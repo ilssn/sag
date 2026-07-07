@@ -1,0 +1,167 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─────────────────────────────────────────────────────────
+   muse 设计令牌 · 纸墨极简 + 淡金
+   克制、优雅、风格化统一；亮暗双主题。
+   ───────────────────────────────────────────────────────── */
+:root {
+  --paper: #faf9f6;
+  --surface: #ffffff;
+  --surface-2: #f4f2ec;
+  --ink: #1b1a17;
+  --ink-muted: #6b675e;
+  --ink-faint: #9a9488;
+  --hairline: #e7e3d9;
+
+  --gold: #b8955a;
+  --gold-soft: #efe7d2;
+  --gold-strong: #9c7c42;
+
+  --danger: #b4453a;
+  --success: #4f7a52;
+
+  --ring: var(--gold);
+
+  --font-sans: var(--font-inter), "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", system-ui, sans-serif;
+  --font-serif: var(--font-fraunces), "Songti SC", "Noto Serif SC", Georgia, serif;
+  --font-mono: var(--font-jbmono), "SFMono-Regular", ui-monospace, Menlo, monospace;
+}
+
+.dark {
+  --paper: #15140f;
+  --surface: #1d1b15;
+  --surface-2: #24221a;
+  --ink: #ede9de;
+  --ink-muted: #a39c8b;
+  --ink-faint: #756f61;
+  --hairline: #2c2a22;
+
+  --gold: #d4b36b;
+  --gold-soft: #33301f;
+  --gold-strong: #e4c77e;
+
+  --danger: #e07a6e;
+  --success: #86b98a;
+}
+
+* {
+  border-color: var(--hairline);
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv02", "cv11", "ss01";
+}
+
+::selection {
+  background: var(--gold-soft);
+  color: var(--ink);
+}
+
+/* 焦点环：淡金，恒可见 */
+:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* 细腻滚动条 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--ink-faint) 40%, transparent);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--ink-faint) 65%, transparent);
+  background-clip: content-box;
+}
+
+@layer components {
+  /* 品牌字：衬线、紧字距 */
+  .font-display {
+    font-family: var(--font-serif);
+    letter-spacing: -0.01em;
+    font-optical-sizing: auto;
+  }
+
+  /* 淡金细分隔线（可用于标题下的装饰线） */
+  .rule-gold {
+    height: 1px;
+    background: linear-gradient(
+      to right,
+      var(--gold) 0%,
+      color-mix(in srgb, var(--gold) 30%, transparent) 40%,
+      transparent 100%
+    );
+  }
+
+  /* 骨架微光 */
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+    background: var(--surface-2);
+  }
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in srgb, var(--ink) 6%, transparent),
+      transparent
+    );
+    animation: shimmer 1.6s infinite;
+  }
+
+  /* 答案正文排版 */
+  .answer-prose {
+    line-height: 1.75;
+    font-size: 0.95rem;
+  }
+  .answer-prose p {
+    margin: 0.5rem 0;
+  }
+  .answer-prose strong {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .answer-prose ul,
+  .answer-prose ol {
+    margin: 0.5rem 0;
+    padding-left: 1.25rem;
+  }
+  .answer-prose li {
+    margin: 0.25rem 0;
+  }
+  .answer-prose code {
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    background: var(--surface-2);
+    padding: 0.1em 0.35em;
+    border-radius: 5px;
+  }
+}
+
+/* 骨架微光关键帧（.skeleton 直接引用，非经工具类） */
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}

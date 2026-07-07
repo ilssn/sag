@@ -1,0 +1,118 @@
+"use client";
+
+import * as React from "react";
+import { FileText, RefreshCw, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+
+import { api, ApiError } from "@/lib/api";
+import type { Doc } from "@/lib/types";
+import { formatBytes, relativeTime } from "@/lib/format";
+import { DocStatusBadge } from "@/components/features/status-badge";
+import { Button } from "@/components/ui/button";
+
+export function DocumentList({
+  sourceId,
+  documents,
+  onChange,
+}: {
+  sourceId: string;
+  documents: Doc[];
+  onChange: () => void;
+}) {
+  const [pending, setPending] = React.useState<string | null>(null);
+
+  async function reprocess(d: Doc) {
+    setPending(d.id);
+    try {
+      await api.reprocessDocument(sourceId, d.id);
+      toast.success("已重新加入处理队列");
+      onChange();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "操作失败");
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function remove(d: Doc) {
+    setPending(d.id);
+    try {
+      await api.deleteDocument(sourceId, d.id);
+      toast.success("文档已删除");
+      onChange();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "删除失败");
+    } finally {
+      setPending(null);
+    }
+  }
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-hairline bg-surface">
+      {documents.map((d, i) => (
+        <div
+          key={d.id}
+          className={
+            "flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-2/60 " +
+            (i > 0 ? "border-t border-hairline" : "")
+          }
+        >
+          <div className="grid size-9 shrink-0 place-items-center rounded-md bg-surface-2 text-ink-faint">
+            <FileText className="size-4" />
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-medium text-ink">{d.filename}</div>
+            <div className="mt-0.5 flex items-center gap-2 text-xs text-ink-faint">
+              <span>{formatBytes(d.size_bytes)}</span>
+              <span>·</span>
+              <span>{relativeTime(d.created_at)}</span>
+              {d.status === "ready" && (
+                <>
+                  <span>·</span>
+                  <span>
+                    {d.chunk_count} 块 / {d.event_count} 事件
+                  </span>
+                </>
+              )}
+              {d.status === "failed" && d.error && (
+                <>
+                  <span>·</span>
+                  <span className="truncate text-danger" title={d.error}>
+                    {d.error}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+
+          <DocStatusBadge status={d.status} />
+
+          <div className="flex shrink-0 items-center gap-0.5">
+            {(d.status === "failed" || d.status === "ready") && (
+              <Button
+                variant="ghost"
+                size="icon"
+                title="重新处理"
+                disabled={pending === d.id}
+                onClick={() => reprocess(d)}
+              >
+                <RefreshCw className="size-4" />
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              title="删除"
+              disabled={pending === d.id}
+              onClick={() => remove(d)}
+              className="text-ink-muted hover:text-danger"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
