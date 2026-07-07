@@ -1,18 +1,26 @@
 # muse
 
-> 从信息源到知识问答的开源知识库平台 · An open, elegant knowledge base — from sources to answers.
+> **新一代 Agentic Data Manager · Context Infrastructure**
+> 个人的信息助手，企业的决策大脑，Agent 的灵魂。
 
-`muse` 基于 [`zleap-sag`](https://pypi.org/project/zleap-sag/)（本地优先的记忆 / 知识引擎）构建。引擎负责解析、分块、向量化、事件—实体图谱与检索；muse 在其上补齐产品化能力：**多用户、多信源、后台处理编排、带引用的答案生成、精致的 UI/UX、一键 `docker compose`**。
+`muse` 以 [`zleap-sag`](https://pypi.org/project/zleap-sag/)（本地优先的记忆 / 知识引擎）为**数据基座**，把「上下文」做成一等公民：持续汇聚文档、消息、会话、录音，结构化为事件—实体图谱，再以**灵魂（Soul）**的形态提供给人和 Agent。
 
-对标 RAGFlow，但更**清晰、克制、易拓展、好维护**。
+不是又一个「文档问答」——检索问答只是上下文的一种消费方式。muse 关注上下文的**全生命周期**：获取 → 结构化 → 记忆 → 提供 → 拓展。对标并超越 RAGFlow，目标是**开源级爆款、企业标杆**。
 
-## 特性
+> 📐 **愿景与蓝图见 [docs/](docs/README.md)** —— [产品愿景](docs/product/vision.md) · [核心概念模型](docs/product/concepts.md) · [演进架构](docs/architecture/overview.md) · [路线图](docs/roadmap.md)。
+> 本 README 描述**当前已实现**的能力（Phase 0：知识库地基）。
 
-- **从信息源到答案** — 上传文档 → 自动解析入库与事件抽取 → 带引用的流式问答。
+## 现状能力（Phase 0，已实现）
+
+- **从信息源到答案** — 上传/抓取文档 → 自动解析入库与事件抽取 → 带引用的流式问答。
 - **多信源 / 多用户** — 每个「信源」对应引擎中的一个独立数据源；工作空间隔离。
-- **可插拔连接器** — 采集层抽象。当前内置文件上传，后续可插入 Web / Notion / S3 等动态同步连接器。
+- **可插拔连接器** — 采集层抽象 + 注册表。已内置**文件上传**与**网页同步**；新增连接器即插即用。
 - **渐进式部署** — 本地零依赖（SQLite + LanceDB），生产一键切 Postgres + pgvector 单库。
 - **克制的设计** — 纸墨极简 + 淡金强调，亮暗双主题，风格化统一。
+
+## 演进方向（Phase 1+，见 docs）
+
+命名空间（文件夹式组织） · **灵魂 + 人格**（跨源 fan-out 对话） · **会话记忆闭环**（越聊越懂你） · 消息/会话/录音信源与统一持续写入 · **MCP / 本地 Agent 挂载与「夺舍」** · 洞察与**书→人物** · 企业级审计/RBAC/可观测。
 
 ## 快速开始
 
