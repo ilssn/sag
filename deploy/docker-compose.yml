@@ -1,0 +1,73 @@
+name: muse
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-muse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-muse}
+      POSTGRES_DB: ${POSTGRES_DB:-muse}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-muse} -d ${POSTGRES_DB:-muse}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      MUSE_ENVIRONMENT: prod
+      MUSE_DEBUG: "false"
+      MUSE_SECRET_KEY: ${MUSE_SECRET_KEY:-please-change-this-in-production-0123456789}
+      MUSE_CORS_ORIGINS: ${MUSE_CORS_ORIGINS:-http://localhost:3000}
+      # muse 元数据 → Postgres
+      MUSE_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-muse}:${POSTGRES_PASSWORD:-muse}@db:5432/${POSTGRES_DB:-muse}
+      MUSE_DATA_DIR: /data/zleap
+      MUSE_UPLOAD_DIR: /data/uploads
+      # zleap-sag → pgvector 单库统一
+      MUSE_SAG_VECTOR_PROVIDER: pgvector
+      MUSE_SAG_RELATIONAL_PROVIDER: postgres
+      MUSE_SAG_PG_HOST: db
+      MUSE_SAG_PG_PORT: "5432"
+      MUSE_SAG_PG_USER: ${POSTGRES_USER:-muse}
+      MUSE_SAG_PG_PASSWORD: ${POSTGRES_PASSWORD:-muse}
+      MUSE_SAG_PG_DATABASE: ${POSTGRES_DB:-muse}
+      MUSE_SAG_LANGUAGE: ${MUSE_SAG_LANGUAGE:-zh}
+      # LLM / Embedding（OpenAI 兼容）
+      MUSE_LLM_BASE_URL: ${MUSE_LLM_BASE_URL:-}
+      MUSE_LLM_API_KEY: ${MUSE_LLM_API_KEY:-}
+      MUSE_LLM_MODEL: ${MUSE_LLM_MODEL:-qwen3.6-flash}
+      MUSE_EMBEDDING_MODEL: ${MUSE_EMBEDDING_MODEL:-bge-large-en-v1.5}
+      MUSE_EMBEDDING_BASE_URL: ${MUSE_EMBEDDING_BASE_URL:-}
+      MUSE_EMBEDDING_API_KEY: ${MUSE_EMBEDDING_API_KEY:-}
+    volumes:
+      - musedata:/data
+    ports:
+      - "${API_PORT:-8000}:8000"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../apps/web
+      dockerfile: Dockerfile
+      args:
+        # 浏览器直连的 API 地址（构建期内联）；生产改成公网 API 地址后需重建 web
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8000}
+    depends_on:
+      - api
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  musedata:
