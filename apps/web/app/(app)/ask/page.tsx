@@ -107,6 +107,9 @@ function AskInner() {
     <div className="flex h-full min-h-0">
       <aside className="hidden w-72 shrink-0 flex-col border-r border-hairline bg-surface/40 lg:flex">
         <div className="p-3">
+          <div className="mb-2 px-1 text-[11px] font-medium uppercase tracking-wider text-ink-faint">
+            快速问答 · 单信源
+          </div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button className="flex w-full items-center justify-between gap-2 rounded-md border border-hairline bg-surface px-3 py-2 text-sm transition-colors hover:border-ink-faint">

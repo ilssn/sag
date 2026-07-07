@@ -15,6 +15,7 @@ import { EntityInsights } from "@/components/features/entity-insights";
 import { SyncPanel } from "@/components/features/sync-panel";
 import { UploadZone } from "@/components/features/upload-zone";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const ACTIVE = ["pending", "loading", "extracting"];
@@ -54,8 +55,9 @@ export default function SourceDetailPage() {
     };
   }, [active, refresh]);
 
+  const [confirmDelete, setConfirmDelete] = React.useState(false);
+
   async function deleteSource() {
-    if (!window.confirm("确定删除该信源？其文档与检索数据将不可再访问。")) return;
     try {
       await api.deleteSource(id);
       toast.success("信源已删除");
@@ -94,12 +96,26 @@ export default function SourceDetailPage() {
           <Button asChild variant="gold">
             <Link href={`/ask?source=${id}`}>
               <MessagesSquare className="size-4" />
-              去问答
+              快速问答
             </Link>
           </Button>
-          <Button variant="ghost" size="icon" title="删除信源" onClick={deleteSource} className="text-ink-muted hover:text-danger">
+          <Button
+            variant="ghost"
+            size="icon"
+            title="删除信源"
+            onClick={() => setConfirmDelete(true)}
+            className="text-ink-muted hover:text-danger"
+          >
             <Trash2 className="size-4" />
           </Button>
+          <ConfirmDialog
+            open={confirmDelete}
+            onOpenChange={setConfirmDelete}
+            title="删除信源"
+            description={`「${source?.name ?? ""}」及其文档、会话将被删除，检索数据不可再访问。此操作无法撤销。`}
+            confirmLabel="删除信源"
+            onConfirm={deleteSource}
+          />
         </div>
       </div>
 

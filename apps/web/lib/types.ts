@@ -88,6 +88,7 @@ export interface Citation {
   snippet: string;
   score: number;
   source_id: string | null;
+  source_name?: string | null;
 }
 
 export interface Message {

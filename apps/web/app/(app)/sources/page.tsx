@@ -1,13 +1,13 @@
 "use client";
 
 import * as React from "react";
-import { BookOpen, Brain, Folder, Layers, Plus } from "lucide-react";
+import { BookOpen, Brain, Folder, Layers } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { toast } from "sonner";
 
-import { api, ApiError } from "@/lib/api";
+import { api } from "@/lib/api";
 import type { Namespace, NamespaceKind, Source } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { CreateNamespaceDialog } from "@/components/features/create-namespace-dialog";
 import { CreateSourceDialog } from "@/components/features/create-source-dialog";
 import { EmptyState } from "@/components/features/empty-state";
 import { PageHeader } from "@/components/features/page-header";
@@ -71,18 +71,6 @@ export default function ContextPage() {
     load();
   }, [load]);
 
-  async function createNamespace() {
-    const name = window.prompt("新建命名空间名称");
-    if (!name?.trim()) return;
-    try {
-      await api.createNamespace({ name: name.trim() });
-      toast.success("命名空间已创建");
-      load();
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "创建失败");
-    }
-  }
-
   const visible = (sources ?? []).filter((s) => !selected || s.namespace_id === selected);
   const countOf = (nsId: string) => (sources ?? []).filter((s) => s.namespace_id === nsId).length;
 
@@ -108,13 +96,12 @@ export default function ContextPage() {
               icon={NS_ICON[n.kind] ?? Folder}
             />
           ))}
-          <button
-            onClick={createNamespace}
-            className="inline-flex items-center gap-1 rounded-full border border-dashed border-hairline px-3 py-1 text-xs text-ink-faint transition-colors hover:border-ink-faint hover:text-ink-muted"
-          >
-            <Plus className="size-3.5" />
-            命名空间
-          </button>
+          <CreateNamespaceDialog
+            onCreated={(ns) => {
+              load();
+              setSelected(ns.id);
+            }}
+          />
         </div>
 
         {sources === null ? (

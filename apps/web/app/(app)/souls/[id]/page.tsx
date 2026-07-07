@@ -14,6 +14,7 @@ import { BindingDialog } from "@/components/features/soul/binding-dialog";
 import { PersonaDialog } from "@/components/features/soul/persona-dialog";
 import { SoulChat } from "@/components/features/soul/soul-chat";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function SoulWorkbench() {
@@ -57,8 +58,9 @@ export default function SoulWorkbench() {
     }
   };
 
+  const [confirmDelete, setConfirmDelete] = React.useState(false);
+
   const deleteSoul = async () => {
-    if (!window.confirm("确定删除该灵魂？其会话将一并删除。")) return;
     try {
       await api.deleteSoul(id);
       toast.success("灵魂已删除");
@@ -110,9 +112,23 @@ export default function SoulWorkbench() {
                   </Button>
                 }
               />
-              <Button variant="ghost" size="icon" title="删除灵魂" onClick={deleteSoul} className="text-ink-muted hover:text-danger">
+              <Button
+                variant="ghost"
+                size="icon"
+                title="删除灵魂"
+                onClick={() => setConfirmDelete(true)}
+                className="text-ink-muted hover:text-danger"
+              >
                 <Trash2 className="size-4" />
               </Button>
+              <ConfirmDialog
+                open={confirmDelete}
+                onOpenChange={setConfirmDelete}
+                title="删除灵魂"
+                description={`「${soul?.name ?? ""}」的人格、绑定与全部会话将被删除。此操作无法撤销。`}
+                confirmLabel="删除灵魂"
+                onConfirm={deleteSoul}
+              />
             </div>
           )}
         </div>

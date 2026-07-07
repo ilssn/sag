@@ -2,15 +2,17 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { FileText, Layers, MessagesSquare, Network, Puzzle, TriangleAlert } from "lucide-react";
+import { FileText, Layers, Network, Sparkles, TriangleAlert } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { api } from "@/lib/api";
-import type { Source } from "@/lib/types";
+import type { Soul, Source } from "@/lib/types";
 import { useApp } from "@/components/features/app-shell";
 import { CreateSourceDialog } from "@/components/features/create-source-dialog";
+import { CreateSoulDialog } from "@/components/features/soul/create-soul-dialog";
 import { EmptyState } from "@/components/features/empty-state";
 import { PageHeader } from "@/components/features/page-header";
+import { SoulCard } from "@/components/features/soul/soul-card";
 import { SourceCard } from "@/components/features/source-card";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -26,32 +28,45 @@ function StatTile({ icon: Icon, label, value }: { icon: LucideIcon; label: strin
   );
 }
 
+function SectionHeader({ title, href, hrefLabel }: { title: string; href: string; hrefLabel: string }) {
+  return (
+    <div className="mb-3 flex items-center justify-between">
+      <h2 className="text-sm font-medium text-ink-muted">{title}</h2>
+      <Link href={href} className="text-sm text-ink-muted transition-colors hover:text-gold-strong">
+        {hrefLabel}
+      </Link>
+    </div>
+  );
+}
+
 export default function OverviewPage() {
   const { user, capabilities } = useApp();
   const [sources, setSources] = React.useState<Source[] | null>(null);
+  const [souls, setSouls] = React.useState<Soul[] | null>(null);
 
   const load = React.useCallback(() => {
     api.listSources().then(setSources).catch(() => setSources([]));
+    api.listSouls().then(setSouls).catch(() => setSouls([]));
   }, []);
   React.useEffect(() => load(), [load]);
 
   const totals = React.useMemo(() => {
     const s = sources ?? [];
     return {
+      souls: (souls ?? []).length,
       sources: s.length,
       documents: s.reduce((a, x) => a + x.document_count, 0),
-      chunks: s.reduce((a, x) => a + x.chunk_count, 0),
       events: s.reduce((a, x) => a + x.event_count, 0),
     };
-  }, [sources]);
+  }, [sources, souls]);
 
-  const recent = (sources ?? []).slice(0, 3);
+  const loading = sources === null || souls === null;
 
   return (
     <>
-      <PageHeader title={`欢迎回来，${user?.name ?? ""}`} description="从信息源到知识问答。" />
+      <PageHeader title={`欢迎回来，${user?.name ?? ""}`} description="从信息源到知识问答，从上下文到灵魂。" />
 
-      <div className="flex flex-col gap-6 p-6 md:p-8">
+      <div className="flex flex-col gap-8 p-6 md:p-8">
         {capabilities && !capabilities.llm_configured && (
           <Link
             href="/settings"
@@ -63,37 +78,44 @@ export default function OverviewPage() {
         )}
 
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          {sources === null
-            ? Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-[92px]" />)
-            : (
-                <>
-                  <StatTile icon={Layers} label="信源" value={totals.sources} />
-                  <StatTile icon={FileText} label="文档" value={totals.documents} />
-                  <StatTile icon={Puzzle} label="知识块" value={totals.chunks} />
-                  <StatTile icon={Network} label="事件" value={totals.events} />
-                </>
-              )}
+          {loading ? (
+            Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-[92px]" />)
+          ) : (
+            <>
+              <StatTile icon={Sparkles} label="灵魂" value={totals.souls} />
+              <StatTile icon={Layers} label="信源" value={totals.sources} />
+              <StatTile icon={FileText} label="文档" value={totals.documents} />
+              <StatTile icon={Network} label="事件" value={totals.events} />
+            </>
+          )}
         </div>
 
         <div>
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-sm font-medium text-ink-muted">最近信源</h2>
-            <div className="flex items-center gap-2">
-              {sources && sources.length > 0 && (
-                <Link
-                  href="/ask"
-                  className="inline-flex items-center gap-1.5 text-sm text-ink-muted transition-colors hover:text-gold-strong"
-                >
-                  <MessagesSquare className="size-4" />
-                  去问答
-                </Link>
-              )}
-              <Link href="/sources" className="text-sm text-ink-muted transition-colors hover:text-gold-strong">
-                全部信源
-              </Link>
+          <SectionHeader title="我的灵魂" href="/souls" hrefLabel="全部灵魂" />
+          {souls === null ? (
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} className="h-[132px]" />
+              ))}
             </div>
-          </div>
+          ) : souls.length === 0 ? (
+            <EmptyState
+              icon={Sparkles}
+              title="创造第一个灵魂"
+              description="给它名字与人格，绑定你的上下文，让它成为你的助手、决策脑，或书中的某个人物。"
+              action={<CreateSoulDialog onCreated={load} />}
+            />
+          ) : (
+            <div className="grid animate-fade-in gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {souls.slice(0, 3).map((s) => (
+                <SoulCard key={s.id} soul={s} />
+              ))}
+            </div>
+          )}
+        </div>
 
+        <div>
+          <SectionHeader title="最近信源" href="/sources" hrefLabel="全部上下文" />
           {sources === null ? (
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {Array.from({ length: 3 }).map((_, i) => (
@@ -103,13 +125,13 @@ export default function OverviewPage() {
           ) : sources.length === 0 ? (
             <EmptyState
               icon={Layers}
-              title="开始使用 muse"
-              description="创建第一个信源，上传文档，让知识可被检索与问答。"
+              title="接入第一个信源"
+              description="上传文档或同步网页，muse 会解析入库、抽取事件，让知识可检索。"
               action={<CreateSourceDialog onCreated={load} />}
             />
           ) : (
             <div className="grid animate-fade-in gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {recent.map((s) => (
+              {sources.slice(0, 3).map((s) => (
                 <SourceCard key={s.id} source={s} />
               ))}
             </div>
