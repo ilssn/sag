@@ -74,6 +74,49 @@ async def create_document_from_upload(
     return document, job
 
 
+def _format_messages(messages: list[dict]) -> str:
+    lines = ["# 消息", ""]
+    for m in messages:
+        who = m.get("author") or m.get("role") or "消息"
+        ts = f"（{m['ts']}）" if m.get("ts") else ""
+        lines.append(f"**{who}**{ts}：{m.get('text') or ''}")
+    return "\n\n".join(lines)
+
+
+async def ingest_content(
+    session: AsyncSession,
+    source: Source,
+    *,
+    text: str | None = None,
+    title: str | None = None,
+    messages: list[dict] | None = None,
+    upload_dir: str,
+    job_queue: JobQueue,
+) -> Document:
+    """统一写入：把文本 / 一批消息归一为文档 → 复用 ingest/extract 管线（持续写入）。"""
+    from muse_api.core.errors import ValidationError
+
+    if messages:
+        content = _format_messages(messages)
+        filename = f"{title or f'消息-{len(messages)}条'}.md"
+    elif text:
+        content = (f"# {title}\n\n" if title else "") + text
+        filename = f"{title or '文本'}.md"
+    else:
+        raise ValidationError("请提供 text 或 messages")
+
+    document, _job = await create_document_from_upload(
+        session,
+        source,
+        filename=filename,
+        content_type="text/markdown",
+        data=content.encode("utf-8"),
+        upload_dir=upload_dir,
+        job_queue=job_queue,
+    )
+    return document
+
+
 async def reprocess_document(
     session: AsyncSession, source: Source, document_id: str, *, job_queue: JobQueue
 ) -> Job:

@@ -60,6 +60,15 @@ async def test_end_to_end_offline():
             assert up.status_code == 201 and up.json()["status"] == "pending"
             assert (await c.get("/api/v1/sources", headers=H)).json()[0]["document_count"] == 1
 
+            # 统一写入接口：持续推送一批消息 → 归一为文档进入管线
+            ing = await c.post(
+                f"/api/v1/sources/{sid}/documents/ingest",
+                headers=H,
+                json={"messages": [{"author": "张三", "text": "明天评审几点？", "ts": "2026-07-07T09:00Z"}]},
+            )
+            assert ing.status_code == 201 and ing.json()["status"] == "pending"
+            assert (await c.get("/api/v1/sources", headers=H)).json()[0]["document_count"] == 2
+
             # 未配置 LLM 时问答 → 400
             th = (
                 await c.post(
