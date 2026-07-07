@@ -1,10 +1,16 @@
 import { clearToken, getToken } from "./auth";
 import type {
+  Binding,
+  BindingTargetType,
   Capabilities,
   Connector,
   Doc,
   Namespace,
+  Persona,
   SearchResponse,
+  Soul,
+  SoulMessage,
+  SoulThread,
   Source,
   Thread,
   TokenResponse,
@@ -120,6 +126,29 @@ export const api = {
     request<Message[]>(`/api/v1/sources/${sid}/threads/${tid}/messages`),
   deleteThread: (sid: string, tid: string) =>
     request(`/api/v1/sources/${sid}/threads/${tid}`, { method: "DELETE" }),
+
+  // souls
+  listSouls: () => request<Soul[]>("/api/v1/souls"),
+  getSoul: (id: string) => request<Soul>(`/api/v1/souls/${id}`),
+  createSoul: (b: { name: string; avatar?: string; persona?: Persona }) =>
+    request<Soul>("/api/v1/souls", { method: "POST", body: JSON.stringify(b) }),
+  updateSoul: (id: string, b: { name?: string; avatar?: string; persona?: Persona }) =>
+    request<Soul>(`/api/v1/souls/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
+  deleteSoul: (id: string) => request<{ ok: boolean }>(`/api/v1/souls/${id}`, { method: "DELETE" }),
+
+  listBindings: (id: string) => request<Binding[]>(`/api/v1/souls/${id}/bindings`),
+  addBinding: (id: string, b: { target_type: BindingTargetType; target_id: string }) =>
+    request<Binding>(`/api/v1/souls/${id}/bindings`, { method: "POST", body: JSON.stringify(b) }),
+  removeBinding: (id: string, bindingId: string) =>
+    request<{ ok: boolean }>(`/api/v1/souls/${id}/bindings/${bindingId}`, { method: "DELETE" }),
+
+  listSoulThreads: (id: string) => request<SoulThread[]>(`/api/v1/souls/${id}/threads`),
+  createSoulThread: (id: string, title = "新会话") =>
+    request<SoulThread>(`/api/v1/souls/${id}/threads`, { method: "POST", body: JSON.stringify({ title }) }),
+  listSoulMessages: (id: string, tid: string) =>
+    request<SoulMessage[]>(`/api/v1/souls/${id}/threads/${tid}/messages`),
+  deleteSoulThread: (id: string, tid: string) =>
+    request(`/api/v1/souls/${id}/threads/${tid}`, { method: "DELETE" }),
 
   // search (调试)
   search: (sid: string, body: { query: string; strategy?: string; top_k?: number }) =>

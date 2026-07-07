@@ -17,7 +17,7 @@ from zleap.sag import DataEngine
 from muse_api.core.config import Settings
 from muse_api.core.logging import get_logger
 from muse_api.sag.config_builder import build_engine_config
-from muse_api.sag.dto import ProcessOutcome, SearchOutcome
+from muse_api.sag.dto import ProcessOutcome, RetrievedSection, SearchOutcome
 from muse_api.sag.errors import map_sag_errors
 
 if TYPE_CHECKING:
@@ -107,6 +107,52 @@ class EngineManager:
             async with self.use(source_config_id, source) as engine:
                 result = await engine.search(query, strategy=strategy, top_k=top_k)
         return SearchOutcome.from_result(result)
+
+    async def search_many(
+        self,
+        targets: list[tuple[str, "Source | None"]],
+        query: str,
+        *,
+        strategy: str | None = None,
+        top_k: int | None = None,
+    ) -> SearchOutcome:
+        """跨多个信源并发检索 → 去重/合并/排序。单源失败不影响整体（灵魂 fan-out）。"""
+        strategy = strategy or self._settings.search_strategy
+        top_k = top_k or self._settings.search_top_k
+        per_source_k = max(top_k, 4)
+
+        async def _one(scid: str, source: "Source | None"):
+            try:
+                with map_sag_errors():
+                    async with self.use(scid, source) as engine:
+                        return await engine.search(query, strategy=strategy, top_k=per_source_k)
+            except Exception as e:  # noqa: BLE001
+                log.warning("fan-out 检索失败 %s：%s", scid, getattr(e, "message", None) or e)
+                return None
+
+        results = await asyncio.gather(*(_one(scid, src) for scid, src in targets))
+
+        best: dict[str, dict] = {}
+        loose: list[dict] = []
+        for res in results:
+            if res is None:
+                continue
+            for s in getattr(res, "sections", None) or []:
+                cid = s.get("chunk_id")
+                score = float(s.get("score") or 0.0)
+                if cid:
+                    if cid not in best or score > float(best[cid].get("score") or 0.0):
+                        best[cid] = s
+                else:
+                    loose.append(s)
+        merged = sorted(
+            [*best.values(), *loose], key=lambda x: float(x.get("score") or 0.0), reverse=True
+        )[:top_k]
+        return SearchOutcome(
+            query=query,
+            sections=[RetrievedSection.from_section(s) for s in merged],
+            stats={"sources": len(targets), "candidates": len(best) + len(loose)},
+        )
 
     async def aclose_all(self) -> None:
         for scid, slot in list(self._slots.items()):

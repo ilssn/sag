@@ -99,6 +99,58 @@ export interface Message {
   created_at: string;
 }
 
+export type SoulOrigin = "user" | "book_entity" | "mount" | "import";
+export type SoulStatus = "active" | "archived";
+export type BindingTargetType = "namespace" | "source";
+
+export interface Persona {
+  system_prompt?: string;
+  greeting?: string;
+  voice?: string;
+  traits?: string[];
+  guardrails?: string[];
+  search_strategy?: string | null;
+  top_k?: number | null;
+  temperature?: number | null;
+}
+
+export interface Soul {
+  id: string;
+  name: string;
+  avatar: string;
+  persona: Persona;
+  origin: SoulOrigin;
+  status: SoulStatus;
+  memory_namespace_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Binding {
+  id: string;
+  target_type: BindingTargetType;
+  target_id: string;
+  mode: string;
+}
+
+export interface SoulThread {
+  id: string;
+  soul_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SoulMessage {
+  id: string;
+  thread_id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  author: string | null;
+  citations: Citation[];
+  created_at: string;
+}
+
 export interface Section {
   chunk_id: string | null;
   heading: string;

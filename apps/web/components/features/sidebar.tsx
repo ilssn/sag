@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutGrid, Layers, MessagesSquare, Settings } from "lucide-react";
+import { LayoutGrid, Layers, MessagesSquare, Settings, Sparkles } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/overview", label: "概览", icon: LayoutGrid },
+  { href: "/souls", label: "灵魂", icon: Sparkles },
   { href: "/sources", label: "上下文", icon: Layers },
   { href: "/ask", label: "问答", icon: MessagesSquare },
   { href: "/settings", label: "设置", icon: Settings },

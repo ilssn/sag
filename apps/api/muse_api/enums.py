@@ -78,3 +78,20 @@ class MessageRole(StrEnum):
     USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"
+
+
+class SoulOrigin(StrEnum):
+    USER = "user"
+    BOOK_ENTITY = "book_entity"
+    MOUNT = "mount"
+    IMPORT = "import"
+
+
+class SoulStatus(StrEnum):
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+
+
+class BindingTargetType(StrEnum):
+    NAMESPACE = "namespace"
+    SOURCE = "source"

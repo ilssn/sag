@@ -57,6 +57,36 @@ def build_messages(
     return messages
 
 
+def build_soul_messages(
+    name: str,
+    persona: dict[str, Any],
+    query: str,
+    sections: list[RetrievedSection],
+    *,
+    history: list[dict[str, str]] | None = None,
+    language: str = "zh",
+) -> list[dict[str, str]]:
+    """注入灵魂人格的问答提示词。"""
+    lang = language if language in _SYSTEM else "zh"
+    persona = persona or {}
+    parts = [persona.get("system_prompt") or f"你是{name}。", _SYSTEM[lang]]
+    guardrails = persona.get("guardrails") or []
+    if guardrails:
+        parts.append("约束：" + "；".join(guardrails))
+    messages: list[dict[str, str]] = [{"role": "system", "content": "\n\n".join(parts)}]
+    if history:
+        messages.extend(history)
+    messages.append(
+        {
+            "role": "user",
+            "content": _USER_TEMPLATE[lang].format(
+                context=_format_context(sections), query=query
+            ),
+        }
+    )
+    return messages
+
+
 def build_citations(sections: list[RetrievedSection]) -> list[dict[str, Any]]:
     """由检索段落确定性地构造引用列表（编号与 prompt 中一致）。"""
     citations = []

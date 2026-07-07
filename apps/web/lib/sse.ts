@@ -12,26 +12,22 @@ export interface AskHandlers {
 /**
  * 通过 fetch 消费 SSE 流（因 ask 是带鉴权的 POST，原生 EventSource 无法胜任）。
  */
-export async function streamAsk(
-  sourceId: string,
-  threadId: string,
-  body: { query: string; strategy?: string; top_k?: number },
+async function streamPost(
+  path: string,
+  body: Record<string, unknown>,
   handlers: AskHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
   const token = getToken();
-  const res = await fetch(
-    `${API_BASE}/api/v1/sources/${sourceId}/threads/${threadId}/ask`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(body),
-      signal,
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-  );
+    body: JSON.stringify(body),
+    signal,
+  });
 
   if (!res.ok || !res.body) {
     let message = "生成失败";
@@ -82,4 +78,24 @@ export async function streamAsk(
     }
   }
   if (buffer.trim()) dispatch(buffer);
+}
+
+export function streamAsk(
+  sourceId: string,
+  threadId: string,
+  body: { query: string; strategy?: string; top_k?: number },
+  handlers: AskHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  return streamPost(`/api/v1/sources/${sourceId}/threads/${threadId}/ask`, body, handlers, signal);
+}
+
+export function streamSoulAsk(
+  soulId: string,
+  threadId: string,
+  body: { query: string; author?: string },
+  handlers: AskHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  return streamPost(`/api/v1/souls/${soulId}/threads/${threadId}/ask`, body, handlers, signal);
 }
