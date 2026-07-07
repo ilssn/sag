@@ -11,6 +11,7 @@ import type { Doc, Source } from "@/lib/types";
 import { useApp } from "@/components/features/app-shell";
 import { DocumentList } from "@/components/features/document-list";
 import { EmptyState } from "@/components/features/empty-state";
+import { EntityInsights } from "@/components/features/entity-insights";
 import { SyncPanel } from "@/components/features/sync-panel";
 import { UploadZone } from "@/components/features/upload-zone";
 import { Button } from "@/components/ui/button";
@@ -143,6 +144,11 @@ export default function SourceDetailPage() {
           ) : (
             <DocumentList sourceId={id} documents={documents} onChange={refresh} />
           )}
+        </div>
+
+        <div>
+          <h2 className="mb-3 text-sm font-medium text-ink-muted">洞察 · 实体与人物</h2>
+          <EntityInsights sourceId={id} />
         </div>
       </div>
     </>

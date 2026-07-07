@@ -51,6 +51,16 @@ class SearchOutcome(BaseModel):
         )
 
 
+class EntityInfo(BaseModel):
+    """从事件—实体图谱聚合出的一个实体（用于洞察 / 书→人物）。"""
+
+    id: str
+    name: str
+    type: str
+    description: str = ""
+    heat: int = 0  # 关联事件数（频次 × 中心度的代理指标）
+
+
 class ProcessOutcome(BaseModel):
     """文档处理（ingest + extract）结果。"""
 

@@ -151,6 +151,14 @@ export interface SoulMessage {
   created_at: string;
 }
 
+export interface Entity {
+  id: string;
+  name: string;
+  type: string;
+  description: string;
+  heat: number;
+}
+
 export interface Section {
   chunk_id: string | null;
   heading: string;

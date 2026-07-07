@@ -5,6 +5,7 @@ import type {
   Capabilities,
   Connector,
   Doc,
+  Entity,
   Namespace,
   Persona,
   SearchResponse,
@@ -149,6 +150,12 @@ export const api = {
     request<SoulMessage[]>(`/api/v1/souls/${id}/threads/${tid}/messages`),
   deleteSoulThread: (id: string, tid: string) =>
     request(`/api/v1/souls/${id}/threads/${tid}`, { method: "DELETE" }),
+
+  // insights / 书→人物
+  listEntities: (sid: string, types?: string) =>
+    request<Entity[]>(`/api/v1/sources/${sid}/entities${types ? `?types=${types}` : ""}`),
+  entityToSoul: (sid: string, entityId: string) =>
+    request<Soul>(`/api/v1/sources/${sid}/entities/${entityId}/to-soul`, { method: "POST" }),
 
   // search (调试)
   search: (sid: string, body: { query: string; strategy?: string; top_k?: number }) =>
