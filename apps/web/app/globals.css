@@ -176,16 +176,58 @@ body {
   }
   .answer-prose h1,
   .answer-prose h2,
-  .answer-prose h3 {
+  .answer-prose h3,
+  .answer-prose h4 {
     margin: 1rem 0 0.5rem;
     font-family: var(--font-serif);
     font-weight: 600;
     line-height: 1.35;
+    text-wrap: balance;
+  }
+  .answer-prose h1 {
+    font-size: 1.2rem;
+  }
+  .answer-prose h2 {
+    font-size: 1.1rem;
+  }
+  .answer-prose h3,
+  .answer-prose h4 {
+    font-size: 1rem;
   }
   .answer-prose a {
     color: var(--gold-strong);
     text-decoration: underline;
     text-underline-offset: 2px;
+  }
+  .answer-prose hr {
+    margin: 1rem 0;
+    border: none;
+    border-top: 1px solid var(--hairline);
+  }
+  /* GFM 表格：细边、表头浅底、超宽横向滚动（不撑破对话列） */
+  .answer-prose table {
+    display: block;
+    margin: 0.75rem 0;
+    max-width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+    font-size: 0.875em;
+    font-variant-numeric: tabular-nums;
+  }
+  .answer-prose th,
+  .answer-prose td {
+    border: 1px solid var(--hairline);
+    padding: 0.4rem 0.75rem;
+    text-align: left;
+    vertical-align: top;
+  }
+  .answer-prose th {
+    background: var(--surface-2);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .answer-prose tbody tr:nth-child(even) {
+    background: color-mix(in srgb, var(--surface-2) 45%, transparent);
   }
 }
 
