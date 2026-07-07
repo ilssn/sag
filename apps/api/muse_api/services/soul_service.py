@@ -7,11 +7,22 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from muse_api.core.config import settings
 from muse_api.core.errors import ConflictError, NotFoundError, ValidationError
+from muse_api.core.logging import get_logger
+from muse_api.db.base import new_id
 from muse_api.db.models import Namespace, Soul, SoulBinding, SoulMessage, SoulThread, Source
-from muse_api.enums import BindingTargetType, MessageRole, NamespaceKind, SoulOrigin
+from muse_api.enums import (
+    BindingTargetType,
+    ConnectorKind,
+    MessageRole,
+    NamespaceKind,
+    SoulOrigin,
+    SourceType,
+)
 from muse_api.generation import build_citations, build_soul_messages
 from muse_api.sag import EngineManager
 from muse_api.services.namespace_service import default_namespace
+
+log = get_logger("services.soul")
 
 _DEFAULT_TITLES = {"新会话", "New chat"}
 _HISTORY_LIMIT = 6
@@ -149,7 +160,65 @@ async def resolve_sources(session: AsyncSession, soul: Soul) -> list[Source]:
         rows = await session.execute(select(Source).where(Source.id.in_(src_ids)))
         for s in rows.scalars():
             found[s.id] = s
+    # 灵魂自己的会话记忆（越聊越懂你）
+    mem = await session.execute(
+        select(Source).where(
+            Source.soul_id == soul.id, Source.source_type == SourceType.CONVERSATION
+        )
+    )
+    for s in mem.scalars():
+        found[s.id] = s
     return list(found.values())
+
+
+async def remember_exchange(
+    session_factory,
+    job_queue,
+    *,
+    soul_id: str,
+    thread_id: str,
+    question: str,
+    answer: str,
+    upload_dir: str,
+) -> None:
+    """把一轮问答写入该灵魂/会话的记忆信源（懒创建）→ 入队 ingest/extract，形成记忆闭环。"""
+    from muse_api.services.document_service import create_document_from_upload
+
+    if not answer.strip():
+        return
+    async with session_factory() as session:
+        soul = await session.get(Soul, soul_id)
+        thread = await session.get(SoulThread, thread_id)
+        if soul is None or thread is None or not soul.memory_namespace_id:
+            return
+        src = await session.get(Source, thread.memory_source_id) if thread.memory_source_id else None
+        if src is None:
+            src = Source(
+                workspace_id=soul.workspace_id,
+                namespace_id=soul.memory_namespace_id,
+                soul_id=soul.id,
+                name=f"与 {soul.name} 的对话",
+                source_type=SourceType.CONVERSATION,
+                connector_kind=ConnectorKind.FILE_UPLOAD,
+                sag_source_config_id=f"mem_{new_id()[:16]}",
+                config={},
+            )
+            session.add(src)
+            await session.flush()
+            thread.memory_source_id = src.id
+            await session.commit()
+            await session.refresh(src)
+        md = f"# 对话记忆\n\n**用户**：{question}\n\n**{soul.name}**：{answer}\n".encode("utf-8")
+        await create_document_from_upload(
+            session,
+            src,
+            filename="exchange.md",
+            content_type="text/markdown",
+            data=md,
+            upload_dir=upload_dir,
+            job_queue=job_queue,
+        )
+        log.info("记忆写入 soul=%s thread=%s source=%s", soul.id, thread.id, src.id)
 
 
 # ── 会话 ────────────────────────────────────────────────────────────

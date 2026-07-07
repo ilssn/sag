@@ -73,3 +73,42 @@ async def test_souls_flow_offline():
             assert len((await c.get("/api/v1/souls", headers=H)).json()) == 1
             assert (await c.delete(f"/api/v1/souls/{sid}", headers=H)).status_code == 200
             assert len((await c.get("/api/v1/souls", headers=H)).json()) == 0
+
+
+@pytest.mark.asyncio
+async def test_soul_memory_closes_loop():
+    from muse_api.core.config import settings
+    from muse_api.core.db import SessionLocal
+    from muse_api.db.models import Soul
+    from muse_api.enums import SourceType
+    from muse_api.main import app
+    from muse_api.services.soul_service import remember_exchange, resolve_sources
+
+    transport = httpx.ASGITransport(app=app)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            tok = (
+                await c.post(
+                    "/api/v1/auth/register", json={"email": "mem@x.com", "password": "password123"}
+                )
+            ).json()["access_token"]
+            H = {"Authorization": f"Bearer {tok}"}
+            soul = (await c.post("/api/v1/souls", headers=H, json={"name": "记忆体"})).json()
+            th = (await c.post(f"/api/v1/souls/{soul['id']}/threads", headers=H, json={})).json()
+
+            # 写入一轮问答 → 应懒创建「会话记忆」信源并入队处理
+            await remember_exchange(
+                SessionLocal,
+                app.state.job_queue,
+                soul_id=soul["id"],
+                thread_id=th["id"],
+                question="我叫小艾",
+                answer="记住了，小艾。",
+                upload_dir=settings.upload_dir,
+            )
+
+            # 记忆信源已进入该灵魂的可检索上下文
+            async with SessionLocal() as s:
+                soul_obj = await s.get(Soul, soul["id"])
+                resolved = await resolve_sources(s, soul_obj)
+            assert any(x.source_type == SourceType.CONVERSATION for x in resolved)

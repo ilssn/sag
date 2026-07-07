@@ -6,11 +6,19 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
+from muse_api.core.config import settings
 from muse_api.core.db import SessionLocal, get_session
-from muse_api.core.deps import get_current_user, get_engine_manager, get_llm, get_workspace_id
+from muse_api.core.deps import (
+    get_current_user,
+    get_engine_manager,
+    get_job_queue,
+    get_llm,
+    get_workspace_id,
+)
 from muse_api.core.errors import ConfigurationError, MuseError
 from muse_api.db.models import User
 from muse_api.generation import LLMClient
+from muse_api.jobs import JobQueue
 from muse_api.sag import EngineManager
 from muse_api.schemas.common import Ok
 from muse_api.schemas.soul import (
@@ -157,6 +165,7 @@ async def ask(
     session: AsyncSession = Depends(get_session),
     engine_manager: EngineManager = Depends(get_engine_manager),
     llm: LLMClient = Depends(get_llm),
+    job_queue: JobQueue = Depends(get_job_queue),
 ) -> EventSourceResponse:
     soul = await svc.get_soul(session, ws, soul_id)
     thread = await svc.get_thread(session, soul.id, thread_id)
@@ -167,6 +176,7 @@ async def ask(
         session, soul=soul, thread=thread, query=body.query, engine_manager=engine_manager, author=body.author
     )
     thread_id_val = thread.id
+    question = body.query
 
     async def event_gen():
         yield _sse("meta", {"citations": citations})
@@ -180,6 +190,16 @@ async def ask(
             return
         answer = "".join(acc)
         message_id = await svc.persist_answer(SessionLocal, thread_id_val, answer, citations)
+        # 记忆闭环：把本轮问答写入会话记忆信源 → 自动 ingest/extract
+        await svc.remember_exchange(
+            SessionLocal,
+            job_queue,
+            soul_id=soul_id,
+            thread_id=thread_id_val,
+            question=question,
+            answer=answer,
+            upload_dir=settings.upload_dir,
+        )
         yield _sse("done", {"message_id": message_id})
 
     return EventSourceResponse(event_gen())
