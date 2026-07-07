@@ -78,7 +78,7 @@ async def update_(
 @router.delete("/{soul_id}", response_model=Ok)
 async def delete_(soul_id: str, ws: str = Depends(get_workspace_id), session: AsyncSession = Depends(get_session)):
     await svc.delete_soul(session, ws, soul_id)
-    return Ok(detail="Agent 已删除")
+    return Ok(detail="助手已删除")
 
 
 # ── 绑定 ────────────────────────────────────────────────────────────

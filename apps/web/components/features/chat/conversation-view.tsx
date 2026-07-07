@@ -78,7 +78,7 @@ const MessageItem = React.memo(
 );
 
 /**
- * 统一对话视图：知识库问答与Agent对话共用。
+ * 统一对话视图：信源问答与Agent对话共用。
  * 承载流式（rAF 批量刷新 token）、竞态防护（loadGeneration）、结束后强制回读的完整状态机。
  * `avatarNode` / `heroNode` 应在调用方 useMemo 保持稳定，以维持消息列表的 memo 优化。
  */

@@ -3,15 +3,15 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, FileText, MessagesSquare, TriangleAlert, Trash2 } from "lucide-react";
+import { ArrowLeft, FileText, Search, TriangleAlert, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
 import type { Doc, Source } from "@/lib/types";
 import { useApp } from "@/components/features/app-shell";
+import { useSearch } from "@/components/features/search-overlay";
 import { DocumentList } from "@/components/features/document-list";
 import { EmptyState } from "@/components/features/empty-state";
-import { EntityInsights } from "@/components/features/entity-insights";
 import { SyncPanel } from "@/components/features/sync-panel";
 import { UploadZone } from "@/components/features/upload-zone";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ export default function SourceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { capabilities } = useApp();
+  const { openSearch } = useSearch();
   const [source, setSource] = React.useState<Source | null>(null);
   const [documents, setDocuments] = React.useState<Doc[] | null>(null);
 
@@ -60,7 +61,7 @@ export default function SourceDetailPage() {
   async function deleteSource() {
     try {
       await api.deleteSource(id);
-      toast.success("知识库已删除");
+      toast.success("信源已删除");
       router.push("/sources");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "删除失败");
@@ -76,7 +77,7 @@ export default function SourceDetailPage() {
             className="mb-2 inline-flex items-center gap-1 text-xs text-ink-faint transition-colors hover:text-ink-muted"
           >
             <ArrowLeft className="size-3.5" />
-            全部知识库
+            全部信源
           </Link>
           {source ? (
             <>
@@ -93,16 +94,18 @@ export default function SourceDetailPage() {
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Button asChild variant="gold">
-            <Link href={`/ask?source=${id}`}>
-              <MessagesSquare className="size-4" />
-              快速问答
-            </Link>
+          <Button
+            variant="gold"
+            onClick={() => source && openSearch({ id: source.id, name: source.name })}
+            disabled={!source}
+          >
+            <Search className="size-4" />
+            搜索此信源
           </Button>
           <Button
             variant="ghost"
             size="icon"
-            title="删除知识库"
+            title="删除信源"
             onClick={() => setConfirmDelete(true)}
             className="text-ink-muted hover:text-danger"
           >
@@ -111,9 +114,9 @@ export default function SourceDetailPage() {
           <ConfirmDialog
             open={confirmDelete}
             onOpenChange={setConfirmDelete}
-            title="删除知识库"
+            title="删除信源"
             description={`「${source?.name ?? ""}」及其文档、会话将被删除，检索数据不可再访问。此操作无法撤销。`}
-            confirmLabel="删除知识库"
+            confirmLabel="删除信源"
             onConfirm={deleteSource}
           />
         </div>
@@ -162,10 +165,6 @@ export default function SourceDetailPage() {
           )}
         </div>
 
-        <div>
-          <h2 className="mb-3 text-sm font-medium text-ink-muted">洞察 · 实体与人物</h2>
-          <EntityInsights sourceId={id} />
-        </div>
       </div>
     </>
   );

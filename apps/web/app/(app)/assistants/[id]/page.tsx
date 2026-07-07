@@ -28,7 +28,7 @@ export default function SoulWorkbench() {
     try {
       setSoul(await api.getSoul(id));
     } catch (e) {
-      if (e instanceof ApiError && e.status === 404) router.replace("/souls");
+      if (e instanceof ApiError && e.status === 404) router.replace("/assistants");
     }
   }, [id, router]);
 
@@ -63,8 +63,8 @@ export default function SoulWorkbench() {
   const deleteSoul = async () => {
     try {
       await api.deleteSoul(id);
-      toast.success("Agent 已删除");
-      router.push("/souls");
+      toast.success("助手已删除");
+      router.push("/assistants");
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "删除失败");
     }
@@ -74,9 +74,9 @@ export default function SoulWorkbench() {
     <div className="flex h-full min-h-0">
       <aside className="hidden w-72 shrink-0 flex-col border-r border-hairline bg-surface/40 lg:flex">
         <div className="border-b border-hairline p-3">
-          <Link href="/souls" className="mb-2 inline-flex items-center gap-1 text-xs text-ink-faint hover:text-ink-muted">
+          <Link href="/assistants" className="mb-2 inline-flex items-center gap-1 text-xs text-ink-faint hover:text-ink-muted">
             <ArrowLeft className="size-3.5" />
-            全部 Agent
+            全部助手
           </Link>
           {soul ? (
             <div className="flex items-center gap-2.5">
@@ -115,7 +115,7 @@ export default function SoulWorkbench() {
               <Button
                 variant="ghost"
                 size="icon"
-                title="删除 Agent"
+                title="删除助手"
                 onClick={() => setConfirmDelete(true)}
                 className="text-ink-muted hover:text-danger"
               >
@@ -124,9 +124,9 @@ export default function SoulWorkbench() {
               <ConfirmDialog
                 open={confirmDelete}
                 onOpenChange={setConfirmDelete}
-                title="删除 Agent"
+                title="删除助手"
                 description={`「${soul?.name ?? ""}」的设定、绑定与全部会话将被删除。此操作无法撤销。`}
-                confirmLabel="删除 Agent"
+                confirmLabel="删除助手"
                 onConfirm={deleteSoul}
               />
             </div>

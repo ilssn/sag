@@ -3,20 +3,15 @@ import type {
   Binding,
   BindingTargetType,
   Capabilities,
-  Connector,
   Doc,
-  Entity,
-  Namespace,
   Persona,
   SearchResponse,
   Soul,
   SoulMessage,
   SoulThread,
   Source,
-  Thread,
   TokenResponse,
   User,
-  Message,
 } from "./types";
 
 export const API_BASE =
@@ -78,33 +73,20 @@ export const api = {
   me: () => request<User>("/api/v1/auth/me"),
   capabilities: () => request<Capabilities>("/api/v1/system/capabilities"),
 
-  // namespaces
-  listNamespaces: () => request<Namespace[]>("/api/v1/namespaces"),
-  createNamespace: (b: { name: string; icon?: string; color?: string }) =>
-    request<Namespace>("/api/v1/namespaces", { method: "POST", body: JSON.stringify(b) }),
-  deleteNamespace: (id: string) =>
-    request<{ ok: boolean }>(`/api/v1/namespaces/${id}`, { method: "DELETE" }),
-
-  // sources
-  listConnectors: () => request<Connector[]>("/api/v1/sources/connectors"),
-  listSources: (namespaceId?: string) =>
-    request<Source[]>(`/api/v1/sources${namespaceId ? `?namespace_id=${namespaceId}` : ""}`),
+  // 信源
+  listSources: () => request<Source[]>("/api/v1/sources"),
   getSource: (id: string) => request<Source>(`/api/v1/sources/${id}`),
-  createSource: (b: {
-    name: string;
-    description?: string;
-    connector_kind?: string;
-    namespace_id?: string;
-    config?: Record<string, unknown>;
-  }) => request<Source>("/api/v1/sources", { method: "POST", body: JSON.stringify(b) }),
+  createSource: (b: { name: string; description?: string }) =>
+    request<Source>("/api/v1/sources", { method: "POST", body: JSON.stringify(b) }),
   updateSource: (id: string, b: Record<string, unknown>) =>
     request<Source>(`/api/v1/sources/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
   deleteSource: (id: string) =>
     request<{ ok: boolean }>(`/api/v1/sources/${id}`, { method: "DELETE" }),
+  // 存量网页信源的同步（新建入口暂不提供连接器）
   syncSource: (id: string) =>
     request<{ id: string; type: string }>(`/api/v1/sources/${id}/sync`, { method: "POST" }),
 
-  // documents
+  // 文档
   listDocuments: (sid: string) => request<Doc[]>(`/api/v1/sources/${sid}/documents`),
   uploadDocument: (sid: string, file: File) => {
     const fd = new FormData();
@@ -116,19 +98,7 @@ export const api = {
   deleteDocument: (sid: string, did: string) =>
     request(`/api/v1/sources/${sid}/documents/${did}`, { method: "DELETE" }),
 
-  // chat
-  listThreads: (sid: string) => request<Thread[]>(`/api/v1/sources/${sid}/threads`),
-  createThread: (sid: string, title = "新会话") =>
-    request<Thread>(`/api/v1/sources/${sid}/threads`, {
-      method: "POST",
-      body: JSON.stringify({ source_id: sid, title }),
-    }),
-  listMessages: (sid: string, tid: string) =>
-    request<Message[]>(`/api/v1/sources/${sid}/threads/${tid}/messages`),
-  deleteThread: (sid: string, tid: string) =>
-    request(`/api/v1/sources/${sid}/threads/${tid}`, { method: "DELETE" }),
-
-  // souls
+  // 助手（内部路径沿用 /souls）
   listSouls: () => request<Soul[]>("/api/v1/souls"),
   getSoul: (id: string) => request<Soul>(`/api/v1/souls/${id}`),
   createSoul: (b: { name: string; avatar?: string; persona?: Persona }) =>
@@ -151,16 +121,7 @@ export const api = {
   deleteSoulThread: (id: string, tid: string) =>
     request(`/api/v1/souls/${id}/threads/${tid}`, { method: "DELETE" }),
 
-  // insights / 书→人物
-  listEntities: (sid: string, types?: string) =>
-    request<Entity[]>(`/api/v1/sources/${sid}/entities${types ? `?types=${types}` : ""}`),
-  entityToSoul: (sid: string, entityId: string) =>
-    request<Soul>(`/api/v1/sources/${sid}/entities/${entityId}/to-soul`, { method: "POST" }),
-
-  // search (调试)
-  search: (sid: string, body: { query: string; strategy?: string; top_k?: number }) =>
-    request<SearchResponse>(`/api/v1/sources/${sid}/search`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
+  // 搜索
+  globalSearch: (b: { query: string; source_ids?: string[]; top_k?: number }) =>
+    request<SearchResponse>("/api/v1/search", { method: "POST", body: JSON.stringify(b) }),
 };

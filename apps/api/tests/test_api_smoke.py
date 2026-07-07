@@ -69,15 +69,13 @@ async def test_end_to_end_offline():
             assert ing.status_code == 201 and ing.json()["status"] == "pending"
             assert (await c.get("/api/v1/sources", headers=H)).json()[0]["document_count"] == 2
 
-            # 未配置 LLM 时问答 → 400
-            th = (
-                await c.post(
-                    f"/api/v1/sources/{sid}/threads", headers=H, json={"source_id": sid}
-                )
-            ).json()
-            ask = await c.post(
-                f"/api/v1/sources/{sid}/threads/{th['id']}/ask",
-                headers=H,
-                json={"query": "hi"},
+            # 全局搜索：离线（无 embedding）单源失败被吞，返回 200 + 空结果
+            gs = await c.post("/api/v1/search", headers=H, json={"query": "hello"})
+            assert gs.status_code == 200
+            body = gs.json()
+            assert body["query"] == "hello" and isinstance(body["sections"], list)
+            # 收窄到指定信源
+            gs2 = await c.post(
+                "/api/v1/search", headers=H, json={"query": "hello", "source_ids": [sid]}
             )
-            assert ask.status_code == 400
+            assert gs2.status_code == 200

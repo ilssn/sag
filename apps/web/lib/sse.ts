@@ -80,16 +80,6 @@ async function streamPost(
   if (buffer.trim()) dispatch(buffer);
 }
 
-export function streamAsk(
-  sourceId: string,
-  threadId: string,
-  body: { query: string; strategy?: string; top_k?: number },
-  handlers: AskHandlers,
-  signal?: AbortSignal,
-): Promise<void> {
-  return streamPost(`/api/v1/sources/${sourceId}/threads/${threadId}/ask`, body, handlers, signal);
-}
-
 export function streamSoulAsk(
   soulId: string,
   threadId: string,

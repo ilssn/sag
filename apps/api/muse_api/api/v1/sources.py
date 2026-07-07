@@ -76,7 +76,7 @@ async def delete_(
     session: AsyncSession = Depends(get_session),
 ) -> Ok:
     await delete_source(session, workspace_id, source_id)
-    return Ok(detail="知识库已删除")
+    return Ok(detail="信源已删除")
 
 
 @router.post("/{source_id}/sync", response_model=JobOut)

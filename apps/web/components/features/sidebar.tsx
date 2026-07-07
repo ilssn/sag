@@ -7,9 +7,9 @@ import { LayoutGrid, Layers, Settings, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV = [
-  { href: "/overview", label: "概览", icon: LayoutGrid },
-  { href: "/souls", label: "Agent", icon: Sparkles },
-  { href: "/sources", label: "知识库", icon: Layers },
+  { href: "/overview", label: "总览", icon: LayoutGrid },
+  { href: "/assistants", label: "助手", icon: Sparkles },
+  { href: "/sources", label: "信源", icon: Layers },
   { href: "/settings", label: "设置", icon: Settings },
 ];
 

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import { clearToken, getToken } from "@/lib/auth";
 import type { Capabilities, User } from "@/lib/types";
+import { SearchProvider } from "@/components/features/search-overlay";
 import { Sidebar } from "@/components/features/sidebar";
 import { Topbar } from "@/components/features/topbar";
 
@@ -91,13 +92,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <AppContext.Provider value={{ user, capabilities, logout, refreshCapabilities }}>
-      <div className="flex h-screen overflow-hidden">
-        <Sidebar />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <Topbar />
-          <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{children}</main>
+      <SearchProvider>
+        <div className="flex h-screen overflow-hidden">
+          <Sidebar />
+          <div className="flex min-w-0 flex-1 flex-col">
+            <Topbar />
+            <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{children}</main>
+          </div>
         </div>
-      </div>
+      </SearchProvider>
     </AppContext.Provider>
   );
 }

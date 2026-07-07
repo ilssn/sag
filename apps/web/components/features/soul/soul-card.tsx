@@ -6,7 +6,7 @@ export function SoulCard({ soul }: { soul: Soul }) {
   const snippet = soul.persona?.system_prompt || soul.persona?.greeting || "尚未填写设定";
   return (
     <Link
-      href={`/souls/${soul.id}`}
+      href={`/assistants/${soul.id}`}
       className="group flex flex-col rounded-lg border border-hairline bg-surface p-5 shadow-soft transition-all duration-150 ease-smooth hover:-translate-y-0.5 hover:border-gold/40 hover:shadow-lift"
     >
       <div className="flex items-center gap-3">

@@ -63,15 +63,15 @@ export function CreateSoulDialog({
         {trigger ?? (
           <Button variant="gold">
             <Plus className="size-4" />
-            创建 Agent
+            创建助手
           </Button>
         )}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>创建 Agent</DialogTitle>
+          <DialogTitle>创建助手</DialogTitle>
           <DialogDescription>
-            起个名字、写好设定，绑定知识库后，它就能带着记忆与你对话。
+            起个名字、写好设定，绑定信源后，它就能带着记忆与你对话。
           </DialogDescription>
         </DialogHeader>
 
@@ -104,7 +104,7 @@ export function CreateSoulDialog({
               id="soul-sp"
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
-              placeholder="你是阿默，简洁、克制、可靠。只依据绑定的知识库作答。"
+              placeholder="你是阿默，简洁、克制、可靠。只依据绑定的信源作答。"
               rows={3}
             />
           </div>

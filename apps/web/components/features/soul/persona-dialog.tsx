@@ -78,7 +78,7 @@ export function PersonaDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>设定</DialogTitle>
-          <DialogDescription>这个 Agent 的身份、语气与边界。</DialogDescription>
+          <DialogDescription>这个助手的身份、语气与边界。</DialogDescription>
         </DialogHeader>
         <form onSubmit={save} className="flex flex-col gap-4">
           <div className="flex gap-3">
@@ -106,7 +106,7 @@ export function PersonaDialog({
               value={guardrails}
               onChange={(e) => setGuardrails(e.target.value)}
               rows={2}
-              placeholder="只依据绑定的知识库作答&#10;涉密不外泄"
+              placeholder="只依据绑定的信源作答&#10;涉密不外泄"
             />
           </div>
           <div className="flex flex-col gap-1.5">
