@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from sqlalchemy import Enum as SAEnum, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Enum as SAEnum
+from sqlalchemy import ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from muse_api.db.base import Base, IDMixin, TimestampMixin

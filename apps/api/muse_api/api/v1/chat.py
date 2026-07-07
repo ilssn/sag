@@ -7,10 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from muse_api.core.db import SessionLocal, get_session
-from muse_api.core.deps import get_engine_manager, get_llm, get_workspace_id
+from muse_api.core.deps import get_current_user, get_engine_manager, get_llm, get_workspace_id
 from muse_api.core.errors import ConfigurationError, MuseError
 from muse_api.db.models import User
-from muse_api.core.deps import get_current_user
 from muse_api.generation import LLMClient
 from muse_api.sag import EngineManager
 from muse_api.schemas.chat import AskRequest, MessageOut, ThreadCreate, ThreadOut

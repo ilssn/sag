@@ -83,7 +83,11 @@ async def delete_(soul_id: str, ws: str = Depends(get_workspace_id), session: As
 
 # ── 绑定 ────────────────────────────────────────────────────────────
 @router.get("/{soul_id}/bindings", response_model=list[BindingOut])
-async def list_bindings(soul_id: str, ws: str = Depends(get_workspace_id), session: AsyncSession = Depends(get_session)):
+async def list_bindings(
+    soul_id: str,
+    ws: str = Depends(get_workspace_id),
+    session: AsyncSession = Depends(get_session),
+):
     soul = await svc.get_soul(session, ws, soul_id)
     return [BindingOut.model_validate(b) for b in await svc.list_bindings(session, soul)]
 
@@ -96,7 +100,9 @@ async def add_binding(
     session: AsyncSession = Depends(get_session),
 ):
     soul = await svc.get_soul(session, ws, soul_id)
-    b = await svc.add_binding(session, ws, soul, target_type=body.target_type, target_id=body.target_id)
+    b = await svc.add_binding(
+        session, ws, soul, target_type=body.target_type, target_id=body.target_id
+    )
     return BindingOut.model_validate(b)
 
 

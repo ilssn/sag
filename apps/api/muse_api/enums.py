@@ -2,12 +2,7 @@
 
 from __future__ import annotations
 
-from enum import Enum
-
-
-class StrEnum(str, Enum):
-    def __str__(self) -> str:  # 便于日志 / 序列化
-        return self.value
+from enum import StrEnum
 
 
 class UserRole(StrEnum):

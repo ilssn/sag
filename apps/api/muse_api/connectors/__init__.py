@@ -1,7 +1,7 @@
 from muse_api.connectors.base import (
+    ConfigField,
     Connector,
     ConnectorMeta,
-    ConfigField,
     DiscoveredDoc,
     LocalFile,
 )

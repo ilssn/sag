@@ -87,8 +87,13 @@ def build_soul_messages(
     return messages
 
 
-def build_citations(sections: list[RetrievedSection]) -> list[dict[str, Any]]:
-    """由检索段落确定性地构造引用列表（编号与 prompt 中一致）。"""
+def build_citations(
+    sections: list[RetrievedSection], source_names: dict[str, str] | None = None
+) -> list[dict[str, Any]]:
+    """由检索段落确定性地构造引用列表（编号与 prompt 中一致）。
+
+    `source_names`：{sag_source_config_id: 信源名}，用于在引用上标注来源信源（fan-out 时尤其有用）。
+    """
     citations = []
     for i, s in enumerate(sections, start=1):
         snippet = s.content.strip().replace("\n", " ")
@@ -102,6 +107,7 @@ def build_citations(sections: list[RetrievedSection]) -> list[dict[str, Any]]:
                 "snippet": snippet,
                 "score": round(s.score, 4),
                 "source_id": s.source_id,
+                "source_name": (source_names or {}).get(s.source_config_id or ""),
             }
         )
     return citations

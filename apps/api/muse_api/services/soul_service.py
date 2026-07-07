@@ -208,7 +208,7 @@ async def remember_exchange(
             thread.memory_source_id = src.id
             await session.commit()
             await session.refresh(src)
-        md = f"# 对话记忆\n\n**用户**：{question}\n\n**{soul.name}**：{answer}\n".encode("utf-8")
+        md = f"# 对话记忆\n\n**用户**：{question}\n\n**{soul.name}**：{answer}\n".encode()
         await create_document_from_upload(
             session,
             src,
@@ -290,6 +290,7 @@ async def prepare_ask(
 
     persona = soul.persona or {}
     sources = await resolve_sources(session, soul)
+    source_names = {s.sag_source_config_id: s.name for s in sources}
     if sources:
         targets = [(s.sag_source_config_id, s) for s in sources]
         outcome = await engine_manager.search_many(
@@ -302,7 +303,7 @@ async def prepare_ask(
     else:
         sections = []
 
-    citations = build_citations(sections)
+    citations = build_citations(sections, source_names)
     history = await _history(session, thread.id, exclude_id=user_msg.id)
     messages = build_soul_messages(
         soul.name, persona, query, sections, history=history, language=settings.sag_language

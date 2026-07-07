@@ -94,7 +94,7 @@ async def prepare_ask(
     outcome = await engine_manager.search(
         source.sag_source_config_id, query, source=source, strategy=strategy, top_k=top_k
     )
-    citations = build_citations(outcome.sections)
+    citations = build_citations(outcome.sections, {source.sag_source_config_id: source.name})
     history = await _history(session, thread.id, exclude_id=user_msg.id)
     messages = build_messages(
         query, outcome.sections, history=history, language=_language(source)

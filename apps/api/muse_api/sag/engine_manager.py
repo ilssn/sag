@@ -40,13 +40,13 @@ class EngineManager:
         self._slots: dict[str, _Slot] = {}
         self._create_lock = asyncio.Lock()
 
-    def _config_for(self, source: "Source | None") -> Any:
+    def _config_for(self, source: Source | None) -> Any:
         overrides = None
         if source is not None and source.config:
             overrides = source.config.get("engine")
         return build_engine_config(self._settings, overrides=overrides)
 
-    async def _slot(self, source_config_id: str, source: "Source | None" = None) -> _Slot:
+    async def _slot(self, source_config_id: str, source: Source | None = None) -> _Slot:
         slot = self._slots.get(source_config_id)
         if slot is not None:
             return slot
@@ -63,13 +63,13 @@ class EngineManager:
         return slot
 
     @asynccontextmanager
-    async def use(self, source_config_id: str, source: "Source | None" = None):
+    async def use(self, source_config_id: str, source: Source | None = None):
         """取得该源的引擎并持有其锁（串行化本源上的操作）。"""
         slot = await self._slot(source_config_id, source)
         async with slot.lock:
             yield slot.engine
 
-    async def provision(self, source_config_id: str, source: "Source | None" = None) -> None:
+    async def provision(self, source_config_id: str, source: Source | None = None) -> None:
         """确保该源的引擎 schema 就绪（幂等）。"""
         await self._slot(source_config_id, source)
 
@@ -78,7 +78,7 @@ class EngineManager:
         source_config_id: str,
         path: str,
         *,
-        source: "Source | None" = None,
+        source: Source | None = None,
         on_stage: StageCallback | None = None,
     ) -> ProcessOutcome:
         """在同一引擎实例上完成 ingest → extract（extract 复用 ingest 的加载结果）。"""
@@ -97,7 +97,7 @@ class EngineManager:
         source_config_id: str,
         query: str,
         *,
-        source: "Source | None" = None,
+        source: Source | None = None,
         strategy: str | None = None,
         top_k: int | None = None,
     ) -> SearchOutcome:
@@ -110,7 +110,7 @@ class EngineManager:
 
     async def search_many(
         self,
-        targets: list[tuple[str, "Source | None"]],
+        targets: list[tuple[str, Source | None]],
         query: str,
         *,
         strategy: str | None = None,
@@ -121,7 +121,7 @@ class EngineManager:
         top_k = top_k or self._settings.search_top_k
         per_source_k = max(top_k, 4)
 
-        async def _one(scid: str, source: "Source | None"):
+        async def _one(scid: str, source: Source | None):
             try:
                 with map_sag_errors():
                     async with self.use(scid, source) as engine:
@@ -158,7 +158,7 @@ class EngineManager:
         self,
         source_config_id: str,
         *,
-        source: "Source | None" = None,
+        source: Source | None = None,
         types: list[str] | None = None,
         limit: int = 100,
     ) -> list[EntityInfo]:
@@ -199,14 +199,14 @@ class EngineManager:
         source_config_id: str,
         entity_id: str,
         *,
-        source: "Source | None" = None,
+        source: Source | None = None,
         limit: int = 20,
     ) -> list[str]:
         """某实体关联事件的文本片段（用于生成人格）。"""
         await self._slot(source_config_id, source)
         from sqlalchemy import select
-        from zleap.sag.db.models import EventEntity, SourceEvent
         from zleap.sag.db import get_session_factory
+        from zleap.sag.db.models import EventEntity, SourceEvent
 
         stmt = (
             select(SourceEvent.title, SourceEvent.summary, SourceEvent.content)
