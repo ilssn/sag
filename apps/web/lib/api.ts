@@ -80,6 +80,8 @@ export const api = {
     request<Source>(`/api/v1/sources/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
   deleteSource: (id: string) =>
     request<{ ok: boolean }>(`/api/v1/sources/${id}`, { method: "DELETE" }),
+  syncSource: (id: string) =>
+    request<{ id: string; type: string }>(`/api/v1/sources/${id}/sync`, { method: "POST" }),
 
   // documents
   listDocuments: (sid: string) => request<Doc[]>(`/api/v1/sources/${sid}/documents`),

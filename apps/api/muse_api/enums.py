@@ -23,7 +23,8 @@ class WorkspaceRole(StrEnum):
 
 class ConnectorKind(StrEnum):
     FILE_UPLOAD = "file_upload"
-    # 预留：WEB = "web"; NOTION = "notion"; S3 = "s3"; ...
+    WEB = "web"
+    # 预留：NOTION = "notion"; S3 = "s3"; CONFLUENCE = "confluence"; ...
 
 
 class SourceStatus(StrEnum):

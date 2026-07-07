@@ -116,7 +116,7 @@ class InProcessAsyncQueue(JobQueue):
                 return
 
             try:
-                await handler(session, job, engine_manager=self._engine_manager)
+                await handler(session, job, engine_manager=self._engine_manager, job_queue=self)
                 job.status = JobStatus.SUCCEEDED
                 job.progress = 1.0
                 job.finished_at = _now()

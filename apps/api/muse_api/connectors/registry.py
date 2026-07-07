@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from muse_api.connectors.base import Connector
 from muse_api.connectors.file_upload import FileUploadConnector
+from muse_api.connectors.web import WebConnector
 from muse_api.core.errors import NotFoundError
 from muse_api.enums import ConnectorKind
 
@@ -28,4 +29,5 @@ class ConnectorRegistry:
 
 registry = ConnectorRegistry()
 registry.register(FileUploadConnector())
-# 未来：registry.register(WebConnector()); registry.register(NotionConnector()); ...
+registry.register(WebConnector())
+# 未来：registry.register(NotionConnector()); registry.register(S3Connector()); ...

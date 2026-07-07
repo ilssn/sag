@@ -9,4 +9,7 @@ os.environ.setdefault("MUSE_DATA_DIR", f"{_TMP}/zleap")
 os.environ.setdefault("MUSE_UPLOAD_DIR", f"{_TMP}/uploads")
 os.environ.setdefault("MUSE_DEBUG", "false")
 os.environ.setdefault("MUSE_SAG_LANGUAGE", "zh")
-# 刻意不配置 LLM：测试离线路径与错误映射
+# 强制离线：即使存在带真实 key 的 .env，也保证测试确定性（不发起 LLM 调用）
+os.environ["MUSE_LLM_API_KEY"] = ""
+os.environ["MUSE_LLM_BASE_URL"] = ""
+os.environ["MUSE_EMBEDDING_API_KEY"] = ""

@@ -6,10 +6,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from muse_api.connectors import registry
-from muse_api.core.errors import MuseError, NotFoundError
+from muse_api.core.errors import MuseError, NotFoundError, ValidationError
 from muse_api.core.logging import get_logger
 from muse_api.db.base import new_id
-from muse_api.db.models import Source
+from muse_api.db.models import Job, Source
+from muse_api.enums import JobStatus, JobType
+from muse_api.jobs import JobQueue
 from muse_api.sag import EngineManager
 from muse_api.schemas.source import SourceCreate, SourceUpdate
 
@@ -80,3 +82,19 @@ async def delete_source(session: AsyncSession, workspace_id: str, source_id: str
     await session.delete(source)
     await session.commit()
     # 注：MVP 暂不清除引擎侧该源的向量 / 图谱数据（保留在 data_dir）。
+
+
+async def sync_source(
+    session: AsyncSession, workspace_id: str, source_id: str, *, job_queue: JobQueue
+) -> Job:
+    """触发一次动态连接器同步（如网页抓取）。"""
+    source = await get_source(session, workspace_id, source_id)
+    connector = registry.get(source.connector_kind)
+    if not connector.meta.supports_sync:
+        raise ValidationError("该连接器不支持同步")
+    job = Job(type=JobType.SYNC_SOURCE, source_id=source.id, status=JobStatus.QUEUED)
+    session.add(job)
+    await session.commit()
+    await session.refresh(job)
+    await job_queue.enqueue(job.id)
+    return job

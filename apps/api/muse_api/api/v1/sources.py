@@ -5,15 +5,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from muse_api.connectors import registry
 from muse_api.core.db import get_session
-from muse_api.core.deps import get_engine_manager, get_workspace_id
+from muse_api.core.deps import get_engine_manager, get_job_queue, get_workspace_id
+from muse_api.jobs import JobQueue
 from muse_api.sag import EngineManager
 from muse_api.schemas.common import Ok
+from muse_api.schemas.job import JobOut
 from muse_api.schemas.source import ConnectorOut, SourceCreate, SourceOut, SourceUpdate
 from muse_api.services.source_service import (
     create_source,
     delete_source,
     get_source,
     list_sources,
+    sync_source,
     update_source,
 )
 
@@ -72,3 +75,14 @@ async def delete_(
 ) -> Ok:
     await delete_source(session, workspace_id, source_id)
     return Ok(detail="信源已删除")
+
+
+@router.post("/{source_id}/sync", response_model=JobOut)
+async def sync(
+    source_id: str,
+    workspace_id: str = Depends(get_workspace_id),
+    session: AsyncSession = Depends(get_session),
+    job_queue: JobQueue = Depends(get_job_queue),
+) -> JobOut:
+    job = await sync_source(session, workspace_id, source_id, job_queue=job_queue)
+    return JobOut.model_validate(job)

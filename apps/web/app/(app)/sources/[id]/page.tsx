@@ -11,6 +11,7 @@ import type { Doc, Source } from "@/lib/types";
 import { useApp } from "@/components/features/app-shell";
 import { DocumentList } from "@/components/features/document-list";
 import { EmptyState } from "@/components/features/empty-state";
+import { SyncPanel } from "@/components/features/sync-panel";
 import { UploadZone } from "@/components/features/upload-zone";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -109,7 +110,12 @@ export default function SourceDetailPage() {
           </div>
         )}
 
-        <UploadZone sourceId={id} onUploaded={refresh} maxMb={capabilities?.max_upload_mb ?? 25} />
+        {source &&
+          (source.connector_kind === "file_upload" ? (
+            <UploadZone sourceId={id} onUploaded={refresh} maxMb={capabilities?.max_upload_mb ?? 25} />
+          ) : (
+            <SyncPanel sourceId={id} onSynced={refresh} />
+          ))}
 
         <div>
           <h2 className="mb-3 text-sm font-medium text-ink-muted">

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Awaitable, Callable
 
 from sqlalchemy import update
@@ -22,7 +23,9 @@ log = get_logger("jobs")
 TaskHandler = Callable[[AsyncSession, Job], Awaitable[None]]
 
 
-async def process_document(session: AsyncSession, job: Job, *, engine_manager: EngineManager) -> None:
+async def process_document(
+    session: AsyncSession, job: Job, *, engine_manager: EngineManager, job_queue=None
+) -> None:
     """ingest → extract 一篇文档，并推进其状态与计数。"""
     document = await session.get(Document, job.document_id) if job.document_id else None
     if document is None:
@@ -76,6 +79,50 @@ async def process_document(session: AsyncSession, job: Job, *, engine_manager: E
     )
 
 
+async def sync_source(session: AsyncSession, job: Job, *, engine_manager=None, job_queue=None) -> None:
+    """动态连接器同步：discover → fetch → 登记文档并入队处理（复用 ingest→extract 管线）。"""
+    # 延迟导入避免与 jobs 包的循环依赖
+    from muse_api.connectors import registry
+    from muse_api.core.config import settings
+    from muse_api.services.document_service import create_document_from_upload
+
+    source = await session.get(Source, job.source_id) if job.source_id else None
+    if source is None:
+        raise NotFoundError("信源不存在")
+
+    connector = registry.get(source.connector_kind)
+    discovered = await connector.discover(source.config or {})
+    fetched = 0
+    for d in discovered:
+        try:
+            local = await connector.fetch(source.config or {}, d)
+            with open(local.path, "rb") as f:
+                data = f.read()
+        except Exception as e:  # noqa: BLE001 - 单篇失败不影响整体同步
+            log.warning("同步抓取失败 %s：%s", d.external_id, getattr(e, "message", None) or e)
+            continue
+        await create_document_from_upload(
+            session,
+            source,
+            filename=local.filename,
+            content_type=local.content_type,
+            data=data,
+            upload_dir=settings.upload_dir,
+            job_queue=job_queue,
+        )
+        try:
+            os.remove(local.path)
+        except OSError:
+            pass
+        fetched += 1
+
+    job.progress = 1.0
+    job.payload = {**(job.payload or {}), "discovered": len(discovered), "fetched": fetched}
+    await session.commit()
+    log.info("同步完成 source=%s 发现=%d 抓取=%d", source.id, len(discovered), fetched)
+
+
 TASK_HANDLERS: dict[JobType, TaskHandler] = {
     JobType.PROCESS_DOCUMENT: process_document,
+    JobType.SYNC_SOURCE: sync_source,
 }
