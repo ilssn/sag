@@ -9,6 +9,7 @@ venv/
 .ruff_cache/
 
 # muse / zleap-sag local data
+.muse/
 .zleap/
 .zleap_*/
 *.db

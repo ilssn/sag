@@ -42,8 +42,15 @@ export default function SourceDetailPage() {
   const active = documents?.some((d) => ACTIVE.includes(d.status)) ?? false;
   React.useEffect(() => {
     if (!active) return;
-    const t = setInterval(refresh, 2500);
-    return () => clearInterval(t);
+    let t: ReturnType<typeof setInterval> | null = null;
+    const tick = () => {
+      if (document.hidden) return;
+      refresh();
+    };
+    t = setInterval(tick, 4000);
+    return () => {
+      if (t) clearInterval(t);
+    };
   }, [active, refresh]);
 
   async function deleteSource() {

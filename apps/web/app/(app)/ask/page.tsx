@@ -104,7 +104,7 @@ function AskInner() {
   }
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full min-h-0">
       <aside className="hidden w-72 shrink-0 flex-col border-r border-hairline bg-surface/40 lg:flex">
         <div className="p-3">
           <DropdownMenu>

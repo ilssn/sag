@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import * as React from "react";
 import { ArrowUp, Quote, Square } from "lucide-react";
 import { toast } from "sonner";
@@ -7,11 +8,18 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { streamAsk } from "@/lib/sse";
 import type { Citation, Message } from "@/lib/types";
-import { cn } from "@/lib/utils";
 import { useApp } from "@/components/features/app-shell";
 import { Button } from "@/components/ui/button";
 
-function CitationBlock({ citations }: { citations: Citation[] }) {
+const MarkdownContent = dynamic(
+  () => import("@/components/features/markdown-content").then((m) => m.MarkdownContent),
+  {
+    loading: () => null,
+    ssr: false,
+  },
+);
+
+const CitationBlock = React.memo(function CitationBlock({ citations }: { citations: Citation[] }) {
   const [open, setOpen] = React.useState(false);
   if (!citations || citations.length === 0) return null;
   return (
@@ -43,42 +51,47 @@ function CitationBlock({ citations }: { citations: Citation[] }) {
       )}
     </div>
   );
-}
+});
 
-function MessageItem({ message, streaming }: { message: Message; streaming?: boolean }) {
-  const isUser = message.role === "user";
-  if (isUser) {
+const MessageItem = React.memo(
+  function MessageItem({ message, streaming }: { message: Message; streaming?: boolean }) {
+    const isUser = message.role === "user";
+    if (isUser) {
+      return (
+        <div className="flex justify-end">
+          <div className="max-w-[85%] rounded-lg rounded-tr-sm bg-ink px-4 py-2.5 text-sm text-paper">
+            {message.content}
+          </div>
+        </div>
+      );
+    }
+    const thinking = streaming && !message.content;
     return (
-      <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-lg rounded-tr-sm bg-ink px-4 py-2.5 text-sm text-paper">
-          {message.content}
+      <div className="flex gap-3">
+        <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-[7px] bg-gold text-[12px] font-bold text-[#1b1a17]">
+          m
+        </span>
+        <div className="min-w-0 flex-1">
+          {thinking ? (
+            <div className="flex items-center gap-1.5 py-1 text-sm text-ink-faint">
+              <span className="size-1.5 animate-blink rounded-full bg-gold" />
+              检索并生成中…
+            </div>
+          ) : streaming ? (
+            <div className="answer-prose whitespace-pre-wrap text-ink">
+              {message.content}
+              <span className="ml-0.5 inline-block h-4 w-[2px] animate-blink bg-gold align-middle" />
+            </div>
+          ) : (
+            <MarkdownContent content={message.content} />
+          )}
+          {!streaming && <CitationBlock citations={message.citations} />}
         </div>
       </div>
     );
-  }
-  const thinking = streaming && !message.content;
-  return (
-    <div className="flex gap-3">
-      <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-[7px] bg-gold text-[12px] font-bold text-[#1b1a17]">
-        m
-      </span>
-      <div className="min-w-0 flex-1">
-        {thinking ? (
-          <div className="flex items-center gap-1.5 py-1 text-sm text-ink-faint">
-            <span className="size-1.5 animate-blink rounded-full bg-gold" />
-            检索并生成中…
-          </div>
-        ) : (
-          <div className="answer-prose whitespace-pre-wrap text-ink">
-            {message.content}
-            {streaming && <span className="ml-0.5 inline-block h-4 w-[2px] animate-blink bg-gold align-middle" />}
-          </div>
-        )}
-        <CitationBlock citations={message.citations} />
-      </div>
-    </div>
-  );
-}
+  },
+  (prev, next) => prev.message === next.message && prev.streaming === next.streaming,
+);
 
 export function ChatPanel({
   sourceId,
@@ -98,10 +111,33 @@ export function ChatPanel({
   const [input, setInput] = React.useState("");
   const [streaming, setStreaming] = React.useState(false);
   const abortRef = React.useRef<AbortController | null>(null);
+  const scrollRef = React.useRef<HTMLDivElement>(null);
   const bottomRef = React.useRef<HTMLDivElement>(null);
   const streamingId = React.useRef<string | null>(null);
-  // 追踪已加载的会话；自建会话时避免 prop 变化触发重载把本地流式消息清空
   const activeThreadRef = React.useRef<string | null | undefined>(undefined);
+  const streamingRef = React.useRef(false);
+  const loadGeneration = React.useRef(0);
+  const pendingTokens = React.useRef("");
+  const rafId = React.useRef<number | null>(null);
+
+  const loadMessages = React.useCallback(
+    (tid: string, opts?: { force?: boolean }) => {
+      const gen = ++loadGeneration.current;
+      return api
+        .listMessages(sourceId, tid)
+        .then((msgs) => {
+          if (gen !== loadGeneration.current) return;
+          if (streamingRef.current && !opts?.force) return;
+          setMessages(msgs);
+        })
+        .catch(() => {
+          if (gen !== loadGeneration.current) return;
+          if (streamingRef.current && !opts?.force) return;
+          setMessages([]);
+        });
+    },
+    [sourceId],
+  );
 
   React.useEffect(() => {
     if (threadId === activeThreadRef.current) return;
@@ -110,12 +146,40 @@ export function ChatPanel({
       setMessages([]);
       return;
     }
-    api.listMessages(sourceId, threadId).then(setMessages).catch(() => setMessages([]));
-  }, [sourceId, threadId]);
+    if (streamingRef.current) return;
+    loadMessages(threadId);
+  }, [sourceId, threadId, loadMessages]);
+
+  const lastScrollAt = React.useRef(0);
 
   React.useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    const el = bottomRef.current;
+    if (!el) return;
+    const now = Date.now();
+    if (streaming && now - lastScrollAt.current < 120) return;
+    lastScrollAt.current = now;
+    el.scrollIntoView({ behavior: "auto", block: "end" });
+  }, [messages, streaming]);
+
+  const flushTokens = React.useCallback((botId: string) => {
+    const chunk = pendingTokens.current;
+    if (!chunk) return;
+    pendingTokens.current = "";
+    setMessages((list) =>
+      list.map((x) => (x.id === botId ? { ...x, content: x.content + chunk } : x)),
+    );
+  }, []);
+
+  const scheduleTokenFlush = React.useCallback(
+    (botId: string) => {
+      if (rafId.current !== null) return;
+      rafId.current = requestAnimationFrame(() => {
+        rafId.current = null;
+        flushTokens(botId);
+      });
+    },
+    [flushTokens],
+  );
 
   async function send() {
     const q = input.trim();
@@ -128,9 +192,11 @@ export function ChatPanel({
 
     let tid = threadId;
     if (!tid) {
+      loadGeneration.current++;
       try {
         tid = await ensureThread();
-        activeThreadRef.current = tid; // 标记为已加载，防止随后 prop 变化触发重载
+        activeThreadRef.current = tid;
+        loadGeneration.current++;
       } catch {
         toast.error("创建会话失败");
         return;
@@ -140,10 +206,27 @@ export function ChatPanel({
     const now = Date.now();
     const botId = `local-a-${now}`;
     streamingId.current = botId;
+    streamingRef.current = true;
+    pendingTokens.current = "";
+
     setMessages((m) => [
       ...m,
-      { id: `local-u-${now}`, thread_id: tid!, role: "user", content: q, citations: [], created_at: new Date().toISOString() },
-      { id: botId, thread_id: tid!, role: "assistant", content: "", citations: [], created_at: new Date().toISOString() },
+      {
+        id: `local-u-${now}`,
+        thread_id: tid!,
+        role: "user",
+        content: q,
+        citations: [],
+        created_at: new Date().toISOString(),
+      },
+      {
+        id: botId,
+        thread_id: tid!,
+        role: "assistant",
+        content: "",
+        citations: [],
+        created_at: new Date().toISOString(),
+      },
     ]);
 
     setStreaming(true);
@@ -159,8 +242,12 @@ export function ChatPanel({
         { query: q },
         {
           onMeta: (citations) => patch((x) => ({ ...x, citations })),
-          onToken: (t) => patch((x) => ({ ...x, content: x.content + t })),
+          onToken: (t) => {
+            pendingTokens.current += t;
+            scheduleTokenFlush(botId);
+          },
           onError: (msg) => {
+            flushTokens(botId);
             toast.error(msg);
             patch((x) => ({ ...x, content: x.content || `⚠︎ ${msg}` }));
           },
@@ -171,15 +258,24 @@ export function ChatPanel({
     } catch {
       /* aborted or network */
     } finally {
+      flushTokens(botId);
+      if (rafId.current !== null) {
+        cancelAnimationFrame(rafId.current);
+        rafId.current = null;
+      }
       setStreaming(false);
       abortRef.current = null;
       streamingId.current = null;
+      streamingRef.current = false;
+      loadGeneration.current++;
+      await loadMessages(tid, { force: true });
     }
   }
 
   function stop() {
     abortRef.current?.abort();
     setStreaming(false);
+    streamingRef.current = false;
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
@@ -190,8 +286,8 @@ export function ChatPanel({
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex-1 overflow-y-auto">
+    <div className="flex h-full min-h-0 flex-col">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-6">
           {messages.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-20 text-center">
@@ -212,7 +308,7 @@ export function ChatPanel({
         </div>
       </div>
 
-      <div className="border-t border-hairline bg-paper/80 px-4 py-3 backdrop-blur-sm">
+      <div className="border-t border-hairline bg-paper px-4 py-3">
         <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-lg border border-hairline bg-surface p-2 shadow-soft focus-within:border-gold/50">
           <textarea
             value={input}

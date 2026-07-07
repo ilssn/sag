@@ -10,34 +10,36 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "next": "15.1.6",
-    "react": "19.0.0",
-    "react-dom": "19.0.0",
-    "next-themes": "0.4.4",
-    "lucide-react": "0.469.0",
-    "sonner": "1.7.1",
-    "clsx": "2.1.1",
-    "tailwind-merge": "2.6.0",
-    "class-variance-authority": "0.7.1",
-    "@radix-ui/react-slot": "1.1.1",
+    "@radix-ui/react-avatar": "1.1.2",
     "@radix-ui/react-dialog": "1.1.4",
     "@radix-ui/react-dropdown-menu": "2.1.4",
     "@radix-ui/react-label": "2.1.1",
+    "@radix-ui/react-scroll-area": "1.2.2",
     "@radix-ui/react-separator": "1.1.1",
+    "@radix-ui/react-slot": "1.1.1",
     "@radix-ui/react-tooltip": "1.1.6",
-    "@radix-ui/react-avatar": "1.1.2",
-    "@radix-ui/react-scroll-area": "1.2.2"
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
+    "lucide-react": "0.469.0",
+    "next": "15.1.6",
+    "next-themes": "0.4.4",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "sonner": "1.7.1",
+    "tailwind-merge": "2.6.0"
   },
   "devDependencies": {
-    "typescript": "5.7.3",
     "@types/node": "20.17.12",
     "@types/react": "19.0.7",
     "@types/react-dom": "19.0.3",
-    "tailwindcss": "3.4.17",
-    "postcss": "8.4.49",
     "autoprefixer": "10.4.20",
-    "tailwindcss-animate": "1.0.7",
     "eslint": "8.57.1",
-    "eslint-config-next": "15.1.6"
+    "eslint-config-next": "15.1.6",
+    "postcss": "8.4.49",
+    "tailwindcss": "3.4.17",
+    "tailwindcss-animate": "1.0.7",
+    "typescript": "5.7.3"
   }
 }
