@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/overview", label: "概览", icon: LayoutGrid },
-  { href: "/sources", label: "信源", icon: Layers },
+  { href: "/sources", label: "上下文", icon: Layers },
   { href: "/ask", label: "问答", icon: MessagesSquare },
   { href: "/settings", label: "设置", icon: Settings },
 ];

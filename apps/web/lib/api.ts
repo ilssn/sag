@@ -3,6 +3,7 @@ import type {
   Capabilities,
   Connector,
   Doc,
+  Namespace,
   SearchResponse,
   Source,
   Thread,
@@ -70,12 +71,25 @@ export const api = {
   me: () => request<User>("/api/v1/auth/me"),
   capabilities: () => request<Capabilities>("/api/v1/system/capabilities"),
 
+  // namespaces
+  listNamespaces: () => request<Namespace[]>("/api/v1/namespaces"),
+  createNamespace: (b: { name: string; icon?: string; color?: string }) =>
+    request<Namespace>("/api/v1/namespaces", { method: "POST", body: JSON.stringify(b) }),
+  deleteNamespace: (id: string) =>
+    request<{ ok: boolean }>(`/api/v1/namespaces/${id}`, { method: "DELETE" }),
+
   // sources
   listConnectors: () => request<Connector[]>("/api/v1/sources/connectors"),
-  listSources: () => request<Source[]>("/api/v1/sources"),
+  listSources: (namespaceId?: string) =>
+    request<Source[]>(`/api/v1/sources${namespaceId ? `?namespace_id=${namespaceId}` : ""}`),
   getSource: (id: string) => request<Source>(`/api/v1/sources/${id}`),
-  createSource: (b: { name: string; description?: string; connector_kind?: string; config?: Record<string, unknown> }) =>
-    request<Source>("/api/v1/sources", { method: "POST", body: JSON.stringify(b) }),
+  createSource: (b: {
+    name: string;
+    description?: string;
+    connector_kind?: string;
+    namespace_id?: string;
+    config?: Record<string, unknown>;
+  }) => request<Source>("/api/v1/sources", { method: "POST", body: JSON.stringify(b) }),
   updateSource: (id: string, b: Record<string, unknown>) =>
     request<Source>(`/api/v1/sources/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
   deleteSource: (id: string) =>

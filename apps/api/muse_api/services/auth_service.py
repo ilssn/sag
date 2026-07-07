@@ -40,6 +40,12 @@ async def register_user(session: AsyncSession, *, email: str, password: str, nam
     session.add(Membership(user_id=user.id, workspace_id=workspace.id, role=WorkspaceRole.OWNER))
 
     await session.commit()
+
+    # 默认命名空间：会话记忆 + 知识
+    from muse_api.services.namespace_service import ensure_default_namespaces
+
+    await ensure_default_namespaces(session, workspace.id)
+
     await session.refresh(user)
     return user
 

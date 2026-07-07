@@ -6,7 +6,7 @@ import type { LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
-import type { Connector, Source } from "@/lib/types";
+import type { Connector, Namespace, Source } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,9 +33,17 @@ interface Field {
   help?: string;
 }
 
-export function CreateSourceDialog({ onCreated }: { onCreated: (s: Source) => void }) {
+export function CreateSourceDialog({
+  onCreated,
+  defaultNamespaceId,
+}: {
+  onCreated: (s: Source) => void;
+  defaultNamespaceId?: string;
+}) {
   const [open, setOpen] = React.useState(false);
   const [connectors, setConnectors] = React.useState<Connector[]>([]);
+  const [namespaces, setNamespaces] = React.useState<Namespace[]>([]);
+  const [namespaceId, setNamespaceId] = React.useState(defaultNamespaceId ?? "");
   const [kind, setKind] = React.useState("file_upload");
   const [name, setName] = React.useState("");
   const [description, setDescription] = React.useState("");
@@ -43,10 +51,18 @@ export function CreateSourceDialog({ onCreated }: { onCreated: (s: Source) => vo
   const [loading, setLoading] = React.useState(false);
 
   React.useEffect(() => {
-    if (open && connectors.length === 0) {
-      api.listConnectors().then(setConnectors).catch(() => {});
-    }
-  }, [open, connectors.length]);
+    if (!open) return;
+    if (connectors.length === 0) api.listConnectors().then(setConnectors).catch(() => {});
+    api
+      .listNamespaces()
+      .then((ns) => {
+        setNamespaces(ns);
+        setNamespaceId(
+          (prev) => prev || defaultNamespaceId || ns.find((n) => n.kind === "knowledge")?.id || ns[0]?.id || "",
+        );
+      })
+      .catch(() => {});
+  }, [open, connectors.length, defaultNamespaceId]);
 
   const selected = connectors.find((c) => c.kind === kind);
   const fields = (selected?.config_fields ?? []) as unknown as Field[];
@@ -60,7 +76,13 @@ export function CreateSourceDialog({ onCreated }: { onCreated: (s: Source) => vo
     e.preventDefault();
     setLoading(true);
     try {
-      const src = await api.createSource({ name, description, connector_kind: kind, config });
+      const src = await api.createSource({
+        name,
+        description,
+        connector_kind: kind,
+        namespace_id: namespaceId || undefined,
+        config,
+      });
       toast.success("信源已创建");
       onCreated(src);
       setOpen(false);
@@ -156,6 +178,22 @@ export function CreateSourceDialog({ onCreated }: { onCreated: (s: Source) => vo
               {f.help && <p className="text-xs text-ink-faint">{f.help}</p>}
             </div>
           ))}
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="s-ns">归属命名空间</Label>
+            <select
+              id="s-ns"
+              value={namespaceId}
+              onChange={(e) => setNamespaceId(e.target.value)}
+              className="h-9 w-full rounded-sm border border-hairline bg-surface px-3 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-1 focus-visible:ring-offset-paper"
+            >
+              {namespaces.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.name}
+                </option>
+              ))}
+            </select>
+          </div>
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="s-name">名称</Label>

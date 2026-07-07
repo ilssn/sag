@@ -21,10 +21,31 @@ class WorkspaceRole(StrEnum):
     VIEWER = "viewer"
 
 
+class NamespaceKind(StrEnum):
+    MEMORY = "memory"        # 会话记忆
+    KNOWLEDGE = "knowledge"  # 知识
+    CUSTOM = "custom"
+
+
+class SourceType(StrEnum):
+    DOCUMENT = "document"
+    WEB = "web"
+    MESSAGE = "message"
+    CONVERSATION = "conversation"
+    AUDIO = "audio"
+
+
 class ConnectorKind(StrEnum):
     FILE_UPLOAD = "file_upload"
     WEB = "web"
     # 预留：NOTION = "notion"; S3 = "s3"; CONFLUENCE = "confluence"; ...
+
+
+# 连接器 → 默认信源类型
+CONNECTOR_SOURCE_TYPE = {
+    ConnectorKind.FILE_UPLOAD: SourceType.DOCUMENT,
+    ConnectorKind.WEB: SourceType.WEB,
+}
 
 
 class SourceStatus(StrEnum):

@@ -10,18 +10,22 @@ from muse_api.core.errors import MuseError, NotFoundError, ValidationError
 from muse_api.core.logging import get_logger
 from muse_api.db.base import new_id
 from muse_api.db.models import Job, Source
-from muse_api.enums import JobStatus, JobType
+from muse_api.enums import CONNECTOR_SOURCE_TYPE, JobStatus, JobType, NamespaceKind, SourceType
 from muse_api.jobs import JobQueue
 from muse_api.sag import EngineManager
 from muse_api.schemas.source import SourceCreate, SourceUpdate
+from muse_api.services.namespace_service import default_namespace, get_namespace
 
 log = get_logger("services.source")
 
 
-async def list_sources(session: AsyncSession, workspace_id: str) -> list[Source]:
-    rows = await session.execute(
-        select(Source).where(Source.workspace_id == workspace_id).order_by(Source.created_at.desc())
-    )
+async def list_sources(
+    session: AsyncSession, workspace_id: str, *, namespace_id: str | None = None
+) -> list[Source]:
+    stmt = select(Source).where(Source.workspace_id == workspace_id)
+    if namespace_id:
+        stmt = stmt.where(Source.namespace_id == namespace_id)
+    rows = await session.execute(stmt.order_by(Source.created_at.desc()))
     return list(rows.scalars().all())
 
 
@@ -42,10 +46,19 @@ async def create_source(
     connector = registry.get(data.connector_kind)
     connector.validate_config(data.config)
 
+    # 命名空间：显式指定则校验归属，否则落默认「知识」
+    if data.namespace_id:
+        namespace = await get_namespace(session, workspace_id, data.namespace_id)
+    else:
+        namespace = await default_namespace(session, workspace_id, NamespaceKind.KNOWLEDGE)
+    source_type = CONNECTOR_SOURCE_TYPE.get(data.connector_kind, SourceType.DOCUMENT)
+
     source = Source(
         workspace_id=workspace_id,
+        namespace_id=namespace.id,
         name=data.name,
         description=data.description,
+        source_type=source_type,
         connector_kind=data.connector_kind,
         sag_source_config_id=f"src_{new_id()[:16]}",
         config=data.config or {},

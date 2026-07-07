@@ -4,7 +4,7 @@ from sqlalchemy import Enum as SAEnum, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from muse_api.db.base import Base, IDMixin, TimestampMixin
-from muse_api.enums import ConnectorKind, SourceStatus
+from muse_api.enums import ConnectorKind, SourceStatus, SourceType
 
 
 class Source(IDMixin, TimestampMixin, Base):
@@ -15,8 +15,16 @@ class Source(IDMixin, TimestampMixin, Base):
     workspace_id: Mapped[str] = mapped_column(
         ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
     )
+    # 归属命名空间（文件夹）；灵魂会话记忆源会置 soul_id
+    namespace_id: Mapped[str | None] = mapped_column(
+        ForeignKey("namespaces.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    soul_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text, default="")
+    source_type: Mapped[SourceType] = mapped_column(
+        SAEnum(SourceType, native_enum=False, length=16), default=SourceType.DOCUMENT
+    )
     connector_kind: Mapped[ConnectorKind] = mapped_column(
         SAEnum(ConnectorKind, native_enum=False, length=32),
         default=ConnectorKind.FILE_UPLOAD,

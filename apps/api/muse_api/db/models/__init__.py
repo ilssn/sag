@@ -3,6 +3,7 @@
 from muse_api.db.models.chat import ChatMessage, ChatThread
 from muse_api.db.models.document import Document
 from muse_api.db.models.job import Job
+from muse_api.db.models.namespace import Namespace
 from muse_api.db.models.setting import Setting
 from muse_api.db.models.source import Source
 from muse_api.db.models.user import User
@@ -14,6 +15,7 @@ __all__ = [
     "Document",
     "Job",
     "Membership",
+    "Namespace",
     "Setting",
     "Source",
     "User",

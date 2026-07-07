@@ -15,11 +15,26 @@ export interface TokenResponse {
 }
 
 export type SourceStatus = "active" | "paused" | "error";
+export type SourceType = "document" | "web" | "message" | "conversation" | "audio";
+export type NamespaceKind = "memory" | "knowledge" | "custom";
+
+export interface Namespace {
+  id: string;
+  name: string;
+  kind: NamespaceKind;
+  icon: string;
+  color: string;
+  is_system: boolean;
+  created_at: string;
+  updated_at: string;
+}
 
 export interface Source {
   id: string;
+  namespace_id: string | null;
   name: string;
   description: string;
+  source_type: SourceType;
   connector_kind: string;
   status: SourceStatus;
   document_count: number;

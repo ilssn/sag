@@ -53,12 +53,50 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
+# 已存在的表需要补的新列（dev 轻量增量迁移；生产用 Alembic）。
+# create_all 只建新表、不改旧表，故对演进列做幂等 ADD COLUMN。
+_COLUMN_UPGRADES: dict[str, dict[str, str]] = {
+    "sources": {
+        "namespace_id": "VARCHAR(32)",
+        "soul_id": "VARCHAR(32)",
+        "source_type": "VARCHAR(16) DEFAULT 'document'",
+    },
+    "chat_threads": {
+        "soul_id": "VARCHAR(32)",
+        "memory_source_id": "VARCHAR(32)",
+    },
+    "chat_messages": {
+        "author": "VARCHAR(120)",
+    },
+}
+
+
+async def _ensure_columns() -> None:
+    from sqlalchemy import inspect as sa_inspect
+
+    def _existing(sync_conn, table: str) -> set[str] | None:
+        insp = sa_inspect(sync_conn)
+        if not insp.has_table(table):
+            return None
+        return {c["name"] for c in insp.get_columns(table)}
+
+    async with engine.begin() as conn:
+        for table, cols in _COLUMN_UPGRADES.items():
+            existing = await conn.run_sync(_existing, table)
+            if existing is None:
+                continue
+            for col, ddl in cols.items():
+                if col not in existing:
+                    await conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+
+
 async def init_db() -> None:
     """开发态建表（生产用 Alembic）。导入 models 以注册到 metadata。"""
     from muse_api.db import models  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    await _ensure_columns()
 
 
 async def dispose_db() -> None:

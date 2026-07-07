@@ -31,10 +31,12 @@ async def list_connectors() -> list[ConnectorOut]:
 
 @router.get("", response_model=list[SourceOut])
 async def list_(
+    namespace_id: str | None = None,
     workspace_id: str = Depends(get_workspace_id),
     session: AsyncSession = Depends(get_session),
 ) -> list[SourceOut]:
-    return [SourceOut.model_validate(s) for s in await list_sources(session, workspace_id)]
+    sources = await list_sources(session, workspace_id, namespace_id=namespace_id)
+    return [SourceOut.model_validate(s) for s in sources]
 
 
 @router.post("", response_model=SourceOut, status_code=201)

@@ -36,9 +36,20 @@ async def test_end_to_end_offline():
             # 连接器 + 信源
             conns = (await c.get("/api/v1/sources/connectors", headers=H)).json()
             assert any(x["kind"] == "file_upload" for x in conns)
+
+            # 命名空间：注册即播种「会话记忆」+「知识」
+            ns = (await c.get("/api/v1/namespaces", headers=H)).json()
+            assert {"memory", "knowledge"} <= {n["kind"] for n in ns}
+            knowledge = next(n for n in ns if n["kind"] == "knowledge")
+
             r = await c.post("/api/v1/sources", headers=H, json={"name": "手册"})
             assert r.status_code == 201
             sid = r.json()["id"]
+            # 新建源默认落「知识」，类型 document
+            assert r.json()["namespace_id"] == knowledge["id"]
+            assert r.json()["source_type"] == "document"
+            in_ns = (await c.get(f"/api/v1/sources?namespace_id={knowledge['id']}", headers=H)).json()
+            assert len(in_ns) == 1 and in_ns[0]["id"] == sid
 
             # 上传（不等待后台完成，避免 401 重试拖慢测试）
             up = await c.post(
