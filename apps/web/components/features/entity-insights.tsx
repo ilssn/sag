@@ -25,7 +25,7 @@ export function EntityInsights({ sourceId }: { sourceId: string }) {
     setBusy(e.id);
     try {
       const soul = await api.entityToSoul(sourceId, e.id);
-      toast.success(`已把「${e.name}」提取成灵魂`);
+      toast.success(`已为「${e.name}」创建 Agent`);
       router.push(`/souls/${soul.id}`);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "提取失败");
@@ -37,7 +37,7 @@ export function EntityInsights({ sourceId }: { sourceId: string }) {
   if (entities === null || entities.length === 0) {
     return (
       <p className="rounded-lg border border-dashed border-hairline bg-surface/40 px-4 py-6 text-center text-sm text-ink-faint">
-        抽取完成后，这里会按热度列出人物与实体，可一键提取成灵魂与之对话。
+        抽取完成后，这里会按热度列出人物与实体，可一键创建 Agent 与之对话。
       </p>
     );
   }
@@ -75,7 +75,7 @@ export function EntityInsights({ sourceId }: { sourceId: string }) {
             {isPerson && (
               <Button variant="outline" size="sm" disabled={busy === e.id} onClick={() => toSoul(e)}>
                 <Sparkles className="size-3.5" />
-                {busy === e.id ? "提取中…" : "提取成灵魂"}
+                {busy === e.id ? "提取中…" : "创建 Agent"}
               </Button>
             )}
           </div>

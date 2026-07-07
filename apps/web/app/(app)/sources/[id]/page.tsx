@@ -60,7 +60,7 @@ export default function SourceDetailPage() {
   async function deleteSource() {
     try {
       await api.deleteSource(id);
-      toast.success("信源已删除");
+      toast.success("知识库已删除");
       router.push("/sources");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "删除失败");
@@ -76,7 +76,7 @@ export default function SourceDetailPage() {
             className="mb-2 inline-flex items-center gap-1 text-xs text-ink-faint transition-colors hover:text-ink-muted"
           >
             <ArrowLeft className="size-3.5" />
-            全部信源
+            全部知识库
           </Link>
           {source ? (
             <>
@@ -102,7 +102,7 @@ export default function SourceDetailPage() {
           <Button
             variant="ghost"
             size="icon"
-            title="删除信源"
+            title="删除知识库"
             onClick={() => setConfirmDelete(true)}
             className="text-ink-muted hover:text-danger"
           >
@@ -111,9 +111,9 @@ export default function SourceDetailPage() {
           <ConfirmDialog
             open={confirmDelete}
             onOpenChange={setConfirmDelete}
-            title="删除信源"
+            title="删除知识库"
             description={`「${source?.name ?? ""}」及其文档、会话将被删除，检索数据不可再访问。此操作无法撤销。`}
-            confirmLabel="删除信源"
+            confirmLabel="删除知识库"
             onConfirm={deleteSource}
           />
         </div>

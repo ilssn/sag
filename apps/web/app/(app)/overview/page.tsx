@@ -64,7 +64,7 @@ export default function OverviewPage() {
 
   return (
     <>
-      <PageHeader title={`欢迎回来，${user?.name ?? ""}`} description="从信息源到知识问答，从上下文到灵魂。" />
+      <PageHeader title={`欢迎回来，${user?.name ?? ""}`} description="接入知识，创建 Agent，带引用对话。" />
 
       <div className="flex flex-col gap-8 p-6 md:p-8">
         {capabilities && !capabilities.llm_configured && (
@@ -82,8 +82,8 @@ export default function OverviewPage() {
             Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-[92px]" />)
           ) : (
             <>
-              <StatTile icon={Sparkles} label="灵魂" value={totals.souls} />
-              <StatTile icon={Layers} label="信源" value={totals.sources} />
+              <StatTile icon={Sparkles} label="Agent" value={totals.souls} />
+              <StatTile icon={Layers} label="知识库" value={totals.sources} />
               <StatTile icon={FileText} label="文档" value={totals.documents} />
               <StatTile icon={Network} label="事件" value={totals.events} />
             </>
@@ -91,7 +91,7 @@ export default function OverviewPage() {
         </div>
 
         <div>
-          <SectionHeader title="我的灵魂" href="/souls" hrefLabel="全部灵魂" />
+          <SectionHeader title="我的 Agent" href="/souls" hrefLabel="全部 Agent" />
           {souls === null ? (
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {Array.from({ length: 3 }).map((_, i) => (
@@ -101,8 +101,8 @@ export default function OverviewPage() {
           ) : souls.length === 0 ? (
             <EmptyState
               icon={Sparkles}
-              title="创造第一个灵魂"
-              description="给它名字与人格，绑定你的上下文，让它成为你的助手、决策脑，或书中的某个人物。"
+              title="创建第一个 Agent"
+              description="起个名字、写好设定，绑定你的知识库——它可以是你的助手、团队的决策脑，或书中的某个人物。"
               action={<CreateSoulDialog onCreated={load} />}
             />
           ) : (
@@ -115,7 +115,7 @@ export default function OverviewPage() {
         </div>
 
         <div>
-          <SectionHeader title="最近信源" href="/sources" hrefLabel="全部上下文" />
+          <SectionHeader title="最近知识库" href="/sources" hrefLabel="全部知识库" />
           {sources === null ? (
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {Array.from({ length: 3 }).map((_, i) => (
@@ -125,7 +125,7 @@ export default function OverviewPage() {
           ) : sources.length === 0 ? (
             <EmptyState
               icon={Layers}
-              title="接入第一个信源"
+              title="接入第一个知识库"
               description="上传文档或同步网页，muse 会解析入库、抽取事件，让知识可检索。"
               action={<CreateSourceDialog onCreated={load} />}
             />

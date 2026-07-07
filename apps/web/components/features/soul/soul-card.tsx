@@ -3,7 +3,7 @@ import Link from "next/link";
 import type { Soul } from "@/lib/types";
 
 export function SoulCard({ soul }: { soul: Soul }) {
-  const snippet = soul.persona?.system_prompt || soul.persona?.greeting || "尚未设定人格";
+  const snippet = soul.persona?.system_prompt || soul.persona?.greeting || "尚未填写设定";
   return (
     <Link
       href={`/souls/${soul.id}`}

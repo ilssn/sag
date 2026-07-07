@@ -32,7 +32,7 @@ async def process_document(
         raise NotFoundError("文档不存在")
     source = await session.get(Source, document.source_id)
     if source is None:
-        raise NotFoundError("信源不存在")
+        raise NotFoundError("知识库不存在")
 
     async def on_stage(stage: str) -> None:
         if stage == "loading":
@@ -88,7 +88,7 @@ async def sync_source(session: AsyncSession, job: Job, *, engine_manager=None, j
 
     source = await session.get(Source, job.source_id) if job.source_id else None
     if source is None:
-        raise NotFoundError("信源不存在")
+        raise NotFoundError("知识库不存在")
 
     connector = registry.get(source.connector_kind)
     discovered = await connector.discover(source.config or {})

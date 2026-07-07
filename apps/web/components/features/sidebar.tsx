@@ -8,8 +8,8 @@ import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/overview", label: "概览", icon: LayoutGrid },
-  { href: "/souls", label: "灵魂", icon: Sparkles },
-  { href: "/sources", label: "上下文", icon: Layers },
+  { href: "/souls", label: "Agent", icon: Sparkles },
+  { href: "/sources", label: "知识库", icon: Layers },
   { href: "/settings", label: "设置", icon: Settings },
 ];
 

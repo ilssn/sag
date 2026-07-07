@@ -39,7 +39,7 @@ async def list_souls(session: AsyncSession, workspace_id: str) -> list[Soul]:
 async def get_soul(session: AsyncSession, workspace_id: str, soul_id: str) -> Soul:
     soul = await session.get(Soul, soul_id)
     if soul is None or soul.workspace_id != workspace_id:
-        raise NotFoundError("灵魂不存在")
+        raise NotFoundError("Agent 不存在")
     return soul
 
 
@@ -55,7 +55,7 @@ async def create_soul(
 ) -> Soul:
     name = name.strip()
     if not name:
-        raise ValidationError("灵魂名称不能为空")
+        raise ValidationError("Agent 名称不能为空")
     memory_ns = await default_namespace(session, workspace_id, NamespaceKind.MEMORY)
     soul = Soul(
         workspace_id=workspace_id,
@@ -117,11 +117,11 @@ async def add_binding(
     if target_type == BindingTargetType.NAMESPACE:
         ns = await session.get(Namespace, target_id)
         if ns is None or ns.workspace_id != workspace_id:
-            raise NotFoundError("命名空间不存在")
+            raise NotFoundError("分组不存在")
     else:
         src = await session.get(Source, target_id)
         if src is None or src.workspace_id != workspace_id:
-            raise NotFoundError("信源不存在")
+            raise NotFoundError("知识库不存在")
     exists = await session.scalar(
         select(SoulBinding).where(
             SoulBinding.soul_id == soul.id,

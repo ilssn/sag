@@ -29,7 +29,7 @@ export function CreateNamespaceDialog({ onCreated }: { onCreated: (ns: Namespace
     setLoading(true);
     try {
       const ns = await api.createNamespace({ name: name.trim() });
-      toast.success(`命名空间「${ns.name}」已创建`);
+      toast.success(`分组「${ns.name}」已创建`);
       onCreated(ns);
       setOpen(false);
       setName("");
@@ -45,14 +45,14 @@ export function CreateNamespaceDialog({ onCreated }: { onCreated: (ns: Namespace
       <DialogTrigger asChild>
         <button className="inline-flex items-center gap-1 rounded-full border border-dashed border-hairline px-3 py-1 text-xs text-ink-faint transition-colors hover:border-ink-faint hover:text-ink-muted">
           <Plus className="size-3.5" />
-          命名空间
+          分组
         </button>
       </DialogTrigger>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>新建命名空间</DialogTitle>
+          <DialogTitle>新建分组</DialogTitle>
           <DialogDescription>
-            命名空间是信源的文件夹，用于按主题组织上下文，也可整组绑定给灵魂。
+            分组是知识库的文件夹，可按主题整理，也可整组绑定给 Agent。
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="flex flex-col gap-4">

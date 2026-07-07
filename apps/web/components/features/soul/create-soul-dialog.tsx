@@ -43,7 +43,7 @@ export function CreateSoulDialog({
         avatar: avatar || name.slice(0, 1),
         persona: { system_prompt: systemPrompt, greeting },
       });
-      toast.success("灵魂已创建");
+      toast.success("Agent已创建");
       onCreated(soul);
       setOpen(false);
       setName("");
@@ -63,15 +63,15 @@ export function CreateSoulDialog({
         {trigger ?? (
           <Button variant="gold">
             <Plus className="size-4" />
-            创建灵魂
+            创建 Agent
           </Button>
         )}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>创建灵魂</DialogTitle>
+          <DialogTitle>创建 Agent</DialogTitle>
           <DialogDescription>
-            给它一个名字与人格，之后绑定上下文，它就能带着记忆与你对话。
+            起个名字、写好设定，绑定知识库后，它就能带着记忆与你对话。
           </DialogDescription>
         </DialogHeader>
 
@@ -99,12 +99,12 @@ export function CreateSoulDialog({
             </div>
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="soul-sp">人格设定（System Prompt）</Label>
+            <Label htmlFor="soul-sp">角色说明（System Prompt）</Label>
             <Textarea
               id="soul-sp"
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
-              placeholder="你是阿默，简洁、克制、可靠。只依据绑定的上下文作答。"
+              placeholder="你是阿默，简洁、克制、可靠。只依据绑定的知识库作答。"
               rows={3}
             />
           </div>

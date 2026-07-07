@@ -33,7 +33,7 @@ export function SyncPanel({ sourceId, onSynced }: { sourceId: string; onSynced: 
         <div>
           <div className="text-sm font-medium text-ink">网页同步</div>
           <p className="mt-0.5 text-xs text-ink-muted">
-            抓取信源配置的网页正文，解析入库并抽取事件。可随时重新同步以获取更新。
+            抓取知识库配置的网页正文，解析入库并抽取事件。可随时重新同步以获取更新。
           </p>
         </div>
       </div>

@@ -52,8 +52,8 @@ export function BindingDialog({
   const boundKey = new Set(bindings.map((b) => `${b.target_type}:${b.target_id}`));
   const nameOf = (b: Binding) =>
     b.target_type === "namespace"
-      ? namespaces.find((n) => n.id === b.target_id)?.name ?? "命名空间"
-      : sources.find((s) => s.id === b.target_id)?.name ?? "信源";
+      ? namespaces.find((n) => n.id === b.target_id)?.name ?? "分组"
+      : sources.find((s) => s.id === b.target_id)?.name ?? "知识库";
 
   async function add() {
     if (!pick) return;
@@ -83,15 +83,15 @@ export function BindingDialog({
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>绑定上下文</DialogTitle>
+          <DialogTitle>绑定知识库</DialogTitle>
           <DialogDescription>
-            选择该灵魂可检索的命名空间或信源。绑定命名空间会包含其下全部信源。
+            选择该 Agent可检索的分组或知识库。绑定分组会包含其下全部知识库。
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap gap-2">
-            {bindings.length === 0 && <span className="text-sm text-ink-faint">尚未绑定任何上下文</span>}
+            {bindings.length === 0 && <span className="text-sm text-ink-faint">尚未绑定任何知识库</span>}
             {bindings.map((b) => (
               <span
                 key={b.id}
@@ -112,8 +112,8 @@ export function BindingDialog({
               onChange={(e) => setPick(e.target.value)}
               className="h-9 flex-1 rounded-sm border border-hairline bg-surface px-3 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-gold"
             >
-              <option value="">选择要绑定的命名空间 / 信源…</option>
-              <optgroup label="命名空间">
+              <option value="">选择要绑定的分组 / 知识库…</option>
+              <optgroup label="分组">
                 {namespaces
                   .filter((n) => !boundKey.has(`namespace:${n.id}`))
                   .map((n) => (
@@ -122,7 +122,7 @@ export function BindingDialog({
                     </option>
                   ))}
               </optgroup>
-              <optgroup label="信源">
+              <optgroup label="知识库">
                 {sources
                   .filter((s) => !boundKey.has(`source:${s.id}`))
                   .map((s) => (

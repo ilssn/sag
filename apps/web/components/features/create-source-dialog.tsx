@@ -83,7 +83,7 @@ export function CreateSourceDialog({
         namespace_id: namespaceId || undefined,
         config,
       });
-      toast.success("信源已创建");
+      toast.success("知识库已创建");
       onCreated(src);
       setOpen(false);
       setName("");
@@ -101,14 +101,14 @@ export function CreateSourceDialog({
       <DialogTrigger asChild>
         <Button variant="gold">
           <Plus className="size-4" />
-          新建信源
+          新建知识库
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>新建信源</DialogTitle>
+          <DialogTitle>新建知识库</DialogTitle>
           <DialogDescription>
-            一个信源即一个独立的知识库。选择采集方式，之后上传或同步文档即可就其提问。
+            一个知识库即一个独立的知识库。选择采集方式，之后上传或同步文档即可就其提问。
           </DialogDescription>
         </DialogHeader>
 
@@ -180,7 +180,7 @@ export function CreateSourceDialog({
           ))}
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="s-ns">归属命名空间</Label>
+            <Label htmlFor="s-ns">分组</Label>
             <select
               id="s-ns"
               value={namespaceId}
@@ -211,14 +211,14 @@ export function CreateSourceDialog({
               id="s-desc"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="这个信源包含什么内容？"
+              placeholder="这个知识库包含什么内容？"
               rows={2}
             />
           </div>
 
           <DialogFooter>
             <Button type="submit" variant="gold" disabled={loading || !name.trim()}>
-              {loading ? "创建中…" : "创建信源"}
+              {loading ? "创建中…" : "创建知识库"}
             </Button>
           </DialogFooter>
         </form>

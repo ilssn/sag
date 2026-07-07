@@ -77,8 +77,8 @@ export default function ContextPage() {
   return (
     <>
       <PageHeader
-        title="上下文"
-        description="按命名空间组织你的信源 —— 文档、网页，未来还有消息与录音。"
+        title="知识库"
+        description="按分组组织你的知识库 —— 文档、网页，未来还有消息与录音。"
       >
         <CreateSourceDialog onCreated={load} defaultNamespaceId={selected ?? undefined} />
       </PageHeader>
@@ -113,8 +113,8 @@ export default function ContextPage() {
         ) : visible.length === 0 ? (
           <EmptyState
             icon={Layers}
-            title="这里还没有信源"
-            description="创建一个信源，上传文档或同步网页，muse 会解析入库并让你就其提问。"
+            title="这里还没有知识库"
+            description="创建一个知识库，上传文档或同步网页，muse 会解析入库并让你就其提问。"
             action={<CreateSourceDialog onCreated={load} defaultNamespaceId={selected ?? undefined} />}
           />
         ) : (

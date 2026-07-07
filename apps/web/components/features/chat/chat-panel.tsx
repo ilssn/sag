@@ -9,7 +9,7 @@ import {
   type ConvMessage,
 } from "@/components/features/chat/conversation-view";
 
-/** 信源问答面板 —— 共享 ConversationView 的薄封装。 */
+/** 知识库问答面板 —— 共享 ConversationView 的薄封装。 */
 export function ChatPanel({
   sourceId,
   sourceName,
@@ -62,7 +62,7 @@ export function ChatPanel({
       avatarNode={avatarNode}
       heroNode={heroNode}
       emptyTitle={`就「${sourceName}」提问`}
-      emptyHint="muse 会在该信源中检索相关段落，并据此生成带引用的回答。"
+      emptyHint="muse 会在该知识库中检索相关段落，并据此生成带引用的回答。"
     />
   );
 }

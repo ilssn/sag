@@ -91,11 +91,11 @@ function AskInner() {
       <div className="p-6 md:p-8">
         <EmptyState
           icon={Layers}
-          title="先创建一个信源"
-          description="问答需要一个已上传文档的信源作为知识来源。"
+          title="先创建一个知识库"
+          description="问答需要一个已上传文档的知识库作为知识来源。"
           action={
             <Button asChild variant="gold">
-              <Link href="/sources">前往信源</Link>
+              <Link href="/sources">前往知识库</Link>
             </Button>
           }
         />
@@ -108,12 +108,12 @@ function AskInner() {
       <aside className="hidden w-72 shrink-0 flex-col border-r border-hairline bg-surface/40 lg:flex">
         <div className="p-3">
           <div className="mb-2 px-1 text-[11px] font-medium uppercase tracking-wider text-ink-faint">
-            快速问答 · 单信源
+            快速问答 · 单知识库
           </div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button className="flex w-full items-center justify-between gap-2 rounded-md border border-hairline bg-surface px-3 py-2 text-sm transition-colors hover:border-ink-faint">
-                <span className="truncate font-medium text-ink">{source?.name ?? "选择信源"}</span>
+                <span className="truncate font-medium text-ink">{source?.name ?? "选择知识库"}</span>
                 <ChevronsUpDown className="size-4 shrink-0 text-ink-faint" />
               </button>
             </DropdownMenuTrigger>

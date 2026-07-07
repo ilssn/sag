@@ -45,4 +45,4 @@ async def delete_(
     session: AsyncSession = Depends(get_session),
 ) -> Ok:
     await delete_namespace(session, workspace_id, namespace_id)
-    return Ok(detail="命名空间已删除")
+    return Ok(detail="分组已删除")

@@ -77,8 +77,8 @@ export function PersonaDialog({
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>人格</DialogTitle>
-          <DialogDescription>塑造这个灵魂的身份、语气与边界。</DialogDescription>
+          <DialogTitle>设定</DialogTitle>
+          <DialogDescription>这个 Agent 的身份、语气与边界。</DialogDescription>
         </DialogHeader>
         <form onSubmit={save} className="flex flex-col gap-4">
           <div className="flex gap-3">
@@ -92,7 +92,7 @@ export function PersonaDialog({
             </div>
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="p-sp">人格设定</Label>
+            <Label htmlFor="p-sp">角色说明</Label>
             <Textarea id="p-sp" value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} rows={3} />
           </div>
           <div className="flex flex-col gap-1.5">
@@ -106,7 +106,7 @@ export function PersonaDialog({
               value={guardrails}
               onChange={(e) => setGuardrails(e.target.value)}
               rows={2}
-              placeholder="只依据绑定上下文作答&#10;涉密不外泄"
+              placeholder="只依据绑定的知识库作答&#10;涉密不外泄"
             />
           </div>
           <div className="flex flex-col gap-1.5">

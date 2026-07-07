@@ -63,7 +63,7 @@ export default function SoulWorkbench() {
   const deleteSoul = async () => {
     try {
       await api.deleteSoul(id);
-      toast.success("灵魂已删除");
+      toast.success("Agent 已删除");
       router.push("/souls");
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "删除失败");
@@ -76,7 +76,7 @@ export default function SoulWorkbench() {
         <div className="border-b border-hairline p-3">
           <Link href="/souls" className="mb-2 inline-flex items-center gap-1 text-xs text-ink-faint hover:text-ink-muted">
             <ArrowLeft className="size-3.5" />
-            全部灵魂
+            全部 Agent
           </Link>
           {soul ? (
             <div className="flex items-center gap-2.5">
@@ -98,7 +98,7 @@ export default function SoulWorkbench() {
                 trigger={
                   <Button variant="outline" size="sm" className="flex-1">
                     <SlidersHorizontal className="size-3.5" />
-                    人格
+                    设定
                   </Button>
                 }
               />
@@ -115,7 +115,7 @@ export default function SoulWorkbench() {
               <Button
                 variant="ghost"
                 size="icon"
-                title="删除灵魂"
+                title="删除 Agent"
                 onClick={() => setConfirmDelete(true)}
                 className="text-ink-muted hover:text-danger"
               >
@@ -124,9 +124,9 @@ export default function SoulWorkbench() {
               <ConfirmDialog
                 open={confirmDelete}
                 onOpenChange={setConfirmDelete}
-                title="删除灵魂"
-                description={`「${soul?.name ?? ""}」的人格、绑定与全部会话将被删除。此操作无法撤销。`}
-                confirmLabel="删除灵魂"
+                title="删除 Agent"
+                description={`「${soul?.name ?? ""}」的设定、绑定与全部会话将被删除。此操作无法撤销。`}
+                confirmLabel="删除 Agent"
                 onConfirm={deleteSoul}
               />
             </div>

@@ -32,7 +32,7 @@ async def list_sources(
 async def get_source(session: AsyncSession, workspace_id: str, source_id: str) -> Source:
     source = await session.get(Source, source_id)
     if source is None or source.workspace_id != workspace_id:
-        raise NotFoundError("信源不存在")
+        raise NotFoundError("知识库不存在")
     return source
 
 

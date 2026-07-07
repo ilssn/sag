@@ -28,7 +28,7 @@ async def list_namespaces(session: AsyncSession, workspace_id: str) -> list[Name
 async def get_namespace(session: AsyncSession, workspace_id: str, namespace_id: str) -> Namespace:
     ns = await session.get(Namespace, namespace_id)
     if ns is None or ns.workspace_id != workspace_id:
-        raise NotFoundError("命名空间不存在")
+        raise NotFoundError("分组不存在")
     return ns
 
 
@@ -44,12 +44,12 @@ async def create_namespace(
 ) -> Namespace:
     name = name.strip()
     if not name:
-        raise ValidationError("命名空间名称不能为空")
+        raise ValidationError("分组名称不能为空")
     exists = await session.scalar(
         select(Namespace).where(Namespace.workspace_id == workspace_id, Namespace.name == name)
     )
     if exists is not None:
-        raise ConflictError("同名命名空间已存在")
+        raise ConflictError("同名分组已存在")
     ns = Namespace(
         workspace_id=workspace_id, name=name, kind=kind, icon=icon, color=color, is_system=is_system
     )
@@ -62,7 +62,7 @@ async def create_namespace(
 async def delete_namespace(session: AsyncSession, workspace_id: str, namespace_id: str) -> None:
     ns = await get_namespace(session, workspace_id, namespace_id)
     if ns.is_system:
-        raise ValidationError("默认命名空间不可删除")
+        raise ValidationError("默认分组不可删除")
     await session.delete(ns)
     await session.commit()
 

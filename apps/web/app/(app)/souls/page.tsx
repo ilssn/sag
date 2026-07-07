@@ -21,7 +21,7 @@ export default function SoulsPage() {
 
   return (
     <>
-      <PageHeader title="灵魂" description="有名字、有人格、绑定上下文、带记忆的对话对象。">
+      <PageHeader title="Agent" description="有名字、有设定、有记忆的 AI 同事，绑定知识库后即可带引用对话。">
         <CreateSoulDialog onCreated={load} />
       </PageHeader>
 
@@ -35,8 +35,8 @@ export default function SoulsPage() {
         ) : souls.length === 0 ? (
           <EmptyState
             icon={Sparkles}
-            title="创造第一个灵魂"
-            description="给它名字与人格，绑定你的上下文，让它成为你的助手、决策脑，或书中的某个人物。"
+            title="创建第一个 Agent"
+            description="起个名字、写好设定，绑定你的知识库——它可以是你的助手、团队的决策脑，或书中的某个人物。"
             action={<CreateSoulDialog onCreated={load} />}
           />
         ) : (

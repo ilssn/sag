@@ -9,7 +9,7 @@ import {
   type ConvMessage,
 } from "@/components/features/chat/conversation-view";
 
-/** 灵魂对话面板 —— 共享 ConversationView 的薄封装（人格头像 + 开场白）。 */
+/** Agent 对话面板 —— 共享 ConversationView 的薄封装（头像 + 开场白）。 */
 export function SoulChat({
   soulId,
   soulName,
