@@ -1,6 +1,6 @@
-# muse 文档
+# zleap 文档
 
-> **muse** —— 新一代 **Agentic Data Manager · Context Infrastructure**。
+> **zleap** —— 新一代 **Agentic Data Manager · Context Infrastructure**。
 > 以 `zleap-sag` 为数据基座，把「上下文」做成一等公民：**个人的信息助手，企业的决策大脑，Agent 的灵魂。**
 
 这套文档把产品愿景拆成**可原型、可实施**的蓝图。建议阅读顺序：

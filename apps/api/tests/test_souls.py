@@ -6,10 +6,10 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_souls_flow_offline():
-    from muse_api.core.db import SessionLocal
-    from muse_api.db.models import Soul
-    from muse_api.main import app
-    from muse_api.services.soul_service import resolve_sources
+    from zleap_api.core.db import SessionLocal
+    from zleap_api.db.models import Soul
+    from zleap_api.main import app
+    from zleap_api.services.soul_service import resolve_sources
 
     transport = httpx.ASGITransport(app=app)
     async with app.router.lifespan_context(app):
@@ -77,12 +77,12 @@ async def test_souls_flow_offline():
 
 @pytest.mark.asyncio
 async def test_soul_memory_closes_loop():
-    from muse_api.core.config import settings
-    from muse_api.core.db import SessionLocal
-    from muse_api.db.models import Soul
-    from muse_api.enums import SourceType
-    from muse_api.main import app
-    from muse_api.services.soul_service import remember_exchange, resolve_sources
+    from zleap_api.core.config import settings
+    from zleap_api.core.db import SessionLocal
+    from zleap_api.db.models import Soul
+    from zleap_api.enums import SourceType
+    from zleap_api.main import app
+    from zleap_api.services.soul_service import remember_exchange, resolve_sources
 
     transport = httpx.ASGITransport(app=app)
     async with app.router.lifespan_context(app):

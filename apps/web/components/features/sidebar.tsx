@@ -19,9 +19,9 @@ export function Sidebar() {
     <aside className="hidden w-[236px] shrink-0 flex-col border-r border-hairline bg-surface/60 md:flex">
       <div className="flex h-14 items-center gap-2.5 px-5">
         <span className="grid size-6 place-items-center rounded-[7px] bg-gold text-[13px] font-bold text-[#1b1a17] shadow-sm">
-          m
+          z
         </span>
-        <span className="font-display text-[1.35rem] font-medium tracking-tight">muse</span>
+        <span className="font-display text-[1.35rem] font-medium tracking-tight">zleap</span>
       </div>
 
       <nav className="flex flex-1 flex-col gap-0.5 px-3 py-3">

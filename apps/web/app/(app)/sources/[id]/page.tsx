@@ -158,7 +158,7 @@ export default function SourceDetailPage() {
             <EmptyState
               icon={FileText}
               title="还没有文档"
-              description="上传文档后，muse 会自动解析、分块、向量化并抽取事件与实体。"
+              description="上传文档后，zleap 会自动解析、分块、向量化并抽取事件与实体。"
             />
           ) : (
             <DocumentList sourceId={id} documents={documents} onChange={refresh} />

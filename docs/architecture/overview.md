@@ -34,7 +34,7 @@
    `Source` 增加 `source_type` 与 `namespace_id`。文档/网页已通，新增 `message`/`conversation`/`audio` 只是**采集与切分**不同，下游 `ingest/extract/search` 完全复用。
 
 2. **两层组织：Namespace + Soul**（`souls/`, `context/`）
-   Namespace = 信源文件夹；Soul = 名字+人格+绑定。都是 muse 侧新表，不触碰引擎。
+   Namespace = 信源文件夹；Soul = 名字+人格+绑定。都是 zleap 侧新表，不触碰引擎。
 
 3. **统一写入接口 + 流式连接器**（`connectors/`）
    在现有 `Connector` 协议上加 `stream/write` 能力与 `POST /sources/{id}/messages`，支撑「动态持续写入」。缓冲→成块→复用 `process_document` 管线。

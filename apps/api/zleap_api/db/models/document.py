@@ -1,0 +1,28 @@
+from __future__ import annotations
+
+from sqlalchemy import Enum as SAEnum
+from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
+
+from zleap_api.db.base import Base, IDMixin, TimestampMixin
+from zleap_api.enums import DocumentStatus
+
+
+class Document(IDMixin, TimestampMixin, Base):
+    __tablename__ = "documents"
+
+    source_id: Mapped[str] = mapped_column(
+        ForeignKey("sources.id", ondelete="CASCADE"), index=True
+    )
+    filename: Mapped[str] = mapped_column(String(512))
+    content_type: Mapped[str] = mapped_column(String(128), default="application/octet-stream")
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    storage_path: Mapped[str] = mapped_column(String(1024))
+    status: Mapped[DocumentStatus] = mapped_column(
+        SAEnum(DocumentStatus, native_enum=False, length=16), default=DocumentStatus.PENDING
+    )
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    event_count: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # zleap-sag ingest 返回的 source_id（用于溯源）
+    sag_source_id: Mapped[str | None] = mapped_column(String(64), nullable=True)

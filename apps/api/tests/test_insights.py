@@ -8,9 +8,9 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_entity_insights_and_book_to_soul():
-    from muse_api.core.db import SessionLocal
-    from muse_api.db.models import Source
-    from muse_api.main import app
+    from zleap_api.core.db import SessionLocal
+    from zleap_api.db.models import Source
+    from zleap_api.main import app
 
     transport = httpx.ASGITransport(app=app)
     async with app.router.lifespan_context(app):

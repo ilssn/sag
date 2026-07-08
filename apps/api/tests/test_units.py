@@ -1,12 +1,12 @@
 """快速单元测试：无需网络 / 引擎。"""
 
-from muse_api.connectors import registry
-from muse_api.core.config import settings
-from muse_api.core.security import hash_password, verify_password
-from muse_api.enums import ConnectorKind
-from muse_api.generation.prompt import build_citations, build_messages
-from muse_api.sag import RetrievedSection
-from muse_api.sag.config_builder import build_engine_config
+from zleap_api.connectors import registry
+from zleap_api.core.config import settings
+from zleap_api.core.security import hash_password, verify_password
+from zleap_api.enums import ConnectorKind
+from zleap_api.generation.prompt import build_citations, build_messages
+from zleap_api.sag import RetrievedSection
+from zleap_api.sag.config_builder import build_engine_config
 
 
 def test_password_hash_roundtrip():

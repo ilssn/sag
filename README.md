@@ -1,11 +1,11 @@
-# muse
+# zleap
 
 > **新一代 Agentic Data Manager · Context Infrastructure**
 > 个人的信息助手，企业的决策大脑，Agent 的灵魂。
 
-`muse` 以 [`zleap-sag`](https://pypi.org/project/zleap-sag/)（本地优先的记忆 / 知识引擎）为**数据基座**，把「上下文」做成一等公民：持续汇聚文档、消息、会话、录音，结构化为事件—实体图谱，再以**灵魂（Soul）**的形态提供给人和 Agent。
+`zleap` 以 [`zleap-sag`](https://pypi.org/project/zleap-sag/)（本地优先的记忆 / 知识引擎）为**数据基座**，把「上下文」做成一等公民：持续汇聚文档、消息、会话、录音，结构化为事件—实体图谱，再以**灵魂（Soul）**的形态提供给人和 Agent。
 
-不是又一个「文档问答」——检索问答只是上下文的一种消费方式。muse 关注上下文的**全生命周期**：获取 → 结构化 → 记忆 → 提供 → 拓展。对标并超越 RAGFlow，目标是**开源级爆款、企业标杆**。
+不是又一个「文档问答」——检索问答只是上下文的一种消费方式。zleap 关注上下文的**全生命周期**：获取 → 结构化 → 记忆 → 提供 → 拓展。对标并超越 RAGFlow，目标是**开源级爆款、企业标杆**。
 
 > 📐 **愿景与蓝图见 [docs/](docs/README.md)** —— [产品愿景](docs/product/vision.md) · [核心概念模型](docs/product/concepts.md) · [演进架构](docs/architecture/overview.md) · [路线图](docs/roadmap.md)。
 > 本 README 描述**当前已实现**的能力（Phase 0：知识库地基）。
@@ -32,7 +32,7 @@ cd apps/api
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env          # 填入 OpenAI 兼容的 LLM / embedding 配置
-uvicorn muse_api.main:app --reload
+uvicorn zleap_api.main:app --reload
 
 # 前端
 cd apps/web

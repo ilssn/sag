@@ -1,10 +1,10 @@
 # 插件与挂载（拓展层）
 
-> muse 不止是一个网站。它要成为**任意 Agent 的上下文与灵魂来源**。这一层把「上下文」以 Agent 原生的方式（MCP / Skill / Hook）投送出去，并支持把灵魂「挂载/夺舍」进本地 Agent。
+> zleap 不止是一个网站。它要成为**任意 Agent 的上下文与灵魂来源**。这一层把「上下文」以 Agent 原生的方式（MCP / Skill / Hook）投送出去，并支持把灵魂「挂载/夺舍」进本地 Agent。
 
 ## 上下文插件：MCP / Skill / Hook
 
-muse 把「某个灵魂的上下文」暴露为标准接口，供外部 Agent 消费：
+zleap 把「某个灵魂的上下文」暴露为标准接口，供外部 Agent 消费：
 
 | 形态 | 作用 | 面向 |
 |---|---|---|
@@ -23,10 +23,10 @@ list_namespaces() / list_sources()
 
 ## 挂载：知识挂载 vs 全量夺舍
 
-「挂载」= 把 muse 装进本地 Agent。流程：**下载插件包 → 填入 key → 一键导入**。
+「挂载」= 把 zleap 装进本地 Agent。流程：**下载插件包 → 填入 key → 一键导入**。
 
 ### 知识挂载（Knowledge Mount，安全默认）
-- 只把 muse 作为**上下文源**接入（MCP `search_context`）。本地 Agent 回答时能引用你的私有知识。
+- 只把 zleap 作为**上下文源**接入（MCP `search_context`）。本地 Agent 回答时能引用你的私有知识。
 - 不改本地 Agent 的人格；随时移除。
 
 ### 全量夺舍（Full Possession，戏剧化但可逆）
@@ -51,8 +51,8 @@ class MountAdapter(ABC):
 ```
 
 ### 挂载包（分发）
-- 一个轻量 CLI / 安装器：`muse mount --soul <id> --host claude_code --key <token>`。
-- 或图形化：muse 网站「挂载向导」生成一段命令 / 一个配置文件，用户粘贴即用。
+- 一个轻量 CLI / 安装器：`zleap mount --soul <id> --host claude_code --key <token>`。
+- 或图形化：zleap 网站「挂载向导」生成一段命令 / 一个配置文件，用户粘贴即用。
 - 包内含：MCP 配置模板 + 适配器 + 人格写入逻辑；key 决定连哪个灵魂。
 
 ## 书 → 人物灵魂（Context App 示范）

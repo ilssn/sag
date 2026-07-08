@@ -4,7 +4,7 @@ import type { NextRequest } from "next/server";
 const PUBLIC_PATHS = ["/login"];
 
 export function middleware(req: NextRequest) {
-  const token = req.cookies.get("muse_token")?.value;
+  const token = req.cookies.get("zleap_token")?.value;
   const { pathname } = req.nextUrl;
 
   if (pathname === "/") {

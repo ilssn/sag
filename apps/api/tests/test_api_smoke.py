@@ -6,7 +6,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_end_to_end_offline():
-    from muse_api.main import app
+    from zleap_api.main import app
 
     transport = httpx.ASGITransport(app=app)
     async with app.router.lifespan_context(app):

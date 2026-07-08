@@ -28,7 +28,7 @@ export default function LoginPage() {
         ? await api.register({ email, password, name })
         : await api.login({ email, password });
       setToken(res.access_token);
-      toast.success(isRegister ? "账号已创建，欢迎使用 muse" : "欢迎回来");
+      toast.success(isRegister ? "账号已创建，欢迎使用 zleap" : "欢迎回来");
       router.replace("/overview");
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : "请求失败，请稍后再试";
@@ -42,10 +42,10 @@ export default function LoginPage() {
     <div className="w-full max-w-[380px] animate-fade-in">
       <div className="mb-8 flex flex-col items-center gap-3 text-center">
         <span className="grid size-11 place-items-center rounded-[11px] bg-gold text-xl font-bold text-[#1b1a17] shadow-soft">
-          m
+          z
         </span>
         <div>
-          <h1 className="font-display text-3xl font-medium tracking-tight">muse</h1>
+          <h1 className="font-display text-3xl font-medium tracking-tight">zleap</h1>
           <p className="mt-1 text-sm text-ink-muted">从信息源到知识问答</p>
         </div>
       </div>

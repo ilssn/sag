@@ -1,14 +1,14 @@
-# muse 架构（as-built · 与代码同步）
+# zleap 架构（as-built · 与代码同步）
 
 > 本篇描述**当前已实现**的系统。目标态设计见 [architecture/](architecture/overview.md)，两者差距见 [roadmap](roadmap.md)。
 
 ## 定位
 
-muse = **产品层**（命名空间 / 灵魂 / 记忆 / 连接器 / 生成 / UI）覆盖在 `zleap-sag`（**引擎层**：解析·分块·向量·事件-实体图谱·检索）之上。
+zleap = **产品层**（命名空间 / 灵魂 / 记忆 / 连接器 / 生成 / UI）覆盖在 `zleap-sag`（**引擎层**：解析·分块·向量·事件-实体图谱·检索）之上。
 
-> 关键分工：**引擎只做检索**（`search` → 排序段落），**不做答案生成**。muse 自持「检索 → 人格化提示词 → LLM 流式合成 → 引用」。
+> 关键分工：**引擎只做检索**（`search` → 排序段落），**不做答案生成**。zleap 自持「检索 → 人格化提示词 → LLM 流式合成 → 引用」。
 
-## 分层（后端 `apps/api/muse_api`）
+## 分层（后端 `apps/api/zleap_api`）
 
 ```
 api/v1/        HTTP 路由：auth · sources · documents(+ingest) · jobs ·
@@ -44,7 +44,7 @@ core/          config(pydantic-settings) · security(JWT/bcrypt) · db(含轻量
 - `process_document`：ingest → extract，阶段回调驱动文档状态机。
 - `search` / **`search_many`**：单源检索 / **多源并发 fan-out**（去重 chunk_id、按分归并、单源失败不阻断）。
 - **`list_entities` / `entity_context`**：经引擎 `get_session_factory()` 读事件-实体图谱（`entity`/`source_event`/`event_entity`），按热度（关联事件数）排序 —— 洞察与「书→人物」的数据来源。
-- 错误映射：`SagError` 家族 → muse 领域异常 → 统一 HTTP 响应体。
+- 错误映射：`SagError` 家族 → zleap 领域异常 → 统一 HTTP 响应体。
 
 ## 关键流程
 
@@ -85,7 +85,7 @@ POST /entities/{eid}/to-soul      收集实体相关事件片段 → generate_pe
 
 ## 存储（渐进式）
 
-- 本地零依赖：muse 元数据 SQLite + 引擎 LanceDB/SQLite（`data_dir`）。
+- 本地零依赖：zleap 元数据 SQLite + 引擎 LanceDB/SQLite（`data_dir`）。
 - compose 生产：单 Postgres —— 元数据 + 引擎 `pgvector`（`deploy/docker-compose.yml`）。
 - dev 演进列由 `core/db.py` 幂等 `ADD COLUMN`；生产迁移预留 Alembic。
 
