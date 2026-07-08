@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
 
 from openai import AsyncOpenAI
 
@@ -15,7 +17,22 @@ from zleap_api.core.logging import get_logger
 
 log = get_logger("generation")
 
-Message = dict[str, str]
+Message = dict
+
+
+@dataclass
+class ToolCall:
+    id: str
+    name: str
+    arguments: dict
+
+
+@dataclass
+class ChatTurn:
+    """一次（非流式）对话轮结果：要么是最终文本，要么是若干工具调用。"""
+
+    content: str | None = None
+    tool_calls: list[ToolCall] = field(default_factory=list)
 
 
 class LLMClient:
@@ -65,5 +82,33 @@ class LLMClient:
                 max_tokens=self._settings.llm_max_tokens,
             )
             return resp.choices[0].message.content or ""
+        except Exception as e:  # noqa: BLE001
+            raise UpstreamError(f"生成失败：{e}") from e
+
+    async def chat(self, messages: list[Message], tools: list[dict] | None = None) -> ChatTurn:
+        """非流式对话轮，支持工具调用（native function-calling）。
+
+        返回 ChatTurn：若模型请求调用工具则 `tool_calls` 非空（Agent 循环据此派发），
+        否则 `content` 为最终文本。用于 Agent 循环的「决策」步，最终答案仍走 stream()。
+        """
+        self._ensure_configured()
+        try:
+            resp = await self._client.chat.completions.create(
+                model=self._settings.llm_model,
+                messages=messages,  # type: ignore[arg-type]
+                temperature=self._settings.llm_temperature,
+                max_tokens=self._settings.llm_max_tokens,
+                tools=tools or None,  # type: ignore[arg-type]
+            )
+            msg = resp.choices[0].message
+            calls: list[ToolCall] = []
+            for tc in getattr(msg, "tool_calls", None) or []:
+                fn = tc.function
+                try:
+                    parsed = json.loads(fn.arguments or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    parsed = {}
+                calls.append(ToolCall(id=tc.id, name=fn.name, arguments=parsed))
+            return ChatTurn(content=msg.content, tool_calls=calls)
         except Exception as e:  # noqa: BLE001
             raise UpstreamError(f"生成失败：{e}") from e

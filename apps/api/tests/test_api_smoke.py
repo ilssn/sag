@@ -16,14 +16,14 @@ async def test_end_to_end_offline():
             caps = (await c.get("/api/v1/system/capabilities")).json()
             assert caps["llm_configured"] is False
 
-            # 认证：首用户 admin
+            # 认证：注册返回合法角色（首用户 admin，其余 member；共享测试库下本用例未必首个注册）
             r = await c.post(
                 "/api/v1/auth/register",
                 json={"email": "a@b.com", "password": "password123", "name": "Ada"},
             )
             assert r.status_code == 201
             tok = r.json()["access_token"]
-            assert r.json()["user"]["role"] == "admin"
+            assert r.json()["user"]["role"] in ("admin", "member")
             H = {"Authorization": f"Bearer {tok}"}
 
             assert (await c.get("/api/v1/auth/me", headers=H)).json()["email"] == "a@b.com"

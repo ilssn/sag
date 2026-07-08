@@ -17,20 +17,25 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from zleap_api.core.db import get_session
+from zleap_api.core.db import SessionLocal, get_session
 from zleap_api.core.deps import (
     get_current_user,
     get_engine_manager,
+    get_job_queue,
     get_llm,
+    get_tool_registry,
     get_workspace_id,
     get_workspace_role,
 )
-from zleap_api.core.errors import ConfigurationError, ValidationError
+from zleap_api.core.errors import ConfigurationError, UpstreamError, ValidationError
 from zleap_api.db.models import User
 from zleap_api.enums import WorkspaceRole
 from zleap_api.generation import LLMClient
+from zleap_api.jobs import JobQueue
 from zleap_api.sag import EngineManager
+from zleap_api.services import agent_service
 from zleap_api.services import soul_service as svc
+from zleap_api.tools import ToolRegistry
 
 router = APIRouter(prefix="/openai", tags=["openai"])
 
@@ -73,6 +78,8 @@ async def chat_completions(
     session: AsyncSession = Depends(get_session),
     engine_manager: EngineManager = Depends(get_engine_manager),
     llm: LLMClient = Depends(get_llm),
+    job_queue: JobQueue = Depends(get_job_queue),
+    tool_registry: ToolRegistry = Depends(get_tool_registry),
 ):
     soul = await svc.get_soul(session, ws, soul_id, user_id=user.id, role=role)
     query, history = _split_query(body.messages)
@@ -87,6 +94,21 @@ async def chat_completions(
     model = body.model or f"zleap:{soul.name}"
     cid = f"chatcmpl-{soul_id[:12]}-{created}"
 
+    def _events():
+        # 无状态：thread_id=None → 不落库、不沉淀记忆；复用同一 Agent 循环
+        return agent_service.generate_stream(
+            SessionLocal,
+            job_queue,
+            plan=plan,
+            soul=soul,
+            thread_id=None,
+            query=query,
+            engine_manager=engine_manager,
+            llm=llm,
+            tool_registry=tool_registry,
+            upload_dir="",
+        )
+
     if body.stream:
         async def gen():
             def chunk(delta: dict, finish: str | None = None) -> str:
@@ -100,18 +122,26 @@ async def chat_completions(
                 return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
             yield chunk({"role": "assistant"})
-            if plan.short_circuit is not None:
-                yield chunk({"content": plan.short_circuit})
-            else:
-                async for token in llm.stream(plan.messages):
-                    yield chunk({"content": token})
+            async for name, payload in _events():
+                if name == "token":
+                    yield chunk({"content": payload["text"]})
+                elif name == "error":
+                    yield chunk({"content": f"\n[错误] {payload['message']}"})
             yield chunk({}, finish="stop")
             yield "data: [DONE]\n\n"
 
         return StreamingResponse(gen(), media_type="text/event-stream")
 
-    # 非流式
-    answer = plan.short_circuit if plan.short_circuit is not None else await llm.complete(plan.messages)
+    # 非流式：消费同一事件流，聚合为最终答案
+    parts: list[str] = []
+    citations = plan.citations
+    async for name, payload in _events():
+        if name == "token":
+            parts.append(payload["text"])
+        elif name == "meta":
+            citations = payload["citations"]
+        elif name == "error":
+            raise UpstreamError(payload["message"])
     return {
         "id": cid,
         "object": "chat.completion",
@@ -120,11 +150,11 @@ async def chat_completions(
         "choices": [
             {
                 "index": 0,
-                "message": {"role": "assistant", "content": answer},
+                "message": {"role": "assistant", "content": "".join(parts)},
                 "finish_reason": "stop",
             }
         ],
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         # zleap 扩展：引用溯源（标准客户端忽略未知字段）
-        "zleap": {"citations": plan.citations, "sources": plan.section_count},
+        "zleap": {"citations": citations, "sources": plan.section_count},
     }

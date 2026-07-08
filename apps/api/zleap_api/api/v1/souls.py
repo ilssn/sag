@@ -13,11 +13,12 @@ from zleap_api.core.deps import (
     get_engine_manager,
     get_job_queue,
     get_llm,
+    get_tool_registry,
     get_workspace_id,
     get_workspace_role,
     require_editor,
 )
-from zleap_api.core.errors import ConfigurationError, MuseError
+from zleap_api.core.errors import ConfigurationError
 from zleap_api.db.models import User
 from zleap_api.enums import AuditAction, WorkspaceRole
 from zleap_api.generation import LLMClient
@@ -35,8 +36,9 @@ from zleap_api.schemas.soul import (
     SoulThreadOut,
     SoulUpdate,
 )
-from zleap_api.services import audit_service
+from zleap_api.services import agent_service, audit_service
 from zleap_api.services import soul_service as svc
+from zleap_api.tools import ToolRegistry
 
 router = APIRouter(prefix="/souls", tags=["souls"])
 
@@ -313,6 +315,7 @@ async def ask(
     engine_manager: EngineManager = Depends(get_engine_manager),
     llm: LLMClient = Depends(get_llm),
     job_queue: JobQueue = Depends(get_job_queue),
+    tool_registry: ToolRegistry = Depends(get_tool_registry),
 ) -> EventSourceResponse:
     soul = await svc.get_soul(session, ws, soul_id, user_id=user.id, role=role)
     thread = await svc.get_thread(session, soul.id, thread_id, user_id=user.id)
@@ -329,41 +332,19 @@ async def ask(
     if plan.short_circuit is None and not llm.configured:
         raise ConfigurationError("尚未配置 LLM，无法生成回答")
 
-    thread_id_val = thread.id
-    question = body.query
-
     async def event_gen():
-        yield _sse("meta", {"citations": plan.citations, "prompt_preview": plan.prompt_preview})
-
-        if plan.short_circuit is not None:
-            # 直接回兜底话术，不调用 LLM，不沉淀记忆
-            yield _sse("token", {"text": plan.short_circuit})
-            message_id = await svc.persist_answer(
-                SessionLocal, thread_id_val, plan.short_circuit, plan.citations
-            )
-            yield _sse("done", {"message_id": message_id})
-            return
-
-        acc: list[str] = []
-        try:
-            async for token in llm.stream(plan.messages):
-                acc.append(token)
-                yield _sse("token", {"text": token})
-        except MuseError as e:
-            yield _sse("error", {"code": e.code, "message": e.message})
-            return
-        answer = "".join(acc)
-        message_id = await svc.persist_answer(SessionLocal, thread_id_val, answer, plan.citations)
-        # 记忆闭环：共享助手 = 团队共享记忆；私有助手 = 个人记忆
-        await svc.remember_exchange(
+        async for name, payload in agent_service.generate_stream(
             SessionLocal,
             job_queue,
-            soul_id=soul_id,
-            thread_id=thread_id_val,
-            question=question,
-            answer=answer,
+            plan=plan,
+            soul=soul,
+            thread_id=thread.id,
+            query=body.query,
+            engine_manager=engine_manager,
+            llm=llm,
+            tool_registry=tool_registry,
             upload_dir=settings.upload_dir,
-        )
-        yield _sse("done", {"message_id": message_id})
+        ):
+            yield _sse(name, payload)
 
     return EventSourceResponse(event_gen())

@@ -99,3 +99,10 @@ def get_job_queue(request: Request) -> JobQueue:
 
 def get_llm(request: Request) -> LLMClient:
     return request.app.state.llm
+
+
+def get_tool_registry():
+    """Agent 工具注册表（内置检索/实体工具；第二阶段注入 MCP 工具）。"""
+    from zleap_api.tools import registry
+
+    return registry
