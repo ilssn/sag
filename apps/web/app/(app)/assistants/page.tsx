@@ -8,6 +8,7 @@ import type { Agent } from "@/lib/types";
 import { CreateAgentDialog } from "@/components/features/agent/create-agent-dialog";
 import { AgentCard } from "@/components/features/agent/agent-card";
 import { EmptyState } from "@/components/features/empty-state";
+import { PageHeader } from "@/components/features/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function AssistantsPage() {
@@ -20,15 +21,11 @@ export default function AssistantsPage() {
 
   return (
     <div className="flex flex-col gap-6 p-4 md:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="font-display text-2xl font-semibold">助手</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            给它一个设定、绑定信源，它就能带引用地依据你的内容作答。
-          </p>
-        </div>
-        <CreateAgentDialog onCreated={load} />
-      </div>
+      <PageHeader
+        title="助手"
+        description="给它一个设定、绑定信源，它就能带引用地依据你的内容作答。"
+        actions={<CreateAgentDialog onCreated={load} />}
+      />
 
       <div>
         {agents === null ? (

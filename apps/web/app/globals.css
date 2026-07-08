@@ -44,24 +44,8 @@
     --sidebar-border: 240 5.9% 90%;
     --sidebar-ring: 240 10% 3.9%;
 
-    /* 语义别名（沿用既有类名，全部指向中性调色板）*/
-    --ink-faint: 240 4% 64%;
+    /* 状态色 */
     --success: 142 52% 40%;
-    --paper: var(--background);
-    --surface: var(--card);
-    --surface-2: var(--muted);
-    --ink: var(--foreground);
-    --ink-muted: var(--muted-foreground);
-    --hairline: var(--border);
-    --gold: var(--primary);
-    --gold-strong: var(--foreground);
-    --gold-soft: var(--accent);
-    --gold-foreground: var(--primary-foreground);
-    --signal: var(--primary);
-    --signal-strong: var(--foreground);
-    --signal-soft: var(--accent);
-    --signal-foreground: var(--primary-foreground);
-    --danger: var(--destructive);
 
     --font-sans: var(--font-inter), "PingFang SC", "Hiragino Sans GB",
       "Microsoft YaHei", system-ui, sans-serif;
@@ -104,7 +88,6 @@
     --sidebar-border: 240 3.7% 15.9%;
     --sidebar-ring: 240 4.9% 83.9%;
 
-    --ink-faint: 240 5% 44%;
     --success: 142 45% 55%;
   }
 }
@@ -134,13 +117,13 @@
   height: 11px;
 }
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--ink-faint) / 0.35);
+  background: hsl(var(--muted-foreground) / 0.35);
   border-radius: 999px;
   border: 3px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--ink-faint) / 0.55);
+  background: hsl(var(--muted-foreground) / 0.55);
   background-clip: content-box;
 }
 

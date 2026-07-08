@@ -7,8 +7,10 @@ import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { setToken } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
+import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -41,36 +43,31 @@ export default function LoginPage() {
   return (
     <div className="w-full max-w-[380px] animate-fade-in">
       <div className="mb-8 flex flex-col items-center gap-3 text-center">
-        <span className="grid size-11 place-items-center rounded-[11px] bg-gold text-xl font-bold text-gold-foreground shadow-soft">
+        <span className="grid size-11 place-items-center rounded-[11px] bg-primary text-xl font-bold text-primary-foreground shadow-soft">
           s
         </span>
         <div>
           <h1 className="font-display text-3xl font-medium tracking-tight">sag</h1>
-          <p className="mt-1 text-sm text-ink-muted">从信息源到知识问答</p>
+          <p className="mt-1 text-sm text-muted-foreground">从信息源到知识问答</p>
         </div>
       </div>
 
-      <div className="rounded-lg border border-hairline bg-surface p-6 shadow-soft">
-        <div className="mb-5 flex rounded-md border border-hairline bg-surface-2 p-0.5 text-sm">
-          {(["login", "register"] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setMode(m)}
-              className={
-                "flex-1 rounded-[7px] py-1.5 font-medium transition-colors " +
-                (mode === m ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink")
-              }
-            >
-              {m === "login" ? "登录" : "注册"}
-            </button>
-          ))}
-        </div>
+      <div className="rounded-lg border bg-card p-6 shadow-soft">
+        <Tabs value={mode} onValueChange={(v) => setMode(v as typeof mode)} className="mb-5">
+          <TabsList className="w-full">
+            <TabsTrigger value="login" className="flex-1">
+              登录
+            </TabsTrigger>
+            <TabsTrigger value="register" className="flex-1">
+              注册
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         <form onSubmit={onSubmit} className="flex flex-col gap-4">
           {isRegister && (
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="name">名称</Label>
+            <Field>
+              <FieldLabel htmlFor="name">名称</FieldLabel>
               <Input
                 id="name"
                 value={name}
@@ -78,10 +75,10 @@ export default function LoginPage() {
                 placeholder="你的名字"
                 autoComplete="name"
               />
-            </div>
+            </Field>
           )}
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="email">邮箱</Label>
+          <Field>
+            <FieldLabel htmlFor="email">邮箱</FieldLabel>
             <Input
               id="email"
               type="email"
@@ -91,9 +88,9 @@ export default function LoginPage() {
               placeholder="you@example.com"
               autoComplete="email"
             />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="password">密码</Label>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="password">密码</FieldLabel>
             <Input
               id="password"
               type="password"
@@ -104,16 +101,17 @@ export default function LoginPage() {
               placeholder={isRegister ? "至少 8 位" : "••••••••"}
               autoComplete={isRegister ? "new-password" : "current-password"}
             />
-          </div>
+          </Field>
 
-          <Button type="submit" variant="gold" size="lg" disabled={loading} className="mt-1">
+          <Button type="submit" size="lg" disabled={loading} className="mt-1">
+            {loading && <Spinner />}
             {loading ? "请稍候…" : isRegister ? "创建账号" : "登录"}
           </Button>
         </form>
       </div>
 
       {isRegister && (
-        <p className="mt-4 text-center text-xs text-ink-faint">
+        <p className="mt-4 text-center text-xs text-muted-foreground">
           注册的第一个账号将成为管理员。
         </p>
       )}

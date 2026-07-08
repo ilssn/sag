@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { BindingDialog } from "@/components/features/agent/binding-dialog";
 import { PersonaDialog } from "@/components/features/agent/persona-dialog";
 import { AgentChat } from "@/components/features/agent/agent-chat";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -78,19 +79,19 @@ export default function AgentWorkbench() {
 
   return (
     <div className="flex h-full min-h-0">
-      <aside className="hidden w-72 shrink-0 flex-col border-r border-hairline bg-surface/40 lg:flex">
-        <div className="border-b border-hairline p-3">
-          <Link href="/assistants" className="mb-2 inline-flex items-center gap-1 text-xs text-ink-faint hover:text-ink-muted">
+      <aside className="hidden w-72 shrink-0 flex-col border-r bg-card/40 lg:flex">
+        <div className="border-b p-3">
+          <Link href="/assistants" className="mb-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-muted-foreground">
             <ArrowLeft className="size-3.5" />
             全部助手
           </Link>
           {agent ? (
             <div className="flex items-center gap-2.5">
-              <span className="grid size-9 shrink-0 place-items-center rounded-full bg-gold-soft font-display text-base font-semibold text-gold-strong">
+              <span className="grid size-9 shrink-0 place-items-center rounded-full bg-muted font-display text-base font-semibold text-foreground">
                 {agent.avatar || agent.name.slice(0, 1)}
               </span>
               <div className="min-w-0 flex-1">
-                <div className="truncate font-display text-lg font-medium text-ink">{agent.name}</div>
+                <div className="truncate font-display text-lg font-medium text-foreground">{agent.name}</div>
               </div>
             </div>
           ) : (
@@ -126,7 +127,7 @@ export default function AgentWorkbench() {
                 size="icon"
                 title="删除助手"
                 onClick={() => setConfirmDelete(true)}
-                className="text-ink-muted hover:text-danger"
+                className="text-muted-foreground hover:text-destructive"
               >
                 <Trash2 className="size-4" />
               </Button>
@@ -157,16 +158,16 @@ export default function AgentWorkbench() {
                 key={t.id}
                 className={cn(
                   "group flex items-center gap-2 rounded-md px-2.5 py-2 text-sm transition-colors",
-                  active ? "bg-gold-soft text-gold-strong" : "text-ink-muted hover:bg-surface-2",
+                  active ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted",
                 )}
               >
                 <button className="min-w-0 flex-1 text-left" onClick={() => setThreadId(t.id)}>
                   <div className="truncate">{t.title}</div>
-                  <div className="text-[11px] text-ink-faint">{relativeTime(t.updated_at)}</div>
+                  <div className="text-[11px] text-muted-foreground">{relativeTime(t.updated_at)}</div>
                 </button>
                 <button
                   onClick={() => deleteThread(t.id)}
-                  className="shrink-0 rounded p-1 text-ink-faint opacity-0 transition-opacity hover:text-danger group-hover:opacity-100"
+                  className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
                   title="删除会话"
                 >
                   <Trash2 className="size-3.5" />
@@ -180,11 +181,11 @@ export default function AgentWorkbench() {
       <div className="flex min-w-0 flex-1 flex-col">
         {/* 零绑定引导：没有依据的回答只会说「资料中未提及」 */}
         {agent && bindings !== null && bindings.filter((b) => b.target_type === "source").length === 0 && (
-          <div className="flex flex-wrap items-center gap-2.5 border-b border-gold/30 bg-gold-soft px-4 py-2.5 text-sm text-gold-strong">
+          <Alert className="flex flex-wrap items-center gap-2.5 rounded-none border-x-0 border-t-0 [&>svg]:static [&>svg]:translate-y-0 [&>svg~*]:pl-0">
             <TriangleAlert className="size-4 shrink-0" />
-            <span className="min-w-0 flex-1">
+            <AlertDescription className="min-w-0 flex-1">
               「{agent.name}」尚未绑定信源——回答将没有依据。
-            </span>
+            </AlertDescription>
             <BindingDialog
               agentId={id}
               onChanged={() => {
@@ -193,12 +194,12 @@ export default function AgentWorkbench() {
               }}
               trigger={
                 <Button size="sm">
-                  <Link2 className="size-3.5" />
+                  <Link2 />
                   绑定信源
                 </Button>
               }
             />
-          </div>
+          </Alert>
         )}
         <div className="min-h-0 flex-1">
           {agent && (

@@ -36,7 +36,7 @@ function FullLoader() {
         <span className="grid size-9 animate-pulse place-items-center rounded-[9px] bg-primary text-base font-bold text-primary-foreground">
           s
         </span>
-        <span className="text-sm text-ink-faint">载入中…</span>
+        <span className="text-sm text-muted-foreground">载入中…</span>
       </div>
     </div>
   );

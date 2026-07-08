@@ -6,7 +6,6 @@ import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
 import type { Binding, Source } from "@/lib/types";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -18,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   Select,
   SelectContent,
@@ -194,21 +194,17 @@ export function BindingDialog({
 
             <div className="flex flex-col gap-2 rounded-md border p-3">
               <div className="flex items-center gap-3">
-                <div className="inline-flex rounded-md border p-0.5">
-                  {(["http", "stdio"] as const).map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => setMode(m)}
-                      className={cn(
-                        "rounded-[5px] px-2.5 py-1 text-xs transition-colors",
-                        mode === m ? "bg-muted font-medium" : "text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      {m === "http" ? "HTTP" : "本地命令"}
-                    </button>
-                  ))}
-                </div>
+                <ToggleGroup
+                  type="single"
+                  variant="outline"
+                  size="sm"
+                  value={mode}
+                  onValueChange={(v) => v && setMode(v as typeof mode)}
+                  aria-label="MCP 连接方式"
+                >
+                  <ToggleGroupItem value="http">HTTP</ToggleGroupItem>
+                  <ToggleGroupItem value="stdio">本地命令</ToggleGroupItem>
+                </ToggleGroup>
                 <Input
                   value={mcpName}
                   onChange={(e) => setMcpName(e.target.value)}

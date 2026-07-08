@@ -16,7 +16,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 
 export function PersonaDialog({
@@ -76,17 +76,17 @@ export function PersonaDialog({
         </DialogHeader>
         <form onSubmit={save} className="flex flex-col gap-4">
           <div className="flex gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="p-avatar">头像</Label>
+            <Field>
+              <FieldLabel htmlFor="p-avatar">头像</FieldLabel>
               <Input id="p-avatar" value={avatar} onChange={(e) => setAvatar(e.target.value.slice(0, 2))} className="w-16 text-center" />
-            </div>
-            <div className="flex flex-1 flex-col gap-1.5">
-              <Label htmlFor="p-name">名字</Label>
+            </Field>
+            <Field className="flex-1">
+              <FieldLabel htmlFor="p-name">名字</FieldLabel>
               <Input id="p-name" value={name} onChange={(e) => setName(e.target.value)} required />
-            </div>
+            </Field>
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="p-sp">角色说明</Label>
+          <Field>
+            <FieldLabel htmlFor="p-sp">角色说明</FieldLabel>
             <Textarea
               id="p-sp"
               value={systemPrompt}
@@ -94,11 +94,11 @@ export function PersonaDialog({
               rows={3}
               placeholder="你是谁、以什么口吻作答、遵守哪些边界。例如：只依据绑定的信源作答。"
             />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="p-greet">开场白</Label>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="p-greet">开场白</FieldLabel>
             <Input id="p-greet" value={greeting} onChange={(e) => setGreeting(e.target.value)} />
-          </div>
+          </Field>
           <DialogFooter>
             <Button type="submit" disabled={loading || !name.trim()}>
               {loading ? "保存中…" : "保存"}

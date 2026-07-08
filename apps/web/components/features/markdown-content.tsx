@@ -5,7 +5,7 @@ import remarkGfm from "remark-gfm";
 
 export function MarkdownContent({ content }: { content: string }) {
   return (
-    <div className="answer-prose text-ink">
+    <div className="answer-prose text-foreground">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
     </div>
   );

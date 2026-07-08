@@ -46,7 +46,7 @@ const MessageItem = React.memo(
     if (message.role === "user") {
       return (
         <div className="flex justify-end">
-          <div className="max-w-[85%] whitespace-pre-wrap rounded-lg rounded-tr-sm bg-ink px-4 py-2.5 text-sm text-paper">
+          <div className="max-w-[85%] whitespace-pre-wrap rounded-lg rounded-tr-sm bg-primary px-4 py-2.5 text-sm text-primary-foreground">
             {message.content}
           </div>
         </div>
@@ -58,14 +58,14 @@ const MessageItem = React.memo(
         {avatar}
         <div className="min-w-0 flex-1">
           {thinking ? (
-            <div className="flex items-center gap-1.5 py-1 text-sm text-ink-faint">
-              <span className="size-1.5 animate-blink rounded-full bg-gold" />
+            <div className="flex items-center gap-1.5 py-1 text-sm text-muted-foreground">
+              <span className="size-1.5 animate-blink rounded-full bg-primary" />
               检索并生成中…
             </div>
           ) : streaming ? (
-            <div className="answer-prose whitespace-pre-wrap text-ink">
+            <div className="answer-prose whitespace-pre-wrap text-foreground">
               {message.content}
-              <span className="ml-0.5 inline-block h-4 w-[2px] animate-blink bg-gold align-middle" />
+              <span className="ml-0.5 inline-block h-4 w-[2px] animate-blink bg-primary align-middle" />
             </div>
           ) : (
             <MarkdownContent content={message.content} />
@@ -277,8 +277,8 @@ export function ConversationView({
           {messages.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-16 text-center">
               {heroNode}
-              <div className="font-display text-xl text-ink">{emptyTitle}</div>
-              <p className="max-w-sm text-sm text-ink-muted">{emptyHint}</p>
+              <div className="font-display text-xl text-foreground">{emptyTitle}</div>
+              <p className="max-w-sm text-sm text-muted-foreground">{emptyHint}</p>
             </div>
           ) : (
             messages.map((m) => (
@@ -294,22 +294,22 @@ export function ConversationView({
         </div>
       </div>
 
-      <div className="border-t border-hairline bg-paper px-4 py-3">
-        <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-lg border border-hairline bg-surface p-2 shadow-soft focus-within:border-gold/50">
+      <div className="border-t bg-background px-4 py-3">
+        <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-lg border bg-card p-2 shadow-soft focus-within:border-border">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKeyDown}
             rows={1}
             placeholder={placeholder}
-            className="max-h-40 min-h-[36px] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-ink outline-none placeholder:text-ink-faint"
+            className="max-h-40 min-h-[36px] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
           />
           {streaming ? (
             <Button variant="outline" size="icon" onClick={stop} title="停止">
               <Square className="size-4" />
             </Button>
           ) : (
-            <Button variant="gold" size="icon" onClick={send} disabled={!input.trim()} title="发送">
+            <Button size="icon" onClick={send} disabled={!input.trim()} title="发送">
               <ArrowUp className="size-4" />
             </Button>
           )}

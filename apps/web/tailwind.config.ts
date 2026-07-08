@@ -45,30 +45,8 @@ const config: Config = {
           5: "hsl(var(--chart-5))",
         },
 
-        // 强调别名（现全部中性，指向 primary/accent）
-        signal: {
-          DEFAULT: c("--signal"),
-          strong: c("--signal-strong"),
-          soft: c("--signal-soft"),
-          foreground: c("--signal-foreground"),
-        },
+        // 状态色（成功态；danger 用标准 destructive）
         success: c("--success"),
-
-        // 语义别名（沿用既有类名）
-        paper: c("--background"),
-        surface: c("--card"),
-        "surface-2": c("--muted"),
-        ink: c("--foreground"),
-        "ink-muted": c("--muted-foreground"),
-        "ink-faint": c("--ink-faint"),
-        hairline: c("--border"),
-        gold: {
-          DEFAULT: c("--signal"),
-          strong: c("--signal-strong"),
-          soft: c("--signal-soft"),
-          foreground: c("--signal-foreground"),
-        },
-        danger: c("--destructive"),
       },
       fontFamily: {
         sans: ["var(--font-sans)"],

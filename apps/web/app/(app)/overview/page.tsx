@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import type { Agent, Source } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/components/features/app-shell";
+import { PageHeader } from "@/components/features/page-header";
 import { CreateSourceDialog } from "@/components/features/create-source-dialog";
 import { CreateAgentDialog } from "@/components/features/agent/create-agent-dialog";
 import { AgentCard } from "@/components/features/agent/agent-card";
@@ -169,10 +170,10 @@ export default function OverviewPage() {
 
   return (
     <div className="flex flex-col gap-6 p-4 md:p-6">
-      <div>
-        <h1 className="font-display text-2xl font-semibold">{`欢迎回来，${user?.name ?? ""}`}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">上传信息，创建助手，带引用对话。</p>
-      </div>
+      <PageHeader
+        title={`欢迎回来，${user?.name ?? ""}`}
+        description="上传信息，创建助手，带引用对话。"
+      />
 
       {capabilities && !capabilities.llm_configured && (
         <Alert>
