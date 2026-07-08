@@ -1,5 +1,13 @@
 # sag
 
+<p>
+  <img alt="version" src="https://img.shields.io/badge/version-v0.3.0-18181b" />
+  <img alt="python" src="https://img.shields.io/badge/python-3.11+-3776ab" />
+  <img alt="node" src="https://img.shields.io/badge/node-20+-339933" />
+  <img alt="shadcn/ui" src="https://img.shields.io/badge/ui-shadcn-000000" />
+  <img alt="MCP" src="https://img.shields.io/badge/protocol-MCP-6b7280" />
+</p>
+
 > **一个干净、清晰、好用的 SAG 开源示范项目 —— 带知识库的 Agent 客户端。**
 > 对话是主入口（单 agent 开箱即用）；上传文档进知识库 → 搜索/溯源 → 带引用对话。信源即 MCP。
 
@@ -114,6 +122,13 @@ Thread / Message { … 带 citations }
 ```
 
 深入阅读 → [docs/architecture.md](docs/architecture.md) · [Agent · MCP · 图谱](docs/architecture/agent-mcp-graph.md)
+
+## 工程规范（本项目同时是一份最佳实践）
+
+sag 的每一层都以「可被引用的范本」为标准交付——分层架构与错误模型、测试纪律、
+shadcn/ui 落地与 token 纪律、知识库与 Agent 设计原则，全部成文并与代码互相校验：
+
+**[docs/standards/](docs/standards/README.md)** — 价值理念 · [架构](docs/standards/architecture.md) · [前端](docs/standards/frontend.md) · [产品](docs/standards/product.md) ｜ 参与贡献见 [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## 许可
 
