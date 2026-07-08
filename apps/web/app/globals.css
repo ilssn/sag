@@ -3,115 +3,129 @@
 @tailwind utilities;
 
 /* ─────────────────────────────────────────────────────────
-   zleap 设计令牌 · Slate & Signal
-   冷中性画布 + 克制信号蓝；扁平、边框优先、亮暗双主题。
-   规范：shadcn HSL 三元组（hsl(var(--x) / <alpha-value>)）。
+   zleap 设计令牌 · shadcn 规范中性（zinc）
+   单色、边框优先、亮暗双主题；主操作近黑、强调走中性灰。
    ───────────────────────────────────────────────────────── */
-:root {
-  /* shadcn 标准 */
-  --background: 240 10% 98%;
-  --foreground: 240 6% 10%;
-  --card: 0 0% 100%;
-  --card-foreground: 240 6% 10%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 240 6% 10%;
-  --primary: 240 6% 10%;
-  --primary-foreground: 0 0% 99%;
-  --secondary: 240 5% 96%;
-  --secondary-foreground: 240 6% 10%;
-  --muted: 240 5% 96%;
-  --muted-foreground: 240 4% 44%;
-  --accent: 240 5% 96%;
-  --accent-foreground: 240 6% 10%;
-  --destructive: 0 72% 51%;
-  --destructive-foreground: 0 0% 99%;
-  --border: 240 6% 90%;
-  --input: 240 6% 90%;
-  --ring: 222 83% 54%;
-  --radius: 0.625rem;
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 10% 3.9%;
+    --radius: 0.625rem;
 
-  /* 信号蓝（交互强调：active/链接/选区/焦点/徽标）*/
-  --signal: 222 83% 54%;
-  --signal-strong: 224 76% 46%;
-  --signal-soft: 221 91% 96%;
-  --signal-foreground: 0 0% 100%;
-  --success: 142 52% 40%;
+    --chart-1: 240 6% 20%;
+    --chart-2: 240 5% 42%;
+    --chart-3: 240 5% 58%;
+    --chart-4: 240 5% 72%;
+    --chart-5: 240 5% 84%;
 
-  /* 语义别名（沿用既有类名，指向上面的调色板）*/
-  --paper: var(--background);
-  --surface: var(--card);
-  --surface-2: var(--muted);
-  --ink: var(--foreground);
-  --ink-muted: var(--muted-foreground);
-  --ink-faint: 240 4% 64%;
-  --hairline: var(--border);
-  --gold: var(--signal);
-  --gold-strong: var(--signal-strong);
-  --gold-soft: var(--signal-soft);
-  --gold-foreground: var(--signal-foreground);
-  --danger: var(--destructive);
+    --sidebar-background: 240 5% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.2%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 240 5.9% 90%;
+    --sidebar-ring: 240 10% 3.9%;
 
-  --font-sans: var(--font-inter), "PingFang SC", "Hiragino Sans GB",
-    "Microsoft YaHei", system-ui, sans-serif;
-  --font-mono: var(--font-jbmono), "SFMono-Regular", ui-monospace, Menlo, monospace;
+    /* 语义别名（沿用既有类名，全部指向中性调色板）*/
+    --ink-faint: 240 4% 64%;
+    --success: 142 52% 40%;
+    --paper: var(--background);
+    --surface: var(--card);
+    --surface-2: var(--muted);
+    --ink: var(--foreground);
+    --ink-muted: var(--muted-foreground);
+    --hairline: var(--border);
+    --gold: var(--primary);
+    --gold-strong: var(--foreground);
+    --gold-soft: var(--accent);
+    --gold-foreground: var(--primary-foreground);
+    --signal: var(--primary);
+    --signal-strong: var(--foreground);
+    --signal-soft: var(--accent);
+    --signal-foreground: var(--primary-foreground);
+    --danger: var(--destructive);
+
+    --font-sans: var(--font-inter), "PingFang SC", "Hiragino Sans GB",
+      "Microsoft YaHei", system-ui, sans-serif;
+    --font-mono: var(--font-jbmono), "SFMono-Regular", ui-monospace, Menlo, monospace;
+  }
+
+  .dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 8% 6%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 8% 6%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 72% 58%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 240 4.9% 83.9%;
+
+    --chart-1: 0 0% 92%;
+    --chart-2: 240 5% 74%;
+    --chart-3: 240 5% 58%;
+    --chart-4: 240 4% 44%;
+    --chart-5: 240 4% 32%;
+
+    --sidebar-background: 240 8% 6%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 0 0% 98%;
+    --sidebar-primary-foreground: 240 5.9% 10%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 240 4.9% 83.9%;
+
+    --ink-faint: 240 5% 44%;
+    --success: 142 45% 55%;
+  }
 }
 
-.dark {
-  --background: 240 6% 8%;
-  --foreground: 240 6% 92%;
-  --card: 240 5% 11%;
-  --card-foreground: 240 6% 92%;
-  --popover: 240 5% 11%;
-  --popover-foreground: 240 6% 92%;
-  --primary: 0 0% 98%;
-  --primary-foreground: 240 6% 10%;
-  --secondary: 240 5% 16%;
-  --secondary-foreground: 240 6% 92%;
-  --muted: 240 5% 16%;
-  --muted-foreground: 240 5% 62%;
-  --accent: 240 5% 16%;
-  --accent-foreground: 240 6% 92%;
-  --destructive: 0 72% 58%;
-  --destructive-foreground: 0 0% 99%;
-  --border: 240 5% 19%;
-  --input: 240 5% 19%;
-  --ring: 222 90% 62%;
-
-  --signal: 221 83% 65%;
-  --signal-strong: 221 90% 74%;
-  --signal-soft: 223 47% 16%;
-  --signal-foreground: 240 6% 10%;
-  --success: 142 45% 55%;
-
-  --ink-faint: 240 4% 46%;
-}
-
-* {
-  border-color: hsl(var(--border));
-}
-
-html {
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-}
-
-body {
-  background: hsl(var(--background));
-  color: hsl(var(--foreground));
-  font-family: var(--font-sans);
-  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
 }
 
 ::selection {
-  background: hsl(var(--signal) / 0.18);
-  color: hsl(var(--foreground));
-}
-
-/* 焦点环：信号蓝，恒可见 */
-:focus-visible {
-  outline: 2px solid hsl(var(--ring));
-  outline-offset: 2px;
-  border-radius: 6px;
+  background: hsl(var(--foreground) / 0.12);
 }
 
 /* 细腻滚动条 */
@@ -126,19 +140,18 @@ body {
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--ink-faint) / 0.6);
+  background: hsl(var(--ink-faint) / 0.55);
   background-clip: content-box;
 }
 
 @layer components {
-  /* 展示字：无衬线、紧字距、光学 —— Notion/Codex 风，不用衬线 */
+  /* 展示字：无衬线、紧字距、光学 */
   .font-display {
     font-family: var(--font-sans);
     letter-spacing: -0.02em;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
   }
 
-  /* 骨架微光 */
   .skeleton {
     position: relative;
     overflow: hidden;
@@ -194,7 +207,7 @@ body {
   }
   .answer-prose blockquote {
     margin: 0.75rem 0;
-    border-left: 2px solid hsl(var(--signal));
+    border-left: 2px solid hsl(var(--border));
     padding-left: 0.875rem;
     color: hsl(var(--muted-foreground));
   }
@@ -219,7 +232,7 @@ body {
     font-size: 1rem;
   }
   .answer-prose a {
-    color: hsl(var(--signal-strong));
+    color: hsl(var(--foreground));
     text-decoration: underline;
     text-underline-offset: 2px;
     text-decoration-thickness: 1px;
@@ -229,7 +242,6 @@ body {
     border: none;
     border-top: 1px solid hsl(var(--border));
   }
-  /* GFM 表格 */
   .answer-prose table {
     display: block;
     margin: 0.75rem 0;

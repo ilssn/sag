@@ -8,7 +8,6 @@ import type { Soul } from "@/lib/types";
 import { CreateSoulDialog } from "@/components/features/soul/create-soul-dialog";
 import { SoulCard } from "@/components/features/soul/soul-card";
 import { EmptyState } from "@/components/features/empty-state";
-import { PageHeader } from "@/components/features/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function SoulsPage() {
@@ -20,12 +19,18 @@ export default function SoulsPage() {
   React.useEffect(() => load(), [load]);
 
   return (
-    <>
-      <PageHeader title="助手" description="有名字、有设定、有记忆的 AI 同事，绑定信源后即可带引用对话。">
+    <div className="flex flex-col gap-6 p-4 md:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="font-display text-2xl font-semibold">助手</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            有名字、有设定、有记忆的 AI 同事，绑定信源后即可带引用对话。
+          </p>
+        </div>
         <CreateSoulDialog onCreated={load} />
-      </PageHeader>
+      </div>
 
-      <div className="p-6 md:p-8">
+      <div>
         {souls === null ? (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {Array.from({ length: 3 }).map((_, i) => (
@@ -47,6 +52,6 @@ export default function SoulsPage() {
           </div>
         )}
       </div>
-    </>
+    </div>
   );
 }

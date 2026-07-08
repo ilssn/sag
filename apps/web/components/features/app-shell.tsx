@@ -11,9 +11,10 @@ import {
   getActiveWorkspace,
   setActiveWorkspace,
 } from "@/lib/workspace";
+import { AppSidebar } from "@/components/features/app-sidebar";
 import { SearchProvider } from "@/components/features/search-overlay";
-import { Sidebar } from "@/components/features/sidebar";
-import { Topbar } from "@/components/features/topbar";
+import { SiteHeader } from "@/components/features/site-header";
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 
 interface AppCtx {
   user: User | null;
@@ -143,13 +144,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       }}
     >
       <SearchProvider>
-        <div className="flex h-screen overflow-hidden">
-          <Sidebar />
-          <div className="flex min-w-0 flex-1 flex-col">
-            <Topbar />
-            <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{children}</main>
-          </div>
-        </div>
+        <SidebarProvider>
+          <AppSidebar />
+          <SidebarInset className="min-w-0">
+            <SiteHeader />
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{children}</div>
+          </SidebarInset>
+        </SidebarProvider>
       </SearchProvider>
     </AppContext.Provider>
   );
