@@ -8,6 +8,7 @@ import { api, ApiError } from "@/lib/api";
 import type { Agent, Source } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -149,25 +150,29 @@ export function CreateAgentDialog({
                 {sources.map((s, i) => {
                   const on = picked.has(s.id);
                   return (
-                    <label
+                    <div
                       key={s.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => toggle(s.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          toggle(s.id);
+                        }
+                      }}
                       className={cn(
-                        "flex cursor-pointer items-center gap-2.5 px-3 py-2 text-sm transition-colors",
+                        "flex cursor-pointer items-center gap-2.5 px-3 py-2 text-sm transition-colors outline-none focus-visible:bg-muted/50",
                         i > 0 && "border-t",
                         on ? "bg-muted" : "hover:bg-muted/50",
                       )}
                     >
-                      <input
-                        type="checkbox"
-                        checked={on}
-                        onChange={() => toggle(s.id)}
-                        className="size-3.5 accent-foreground"
-                      />
+                      <Checkbox checked={on} className="pointer-events-none" />
                       <span className="min-w-0 flex-1 truncate">{s.name}</span>
                       <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
                         {s.document_count} 文档
                       </span>
-                    </label>
+                    </div>
                   );
                 })}
               </div>

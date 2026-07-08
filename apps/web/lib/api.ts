@@ -6,6 +6,8 @@ import type {
   Capabilities,
   Doc,
   Message,
+  ModelConfig,
+  ModelConfigPatch,
   Persona,
   SearchResponse,
   Source,
@@ -83,6 +85,18 @@ export const api = {
     request<TokenResponse>("/api/v1/auth/login", { method: "POST", body: JSON.stringify(b) }),
   me: () => request<User>("/api/v1/auth/me"),
   capabilities: () => request<Capabilities>("/api/v1/system/capabilities"),
+
+  // 模型与检索配置
+  getModelConfig: () => request<ModelConfig>("/api/v1/system/model-config"),
+  saveModelConfig: (b: ModelConfigPatch) =>
+    request<{ config: ModelConfig; capabilities: Capabilities }>("/api/v1/system/model-config", {
+      method: "PUT",
+      body: JSON.stringify(b),
+    }),
+  testModelConfig: () =>
+    request<{ ok: boolean; message: string }>("/api/v1/system/model-config/test", {
+      method: "POST",
+    }),
 
   // 信源
   listSources: () => request<Source[]>("/api/v1/sources"),

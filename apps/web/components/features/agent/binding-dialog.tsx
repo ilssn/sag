@@ -18,6 +18,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export function BindingDialog({
   agentId,
@@ -141,20 +148,20 @@ export function BindingDialog({
               ))}
             </div>
             <div className="flex items-center gap-2">
-              <select
-                value={pick}
-                onChange={(e) => setPick(e.target.value)}
-                className="h-9 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <option value="">选择要绑定的信源…</option>
-                {sources
-                  .filter((s) => !bound.has(s.id))
-                  .map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-              </select>
+              <Select value={pick} onValueChange={setPick}>
+                <SelectTrigger className="min-w-0 flex-1">
+                  <SelectValue placeholder="选择要绑定的信源…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {sources
+                    .filter((s) => !bound.has(s.id))
+                    .map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
               <Button variant="outline" onClick={addSource} disabled={!pick}>
                 <Link2 className="size-4" />
                 绑定
