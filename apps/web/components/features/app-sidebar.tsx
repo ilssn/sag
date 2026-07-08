@@ -1,17 +1,8 @@
 "use client";
 
-import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  Check,
-  ChevronsUpDown,
-  Layers,
-  LayoutGrid,
-  LogOut,
-  Settings,
-  Sparkles,
-} from "lucide-react";
+import { ChevronsUpDown, Layers, LayoutGrid, LogOut, Settings, Sparkles } from "lucide-react";
 
 import { useApp } from "@/components/features/app-shell";
 import {
@@ -42,69 +33,21 @@ const NAV = [
   { href: "/settings", label: "设置", icon: Settings },
 ];
 
-const ROLE_LABEL: Record<string, string> = { owner: "所有者", editor: "编辑者", viewer: "只读" };
-
-function WorkspaceSwitcher() {
-  const { user, workspace, switchWorkspace } = useApp();
-  const memberships = user?.memberships ?? [];
-  const name = workspace?.workspace_name ?? "工作空间";
-  const multi = memberships.length > 1;
-
-  const trigger = (
-    <SidebarMenuButton
-      size="lg"
-      className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
-    >
-      <div className="flex aspect-square size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-        <span className="text-sm font-semibold">{(name || "空").slice(0, 1)}</span>
-      </div>
-      <div className="grid flex-1 text-left text-sm leading-tight">
-        <span className="truncate font-semibold">{name}</span>
-        <span className="truncate text-xs text-muted-foreground">
-          {workspace ? ROLE_LABEL[workspace.role] : "—"}
-        </span>
-      </div>
-      {multi && <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" />}
-    </SidebarMenuButton>
-  );
-
-  if (!multi) {
-    return (
-      <SidebarMenu>
-        <SidebarMenuItem>{trigger}</SidebarMenuItem>
-      </SidebarMenu>
-    );
-  }
-
+function Brand() {
   return (
     <SidebarMenu>
       <SidebarMenuItem>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
-          <DropdownMenuContent
-            className="w-[--radix-dropdown-menu-trigger-width] min-w-56"
-            align="start"
-            sideOffset={4}
-          >
-            <DropdownMenuLabel className="text-xs text-muted-foreground">切换空间</DropdownMenuLabel>
-            {memberships.map((m) => (
-              <DropdownMenuItem
-                key={m.workspace_id}
-                onClick={() => {
-                  if (m.workspace_id !== workspace?.workspace_id) switchWorkspace(m.workspace_id);
-                }}
-                className="gap-2"
-              >
-                <div className="flex size-6 items-center justify-center rounded-sm border text-xs font-medium">
-                  {(m.workspace_name || "空").slice(0, 1)}
-                </div>
-                <span className="flex-1 truncate">{m.workspace_name}</span>
-                <span className="text-xs text-muted-foreground">{ROLE_LABEL[m.role]}</span>
-                {m.workspace_id === workspace?.workspace_id && <Check className="size-4" />}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <SidebarMenuButton size="lg" asChild>
+          <Link href="/overview">
+            <div className="flex aspect-square size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
+              <span className="text-sm font-semibold">z</span>
+            </div>
+            <div className="grid flex-1 text-left text-sm leading-tight">
+              <span className="truncate font-semibold">zleap</span>
+              <span className="truncate text-xs text-muted-foreground">SAG 知识助手</span>
+            </div>
+          </Link>
+        </SidebarMenuButton>
       </SidebarMenuItem>
     </SidebarMenu>
   );
@@ -161,7 +104,7 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <WorkspaceSwitcher />
+        <Brand />
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>

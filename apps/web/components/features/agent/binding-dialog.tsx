@@ -17,11 +17,11 @@ import {
 } from "@/components/ui/dialog";
 
 export function BindingDialog({
-  soulId,
+  agentId,
   trigger,
   onChanged,
 }: {
-  soulId: string;
+  agentId: string;
   trigger: React.ReactNode;
   onChanged?: () => void;
 }) {
@@ -31,11 +31,11 @@ export function BindingDialog({
   const [pick, setPick] = React.useState("");
 
   const load = React.useCallback(async () => {
-    const [b, s] = await Promise.all([api.listBindings(soulId), api.listSources()]);
+    const [b, s] = await Promise.all([api.listBindings(agentId), api.listSources()]);
     // 界面只呈现信源级绑定
     setBindings(b.filter((x) => x.target_type === "source"));
     setSources(s);
-  }, [soulId]);
+  }, [agentId]);
 
   React.useEffect(() => {
     if (open) load().catch(() => {});
@@ -47,7 +47,7 @@ export function BindingDialog({
   async function add() {
     if (!pick) return;
     try {
-      await api.addBinding(soulId, { target_type: "source", target_id: pick });
+      await api.addBinding(agentId, { target_type: "source", target_id: pick });
       setPick("");
       await load();
       onChanged?.();
@@ -58,7 +58,7 @@ export function BindingDialog({
 
   async function remove(b: Binding) {
     try {
-      await api.removeBinding(soulId, b.id);
+      await api.removeBinding(agentId, b.id);
       await load();
       onChanged?.();
     } catch (e) {

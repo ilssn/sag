@@ -6,8 +6,6 @@ import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
 import type { Source } from "@/lib/types";
-import { useApp } from "@/components/features/app-shell";
-import { ReadOnlyButton } from "@/components/features/read-only-button";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -23,13 +21,10 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
 export function CreateSourceDialog({ onCreated }: { onCreated: (s: Source) => void }) {
-  const { canWrite } = useApp();
   const [open, setOpen] = React.useState(false);
   const [name, setName] = React.useState("");
   const [description, setDescription] = React.useState("");
   const [loading, setLoading] = React.useState(false);
-
-  if (!canWrite) return <ReadOnlyButton label="新建信源" />;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();

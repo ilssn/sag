@@ -5,12 +5,12 @@ import Link from "next/link";
 import { ArrowRight, Check, FileText, Layers, Sparkles, TriangleAlert, Zap } from "lucide-react";
 
 import { api } from "@/lib/api";
-import type { Soul, Source } from "@/lib/types";
+import type { Agent, Source } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/components/features/app-shell";
 import { CreateSourceDialog } from "@/components/features/create-source-dialog";
-import { CreateSoulDialog } from "@/components/features/soul/create-soul-dialog";
-import { SoulCard } from "@/components/features/soul/soul-card";
+import { CreateAgentDialog } from "@/components/features/agent/create-agent-dialog";
+import { AgentCard } from "@/components/features/agent/agent-card";
 import { SourceCard } from "@/components/features/source-card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -80,12 +80,12 @@ function GoldenPath({
       done: hasAssistant,
       title: "创建助手，绑定信源",
       desc: "起个名字、写好设定，它就能依据你的内容作答。",
-      action: <CreateSoulDialog onCreated={onChanged} />,
+      action: <CreateAgentDialog onCreated={onChanged} />,
     },
     {
       done: false,
       title: "开始对话",
-      desc: "回答带引用，可追溯到原文；越聊越有记忆。",
+      desc: "回答带引用，可一路追溯到原文。",
       action: (
         <Button asChild variant="outline">
           <Link href="/assistants">
@@ -145,24 +145,24 @@ function GoldenPath({
 export default function OverviewPage() {
   const { user, capabilities } = useApp();
   const [sources, setSources] = React.useState<Source[] | null>(null);
-  const [souls, setSouls] = React.useState<Soul[] | null>(null);
+  const [agents, setAgents] = React.useState<Agent[] | null>(null);
 
   const load = React.useCallback(() => {
     api.listSources().then(setSources).catch(() => setSources([]));
-    api.listSouls().then(setSouls).catch(() => setSouls([]));
+    api.listAgents().then(setAgents).catch(() => setAgents([]));
   }, []);
   React.useEffect(() => load(), [load]);
 
-  const loading = sources === null || souls === null;
+  const loading = sources === null || agents === null;
   const totals = React.useMemo(() => {
     const s = sources ?? [];
     return {
-      assistants: (souls ?? []).length,
+      assistants: (agents ?? []).length,
       sources: s.length,
       documents: s.reduce((a, x) => a + x.document_count, 0),
       events: s.reduce((a, x) => a + x.event_count, 0),
     };
-  }, [sources, souls]);
+  }, [sources, agents]);
 
   const hasDoc = (sources ?? []).some((s) => s.document_count > 0);
   const onboarding = !loading && (totals.sources === 0 || !hasDoc || totals.assistants === 0);
@@ -220,8 +220,8 @@ export default function OverviewPage() {
           <div className="flex flex-col gap-3">
             <SectionHeader title="我的助手" href="/assistants" hrefLabel="全部助手" />
             <div className="grid animate-fade-in gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {(souls ?? []).slice(0, 3).map((s) => (
-                <SoulCard key={s.id} soul={s} />
+              {(agents ?? []).slice(0, 3).map((s) => (
+                <AgentCard key={s.id} agent={s} />
               ))}
             </div>
           </div>

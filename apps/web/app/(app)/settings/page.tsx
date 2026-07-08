@@ -5,8 +5,6 @@ import { Check, Monitor, Moon, Sun, X } from "lucide-react";
 import { useTheme } from "next-themes";
 
 import { useApp } from "@/components/features/app-shell";
-import { AuditCard } from "@/components/features/audit-card";
-import { MembersCard } from "@/components/features/members-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -56,22 +54,18 @@ function ThemeSegment() {
 }
 
 export default function SettingsPage() {
-  const { user, capabilities, role, logout } = useApp();
-
-  const isOwner = role === "owner";
+  const { user, capabilities, logout } = useApp();
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 p-4 md:p-6">
       <div>
         <h1 className="font-display text-2xl font-semibold">设置</h1>
-        <p className="mt-1 text-sm text-muted-foreground">账户、成员、模型与外观。</p>
+        <p className="mt-1 text-sm text-muted-foreground">账户、模型与外观。</p>
       </div>
 
       <Tabs defaultValue="account" className="gap-4">
         <TabsList>
           <TabsTrigger value="account">账户</TabsTrigger>
-          <TabsTrigger value="members">成员</TabsTrigger>
-          {isOwner && <TabsTrigger value="audit">审计</TabsTrigger>}
           <TabsTrigger value="model">模型</TabsTrigger>
           <TabsTrigger value="appearance">外观</TabsTrigger>
         </TabsList>
@@ -85,11 +79,6 @@ export default function SettingsPage() {
             <CardContent className="flex flex-col gap-0">
               <Row label="名称">{user?.name}</Row>
               <Row label="邮箱">{user?.email}</Row>
-              <Row label="全局角色">
-                <Badge variant={user?.role === "admin" ? "gold" : "outline"}>
-                  {user?.role === "admin" ? "管理员" : "成员"}
-                </Badge>
-              </Row>
               <div className="border-t pt-4">
                 <Button variant="outline" size="sm" onClick={logout}>
                   退出登录
@@ -98,16 +87,6 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
         </TabsContent>
-
-        <TabsContent value="members">
-          <MembersCard />
-        </TabsContent>
-
-        {isOwner && (
-          <TabsContent value="audit">
-            <AuditCard />
-          </TabsContent>
-        )}
 
         <TabsContent value="model" className="flex flex-col gap-4">
           <Card>

@@ -1,48 +1,8 @@
-export type Role = "admin" | "member";
-
-export type WorkspaceRole = "owner" | "editor" | "viewer";
-
-export interface Membership {
-  workspace_id: string;
-  workspace_name: string;
-  role: WorkspaceRole;
-}
-
-export interface AuditEntry {
-  id: string;
-  actor_id: string | null;
-  actor_email: string;
-  action: string;
-  target_type: string;
-  target_id: string;
-  target_label: string;
-  meta_json: string;
-  ip: string;
-  created_at: string;
-}
-
-export interface AuditPage {
-  items: AuditEntry[];
-  total: number;
-  limit: number;
-  offset: number;
-}
-
-export interface Member {
-  user_id: string;
-  email: string;
-  name: string;
-  role: WorkspaceRole;
-  joined_at: string;
-}
-
 export interface User {
   id: string;
   email: string;
   name: string;
-  role: Role;
   created_at: string;
-  memberships?: Membership[];
 }
 
 export interface TokenResponse {
@@ -52,10 +12,9 @@ export interface TokenResponse {
 }
 
 export type SourceStatus = "active" | "paused" | "error";
-export type SourceType = "document" | "web" | "message" | "conversation" | "audio";
+export type SourceType = "document" | "web" | "message" | "audio";
 export interface Source {
   id: string;
-  namespace_id: string | null;
   name: string;
   description: string;
   source_type: SourceType;
@@ -107,40 +66,19 @@ export interface Citation {
   source_name?: string | null;
 }
 
-export type SoulOrigin = "user" | "book_entity" | "mount" | "import";
-export type SoulVisibility = "private" | "workspace";
-export type SoulStatus = "active" | "archived";
-export type BindingTargetType = "namespace" | "source";
+export type BindingTargetType = "source" | "mcp_server";
 
 export interface Persona {
   system_prompt?: string;
   greeting?: string;
-  voice?: string;
-  traits?: string[];
-  guardrails?: string[];
-  search_strategy?: string | null;
-  top_k?: number | null;
-  temperature?: number | null;
-  empty_response?: string;
+  tools?: string[];
 }
 
-export interface MemoryStats {
-  document_count: number;
-  chunk_count: number;
-  event_count: number;
-  recent: { id: string; status: string; created_at: string }[];
-}
-
-export interface Soul {
+export interface Agent {
   id: string;
   name: string;
   avatar: string;
   persona: Persona;
-  owner_id: string | null;
-  visibility: SoulVisibility;
-  origin: SoulOrigin;
-  status: SoulStatus;
-  memory_namespace_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -149,23 +87,22 @@ export interface Binding {
   id: string;
   target_type: BindingTargetType;
   target_id: string;
-  mode: string;
+  config: Record<string, unknown>;
 }
 
-export interface SoulThread {
+export interface Thread {
   id: string;
-  soul_id: string;
+  agent_id: string;
   title: string;
   created_at: string;
   updated_at: string;
 }
 
-export interface SoulMessage {
+export interface Message {
   id: string;
   thread_id: string;
   role: "user" | "assistant" | "system";
   content: string;
-  author: string | null;
   citations: Citation[];
   created_at: string;
 }
