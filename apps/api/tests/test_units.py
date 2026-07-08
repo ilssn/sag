@@ -1,12 +1,12 @@
 """快速单元测试：无需网络 / 引擎。"""
 
-from zleap_api.connectors import registry
-from zleap_api.core.config import settings
-from zleap_api.core.security import hash_password, verify_password
-from zleap_api.enums import ConnectorKind
-from zleap_api.generation.prompt import build_citations, build_messages
-from zleap_api.sag import RetrievedSection
-from zleap_api.sag.config_builder import build_engine_config
+from sag_api.connectors import registry
+from sag_api.core.config import settings
+from sag_api.core.security import hash_password, verify_password
+from sag_api.enums import ConnectorKind
+from sag_api.generation.prompt import build_citations, build_messages
+from sag_api.sag import RetrievedSection
+from sag_api.sag.config_builder import build_engine_config
 
 
 def test_password_hash_roundtrip():

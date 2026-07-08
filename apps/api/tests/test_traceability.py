@@ -1,4 +1,4 @@
-"""引用溯源：chunk 原文端点 + citations 的 zleap source_id 语义。"""
+"""引用溯源：chunk 原文端点 + citations 的 sag source_id 语义。"""
 
 import uuid
 
@@ -8,11 +8,11 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_chunk_endpoint_and_citation_refs():
-    from zleap_api.core.db import SessionLocal
-    from zleap_api.db.models import Source
-    from zleap_api.generation.prompt import build_citations
-    from zleap_api.main import app
-    from zleap_api.sag.dto import RetrievedSection
+    from sag_api.core.db import SessionLocal
+    from sag_api.db.models import Source
+    from sag_api.generation.prompt import build_citations
+    from sag_api.main import app
+    from sag_api.sag.dto import RetrievedSection
 
     transport = httpx.ASGITransport(app=app)
     async with app.router.lifespan_context(app):
@@ -52,7 +52,7 @@ async def test_chunk_endpoint_and_citation_refs():
                 )
                 await s.commit()
 
-            # 原文端点：返回完整内容 + zleap 信源标识
+            # 原文端点：返回完整内容 + sag 信源标识
             r = await c.get(f"/api/v1/sources/{sid}/chunks/{chunk_id}", headers=H)
             assert r.status_code == 200, r.text
             body = r.json()
@@ -65,7 +65,7 @@ async def test_chunk_endpoint_and_citation_refs():
                 await c.get(f"/api/v1/sources/{sid}/chunks/{uuid.uuid4().hex}", headers=H)
             ).status_code == 404
 
-            # citations：source_id 应为 zleap 信源 id（非引擎内部 id）
+            # citations：source_id 应为 sag 信源 id（非引擎内部 id）
             section = RetrievedSection(
                 chunk_id=chunk_id,
                 heading="导出与备份",

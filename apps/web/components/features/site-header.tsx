@@ -27,7 +27,7 @@ const SECTION: Record<string, string> = {
 
 function sectionLabel(pathname: string): string {
   const key = Object.keys(SECTION).find((k) => pathname === k || pathname.startsWith(k + "/"));
-  return key ? SECTION[key] : "zleap";
+  return key ? SECTION[key] : "sag";
 }
 
 export function SiteHeader() {
@@ -44,7 +44,7 @@ export function SiteHeader() {
         <BreadcrumbList>
           <BreadcrumbItem className="hidden sm:block">
             <BreadcrumbLink asChild>
-              <Link href="/overview">zleap</Link>
+              <Link href="/overview">sag</Link>
             </BreadcrumbLink>
           </BreadcrumbItem>
           <BreadcrumbSeparator className="hidden sm:block" />

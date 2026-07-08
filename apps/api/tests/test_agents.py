@@ -6,10 +6,10 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_agents_flow_offline():
-    from zleap_api.core.db import SessionLocal
-    from zleap_api.db.models import Agent
-    from zleap_api.main import app
-    from zleap_api.services.agent_domain import resolve_sources
+    from sag_api.core.db import SessionLocal
+    from sag_api.db.models import Agent
+    from sag_api.main import app
+    from sag_api.services.agent_domain import resolve_sources
 
     transport = httpx.ASGITransport(app=app)
     async with app.router.lifespan_context(app):

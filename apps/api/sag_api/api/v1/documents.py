@@ -1,0 +1,131 @@
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, File, UploadFile
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from sag_api.core.config import settings
+from sag_api.core.db import get_session
+from sag_api.core.deps import get_current_user, get_job_queue
+from sag_api.core.errors import ValidationError
+from sag_api.db.models import User
+from sag_api.jobs import JobQueue
+from sag_api.schemas.common import Ok
+from sag_api.schemas.document import DocumentOut, IngestRequest
+from sag_api.schemas.job import JobOut
+from sag_api.services.document_service import (
+    create_document_from_upload,
+    delete_document,
+    get_document,
+    ingest_content,
+    list_documents,
+    reprocess_document,
+)
+from sag_api.services.source_service import get_source
+
+router = APIRouter(prefix="/sources/{source_id}/documents", tags=["documents"])
+
+
+def _check_extension(filename: str | None) -> None:
+    """按白名单校验上传扩展名（空白名单 = 不限制）。"""
+    allowed = settings.allowed_upload_exts
+    if not allowed:
+        return
+    name = (filename or "").lower()
+    if "." not in name or ("." + name.rsplit(".", 1)[1]) not in allowed:
+        pretty = "、".join(sorted(e.lstrip(".") for e in allowed))
+        raise ValidationError(f"不支持的文件类型。可上传：{pretty}")
+
+
+@router.get("", response_model=list[DocumentOut])
+async def list_(
+    source_id: str,
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> list[DocumentOut]:
+    source = await get_source(session, source_id)
+    return [DocumentOut.model_validate(d) for d in await list_documents(session, source.id)]
+
+
+@router.post("", response_model=DocumentOut, status_code=201)
+async def upload(
+    source_id: str,
+    file: UploadFile = File(...),
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+    job_queue: JobQueue = Depends(get_job_queue),
+) -> DocumentOut:
+    source = await get_source(session, source_id)
+    _check_extension(file.filename)
+    data = await file.read()
+    if not data:
+        raise ValidationError("文件内容为空")
+    if len(data) > settings.max_upload_mb * 1024 * 1024:
+        raise ValidationError(f"文件超过 {settings.max_upload_mb}MB 上限")
+    document, _job = await create_document_from_upload(
+        session,
+        source,
+        filename=file.filename or "upload",
+        content_type=file.content_type or "application/octet-stream",
+        data=data,
+        upload_dir=settings.upload_dir,
+        job_queue=job_queue,
+    )
+    return DocumentOut.model_validate(document)
+
+
+@router.post("/ingest", response_model=DocumentOut, status_code=201)
+async def ingest(
+    source_id: str,
+    body: IngestRequest,
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+    job_queue: JobQueue = Depends(get_job_queue),
+) -> DocumentOut:
+    """统一写入接口：外部系统持续推送文本 / 消息进入信源。"""
+    source = await get_source(session, source_id)
+    document = await ingest_content(
+        session,
+        source,
+        text=body.text,
+        title=body.title,
+        messages=[m.model_dump() for m in body.messages] if body.messages else None,
+        upload_dir=settings.upload_dir,
+        job_queue=job_queue,
+    )
+    return DocumentOut.model_validate(document)
+
+
+@router.get("/{document_id}", response_model=DocumentOut)
+async def get_(
+    source_id: str,
+    document_id: str,
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> DocumentOut:
+    source = await get_source(session, source_id)
+    return DocumentOut.model_validate(await get_document(session, source, document_id))
+
+
+@router.post("/{document_id}/reprocess", response_model=JobOut)
+async def reprocess(
+    source_id: str,
+    document_id: str,
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+    job_queue: JobQueue = Depends(get_job_queue),
+) -> JobOut:
+    source = await get_source(session, source_id)
+    job = await reprocess_document(session, source, document_id, job_queue=job_queue)
+    return JobOut.model_validate(job)
+
+
+@router.delete("/{document_id}", response_model=Ok)
+async def delete_(
+    source_id: str,
+    document_id: str,
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> Ok:
+    source = await get_source(session, source_id)
+    await delete_document(session, source, document_id)
+    return Ok(detail="文档已删除")

@@ -5,9 +5,9 @@
 
 ## 一、调研事实
 
-### 1. zleap（引擎方，zleap.ai / zleap.com）
+### 1. sag（引擎方，sag.ai / sag.com）
 
-- 定位：**「企业的私有化 AI 大脑」**；zleap.com 一句话是「下一代内容社区——人与 Agent 共同创作和交流」。
+- 定位：**「企业的私有化 AI 大脑」**；sag.com 一句话是「下一代内容社区——人与 Agent 共同创作和交流」。
 - 概念用词：**「AI Agent / 智能同事」**（强调主动性）、「结构化知识」、信息以 **Feed 流（帖子）** 呈现；技术叫 **SAG™ 架构**。
 - 三支柱：Information Manager（自动连接飞书/代码库/文档/会议）→ Company News（X 式信息流）→ Smart Colleague（Agent 主动发布洞察）。
 - 关键承诺：**「所有内容 100% 可溯源到原始数据」**、SQL 级精准、数据不出门（内网部署）。
@@ -38,7 +38,7 @@
 
 | 旧（对外） | **新（对外，唯一）** | 内部代码 | 理由 |
 |---|---|---|---|
-| 灵魂 Soul | **Agent** | `Soul`（保留，不迁移） | zleap/RAGFlow/用户全用 Agent；「灵魂」抬高理解成本 |
+| 灵魂 Soul | **Agent** | `Soul`（保留，不迁移） | sag/RAGFlow/用户全用 Agent；「灵魂」抬高理解成本 |
 | 上下文 / 信源 Source | **知识库** | `Source` | 一个信源=RAGFlow 的一个 knowledge base，人人秒懂 |
 | 命名空间 Namespace | **分组** | `Namespace` | 「命名空间」是工程词；分组=文件夹心智，零学习 |
 | 人格 Persona | **设定** | `persona` | 按钮/表单用「设定」，字段直白（角色说明/开场白/回答规则） |

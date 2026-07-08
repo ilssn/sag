@@ -15,7 +15,7 @@ export function SyncPanel({ sourceId, onSynced }: { sourceId: string; onSynced: 
     setBusy(true);
     try {
       await api.syncSource(sourceId);
-      toast.success("已开始同步，zleap 正在后台抓取网页");
+      toast.success("已开始同步，sag 正在后台抓取网页");
       onSynced();
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "同步失败");

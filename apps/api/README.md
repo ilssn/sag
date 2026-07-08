@@ -1,19 +1,19 @@
-# zleap-api
+# sag-api
 
-zleap 的后端服务：FastAPI + `zleap-sag`。
+sag 的后端服务：FastAPI + `zleap-sag`。
 
 ## 分层
 
 | 层 | 目录 | 职责 |
 |---|---|---|
-| 适配层 | `zleap_api/sag/` | **唯一** import `zleap-sag` 之处；信源 ↔ `DataEngine` |
-| 连接器 | `zleap_api/connectors/` | 采集抽象 + 注册表（文件上传 → 动态同步） |
-| 任务队列 | `zleap_api/jobs/` | 后台处理编排（ingest → extract 状态机） |
-| 生成层 | `zleap_api/generation/` | 检索结果 → LLM 流式答案 + 引用 |
-| 工具层 | `zleap_api/tools/` | Agent 工具：内置检索/实体 + 远端 MCP 适配（统一 `Tool` 接口） |
-| MCP | `zleap_api/mcp/` | 信源即 MCP：FastMCP server + Streamable-HTTP 挂载（`/mcp/`）+ stdio 入口 |
-| 领域服务 | `zleap_api/services/` | 纯业务逻辑，不依赖 FastAPI |
-| 接口 | `zleap_api/api/v1/` | HTTP 路由，仅做 IO / 校验 / 序列化 |
+| 适配层 | `sag_api/sag/` | **唯一** import `zleap-sag` 之处；信源 ↔ `DataEngine` |
+| 连接器 | `sag_api/connectors/` | 采集抽象 + 注册表（文件上传 → 动态同步） |
+| 任务队列 | `sag_api/jobs/` | 后台处理编排（ingest → extract 状态机） |
+| 生成层 | `sag_api/generation/` | 检索结果 → LLM 流式答案 + 引用 |
+| 工具层 | `sag_api/tools/` | Agent 工具：内置检索/实体 + 远端 MCP 适配（统一 `Tool` 接口） |
+| MCP | `sag_api/mcp/` | 信源即 MCP：FastMCP server + Streamable-HTTP 挂载（`/mcp/`）+ stdio 入口 |
+| 领域服务 | `sag_api/services/` | 纯业务逻辑，不依赖 FastAPI |
+| 接口 | `sag_api/api/v1/` | HTTP 路由，仅做 IO / 校验 / 序列化 |
 
 ## 运行
 
@@ -21,7 +21,7 @@ zleap 的后端服务：FastAPI + `zleap-sag`。
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env
-uvicorn zleap_api.main:app --reload
+uvicorn sag_api.main:app --reload
 ```
 
 文档 UI：http://localhost:8000/docs

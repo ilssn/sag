@@ -31,7 +31,7 @@ async def _make_soul_with_empty_response(c, headers):
 
 @pytest.mark.asyncio
 async def test_empty_response_short_circuit_and_prompt_preview():
-    from zleap_api.main import app
+    from sag_api.main import app
 
     transport = httpx.ASGITransport(app=app)
     async with app.router.lifespan_context(app):
@@ -73,7 +73,7 @@ async def test_empty_response_short_circuit_and_prompt_preview():
 
 @pytest.mark.asyncio
 async def test_openai_compatible_endpoint():
-    from zleap_api.main import app
+    from sag_api.main import app
 
     transport = httpx.ASGITransport(app=app)
     async with app.router.lifespan_context(app):
@@ -92,7 +92,7 @@ async def test_openai_compatible_endpoint():
             assert body["object"] == "chat.completion"
             assert body["choices"][0]["message"]["content"] == EMPTY
             assert body["choices"][0]["finish_reason"] == "stop"
-            assert "zleap" in body  # 扩展字段：引用
+            assert "sag" in body  # 扩展字段：引用
 
             # 流式：SSE chunk + [DONE]
             chunks: list[str] = []

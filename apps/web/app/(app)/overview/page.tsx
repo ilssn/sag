@@ -73,7 +73,7 @@ function GoldenPath({
     {
       done: hasSource && hasDoc,
       title: "新建信源，上传文档",
-      desc: "zleap 会自动解析、分块并抽取事件。",
+      desc: "sag 会自动解析、分块并抽取事件。",
       action: <CreateSourceDialog onCreated={onChanged} />,
     },
     {

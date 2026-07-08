@@ -11,11 +11,11 @@ RUN apt-get update \
 
 # 先装依赖（利于缓存）
 COPY pyproject.toml README.md ./
-COPY zleap_api ./zleap_api
+COPY sag_api ./sag_api
 RUN pip install --upgrade pip && pip install ".[postgres]"
 
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
   CMD curl -fsS http://localhost:8000/api/v1/system/health || exit 1
 
-CMD ["uvicorn", "zleap_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "sag_api.main:app", "--host", "0.0.0.0", "--port", "8000"]

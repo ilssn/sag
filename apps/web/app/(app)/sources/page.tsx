@@ -44,7 +44,7 @@ export default function SourcesPage() {
           <EmptyState
             icon={Layers}
             title="还没有信源"
-            description="新建一个信源并上传文档，zleap 会解析入库，让内容可被搜索与问答。"
+            description="新建一个信源并上传文档，sag 会解析入库，让内容可被搜索与问答。"
             action={<CreateSourceDialog onCreated={load} />}
           />
         ) : (

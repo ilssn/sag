@@ -35,7 +35,7 @@ IngestItem(kind="text|file", title, text|path, author?, ts?, thread?, meta{})
 
 ## 统一 Ingestion API（持续写入）
 
-外部系统无需了解 zleap 内部，按标准格式往信源推：
+外部系统无需了解 sag 内部，按标准格式往信源推：
 
 ```
 POST /v1/sources/{id}/messages     # 消息流（IM/飞书/自定义）
