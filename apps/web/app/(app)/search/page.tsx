@@ -1,9 +1,10 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Clock, FileText, MessageSquare, Search as SearchIcon } from "lucide-react";
+import { Clock, FileText, List, MessageSquare, Search as SearchIcon, Waypoints } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
@@ -22,6 +23,13 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+
+// 图谱视图较重，按需加载（列表为默认视图）
+const SearchGraph = dynamic(() => import("@/components/features/search-graph"), {
+  ssr: false,
+  loading: () => <Skeleton className="h-[560px] rounded-lg" />,
+});
 
 const ALL = "__all__";
 
@@ -170,6 +178,8 @@ export default function SearchPage() {
   const [results, setResults] = React.useState<Section[] | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [activity, setActivity] = React.useState<ActivityItem[] | null>(null);
+  const [view, setView] = React.useState<"list" | "graph">("list");
+  const [lastQuery, setLastQuery] = React.useState("");
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
@@ -193,6 +203,7 @@ export default function SearchPage() {
         top_k: 12,
       });
       setResults(r.sections);
+      setLastQuery(q);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "检索失败");
     } finally {
@@ -239,11 +250,34 @@ export default function SearchPage() {
 
       {results !== null ? (
         <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between px-1">
+          <div className="flex items-center justify-between gap-3 px-1">
             <h2 className="text-sm font-medium">检索结果</h2>
-            <span className="text-xs text-muted-foreground">召回 {results.length} 条 · 点击查看原文</span>
+            <div className="flex items-center gap-3">
+              <span className="hidden text-xs text-muted-foreground sm:inline">
+                召回 {results.length} 条 · 点击查看原文
+              </span>
+              <ToggleGroup
+                type="single"
+                variant="outline"
+                size="sm"
+                value={view}
+                onValueChange={(v) => v && setView(v as typeof view)}
+                aria-label="结果视图"
+              >
+                <ToggleGroupItem value="list" aria-label="列表视图">
+                  <List />
+                </ToggleGroupItem>
+                <ToggleGroupItem value="graph" aria-label="图谱视图">
+                  <Waypoints />
+                </ToggleGroupItem>
+              </ToggleGroup>
+            </div>
           </div>
-          <ResultList results={results} />
+          {view === "graph" && results.length > 0 ? (
+            <SearchGraph query={lastQuery} results={results} />
+          ) : (
+            <ResultList results={results} />
+          )}
         </div>
       ) : (
         <div className="flex flex-col gap-2">
