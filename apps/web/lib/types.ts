@@ -90,6 +90,14 @@ export interface Binding {
   config: Record<string, unknown>;
 }
 
+export interface SourceMcpDescriptor {
+  source_id: string;
+  source_name: string;
+  tools: string[];
+  http: { transport: string; url: string; note: string };
+  stdio: { command: string; args: string[]; env: Record<string, string>; note: string };
+}
+
 export interface Thread {
   id: string;
   agent_id: string;

@@ -13,6 +13,7 @@ import { useSearch } from "@/components/features/search-overlay";
 import { DocumentList } from "@/components/features/document-list";
 import { EmptyState } from "@/components/features/empty-state";
 import { RetrievalTestDialog } from "@/components/features/retrieval-test-dialog";
+import { SourceMcpCard } from "@/components/features/source-mcp-card";
 import { SyncPanel } from "@/components/features/sync-panel";
 import { UploadZone } from "@/components/features/upload-zone";
 import { Button } from "@/components/ui/button";
@@ -181,6 +182,7 @@ export default function SourceDetailPage() {
           )}
         </div>
 
+        <SourceMcpCard sourceId={id} />
       </div>
 
       {source && (

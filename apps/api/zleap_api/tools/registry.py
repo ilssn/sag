@@ -30,6 +30,12 @@ class ToolRegistry:
         """给定工具名列表 → OpenAI function schema 列表（供 tools= 传参）。"""
         return [self._by_name[n].meta.to_openai_schema() for n in names if n in self._by_name]
 
+    def overlay(self, tools: list[Tool]) -> ToolRegistry:
+        """派生一个叠加层：内置工具 + 本请求的 MCP 工具（不改动全局单例）。"""
+        child = ToolRegistry()
+        child._by_name = {**self._by_name, **{t.meta.name: t for t in tools}}
+        return child
+
 
 registry = ToolRegistry()
 registry.register(SearchContextTool())

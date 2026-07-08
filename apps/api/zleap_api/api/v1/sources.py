@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from zleap_api.connectors import registry
@@ -98,6 +98,34 @@ async def get_chunk(
     if chunk is None:
         raise NotFoundError("原文分块不存在")
     return {**chunk.model_dump(), "source_id": source.id, "source_name": source.name}
+
+
+@router.get("/{source_id}/mcp")
+async def mcp_descriptor(
+    source_id: str,
+    request: Request,
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """信源即 MCP：返回把该信源挂进外部宿主（Claude Desktop / Cursor）的连接信息。"""
+    source = await get_source(session, source_id)
+    base = str(request.base_url).rstrip("/")
+    return {
+        "source_id": source.id,
+        "source_name": source.name,
+        "tools": ["search", "get_entity", "get_chunk"],
+        "http": {
+            "transport": "streamable-http",
+            "url": f"{base}/mcp/?source_id={source.id}",
+            "note": "在支持 HTTP 传输的 MCP 宿主中填此 URL，并在 Authorization 头携带 Bearer <token>。",
+        },
+        "stdio": {
+            "command": "python",
+            "args": ["-m", "zleap_api.mcp.server"],
+            "env": {"ZLEAP_MCP_SOURCE_ID": source.id},
+            "note": "面向仅支持 stdio 的宿主；需在 apps/api 的 Python 环境下运行。",
+        },
+    }
 
 
 @router.post("/{source_id}/sync", response_model=JobOut)

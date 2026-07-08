@@ -9,6 +9,7 @@ import type {
   Persona,
   SearchResponse,
   Source,
+  SourceMcpDescriptor,
   Thread,
   TokenResponse,
   User,
@@ -141,4 +142,8 @@ export const api = {
     request<{ chunk_id: string; heading: string; content: string; source_id: string; source_name: string }>(
       `/api/v1/sources/${sourceId}/chunks/${chunkId}`,
     ),
+
+  // 信源即 MCP：外部宿主（Claude Desktop / Cursor）挂载信息
+  sourceMcp: (sourceId: string) =>
+    request<SourceMcpDescriptor>(`/api/v1/sources/${sourceId}/mcp`),
 };

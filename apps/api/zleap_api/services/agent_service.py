@@ -17,8 +17,14 @@ from zleap_api.core.errors import MuseError
 from zleap_api.core.logging import get_logger
 from zleap_api.generation import LLMClient, build_prompt_preview
 from zleap_api.sag import EngineManager
-from zleap_api.services.agent_domain import AskPlan, persist_answer, resolve_sources
+from zleap_api.services.agent_domain import (
+    AskPlan,
+    persist_answer,
+    resolve_mcp_specs,
+    resolve_sources,
+)
 from zleap_api.tools import ToolContext, ToolRegistry
+from zleap_api.tools.mcp import open_agent_mcp_tools
 
 log = get_logger("agent")
 
@@ -117,18 +123,24 @@ async def generate_stream(
     preview = plan.prompt_preview
 
     tool_names = _enabled_tool_names(agent)
-    if tool_names and llm.configured:
-        async for ev in _run_tool_loop(
-            agent=agent,
-            messages=messages,
-            citations=citations,
-            tool_names=tool_names,
-            engine_manager=engine_manager,
-            llm=llm,
-            tool_registry=tool_registry,
-            session_factory=session_factory,
-        ):
-            yield ev
+    async with session_factory() as s:
+        mcp_specs = await resolve_mcp_specs(s, agent)
+    if (tool_names or mcp_specs) and llm.configured:
+        # 外部 MCP 连接在整个工具循环期间保持打开，循环结束即断开
+        async with open_agent_mcp_tools(mcp_specs) as mcp_tools:
+            loop_registry = tool_registry.overlay(mcp_tools) if mcp_tools else tool_registry
+            loop_names = [*tool_names, *(t.meta.name for t in mcp_tools)]
+            async for ev in _run_tool_loop(
+                agent=agent,
+                messages=messages,
+                citations=citations,
+                tool_names=loop_names,
+                engine_manager=engine_manager,
+                llm=llm,
+                tool_registry=loop_registry,
+                session_factory=session_factory,
+            ):
+                yield ev
         preview = build_prompt_preview(messages)
 
     yield ("meta", {"citations": citations, "prompt_preview": preview})

@@ -128,6 +128,18 @@ async def resolve_sources(session: AsyncSession, agent: Agent) -> list[Source]:
     return list(rows.scalars().all())
 
 
+async def resolve_mcp_specs(session: AsyncSession, agent: Agent) -> list[tuple[str, dict]]:
+    """展开外部 MCP server 绑定 → `[(label, config), …]`，供 agent 作 MCP 客户端挂载。"""
+    bindings = await list_bindings(session, agent)
+    specs: list[tuple[str, dict]] = []
+    for b in bindings:
+        if b.target_type != BindingTargetType.MCP_SERVER:
+            continue
+        cfg = b.config or {}
+        specs.append((cfg.get("name") or b.target_id or "mcp", cfg))
+    return specs
+
+
 # ── 会话 ────────────────────────────────────────────────────────────
 async def list_threads(session: AsyncSession, agent_id: str) -> list[Thread]:
     rows = await session.execute(

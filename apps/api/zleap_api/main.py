@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -60,8 +60,17 @@ async def lifespan(app: FastAPI):
         settings.llm_configured,
         settings.sag_vector_provider,
     )
+    source_mcp = getattr(app.state, "source_mcp", None)
     try:
-        yield
+        # MCP 端点的会话管理器需在 lifespan 内运行；失败仅关闭 /mcp，不影响其余服务
+        async with AsyncExitStack() as stack:
+            if source_mcp is not None:
+                try:
+                    await stack.enter_async_context(source_mcp.session_manager.run())
+                    log.info("MCP 端点已就绪 · /mcp?source_id=<信源 id>")
+                except Exception as e:  # noqa: BLE001
+                    log.warning("MCP 会话管理器启动失败（/mcp 不可用）：%s", e)
+            yield
     finally:
         warmup_task.cancel()
         await app.state.job_queue.stop()
@@ -134,6 +143,15 @@ def create_app() -> FastAPI:
         )
 
     app.include_router(api_router)
+
+    # 信源即 MCP：挂载 Streamable-HTTP 端点（失败不阻断应用启动）
+    try:
+        from zleap_api.mcp.mount import attach_source_mcp
+
+        app.state.source_mcp = attach_source_mcp(app)
+    except Exception as e:  # noqa: BLE001
+        app.state.source_mcp = None
+        log.warning("MCP 端点挂载失败：%s", e)
 
     @app.get("/", tags=["system"])
     async def root() -> dict:

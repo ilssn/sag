@@ -1,11 +1,12 @@
 "use client";
 
 import * as React from "react";
-import { FileText, Link2, X } from "lucide-react";
+import { FileText, Link2, Plug, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
 import type { Binding, Source } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -15,6 +16,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 export function BindingDialog({
   agentId,
@@ -30,10 +33,16 @@ export function BindingDialog({
   const [sources, setSources] = React.useState<Source[]>([]);
   const [pick, setPick] = React.useState("");
 
+  // MCP 挂载表单
+  const [mode, setMode] = React.useState<"http" | "stdio">("http");
+  const [mcpName, setMcpName] = React.useState("");
+  const [mcpUrl, setMcpUrl] = React.useState("");
+  const [mcpCommand, setMcpCommand] = React.useState("");
+  const [mcpArgs, setMcpArgs] = React.useState("");
+
   const load = React.useCallback(async () => {
     const [b, s] = await Promise.all([api.listBindings(agentId), api.listSources()]);
-    // 界面只呈现信源级绑定
-    setBindings(b.filter((x) => x.target_type === "source"));
+    setBindings(b);
     setSources(s);
   }, [agentId]);
 
@@ -41,10 +50,12 @@ export function BindingDialog({
     if (open) load().catch(() => {});
   }, [open, load]);
 
-  const bound = new Set(bindings.map((b) => b.target_id));
+  const sourceBindings = bindings.filter((b) => b.target_type === "source");
+  const mcpBindings = bindings.filter((b) => b.target_type === "mcp_server");
+  const bound = new Set(sourceBindings.map((b) => b.target_id));
   const nameOf = (b: Binding) => sources.find((s) => s.id === b.target_id)?.name ?? "信源";
 
-  async function add() {
+  async function addSource() {
     if (!pick) return;
     try {
       await api.addBinding(agentId, { target_type: "source", target_id: pick });
@@ -53,6 +64,32 @@ export function BindingDialog({
       onChanged?.();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "绑定失败");
+    }
+  }
+
+  async function addMcp() {
+    const name = mcpName.trim();
+    const config: Record<string, unknown> = name ? { name } : {};
+    if (mode === "http") {
+      if (!mcpUrl.trim()) return;
+      config.url = mcpUrl.trim();
+    } else {
+      if (!mcpCommand.trim()) return;
+      config.command = mcpCommand.trim();
+      const args = mcpArgs.trim().split(/\s+/).filter(Boolean);
+      if (args.length) config.args = args;
+    }
+    try {
+      await api.addBinding(agentId, { target_type: "mcp_server", config });
+      setMcpName("");
+      setMcpUrl("");
+      setMcpCommand("");
+      setMcpArgs("");
+      await load();
+      onChanged?.();
+      toast.success("已挂载 MCP server");
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "挂载失败");
     }
   }
 
@@ -66,54 +103,148 @@ export function BindingDialog({
     }
   }
 
+  function mcpLabel(b: Binding): string {
+    const cfg = (b.config ?? {}) as { name?: string; url?: string; command?: string };
+    return cfg.name || cfg.url || cfg.command || b.target_id || "MCP";
+  }
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="max-w-sm">
+      <DialogContent>
         <DialogHeader>
-          <DialogTitle>绑定信源</DialogTitle>
-          <DialogDescription>助手回答时，会在绑定的信源与自己的记忆中检索。</DialogDescription>
+          <DialogTitle>连接</DialogTitle>
+          <DialogDescription>
+            把助手接到信源（回答的依据）与外部 MCP server（扩展工具）。
+          </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-wrap gap-2">
-            {bindings.length === 0 && (
-              <span className="text-sm text-ink-faint">尚未绑定任何信源</span>
-            )}
-            {bindings.map((b) => (
-              <span
-                key={b.id}
-                className="inline-flex items-center gap-1.5 rounded-full border border-gold/30 bg-gold-soft px-2.5 py-1 text-xs text-gold-strong"
+        <div className="flex flex-col gap-5">
+          {/* 信源 */}
+          <section className="flex flex-col gap-2.5">
+            <Label>信源</Label>
+            <div className="flex flex-wrap gap-2">
+              {sourceBindings.length === 0 && (
+                <span className="text-sm text-muted-foreground">尚未绑定任何信源</span>
+              )}
+              {sourceBindings.map((b) => (
+                <span
+                  key={b.id}
+                  className="inline-flex items-center gap-1.5 rounded-full border bg-muted px-2.5 py-1 text-xs"
+                >
+                  <FileText className="size-3.5" />
+                  {nameOf(b)}
+                  <button onClick={() => remove(b)} className="hover:text-destructive" aria-label="解绑">
+                    <X className="size-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <select
+                value={pick}
+                onChange={(e) => setPick(e.target.value)}
+                className="h-9 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <FileText className="size-3.5" />
-                {nameOf(b)}
-                <button onClick={() => remove(b)} className="hover:text-danger" aria-label="解绑">
-                  <X className="size-3" />
-                </button>
-              </span>
-            ))}
-          </div>
+                <option value="">选择要绑定的信源…</option>
+                {sources
+                  .filter((s) => !bound.has(s.id))
+                  .map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+              </select>
+              <Button variant="outline" onClick={addSource} disabled={!pick}>
+                <Link2 className="size-4" />
+                绑定
+              </Button>
+            </div>
+          </section>
 
-          <div className="flex items-center gap-2">
-            <select
-              value={pick}
-              onChange={(e) => setPick(e.target.value)}
-              className="h-9 min-w-0 flex-1 rounded-sm border border-hairline bg-surface px-3 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <option value="">选择要绑定的信源…</option>
-              {sources
-                .filter((s) => !bound.has(s.id))
-                .map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-            </select>
-            <Button variant="gold" onClick={add} disabled={!pick}>
-              <Link2 className="size-4" />
-              绑定
-            </Button>
-          </div>
+          {/* MCP server */}
+          <section className="flex flex-col gap-2.5 border-t pt-5">
+            <div className="flex flex-col gap-0.5">
+              <Label>MCP server</Label>
+              <p className="text-xs text-muted-foreground">
+                挂载外部 MCP（如本地 filesystem、检索、你自建的工具），助手对话中即可调用。
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {mcpBindings.map((b) => (
+                <span
+                  key={b.id}
+                  className="inline-flex items-center gap-1.5 rounded-full border bg-muted px-2.5 py-1 text-xs"
+                >
+                  <Plug className="size-3.5" />
+                  {mcpLabel(b)}
+                  <button onClick={() => remove(b)} className="hover:text-destructive" aria-label="卸载">
+                    <X className="size-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+
+            <div className="flex flex-col gap-2 rounded-md border p-3">
+              <div className="flex items-center gap-3">
+                <div className="inline-flex rounded-md border p-0.5">
+                  {(["http", "stdio"] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setMode(m)}
+                      className={cn(
+                        "rounded-[5px] px-2.5 py-1 text-xs transition-colors",
+                        mode === m ? "bg-muted font-medium" : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {m === "http" ? "HTTP" : "本地命令"}
+                    </button>
+                  ))}
+                </div>
+                <Input
+                  value={mcpName}
+                  onChange={(e) => setMcpName(e.target.value)}
+                  placeholder="名称（可选，如 filesystem）"
+                  className="h-8 flex-1"
+                />
+              </div>
+              {mode === "http" ? (
+                <Input
+                  value={mcpUrl}
+                  onChange={(e) => setMcpUrl(e.target.value)}
+                  placeholder="https://host/mcp  （Streamable-HTTP 端点）"
+                  className="h-8"
+                />
+              ) : (
+                <div className="flex gap-2">
+                  <Input
+                    value={mcpCommand}
+                    onChange={(e) => setMcpCommand(e.target.value)}
+                    placeholder="命令，如 npx"
+                    className="h-8 w-32"
+                  />
+                  <Input
+                    value={mcpArgs}
+                    onChange={(e) => setMcpArgs(e.target.value)}
+                    placeholder="参数，空格分隔，如 -y @modelcontextprotocol/server-filesystem /data"
+                    className="h-8 flex-1"
+                  />
+                </div>
+              )}
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={addMcp}
+                  disabled={mode === "http" ? !mcpUrl.trim() : !mcpCommand.trim()}
+                >
+                  <Plug className="size-3.5" />
+                  挂载
+                </Button>
+              </div>
+            </div>
+          </section>
         </div>
       </DialogContent>
     </Dialog>
