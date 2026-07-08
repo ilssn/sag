@@ -89,8 +89,29 @@ POST /entities/{eid}/to-soul      收集实体相关事件片段 → generate_pe
 - compose 生产：单 Postgres —— 元数据 + 引擎 `pgvector`（`deploy/docker-compose.yml`）。
 - dev 演进列由 `core/db.py` 幂等 `ADD COLUMN`；生产迁移预留 Alembic。
 
+## 团队 · 审计 · 硬化 · OpenAI（R1–R4，as-built）
+
+- **团队与权限（R1）**：`core/deps` 读 `X-Workspace-Id` 头解析活动空间成员关系（非成员 403），
+  派生 `require_editor`/`require_owner`；`api/v1/workspaces` + `workspace_service` 管理成员
+  （邀请已注册用户 / 改角色 / 移除，最后一名 owner 护栏）；Soul 增 `owner_id`+`visibility`
+  （private/workspace），list 按可见性过滤、管理限创建者/owner、共享助手会话按 `user_id` 隔离；
+  写端点统一挂 `require_editor`。
+- **审计与可观测（R2）**：`audit_logs` 只增表（actor 邮箱快照 / action / target / meta / ip），
+  `audit_service` 在**独立会话**写入（不污染主事务），关键动作全覆盖；`api/v1/audit`
+  owner 限定读 + CSV 导出；`RequestContextMiddleware` 注入 `X-Request-Id`（contextvar + 日志前缀）；
+  SQLite 开 WAL + busy_timeout。
+- **稳定硬化（R3）**：`jobs/inproc` 对 `ServiceUnavailable/Upstream` 指数退避重试
+  （≤`job_max_attempts`），不可重试立即 FAILED；`EngineManager` 引擎槽 LRU
+  （`engine_cache_size`，逐出 aclose，持锁跳过）+ 启动后台预热；`/system/ready`（DB 探针）
+  与 `/health` 分离，compose healthcheck 指向 ready；上传扩展名白名单；前端 30s fetch 超时。
+- **体验四件套 + OpenAI（R4）**：人格 `empty_response` 防幻觉短路；ask SSE `meta.prompt_preview`
+  透明；`GET/DELETE /souls/{id}/memory` 记忆面板；信源「检索测试」→ 参数回填助手；
+  `POST /api/v1/openai/{soul_id}/chat/completions`（stream/非流，JWT bearer）复用
+  `build_ask_context`（`prepare_ask` 与之共用 `AskPlan`）。
+
 ## 质量基线
 
-- `pytest`：14 项（HTTP e2e、连接器、灵魂绑定/解析、记忆闭环、实体→灵魂），全部离线可跑。
-- `ruff` 全绿（line-length 120）；`next build` 全路由类型检查通过。
+- `pytest`：24 项（HTTP e2e、连接器、灵魂绑定/解析、记忆闭环、实体→灵魂、团队、审计、
+  稳定硬化、体验四件套/OpenAI），全部离线可跑（无 LLM key 走短路/降级分支断言）。
+- `ruff` 全绿（line-length 120）；`tsc --noEmit` + `next build` 全路由类型检查通过。
 - LLM/embedding 未配置时：上传/解析/入库可用（降级），问答/抽取给出明确 4xx 与 UI 提示。

@@ -30,19 +30,19 @@
 | # | 缺陷 | 方案 |
 |---|---|---|
 | 5 | ~~引用不可溯源到原文~~ **✅ 已修（P12）** | `GET /sources/{id}/chunks/{chunk_id}` 读原文；引用卡与搜索结果均可点开「原文」对话框；同时修正 `source_id` 语义为 zleap 信源 id（顺带修复搜索跳转 404） |
-| 6 | **记忆不可见不可管**：看不到助手记住了什么，无法遗忘 | 工作台「记忆」面板：条数概览 + 清空记忆（删 conversation 源重建） |
-| 7 | **EngineManager 无界缓存**：每信源一个常驻引擎，只增不减；重启后首次全局搜索需冷启动全部引擎 | LRU 上限 + 逐出时 aclose；启动后台预热最近活跃信源 |
-| 8 | **任务无自动重试**：`RetryableError`（限流/超时）也要手动重跑 | worker 对 Retryable 类错误退避重试 ≤2 次 |
-| 9 | **成员能力缺席**：多用户模型在，但无邀请/成员管理 UI | 设置页成员列表 + 邀请（配合注册开关） |
+| 6 | ~~记忆不可见不可管~~ **✅ 已修（R4）** | 工作台「查看记忆」面板：条数/分块/事件概览 + 清空记忆（删 conversation 源、解会话引用） |
+| 7 | ~~EngineManager 无界缓存~~ **✅ 已修（R3）** | 引擎槽 LRU 上限（`engine_cache_size`）+ 逐出 aclose（持锁跳过）；启动后台预热最近活跃信源 |
+| 8 | ~~任务无自动重试~~ **✅ 已修（R3）** | worker 对 `ServiceUnavailable/Upstream` 指数退避重试 ≤`job_max_attempts`，不可重试立即失败 |
+| 9 | ~~成员能力缺席~~ **✅ 已修（R1）** | 设置页成员卡：邀请/改角色/移除（owner 限定）+ 顶栏空间切换 + 只读写入口禁用 |
 
 ## P2 · 记录在案
 
-- 前端 fetch 无超时；SSE 依赖 sse-starlette 默认 15s ping（可接受）。
-- 上传仅校验大小，未白名单 MIME（引擎解析失败会走 failed 态兜底）。
+- ~~前端 fetch 无超时~~ **✅ 已修（R3）**：`request()` 30s AbortSignal 超时护栏（SSE 除外）。
+- ~~上传仅校验大小，未白名单 MIME~~ **✅ 已修（R3）**：扩展名白名单（后端校验 + capabilities 暴露 + 前端 accept 拦截）。
+- ~~审计/日志面板/指标未开工~~ **✅ 已修（R2）**：审计只增表 + owner 面板 + CSV 导出 + `X-Request-Id` 请求追踪。
 - 同一会话并发提问的记忆写入顺序未加锁（低风险）。
 - 遗留 `chat_threads/chat_messages` 表与模型保留（老库兼容），已无 API 面。
-- 预览 artifact 仍是灵魂时代文案，待按定稿重制。
-- 审计/日志面板/指标：见 roadmap P7，未开工。
+- 完整 user/run 维记忆与 key-as-scope 密钥体系：见 [product-form](product-form.md)，v0.1.0 预留。
 
 ## 结论
 
