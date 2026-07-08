@@ -164,7 +164,7 @@ export default function SearchGraph({
             });
           }
         }}
-        className="[&_.react-flow\_\_edge-path]:!stroke-border"
+        className="sag-graph"
       >
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} className="!bg-transparent" />
         <Controls showInteractive={false} className="!shadow-soft" />

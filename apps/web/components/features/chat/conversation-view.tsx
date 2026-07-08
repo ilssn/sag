@@ -96,6 +96,7 @@ export function ConversationView({
   heroNode,
   emptyTitle,
   emptyHint,
+  suggestions,
   placeholder = "输入你的问题，Enter 发送 · Shift+Enter 换行",
 }: {
   conversationKey: string;
@@ -108,6 +109,8 @@ export function ConversationView({
   heroNode: React.ReactNode;
   emptyTitle: string;
   emptyHint: string;
+  /** 空态建议提问：点击即发送 */
+  suggestions?: string[];
   placeholder?: string;
 }) {
   const { capabilities } = useApp();
@@ -180,8 +183,8 @@ export function ConversationView({
     [flushTokens],
   );
 
-  async function send() {
-    const q = input.trim();
+  async function send(text?: string) {
+    const q = (text ?? input).trim();
     if (!q || streaming) return;
     if (!capabilities?.llm_configured) {
       toast.error("尚未配置模型，无法问答。请前往设置。");
@@ -279,6 +282,20 @@ export function ConversationView({
               {heroNode}
               <div className="font-display text-xl text-foreground">{emptyTitle}</div>
               <p className="max-w-sm text-sm text-muted-foreground">{emptyHint}</p>
+              {suggestions && suggestions.length > 0 && (
+                <div className="mt-3 flex max-w-md flex-wrap justify-center gap-2">
+                  {suggestions.map((q) => (
+                    <button
+                      key={q}
+                      type="button"
+                      onClick={() => send(q)}
+                      className="rounded-full border bg-card px-3 py-1.5 text-xs text-muted-foreground shadow-soft transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
             messages.map((m) => (
@@ -309,7 +326,7 @@ export function ConversationView({
               <Square className="size-4" />
             </Button>
           ) : (
-            <Button size="icon" onClick={send} disabled={!input.trim()} title="发送">
+            <Button size="icon" onClick={() => send()} disabled={!input.trim()} title="发送">
               <ArrowUp className="size-4" />
             </Button>
           )}

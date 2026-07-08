@@ -80,6 +80,11 @@ export default function ChatPage() {
         avatarNode={avatarNode}
         heroNode={heroNode}
         emptyTitle={agent.name}
+        suggestions={[
+          "总结一下知识库里最重要的内容",
+          "这份资料的关键结论是什么？",
+          "帮我梳理其中的时间线",
+        ]}
         emptyHint={agent.persona?.greeting || "我在。上传资料到知识库，或直接问我任何问题。"}
         placeholder={`问点什么…  Enter 发送 · Shift+Enter 换行`}
       />
