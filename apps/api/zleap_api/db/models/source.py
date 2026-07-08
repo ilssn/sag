@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import JSON, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Integer, String, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,14 +13,6 @@ class Source(IDMixin, TimestampMixin, Base):
 
     __tablename__ = "sources"
 
-    workspace_id: Mapped[str] = mapped_column(
-        ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
-    )
-    # 归属命名空间（文件夹）；灵魂会话记忆源会置 soul_id
-    namespace_id: Mapped[str | None] = mapped_column(
-        ForeignKey("namespaces.id", ondelete="SET NULL"), nullable=True, index=True
-    )
-    soul_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text, default="")
     source_type: Mapped[SourceType] = mapped_column(

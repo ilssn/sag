@@ -79,7 +79,7 @@ async def test_agent_tool_loop_dispatch_and_citations():
             # 开启额外工具 echo；不绑定信源 → 不触发引擎，循环仍运行
             soul = (
                 await c.post(
-                    "/api/v1/souls",
+                    "/api/v1/agents",
                     headers=A,
                     json={"name": "工具助手", "persona": {"tools": ["echo"]}},
                 )
@@ -111,7 +111,7 @@ async def test_no_tools_soul_skips_loop():
         app.state.llm = fake
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
             A = await _register(c, "plainagent@t.com")
-            soul = (await c.post("/api/v1/souls", headers=A, json={"name": "普通助手"})).json()
+            soul = (await c.post("/api/v1/agents", headers=A, json={"name": "普通助手"})).json()
             r = await c.post(
                 f"/api/v1/openai/{soul['id']}/chat/completions",
                 headers=A,

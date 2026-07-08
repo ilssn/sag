@@ -20,7 +20,6 @@ class SourceCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str = ""
     connector_kind: ConnectorKind = ConnectorKind.FILE_UPLOAD
-    namespace_id: str | None = None
     config: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -34,7 +33,6 @@ class SourceOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    namespace_id: str | None
     name: str
     description: str
     source_type: SourceType

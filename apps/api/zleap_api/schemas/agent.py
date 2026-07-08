@@ -5,42 +5,36 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from zleap_api.enums import BindingTargetType, MessageRole, SoulOrigin, SoulStatus, SoulVisibility
+from zleap_api.enums import BindingTargetType, MessageRole
 
 
-class SoulCreate(BaseModel):
+class AgentCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     avatar: str = ""
-    persona: dict[str, Any] = Field(default_factory=dict)
-    visibility: SoulVisibility = SoulVisibility.PRIVATE
+    persona: dict[str, Any] = Field(default_factory=dict)  # { system_prompt, greeting, tools[] }
 
 
-class SoulUpdate(BaseModel):
+class AgentUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=120)
     avatar: str | None = None
     persona: dict[str, Any] | None = None
-    visibility: SoulVisibility | None = None
 
 
-class SoulOut(BaseModel):
+class AgentOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
     name: str
     avatar: str
     persona: dict[str, Any]
-    owner_id: str | None
-    visibility: SoulVisibility
-    origin: SoulOrigin
-    status: SoulStatus
-    memory_namespace_id: str | None
     created_at: datetime
     updated_at: datetime
 
 
 class BindingCreate(BaseModel):
-    target_type: BindingTargetType
-    target_id: str
+    target_type: BindingTargetType = BindingTargetType.SOURCE
+    target_id: str = ""
+    config: dict[str, Any] = Field(default_factory=dict)  # MCP: url 或 command/args/env
 
 
 class BindingOut(BaseModel):
@@ -49,35 +43,33 @@ class BindingOut(BaseModel):
     id: str
     target_type: BindingTargetType
     target_id: str
-    mode: str
+    config: dict[str, Any]
 
 
-class SoulThreadCreate(BaseModel):
+class ThreadCreate(BaseModel):
     title: str = "新会话"
 
 
-class SoulThreadOut(BaseModel):
+class ThreadOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    soul_id: str
+    agent_id: str
     title: str
     created_at: datetime
     updated_at: datetime
 
 
-class SoulMessageOut(BaseModel):
+class MessageOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
     thread_id: str
     role: MessageRole
     content: str
-    author: str | None
     citations: list[dict[str, Any]]
     created_at: datetime
 
 
-class SoulAskRequest(BaseModel):
+class AskRequest(BaseModel):
     query: str = Field(min_length=1, max_length=4000)
-    author: str | None = None

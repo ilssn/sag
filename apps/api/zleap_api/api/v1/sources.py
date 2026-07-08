@@ -1,23 +1,17 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from zleap_api.connectors import registry
 from zleap_api.core.db import get_session
-from zleap_api.core.deps import (
-    get_engine_manager,
-    get_job_queue,
-    get_workspace_id,
-    require_editor,
-)
-from zleap_api.enums import AuditAction
+from zleap_api.core.deps import get_current_user, get_engine_manager, get_job_queue
+from zleap_api.db.models import User
 from zleap_api.jobs import JobQueue
 from zleap_api.sag import EngineManager
 from zleap_api.schemas.common import Ok
 from zleap_api.schemas.job import JobOut
 from zleap_api.schemas.source import ConnectorOut, SourceCreate, SourceOut, SourceUpdate
-from zleap_api.services import audit_service
 from zleap_api.services.source_service import (
     create_source,
     delete_source,
@@ -38,81 +32,52 @@ async def list_connectors() -> list[ConnectorOut]:
 
 @router.get("", response_model=list[SourceOut])
 async def list_(
-    namespace_id: str | None = None,
-    workspace_id: str = Depends(get_workspace_id),
-    session: AsyncSession = Depends(get_session),
+    _user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)
 ) -> list[SourceOut]:
-    sources = await list_sources(session, workspace_id, namespace_id=namespace_id)
-    return [SourceOut.model_validate(s) for s in sources]
+    return [SourceOut.model_validate(s) for s in await list_sources(session)]
 
 
 @router.post("", response_model=SourceOut, status_code=201)
 async def create(
     body: SourceCreate,
-    request: Request,
-    workspace_id: str = Depends(get_workspace_id),
-    _editor=Depends(require_editor),
+    _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     engine_manager: EngineManager = Depends(get_engine_manager),
 ) -> SourceOut:
-    source = await create_source(session, workspace_id, body, engine_manager=engine_manager)
-    out = SourceOut.model_validate(source)
-    await audit_service.record_request(
-        request,
-        AuditAction.SOURCE_CREATE,
-        target_type="source",
-        target_id=source.id,
-        target_label=source.name,
-    )
-    return out
+    source = await create_source(session, body, engine_manager=engine_manager)
+    return SourceOut.model_validate(source)
 
 
 @router.get("/{source_id}", response_model=SourceOut)
 async def get_(
     source_id: str,
-    workspace_id: str = Depends(get_workspace_id),
+    _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> SourceOut:
-    return SourceOut.model_validate(await get_source(session, workspace_id, source_id))
+    return SourceOut.model_validate(await get_source(session, source_id))
 
 
 @router.patch("/{source_id}", response_model=SourceOut)
 async def update_(
     source_id: str,
     body: SourceUpdate,
-    workspace_id: str = Depends(get_workspace_id),
-    _editor=Depends(require_editor),
+    _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> SourceOut:
-    return SourceOut.model_validate(await update_source(session, workspace_id, source_id, body))
+    return SourceOut.model_validate(await update_source(session, source_id, body))
 
 
 @router.delete("/{source_id}", response_model=Ok)
 async def delete_(
     source_id: str,
-    request: Request,
-    workspace_id: str = Depends(get_workspace_id),
-    _editor=Depends(require_editor),
+    _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     engine_manager: EngineManager = Depends(get_engine_manager),
 ) -> Ok:
     from zleap_api.core.config import settings
 
-    source = await get_source(session, workspace_id, source_id)  # 捕获名称用于审计
-    label = source.name
     await delete_source(
-        session,
-        workspace_id,
-        source_id,
-        engine_manager=engine_manager,
-        upload_dir=settings.upload_dir,
-    )
-    await audit_service.record_request(
-        request,
-        AuditAction.SOURCE_DELETE,
-        target_type="source",
-        target_id=source_id,
-        target_label=label,
+        session, source_id, engine_manager=engine_manager, upload_dir=settings.upload_dir
     )
     return Ok(detail="信源已删除")
 
@@ -121,14 +86,14 @@ async def delete_(
 async def get_chunk(
     source_id: str,
     chunk_id: str,
-    workspace_id: str = Depends(get_workspace_id),
+    _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     engine_manager: EngineManager = Depends(get_engine_manager),
 ) -> dict:
     """引用溯源：读取某分块的完整原文。"""
     from zleap_api.core.errors import NotFoundError
 
-    source = await get_source(session, workspace_id, source_id)
+    source = await get_source(session, source_id)
     chunk = await engine_manager.get_chunk(source.sag_source_config_id, chunk_id, source=source)
     if chunk is None:
         raise NotFoundError("原文分块不存在")
@@ -138,15 +103,9 @@ async def get_chunk(
 @router.post("/{source_id}/sync", response_model=JobOut)
 async def sync(
     source_id: str,
-    request: Request,
-    workspace_id: str = Depends(get_workspace_id),
-    _editor=Depends(require_editor),
+    _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     job_queue: JobQueue = Depends(get_job_queue),
 ) -> JobOut:
-    job = await sync_source(session, workspace_id, source_id, job_queue=job_queue)
-    out = JobOut.model_validate(job)
-    await audit_service.record_request(
-        request, AuditAction.SOURCE_SYNC, target_type="source", target_id=source_id
-    )
-    return out
+    job = await sync_source(session, source_id, job_queue=job_queue)
+    return JobOut.model_validate(job)

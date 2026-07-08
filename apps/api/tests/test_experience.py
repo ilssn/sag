@@ -21,7 +21,7 @@ EMPTY = "抱歉，我暂时没有查到相关资料。"
 async def _make_soul_with_empty_response(c, headers):
     soul = (
         await c.post(
-            "/api/v1/souls",
+            "/api/v1/agents",
             headers=headers,
             json={"name": "严谨助手", "persona": {"empty_response": EMPTY}},
         )
@@ -38,13 +38,13 @@ async def test_empty_response_short_circuit_and_prompt_preview():
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
             A = await _register(c)
             soul = await _make_soul_with_empty_response(c, A)
-            thread = (await c.post(f"/api/v1/souls/{soul['id']}/threads", headers=A, json={})).json()
+            thread = (await c.post(f"/api/v1/agents/{soul['id']}/threads", headers=A, json={})).json()
 
             # 无绑定信源 → 检索为空 → 兜底话术，且不需要 LLM（离线也可）
             events: list[tuple[str, dict]] = []
             async with c.stream(
                 "POST",
-                f"/api/v1/souls/{soul['id']}/threads/{thread['id']}/ask",
+                f"/api/v1/agents/{soul['id']}/threads/{thread['id']}/ask",
                 headers=A,
                 json={"query": "公司的报销流程是怎样的？"},
             ) as resp:
@@ -66,29 +66,9 @@ async def test_empty_response_short_circuit_and_prompt_preview():
 
             # 该轮回答已落库
             msgs = (
-                await c.get(f"/api/v1/souls/{soul['id']}/threads/{thread['id']}/messages", headers=A)
+                await c.get(f"/api/v1/agents/{soul['id']}/threads/{thread['id']}/messages", headers=A)
             ).json()
             assert any(m["content"] == EMPTY and m["role"] == "assistant" for m in msgs)
-
-
-@pytest.mark.asyncio
-async def test_memory_panel():
-    from zleap_api.main import app
-
-    transport = httpx.ASGITransport(app=app)
-    async with app.router.lifespan_context(app):
-        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
-            A = await _register(c, "mem@t.com")
-            soul = await _make_soul_with_empty_response(c, A)
-
-            stats = (await c.get(f"/api/v1/souls/{soul['id']}/memory", headers=A)).json()
-            assert stats["document_count"] == 0 and stats["chunk_count"] == 0
-            assert stats["recent"] == []
-
-            # 无记忆时清空 → 友好提示
-            cleared = await c.request("DELETE", f"/api/v1/souls/{soul['id']}/memory", headers=A)
-            assert cleared.status_code == 200
-            assert "暂无" in cleared.json()["detail"]
 
 
 @pytest.mark.asyncio

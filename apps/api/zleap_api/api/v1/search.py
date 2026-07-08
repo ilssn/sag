@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from zleap_api.core.db import get_session
-from zleap_api.core.deps import get_engine_manager, get_workspace_id
+from zleap_api.core.deps import get_current_user, get_engine_manager
+from zleap_api.db.models import User
 from zleap_api.sag import EngineManager
 from zleap_api.schemas.search import GlobalSearchRequest, SearchRequest, SearchResponse, SectionOut
 from zleap_api.services.source_service import get_source, list_sources
@@ -17,11 +18,11 @@ global_router = APIRouter(prefix="/search", tags=["search"])
 async def search(
     source_id: str,
     body: SearchRequest,
-    workspace_id: str = Depends(get_workspace_id),
+    _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     engine_manager: EngineManager = Depends(get_engine_manager),
 ) -> SearchResponse:
-    source = await get_source(session, workspace_id, source_id)
+    source = await get_source(session, source_id)
     outcome = await engine_manager.search(
         source.sag_source_config_id,
         body.query,
@@ -43,12 +44,12 @@ async def search(
 @global_router.post("", response_model=SearchResponse)
 async def global_search(
     body: GlobalSearchRequest,
-    workspace_id: str = Depends(get_workspace_id),
+    _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     engine_manager: EngineManager = Depends(get_engine_manager),
 ) -> SearchResponse:
     """全局搜索：跨全部（或指定）信源 fan-out 检索，结果带信源名。"""
-    sources = await list_sources(session, workspace_id)
+    sources = await list_sources(session)
     if body.source_ids:
         wanted = set(body.source_ids)
         sources = [s for s in sources if s.id in wanted]

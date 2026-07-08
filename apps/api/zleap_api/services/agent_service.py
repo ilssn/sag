@@ -1,12 +1,9 @@
 """Agent 循环 —— 把「问答」从 RAG 单发升级为有界工具调用循环。
 
 设计要点（对齐旧版 SAG 的解耦思路，但用原生 function-calling）：
-- 检索不再是写死的必经步骤，而是 `search_context` 工具；对有信源绑定的助手，
-  循环开始前**自动播种**一次检索（保住「永远有据」、离线可短路），随后模型可
-  按需再调工具（`get_entity`、以及第二阶段的 MCP 工具）。
-- 默认（未开启额外工具）行为与旧版**逐字节一致**：meta → 流式 token → done，
-  短路与未配置分支不变。额外工具仅在 `persona.tools` 开启时进入循环。
-- 最终答案始终走 `llm.stream()` 流式；工具「决策」步走 `llm.chat(tools=)` 非流式。
+- 检索不再是写死的必经步骤，而是工具（内置 `search_context` 或经 MCP 的 `search`）。
+  默认（未开启额外工具）行为：meta → 流式 token → done。额外工具在 `persona.tools`
+  开启时进入循环；最终答案始终走 `llm.stream()`，工具「决策」步走 `llm.chat(tools=)`。
 """
 
 from __future__ import annotations
@@ -20,12 +17,7 @@ from zleap_api.core.errors import MuseError
 from zleap_api.core.logging import get_logger
 from zleap_api.generation import LLMClient, build_prompt_preview
 from zleap_api.sag import EngineManager
-from zleap_api.services.soul_service import (
-    AskPlan,
-    persist_answer,
-    remember_exchange,
-    resolve_sources,
-)
+from zleap_api.services.agent_domain import AskPlan, persist_answer, resolve_sources
 from zleap_api.tools import ToolContext, ToolRegistry
 
 log = get_logger("agent")
@@ -36,16 +28,16 @@ AGENT_MAX_STEPS = 4
 AgentEvent = tuple[str, dict]
 
 
-def _enabled_tool_names(soul) -> list[str]:
-    """助手显式开启的额外工具名（persona.tools）。默认空 → 不进循环，行为同旧版。"""
-    persona = soul.persona or {}
+def _enabled_tool_names(agent) -> list[str]:
+    """Agent 显式开启的额外工具名（persona.tools）。默认空 → 不进循环。"""
+    persona = agent.persona or {}
     names = persona.get("tools")
     return [n for n in names if isinstance(n, str)] if isinstance(names, list) else []
 
 
 async def _run_tool_loop(
     *,
-    soul,
+    agent,
     messages: list[dict],
     citations: list[dict],
     tool_names: list[str],
@@ -56,9 +48,9 @@ async def _run_tool_loop(
 ) -> AsyncIterator[AgentEvent]:
     """就地驱动工具循环，改写 messages/citations，并 yield 透明化的 tool 事件。"""
     async with session_factory() as s:
-        sources = await resolve_sources(s, soul)
+        sources = await resolve_sources(s, agent)
     ctx = ToolContext(
-        engine_manager=engine_manager, sources=sources, persona=soul.persona or {}, soul=soul
+        engine_manager=engine_manager, sources=sources, persona=agent.persona or {}, agent=agent
     )
     schemas = tool_registry.schemas(tool_names)
     if not schemas:
@@ -98,20 +90,17 @@ async def _run_tool_loop(
 
 async def generate_stream(
     session_factory: async_sessionmaker,
-    job_queue,
     *,
     plan: AskPlan,
-    soul,
+    agent,
     thread_id: str | None,
-    query: str,
     engine_manager: EngineManager,
     llm: LLMClient,
     tool_registry: ToolRegistry,
-    upload_dir: str,
 ) -> AsyncIterator[AgentEvent]:
     """驱动一次问答，产出事件流：meta → (tool)* → token* → done / error。
 
-    `thread_id` 为 None 时（如 OpenAI 无状态端点）跳过落库与记忆闭环。
+    `thread_id` 为 None 时（如 OpenAI 无状态端点）跳过落库。
     """
     # 防幻觉短路：检索为空且配置了兜底话术 → 不调用 LLM
     if plan.short_circuit is not None:
@@ -127,10 +116,10 @@ async def generate_stream(
     citations = list(plan.citations)
     preview = plan.prompt_preview
 
-    tool_names = _enabled_tool_names(soul)
+    tool_names = _enabled_tool_names(agent)
     if tool_names and llm.configured:
         async for ev in _run_tool_loop(
-            soul=soul,
+            agent=agent,
             messages=messages,
             citations=citations,
             tool_names=tool_names,
@@ -157,13 +146,4 @@ async def generate_stream(
     mid = None
     if thread_id is not None:
         mid = await persist_answer(session_factory, thread_id, answer, citations)
-        await remember_exchange(
-            session_factory,
-            job_queue,
-            soul_id=soul.id,
-            thread_id=thread_id,
-            question=query,
-            answer=answer,
-            upload_dir=upload_dir,
-        )
     yield ("done", {"message_id": mid})

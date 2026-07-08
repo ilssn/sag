@@ -1,0 +1,54 @@
+from __future__ import annotations
+
+from sqlalchemy import JSON, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Enum as SAEnum
+from sqlalchemy.orm import Mapped, mapped_column
+
+from zleap_api.db.base import Base, IDMixin, TimestampMixin
+from zleap_api.enums import BindingTargetType, MessageRole
+
+
+class Agent(IDMixin, TimestampMixin, Base):
+    """Agent —— 名字 + 系统提示 + 挂载的信源/工具（经 MCP）。"""
+
+    __tablename__ = "agents"
+
+    name: Mapped[str] = mapped_column(String(120))
+    avatar: Mapped[str] = mapped_column(String(64), default="")  # emoji / 首字母
+    # 配置：{ system_prompt, greeting, tools[] }（tools 为额外启用的工具/MCP 名）
+    persona: Mapped[dict] = mapped_column("persona_json", JSON, default=dict)
+
+
+class AgentBinding(IDMixin, TimestampMixin, Base):
+    """Agent 挂载的东西：一个信源，或一个 MCP server（工具来源）。"""
+
+    __tablename__ = "agent_bindings"
+    __table_args__ = (
+        UniqueConstraint("agent_id", "target_type", "target_id", name="uq_agent_binding"),
+    )
+
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"), index=True)
+    target_type: Mapped[BindingTargetType] = mapped_column(
+        SAEnum(BindingTargetType, native_enum=False, length=16)
+    )
+    target_id: Mapped[str] = mapped_column(String(64), index=True)
+    # MCP server 连接配置（url 或 command/args/env）；信源绑定为空
+    config: Mapped[dict] = mapped_column("config_json", JSON, default=dict)
+
+
+class Thread(IDMixin, TimestampMixin, Base):
+    __tablename__ = "threads"
+
+    agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(300), default="新会话")
+
+
+class Message(IDMixin, TimestampMixin, Base):
+    __tablename__ = "messages"
+
+    thread_id: Mapped[str] = mapped_column(
+        ForeignKey("threads.id", ondelete="CASCADE"), index=True
+    )
+    role: Mapped[MessageRole] = mapped_column(SAEnum(MessageRole, native_enum=False, length=16))
+    content: Mapped[str] = mapped_column(Text, default="")
+    citations: Mapped[list] = mapped_column("citations_json", JSON, default=list)

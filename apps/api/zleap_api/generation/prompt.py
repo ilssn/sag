@@ -57,7 +57,7 @@ def build_messages(
     return messages
 
 
-def build_soul_messages(
+def build_agent_messages(
     name: str,
     persona: dict[str, Any],
     query: str,

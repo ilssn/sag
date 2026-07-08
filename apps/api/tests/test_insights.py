@@ -1,4 +1,4 @@
-"""洞察 + 书→人物：注入实体图谱后验证读路径与实体→灵魂（离线，人格走 fallback）。"""
+"""实体读路径：注入事件—实体图谱后验证 entities 端点（离线）。"""
 
 import uuid
 
@@ -7,7 +7,7 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_entity_insights_and_book_to_soul():
+async def test_entity_read_path():
     from zleap_api.core.db import SessionLocal
     from zleap_api.db.models import Source
     from zleap_api.main import app
@@ -61,17 +61,7 @@ async def test_entity_insights_and_book_to_soul():
                 await s.flush()
                 s.add(EventEntity(id=uuid.uuid4().hex, event_id=ev.id, entity_id=ent.id, weight=1.0))
                 await s.commit()
-                entity_id = ent.id
 
             # 读实体（带热度）
             ents = (await c.get(f"/api/v1/sources/{sid}/entities?types=person", headers=H)).json()
             assert any(e["name"] == "关羽" and e["heat"] >= 1 for e in ents)
-
-            # 书 → 人物：离线未配置 LLM → 人格走 fallback，仍应建灵魂并绑定该书
-            r = await c.post(f"/api/v1/sources/{sid}/entities/{entity_id}/to-soul", headers=H)
-            assert r.status_code == 201, r.text
-            soul = r.json()
-            assert soul["name"] == "关羽" and soul["origin"] == "book_entity"
-
-            bindings = (await c.get(f"/api/v1/souls/{soul['id']}/bindings", headers=H)).json()
-            assert any(b["target_type"] == "source" and b["target_id"] == sid for b in bindings)

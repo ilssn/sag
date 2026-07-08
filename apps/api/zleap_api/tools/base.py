@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from zleap_api.db.models import Soul, Source
+    from zleap_api.db.models import Agent, Source
     from zleap_api.sag import EngineManager
 
 
@@ -43,7 +43,7 @@ class ToolContext:
     engine_manager: EngineManager
     sources: list[Source] = field(default_factory=list)
     persona: dict[str, Any] = field(default_factory=dict)
-    soul: Soul | None = None
+    agent: Agent | None = None
 
 
 @dataclass
