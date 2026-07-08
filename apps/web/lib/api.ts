@@ -41,7 +41,17 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const ws = getActiveWorkspace();
   if (ws) headers["X-Workspace-Id"] = ws;
 
-  const res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
+  // 30s 超时护栏（SSE 流式接口不走此函数，不受影响）
+  const signal = opts.signal ?? AbortSignal.timeout(30_000);
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, { ...opts, headers, signal });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "TimeoutError") {
+      throw new ApiError(0, "timeout", "请求超时，请检查网络后重试");
+    }
+    throw new ApiError(0, "network", "网络异常，请稍后重试");
+  }
 
   if (res.status === 401 && typeof window !== "undefined" && !path.includes("/auth/")) {
     clearToken();

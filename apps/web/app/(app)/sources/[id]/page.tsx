@@ -142,7 +142,12 @@ export default function SourceDetailPage() {
         {source &&
           canWrite &&
           (source.connector_kind === "file_upload" ? (
-            <UploadZone sourceId={id} onUploaded={refresh} maxMb={capabilities?.max_upload_mb ?? 25} />
+            <UploadZone
+              sourceId={id}
+              onUploaded={refresh}
+              maxMb={capabilities?.max_upload_mb ?? 25}
+              allowedExts={capabilities?.allowed_upload_exts}
+            />
           ) : (
             <SyncPanel sourceId={id} onSynced={refresh} />
           ))}

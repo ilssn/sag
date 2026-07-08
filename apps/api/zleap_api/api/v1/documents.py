@@ -26,6 +26,17 @@ from zleap_api.services.source_service import get_source
 router = APIRouter(prefix="/sources/{source_id}/documents", tags=["documents"])
 
 
+def _check_extension(filename: str | None) -> None:
+    """按白名单校验上传扩展名（空白名单 = 不限制）。"""
+    allowed = settings.allowed_upload_exts
+    if not allowed:
+        return
+    name = (filename or "").lower()
+    if "." not in name or ("." + name.rsplit(".", 1)[1]) not in allowed:
+        pretty = "、".join(sorted(e.lstrip(".") for e in allowed))
+        raise ValidationError(f"不支持的文件类型。可上传：{pretty}")
+
+
 @router.get("", response_model=list[DocumentOut])
 async def list_(
     source_id: str,
@@ -47,6 +58,7 @@ async def upload(
     job_queue: JobQueue = Depends(get_job_queue),
 ) -> DocumentOut:
     source = await get_source(session, workspace_id, source_id)
+    _check_extension(file.filename)
     data = await file.read()
     if not data:
         raise ValidationError("文件内容为空")

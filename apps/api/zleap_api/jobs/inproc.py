@@ -12,6 +12,8 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from zleap_api.core.config import settings
+from zleap_api.core.errors import ServiceUnavailableError, UpstreamError
 from zleap_api.core.logging import get_logger
 from zleap_api.enums import JobStatus
 from zleap_api.jobs.queue import JobQueue
@@ -20,9 +22,17 @@ from zleap_api.sag import EngineManager
 
 log = get_logger("jobs")
 
+# 退避基数（秒）：第 n 次重试等待 base**n。测试可 monkeypatch 缩短。
+_BACKOFF_BASE_SECONDS = 2.0
+
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """瞬时故障（限流/超时/上游暂不可用）可重试；输入/配置类错误不重试。"""
+    return isinstance(exc, (ServiceUnavailableError, UpstreamError))
 
 
 class InProcessAsyncQueue(JobQueue):
@@ -38,10 +48,25 @@ class InProcessAsyncQueue(JobQueue):
         self._concurrency = concurrency
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._workers: list[asyncio.Task] = []
+        self._retry_tasks: set[asyncio.Task] = set()
         self._started = False
 
     async def enqueue(self, job_id: str) -> None:
         await self._queue.put(job_id)
+
+    def _schedule_retry(self, job_id: str, delay: float) -> None:
+        """退避后重新入队（不阻塞 worker）。"""
+
+        async def _later() -> None:
+            try:
+                await asyncio.sleep(delay)
+                await self._queue.put(job_id)
+            except asyncio.CancelledError:
+                pass
+
+        task = asyncio.create_task(_later(), name=f"zleap-retry-{job_id}")
+        self._retry_tasks.add(task)
+        task.add_done_callback(self._retry_tasks.discard)
 
     async def start(self) -> None:
         if self._started:
@@ -53,6 +78,9 @@ class InProcessAsyncQueue(JobQueue):
         log.info("任务队列已启动（并发=%d）", self._concurrency)
 
     async def stop(self) -> None:
+        for t in list(self._retry_tasks):
+            t.cancel()
+        self._retry_tasks.clear()
         for w in self._workers:
             w.cancel()
         for w in self._workers:
@@ -124,9 +152,24 @@ class InProcessAsyncQueue(JobQueue):
             except Exception as e:  # noqa: BLE001
                 await session.rollback()
                 job = await session.get(Job, job_id)
+                msg = getattr(e, "message", None) or str(e)
+                attempts = job.attempts if job is not None else settings.job_max_attempts
+                retry = job is not None and _is_retryable(e) and attempts < settings.job_max_attempts
                 if job is not None:
-                    job.status = JobStatus.FAILED
-                    job.error = getattr(e, "message", None) or str(e)
-                    job.finished_at = _now()
-                log.warning("任务失败 job=%s: %s", job_id, getattr(e, "message", None) or str(e))
+                    if retry:
+                        # 退避重排：状态回 QUEUED，延迟 base**attempts 秒后重新入队
+                        job.status = JobStatus.QUEUED
+                        job.progress = 0.0
+                        job.error = f"第 {attempts} 次失败，将重试：{msg}"
+                        delay = _BACKOFF_BASE_SECONDS**attempts
+                        self._schedule_retry(job_id, delay)
+                        log.warning(
+                            "任务可重试 job=%s（第 %d/%d 次），%.1fs 后重排：%s",
+                            job_id, attempts, settings.job_max_attempts, delay, msg,
+                        )
+                    else:
+                        job.status = JobStatus.FAILED
+                        job.error = msg
+                        job.finished_at = _now()
+                        log.warning("任务失败 job=%s（尝试 %d 次）：%s", job_id, attempts, msg)
             await session.commit()

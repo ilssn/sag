@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -32,6 +33,7 @@ StageCallback = Callable[[str], Awaitable[None]]
 class _Slot:
     engine: DataEngine
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    last_used: float = field(default_factory=time.monotonic)
 
 
 class EngineManager:
@@ -39,6 +41,7 @@ class EngineManager:
         self._settings = settings
         self._slots: dict[str, _Slot] = {}
         self._create_lock = asyncio.Lock()
+        self._cache_size = max(1, settings.engine_cache_size)
 
     def _config_for(self, source: Source | None) -> Any:
         overrides = None
@@ -49,6 +52,7 @@ class EngineManager:
     async def _slot(self, source_config_id: str, source: Source | None = None) -> _Slot:
         slot = self._slots.get(source_config_id)
         if slot is not None:
+            slot.last_used = time.monotonic()
             return slot
         async with self._create_lock:
             slot = self._slots.get(source_config_id)
@@ -60,13 +64,36 @@ class EngineManager:
                     await engine.start()
                 slot = _Slot(engine=engine)
                 self._slots[source_config_id] = slot
+                await self._evict_lru(keep=source_config_id)
         return slot
+
+    async def _evict_lru(self, *, keep: str) -> None:
+        """超过缓存上限时逐出最久未用、且当前空闲（未持锁）的引擎槽。
+
+        在 `_create_lock` 内调用。持锁中的槽跳过——正在服务的源不被打断。
+        """
+        while len(self._slots) > self._cache_size:
+            candidates = [
+                (s.last_used, scid)
+                for scid, s in self._slots.items()
+                if scid != keep and not s.lock.locked()
+            ]
+            if not candidates:
+                break  # 其余都在忙，暂不逐出
+            _, victim = min(candidates)
+            slot = self._slots.pop(victim)
+            try:
+                await slot.engine.aclose()
+                log.info("LRU 逐出引擎 source_config_id=%s（缓存上限 %d）", victim, self._cache_size)
+            except Exception as e:  # noqa: BLE001
+                log.warning("逐出引擎失败 %s: %s", victim, e)
 
     @asynccontextmanager
     async def use(self, source_config_id: str, source: Source | None = None):
         """取得该源的引擎并持有其锁（串行化本源上的操作）。"""
         slot = await self._slot(source_config_id, source)
         async with slot.lock:
+            slot.last_used = time.monotonic()
             yield slot.engine
 
     async def provision(self, source_config_id: str, source: Source | None = None) -> None:

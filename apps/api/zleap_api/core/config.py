@@ -45,6 +45,15 @@ class Settings(BaseSettings):
     upload_dir: str = "./.data/uploads"   # 上传原始文件落盘
     max_upload_mb: int = 25               # 单文件上传上限
     job_concurrency: int = 2              # 后台处理并发
+    job_max_attempts: int = 3             # 可重试失败的最大尝试次数（含首次）
+    engine_cache_size: int = 16           # 引擎槽 LRU 上限（超限逐出最久未用）
+    engine_warmup_count: int = 4          # 启动时预热最近使用的信源引擎数
+    # 允许上传的扩展名白名单（小写，含点）；空集合表示不限制
+    allowed_upload_exts: set[str] = {
+        ".md", ".markdown", ".txt", ".text", ".pdf", ".doc", ".docx",
+        ".ppt", ".pptx", ".xls", ".xlsx", ".csv", ".tsv", ".html", ".htm",
+        ".json", ".rtf", ".epub", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp",
+    }
 
     # ── zleap-sag 后端选择 ─────────────────────────────────────────────
     # None → 零基础设施（LanceDB + 内置 SQLite，落在 data_dir）

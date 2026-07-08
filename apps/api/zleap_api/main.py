@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 
@@ -50,6 +51,9 @@ async def lifespan(app: FastAPI):
     )
     await app.state.job_queue.start()
 
+    # 后台预热最近使用的信源引擎（不阻塞启动；失败不影响服务）
+    warmup_task = asyncio.create_task(_warmup_engines(app.state.engine_manager))
+
     log.info(
         "zleap-api 已启动 · env=%s · llm_configured=%s · vector=%s",
         settings.environment,
@@ -59,9 +63,40 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        warmup_task.cancel()
         await app.state.job_queue.stop()
         await app.state.engine_manager.aclose_all()
         await dispose_db()
+
+
+async def _warmup_engines(engine_manager: EngineManager) -> None:
+    """预热最近更新的信源引擎，缩短用户首个操作的等待。"""
+    if settings.engine_warmup_count <= 0:
+        return
+    try:
+        from sqlalchemy import select
+
+        from zleap_api.db.models import Source
+
+        async with SessionLocal() as session:
+            rows = (
+                await session.execute(
+                    select(Source)
+                    .order_by(Source.updated_at.desc())
+                    .limit(settings.engine_warmup_count)
+                )
+            ).scalars().all()
+        for source in rows:
+            try:
+                await engine_manager.provision(source.sag_source_config_id, source)
+            except Exception as e:  # noqa: BLE001
+                log.warning("预热引擎失败 source=%s: %s", source.id, e)
+        if rows:
+            log.info("已预热 %d 个信源引擎", len(rows))
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        log.warning("引擎预热任务异常：%s", e)
 
 
 def create_app() -> FastAPI:

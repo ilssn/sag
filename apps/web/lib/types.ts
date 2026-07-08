@@ -194,4 +194,5 @@ export interface Capabilities {
   language: string;
   search_strategy: string;
   max_upload_mb: number;
+  allowed_upload_exts?: string[];
 }
