@@ -32,8 +32,8 @@ export function Topbar() {
         {memberships.length > 1 && workspace ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="group flex max-w-[15rem] items-center gap-2 rounded-lg px-2 py-1.5 text-sm outline-none transition-colors hover:bg-ink/[0.04] focus-visible:ring-2 focus-visible:ring-gold">
-                <span className="grid size-5 shrink-0 place-items-center rounded-[6px] bg-gold text-[11px] font-bold text-[#1b1a17]">
+              <button className="group flex max-w-[15rem] items-center gap-2 rounded-lg px-2 py-1.5 text-sm outline-none transition-colors hover:bg-ink/[0.04] focus-visible:ring-2 focus-visible:ring-ring">
+                <span className="grid size-5 shrink-0 place-items-center rounded-[6px] bg-gold text-[11px] font-bold text-gold-foreground">
                   {(workspace.workspace_name || "空").slice(0, 1)}
                 </span>
                 <span className="truncate font-medium text-ink">
@@ -91,7 +91,7 @@ export function Topbar() {
         <ThemeToggle />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="ml-1 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-gold">
+            <button className="ml-1 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring">
               <Avatar>
                 <AvatarFallback>{initial}</AvatarFallback>
               </Avatar>

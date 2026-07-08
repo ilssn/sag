@@ -127,7 +127,7 @@ export function MembersCard() {
                   className={
                     "rounded-[7px] px-3 py-1.5 text-sm transition-colors " +
                     (inviteRole === r
-                      ? "bg-gold text-[#1b1a17]"
+                      ? "bg-gold text-gold-foreground"
                       : "text-ink-muted hover:text-ink")
                   }
                 >

@@ -98,7 +98,7 @@ export function BindingDialog({
             <select
               value={pick}
               onChange={(e) => setPick(e.target.value)}
-              className="h-9 min-w-0 flex-1 rounded-sm border border-hairline bg-surface px-3 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-gold"
+              className="h-9 min-w-0 flex-1 rounded-sm border border-hairline bg-surface px-3 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <option value="">选择要绑定的信源…</option>
               {sources

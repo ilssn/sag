@@ -86,7 +86,7 @@ function GoldenPath({
               className={cn(
                 "grid size-7 shrink-0 place-items-center rounded-full border text-[13px] font-semibold tabular-nums",
                 s.done
-                  ? "border-transparent bg-gold text-[#1b1a17]"
+                  ? "border-transparent bg-gold text-gold-foreground"
                   : focus
                     ? "border-gold text-gold-strong"
                     : "border-hairline text-ink-faint",

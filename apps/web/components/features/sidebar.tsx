@@ -16,15 +16,15 @@ const NAV = [
 export function Sidebar() {
   const pathname = usePathname();
   return (
-    <aside className="hidden w-[236px] shrink-0 flex-col border-r border-hairline bg-surface/60 md:flex">
+    <aside className="hidden w-[236px] shrink-0 flex-col border-r border-hairline bg-surface/50 md:flex">
       <div className="flex h-14 items-center gap-2.5 px-5">
-        <span className="grid size-6 place-items-center rounded-[7px] bg-gold text-[13px] font-bold text-[#1b1a17] shadow-sm">
+        <span className="grid size-6 place-items-center rounded-[7px] bg-signal text-[13px] font-bold text-signal-foreground shadow-sm">
           z
         </span>
-        <span className="font-display text-[1.35rem] font-medium tracking-tight">zleap</span>
+        <span className="font-display text-[1.3rem] font-semibold">zleap</span>
       </div>
 
-      <nav className="flex flex-1 flex-col gap-0.5 px-3 py-3">
+      <nav className="flex flex-1 flex-col gap-0.5 px-3 py-2">
         {NAV.map((item) => {
           const active =
             pathname === item.href || pathname.startsWith(item.href + "/");
@@ -34,24 +34,29 @@ export function Sidebar() {
               key={item.href}
               href={item.href}
               className={cn(
-                "group relative flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors duration-150",
+                "group relative flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors duration-150",
                 active
-                  ? "bg-gold-soft text-gold-strong"
-                  : "text-ink-muted hover:bg-surface-2 hover:text-ink",
+                  ? "bg-muted font-medium text-foreground"
+                  : "text-ink-muted hover:bg-muted/60 hover:text-foreground",
               )}
             >
               {active && (
-                <span className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-full bg-gold" />
+                <span className="absolute left-0 top-1/2 h-4 w-[2.5px] -translate-y-1/2 rounded-full bg-signal" />
               )}
-              <Icon className={cn("size-[18px]", active ? "text-gold-strong" : "text-ink-faint group-hover:text-ink-muted")} />
-              <span className={cn(active && "font-medium")}>{item.label}</span>
+              <Icon
+                className={cn(
+                  "size-[18px]",
+                  active ? "text-foreground" : "text-ink-faint group-hover:text-ink-muted",
+                )}
+              />
+              <span>{item.label}</span>
             </Link>
           );
         })}
       </nav>
 
       <div className="px-5 py-4 text-[11px] leading-relaxed text-ink-faint">
-        <div className="rule-gold mb-3 w-8" />
+        <div className="mb-2.5 h-px w-8 bg-border" />
         从信息源到知识问答
       </div>
     </aside>

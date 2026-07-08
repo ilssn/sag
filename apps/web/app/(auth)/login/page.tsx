@@ -41,7 +41,7 @@ export default function LoginPage() {
   return (
     <div className="w-full max-w-[380px] animate-fade-in">
       <div className="mb-8 flex flex-col items-center gap-3 text-center">
-        <span className="grid size-11 place-items-center rounded-[11px] bg-gold text-xl font-bold text-[#1b1a17] shadow-soft">
+        <span className="grid size-11 place-items-center rounded-[11px] bg-gold text-xl font-bold text-gold-foreground shadow-soft">
           z
         </span>
         <div>

@@ -5,17 +5,18 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-sm text-sm font-medium transition-all duration-150 ease-smooth focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-paper disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all duration-150 ease-smooth focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
-        default: "bg-ink text-paper hover:bg-ink/90 active:bg-ink/95",
-        gold: "bg-gold text-[#1b1a17] hover:bg-gold-strong hover:text-white active:brightness-95",
+        // 主操作：高对比中性（近黑 / 暗色下近白）—— Codex/Vercel 质感
+        default: "bg-primary text-primary-foreground shadow-soft hover:bg-primary/90 active:bg-primary/95",
+        gold: "bg-primary text-primary-foreground shadow-soft hover:bg-primary/90 active:bg-primary/95",
         outline:
-          "border border-hairline bg-transparent text-ink hover:bg-surface-2 hover:border-ink-faint",
-        ghost: "text-ink hover:bg-surface-2",
-        danger: "bg-danger text-white hover:opacity-90",
-        link: "text-gold-strong underline-offset-4 hover:underline",
+          "border border-border bg-transparent text-foreground hover:bg-muted hover:border-foreground/20",
+        ghost: "text-foreground hover:bg-muted",
+        danger: "bg-destructive text-destructive-foreground shadow-soft hover:bg-destructive/90",
+        link: "text-signal-strong underline-offset-4 hover:underline",
       },
       size: {
         sm: "h-8 px-3",

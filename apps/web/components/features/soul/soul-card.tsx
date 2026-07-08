@@ -9,7 +9,7 @@ export function SoulCard({ soul }: { soul: Soul }) {
   return (
     <Link
       href={`/assistants/${soul.id}`}
-      className="group flex flex-col rounded-lg border border-hairline bg-surface p-5 shadow-soft transition-all duration-150 ease-smooth hover:-translate-y-0.5 hover:border-gold/40 hover:shadow-lift"
+      className="group flex flex-col rounded-lg border border-hairline bg-surface p-5 shadow-soft transition-all duration-150 ease-smooth hover:border-foreground/15 hover:shadow-lift"
     >
       <div className="flex items-center gap-3">
         <span className="grid size-11 shrink-0 place-items-center rounded-full bg-gold-soft font-display text-lg font-semibold text-gold-strong">

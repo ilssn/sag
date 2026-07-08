@@ -1,5 +1,7 @@
 import type { Config } from "tailwindcss";
 
+const c = (v: string) => `hsl(var(${v}) / <alpha-value>)`;
+
 const config: Config = {
   darkMode: "class",
   content: [
@@ -10,32 +12,58 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        paper: "var(--paper)",
-        surface: "var(--surface)",
-        "surface-2": "var(--surface-2)",
-        ink: "var(--ink)",
-        "ink-muted": "var(--ink-muted)",
-        "ink-faint": "var(--ink-faint)",
-        hairline: "var(--hairline)",
-        gold: "var(--gold)",
-        "gold-soft": "var(--gold-soft)",
-        "gold-strong": "var(--gold-strong)",
-        danger: "var(--danger)",
-        success: "var(--success)",
+        // shadcn 标准
+        background: c("--background"),
+        foreground: c("--foreground"),
+        card: { DEFAULT: c("--card"), foreground: c("--card-foreground") },
+        popover: { DEFAULT: c("--popover"), foreground: c("--popover-foreground") },
+        primary: { DEFAULT: c("--primary"), foreground: c("--primary-foreground") },
+        secondary: { DEFAULT: c("--secondary"), foreground: c("--secondary-foreground") },
+        muted: { DEFAULT: c("--muted"), foreground: c("--muted-foreground") },
+        accent: { DEFAULT: c("--accent"), foreground: c("--accent-foreground") },
+        destructive: { DEFAULT: c("--destructive"), foreground: c("--destructive-foreground") },
+        border: c("--border"),
+        input: c("--input"),
+        ring: c("--ring"),
+
+        // 信号蓝强调
+        signal: {
+          DEFAULT: c("--signal"),
+          strong: c("--signal-strong"),
+          soft: c("--signal-soft"),
+          foreground: c("--signal-foreground"),
+        },
+        success: c("--success"),
+
+        // 语义别名（沿用既有类名）
+        paper: c("--background"),
+        surface: c("--card"),
+        "surface-2": c("--muted"),
+        ink: c("--foreground"),
+        "ink-muted": c("--muted-foreground"),
+        "ink-faint": c("--ink-faint"),
+        hairline: c("--border"),
+        gold: {
+          DEFAULT: c("--signal"),
+          strong: c("--signal-strong"),
+          soft: c("--signal-soft"),
+          foreground: c("--signal-foreground"),
+        },
+        danger: c("--destructive"),
       },
       fontFamily: {
         sans: ["var(--font-sans)"],
-        serif: ["var(--font-serif)"],
         mono: ["var(--font-mono)"],
       },
       borderRadius: {
-        lg: "12px",
-        md: "10px",
-        sm: "8px",
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
+        sm: "calc(var(--radius) - 4px)",
       },
       boxShadow: {
-        soft: "0 1px 2px rgba(20,18,12,0.04), 0 4px 16px -6px rgba(20,18,12,0.08)",
-        lift: "0 2px 4px rgba(20,18,12,0.05), 0 12px 32px -10px rgba(20,18,12,0.14)",
+        // 极轻，边框优先（Notion/Codex）
+        soft: "0 1px 2px 0 rgb(9 9 11 / 0.05), 0 1px 1px -0.5px rgb(9 9 11 / 0.04)",
+        lift: "0 10px 30px -12px rgb(9 9 11 / 0.18), 0 3px 8px -3px rgb(9 9 11 / 0.08)",
       },
       transitionTimingFunction: {
         smooth: "cubic-bezier(0.2, 0, 0, 1)",

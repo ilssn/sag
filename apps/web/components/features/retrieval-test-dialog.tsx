@@ -117,7 +117,7 @@ export function RetrievalTestDialog({
                   <select
                     value={applyTo}
                     onChange={(e) => setApplyTo(e.target.value)}
-                    className="h-7 rounded-md border border-hairline bg-surface px-2 text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-gold"
+                    className="h-7 rounded-md border border-hairline bg-surface px-2 text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <option value="">选择助手…</option>
                     {souls.map((s) => (

@@ -115,7 +115,7 @@ export function AuditCard() {
           <select
             value={action}
             onChange={(e) => setAction(e.target.value)}
-            className="h-9 rounded-md border border-hairline bg-surface px-2.5 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-gold"
+            className="h-9 rounded-md border border-hairline bg-surface px-2.5 text-sm text-ink outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <option value="">全部动作</option>
             {Object.entries(ACTIONS).map(([k, v]) => (

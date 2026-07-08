@@ -48,7 +48,7 @@ function FullLoader() {
   return (
     <div className="grid h-screen place-items-center bg-paper">
       <div className="flex flex-col items-center gap-3">
-        <span className="grid size-9 animate-pulse place-items-center rounded-[9px] bg-gold text-base font-bold text-[#1b1a17]">
+        <span className="grid size-9 animate-pulse place-items-center rounded-[9px] bg-gold text-base font-bold text-gold-foreground">
           z
         </span>
         <span className="text-sm text-ink-faint">载入中…</span>
