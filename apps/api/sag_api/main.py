@@ -44,6 +44,11 @@ async def lifespan(app: FastAPI):
 
     await init_db()
 
+    # 把 DB 里保存的模型配置覆盖到 settings 单例（在构建 LLM/引擎之前）
+    from sag_api.services.settings_service import apply_startup_overrides
+
+    await apply_startup_overrides(SessionLocal)
+
     app.state.engine_manager = EngineManager(settings)
     app.state.llm = LLMClient(settings)
     app.state.job_queue = InProcessAsyncQueue(

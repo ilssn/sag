@@ -24,7 +24,7 @@
 cd apps/api
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env          # 填入 OpenAI 兼容的 LLM / embedding 配置
+cp .env.example .env          # 可选：预填 OpenAI 兼容的 LLM / embedding（也可启动后在界面里配）
 uvicorn sag_api.main:app --reload      # http://localhost:8000
 
 # 前端
@@ -34,6 +34,7 @@ npm run dev                   # http://localhost:3000
 ```
 
 - **首个注册用户即你的账号。** 引导完成后可在 `.env` 设 `SAG_ALLOW_REGISTRATION=false`，此后不再开放注册。
+- **模型可视化配置**：登录后在 **设置 → 模型** 里填 LLM / 向量模型（Base URL、API Key、模型、温度、检索策略…），**保存即生效、无需重启**，并可一键「测试连接」。也可继续用 `.env` 的 `SAG_LLM_*` 预置。
 - 未配置 LLM 也能启动、建信源、上传文档；仅**事件抽取**与**问答**需要模型。
 - 默认零基础设施：元数据 SQLite（`./.data/sag.db`）+ SAG 存储 LanceDB（`./.data/engine`）。**升级后若旧库结构不兼容，删除 `apps/api/.data/` 后重启即重建。**
 

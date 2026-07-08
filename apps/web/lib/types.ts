@@ -90,6 +90,36 @@ export interface Binding {
   config: Record<string, unknown>;
 }
 
+export interface ModelConfig {
+  llm_base_url: string | null;
+  llm_model: string;
+  llm_temperature: number;
+  llm_max_tokens: number;
+  llm_api_key_set: boolean;
+  embedding_model: string;
+  embedding_base_url: string | null;
+  embedding_dimensions: number | null;
+  embedding_api_key_set: boolean;
+  search_strategy: "multi" | "vector" | "atomic";
+  search_top_k: number;
+  sag_language: "zh" | "en";
+}
+
+export type ModelConfigPatch = Partial<{
+  llm_base_url: string;
+  llm_api_key: string;
+  llm_model: string;
+  llm_temperature: number;
+  llm_max_tokens: number;
+  embedding_model: string;
+  embedding_base_url: string;
+  embedding_api_key: string;
+  embedding_dimensions: number | null;
+  search_strategy: "multi" | "vector" | "atomic";
+  search_top_k: number;
+  sag_language: "zh" | "en";
+}>;
+
 export interface SourceMcpDescriptor {
   source_id: string;
   source_name: string;

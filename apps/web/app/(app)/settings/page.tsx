@@ -1,11 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { Check, Monitor, Moon, Sun, X } from "lucide-react";
+import { Monitor, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 
 import { useApp } from "@/components/features/app-shell";
-import { Badge } from "@/components/ui/badge";
+import { ModelConfigForm } from "@/components/features/model-config-form";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -54,7 +54,7 @@ function ThemeSegment() {
 }
 
 export default function SettingsPage() {
-  const { user, capabilities, logout } = useApp();
+  const { user, logout } = useApp();
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 p-4 md:p-6">
@@ -88,51 +88,8 @@ export default function SettingsPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="model" className="flex flex-col gap-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>模型与检索</CardTitle>
-              <CardDescription>当前生效的生成、向量与检索配置。</CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-0">
-              <Row label="LLM 状态">
-                {capabilities?.llm_configured ? (
-                  <Badge variant="success">
-                    <Check className="size-3" />
-                    已配置
-                  </Badge>
-                ) : (
-                  <Badge variant="danger">
-                    <X className="size-3" />
-                    未配置
-                  </Badge>
-                )}
-              </Row>
-              <Row label="生成模型">
-                <span className="font-mono text-xs">{capabilities?.llm_model}</span>
-              </Row>
-              <Row label="向量模型">
-                <span className="font-mono text-xs">{capabilities?.embedding_model}</span>
-              </Row>
-              <Row label="向量后端">
-                <span className="font-mono text-xs">{capabilities?.vector_provider}</span>
-              </Row>
-              <Row label="检索策略">
-                <span className="font-mono text-xs">{capabilities?.search_strategy}</span>
-              </Row>
-              <Row label="抽取语言">
-                <span className="font-mono text-xs">{capabilities?.language}</span>
-              </Row>
-            </CardContent>
-          </Card>
-          <p className="rounded-lg border bg-muted/40 p-4 text-xs leading-relaxed text-muted-foreground">
-            当前版本模型配置通过后端环境变量设置：
-            <span className="font-mono"> SAG_LLM_BASE_URL</span>、
-            <span className="font-mono"> SAG_LLM_API_KEY</span>、
-            <span className="font-mono"> SAG_LLM_MODEL</span>、
-            <span className="font-mono"> SAG_EMBEDDING_MODEL</span>。 修改{" "}
-            <span className="font-mono">apps/api/.env</span> 后重启后端即可生效。可视化配置将在后续版本提供。
-          </p>
+        <TabsContent value="model">
+          <ModelConfigForm />
         </TabsContent>
 
         <TabsContent value="appearance">
