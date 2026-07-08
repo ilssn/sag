@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from zleap_api.core.config import settings
-from zleap_api.core.errors import ConflictError, NotFoundError, ValidationError
+from zleap_api.core.errors import ConflictError, ForbiddenError, NotFoundError, ValidationError
 from zleap_api.core.logging import get_logger
 from zleap_api.db.base import new_id
 from zleap_api.db.models import Namespace, Soul, SoulBinding, SoulMessage, SoulThread, Source
@@ -16,7 +16,9 @@ from zleap_api.enums import (
     MessageRole,
     NamespaceKind,
     SoulOrigin,
+    SoulVisibility,
     SourceType,
+    WorkspaceRole,
 )
 from zleap_api.generation import build_citations, build_soul_messages
 from zleap_api.sag import EngineManager
@@ -28,17 +30,47 @@ _DEFAULT_TITLES = {"新会话", "New chat"}
 _HISTORY_LIMIT = 6
 
 
-# ── CRUD ────────────────────────────────────────────────────────────
-async def list_souls(session: AsyncSession, workspace_id: str) -> list[Soul]:
-    rows = await session.execute(
-        select(Soul).where(Soul.workspace_id == workspace_id).order_by(Soul.created_at.desc())
+# ── 访问语义 ─────────────────────────────────────────────────────────
+def _accessible(soul: Soul, user_id: str, role: WorkspaceRole) -> bool:
+    """可见：空间共享 / 我创建的 / 我是空间 owner（含 owner_id 为空的存量数据）。"""
+    return (
+        soul.visibility == SoulVisibility.WORKSPACE
+        or soul.owner_id == user_id
+        or soul.owner_id is None
+        or role == WorkspaceRole.OWNER
     )
+
+
+def _manageable(soul: Soul, user_id: str, role: WorkspaceRole) -> bool:
+    """可管（改设定/可见性/删除/绑定）：创建者或空间 owner。"""
+    return soul.owner_id == user_id or soul.owner_id is None or role == WorkspaceRole.OWNER
+
+
+def ensure_manageable(soul: Soul, user_id: str, role: WorkspaceRole) -> None:
+    if not _manageable(soul, user_id, role):
+        raise ForbiddenError("仅创建者或空间所有者可管理该助手")
+
+
+# ── CRUD ────────────────────────────────────────────────────────────
+async def list_souls(
+    session: AsyncSession, workspace_id: str, *, user_id: str, role: WorkspaceRole
+) -> list[Soul]:
+    stmt = select(Soul).where(Soul.workspace_id == workspace_id)
+    if role != WorkspaceRole.OWNER:
+        stmt = stmt.where(
+            (Soul.visibility == SoulVisibility.WORKSPACE)
+            | (Soul.owner_id == user_id)
+            | (Soul.owner_id.is_(None))
+        )
+    rows = await session.execute(stmt.order_by(Soul.created_at.desc()))
     return list(rows.scalars().all())
 
 
-async def get_soul(session: AsyncSession, workspace_id: str, soul_id: str) -> Soul:
+async def get_soul(
+    session: AsyncSession, workspace_id: str, soul_id: str, *, user_id: str, role: WorkspaceRole
+) -> Soul:
     soul = await session.get(Soul, soul_id)
-    if soul is None or soul.workspace_id != workspace_id:
+    if soul is None or soul.workspace_id != workspace_id or not _accessible(soul, user_id, role):
         raise NotFoundError("助手不存在")
     return soul
 
@@ -48,8 +80,10 @@ async def create_soul(
     workspace_id: str,
     *,
     name: str,
+    owner_id: str,
     avatar: str = "",
     persona: dict | None = None,
+    visibility: SoulVisibility = SoulVisibility.PRIVATE,
     origin: SoulOrigin = SoulOrigin.USER,
     origin_ref: dict | None = None,
 ) -> Soul:
@@ -59,6 +93,8 @@ async def create_soul(
     memory_ns = await default_namespace(session, workspace_id, NamespaceKind.MEMORY)
     soul = Soul(
         workspace_id=workspace_id,
+        owner_id=owner_id,
+        visibility=visibility,
         name=name,
         avatar=avatar or name[:1],
         persona=persona or {},
@@ -77,11 +113,17 @@ async def update_soul(
     workspace_id: str,
     soul_id: str,
     *,
+    user_id: str,
+    role: WorkspaceRole,
     name: str | None = None,
     avatar: str | None = None,
     persona: dict | None = None,
+    visibility: SoulVisibility | None = None,
 ) -> Soul:
-    soul = await get_soul(session, workspace_id, soul_id)
+    soul = await get_soul(session, workspace_id, soul_id, user_id=user_id, role=role)
+    ensure_manageable(soul, user_id, role)
+    if visibility is not None:
+        soul.visibility = visibility
     if name is not None:
         soul.name = name
     if avatar is not None:
@@ -93,8 +135,11 @@ async def update_soul(
     return soul
 
 
-async def delete_soul(session: AsyncSession, workspace_id: str, soul_id: str) -> None:
-    soul = await get_soul(session, workspace_id, soul_id)
+async def delete_soul(
+    session: AsyncSession, workspace_id: str, soul_id: str, *, user_id: str, role: WorkspaceRole
+) -> None:
+    soul = await get_soul(session, workspace_id, soul_id, user_id=user_id, role=role)
+    ensure_manageable(soul, user_id, role)
     await session.delete(soul)
     await session.commit()
 
@@ -222,9 +267,12 @@ async def remember_exchange(
 
 
 # ── 会话 ────────────────────────────────────────────────────────────
-async def list_threads(session: AsyncSession, soul_id: str) -> list[SoulThread]:
+async def list_threads(session: AsyncSession, soul_id: str, *, user_id: str) -> list[SoulThread]:
+    """会话按人隔离：共享助手下互相看不到彼此的会话。"""
     rows = await session.execute(
-        select(SoulThread).where(SoulThread.soul_id == soul_id).order_by(SoulThread.updated_at.desc())
+        select(SoulThread)
+        .where(SoulThread.soul_id == soul_id, SoulThread.user_id == user_id)
+        .order_by(SoulThread.updated_at.desc())
     )
     return list(rows.scalars().all())
 
@@ -239,15 +287,19 @@ async def create_thread(
     return thread
 
 
-async def get_thread(session: AsyncSession, soul_id: str, thread_id: str) -> SoulThread:
+async def get_thread(
+    session: AsyncSession, soul_id: str, thread_id: str, *, user_id: str
+) -> SoulThread:
     thread = await session.get(SoulThread, thread_id)
-    if thread is None or thread.soul_id != soul_id:
+    if thread is None or thread.soul_id != soul_id or thread.user_id != user_id:
         raise NotFoundError("会话不存在")
     return thread
 
 
-async def delete_thread(session: AsyncSession, soul_id: str, thread_id: str) -> None:
-    thread = await get_thread(session, soul_id, thread_id)
+async def delete_thread(
+    session: AsyncSession, soul_id: str, thread_id: str, *, user_id: str
+) -> None:
+    thread = await get_thread(session, soul_id, thread_id, user_id=user_id)
     await session.delete(thread)
     await session.commit()
 

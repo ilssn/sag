@@ -8,6 +8,7 @@ from zleap_api.core.deps import get_current_user
 from zleap_api.core.security import create_access_token
 from zleap_api.db.models import User
 from zleap_api.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UserOut
+from zleap_api.schemas.workspace import WorkspaceOut
 from zleap_api.services.auth_service import authenticate, register_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -26,5 +27,12 @@ async def login(body: LoginRequest, session: AsyncSession = Depends(get_session)
 
 
 @router.get("/me", response_model=UserOut)
-async def me(user: User = Depends(get_current_user)) -> UserOut:
-    return UserOut.model_validate(user)
+async def me(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> UserOut:
+    from zleap_api.services.workspace_service import list_my_workspaces
+
+    out = UserOut.model_validate(user)
+    out.memberships = [WorkspaceOut(**w) for w in await list_my_workspaces(session, user.id)]
+    return out

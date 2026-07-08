@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from zleap_api.core.db import get_session
-from zleap_api.core.deps import get_workspace_id
+from zleap_api.core.deps import get_workspace_id, require_editor
 from zleap_api.schemas.common import Ok
 from zleap_api.schemas.namespace import NamespaceCreate, NamespaceOut
 from zleap_api.services.namespace_service import (
@@ -30,6 +30,7 @@ async def list_(
 async def create(
     body: NamespaceCreate,
     workspace_id: str = Depends(get_workspace_id),
+    _editor=Depends(require_editor),
     session: AsyncSession = Depends(get_session),
 ) -> NamespaceOut:
     ns = await create_namespace(
@@ -42,6 +43,7 @@ async def create(
 async def delete_(
     namespace_id: str,
     workspace_id: str = Depends(get_workspace_id),
+    _editor=Depends(require_editor),
     session: AsyncSession = Depends(get_session),
 ) -> Ok:
     await delete_namespace(session, workspace_id, namespace_id)

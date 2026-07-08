@@ -5,19 +5,21 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from zleap_api.enums import BindingTargetType, MessageRole, SoulOrigin, SoulStatus
+from zleap_api.enums import BindingTargetType, MessageRole, SoulOrigin, SoulStatus, SoulVisibility
 
 
 class SoulCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     avatar: str = ""
     persona: dict[str, Any] = Field(default_factory=dict)
+    visibility: SoulVisibility = SoulVisibility.PRIVATE
 
 
 class SoulUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=120)
     avatar: str | None = None
     persona: dict[str, Any] | None = None
+    visibility: SoulVisibility | None = None
 
 
 class SoulOut(BaseModel):
@@ -27,6 +29,8 @@ class SoulOut(BaseModel):
     name: str
     avatar: str
     persona: dict[str, Any]
+    owner_id: str | None
+    visibility: SoulVisibility
     origin: SoulOrigin
     status: SoulStatus
     memory_namespace_id: str | None

@@ -5,6 +5,7 @@ import { Check, Monitor, Moon, Sun, X } from "lucide-react";
 import { useTheme } from "next-themes";
 
 import { useApp } from "@/components/features/app-shell";
+import { MembersCard } from "@/components/features/members-card";
 import { PageHeader } from "@/components/features/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -80,6 +81,8 @@ export default function SettingsPage() {
             </div>
           </CardContent>
         </Card>
+
+        <MembersCard />
 
         <Card>
           <CardHeader>

@@ -1,11 +1,28 @@
 export type Role = "admin" | "member";
 
+export type WorkspaceRole = "owner" | "editor" | "viewer";
+
+export interface Membership {
+  workspace_id: string;
+  workspace_name: string;
+  role: WorkspaceRole;
+}
+
+export interface Member {
+  user_id: string;
+  email: string;
+  name: string;
+  role: WorkspaceRole;
+  joined_at: string;
+}
+
 export interface User {
   id: string;
   email: string;
   name: string;
   role: Role;
   created_at: string;
+  memberships?: Membership[];
 }
 
 export interface TokenResponse {
@@ -71,6 +88,7 @@ export interface Citation {
 }
 
 export type SoulOrigin = "user" | "book_entity" | "mount" | "import";
+export type SoulVisibility = "private" | "workspace";
 export type SoulStatus = "active" | "archived";
 export type BindingTargetType = "namespace" | "source";
 
@@ -90,6 +108,8 @@ export interface Soul {
   name: string;
   avatar: string;
   persona: Persona;
+  owner_id: string | null;
+  visibility: SoulVisibility;
   origin: SoulOrigin;
   status: SoulStatus;
   memory_namespace_id: string | null;

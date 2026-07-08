@@ -61,6 +61,10 @@ _COLUMN_UPGRADES: dict[str, dict[str, str]] = {
         "soul_id": "VARCHAR(32)",
         "source_type": "VARCHAR(16) DEFAULT 'document'",
     },
+    "souls": {
+        "owner_id": "VARCHAR(32)",
+        "visibility": "VARCHAR(16) DEFAULT 'private'",
+    },
     "chat_threads": {
         "soul_id": "VARCHAR(32)",
         "memory_source_id": "VARCHAR(32)",

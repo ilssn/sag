@@ -26,6 +26,7 @@ async def entity_to_soul(
     source: Source,
     entity_id: str,
     *,
+    owner_id: str,
     engine_manager: EngineManager,
     llm: LLMClient,
 ) -> Soul:
@@ -44,6 +45,7 @@ async def entity_to_soul(
         session,
         workspace_id,
         name=entity.name,
+        owner_id=owner_id,
         avatar=entity.name[:1],
         persona=persona,
         origin=SoulOrigin.BOOK_ENTITY,

@@ -3,13 +3,14 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Link2, Plus, SlidersHorizontal, Trash2, TriangleAlert } from "lucide-react";
+import { ArrowLeft, Link2, Plus, SlidersHorizontal, Trash2, TriangleAlert, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
 import type { Binding, Soul, SoulThread } from "@/lib/types";
 import { relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useApp } from "@/components/features/app-shell";
 import { BindingDialog } from "@/components/features/soul/binding-dialog";
 import { PersonaDialog } from "@/components/features/soul/persona-dialog";
 import { SoulChat } from "@/components/features/soul/soul-chat";
@@ -20,6 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 export default function SoulWorkbench() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const { user, role } = useApp();
   const [soul, setSoul] = React.useState<Soul | null>(null);
   const [threads, setThreads] = React.useState<SoulThread[]>([]);
   const [threadId, setThreadId] = React.useState<string | null>(null);
@@ -46,6 +48,10 @@ export default function SoulWorkbench() {
     loadThreads();
     loadBindings();
   }, [loadSoul, loadThreads, loadBindings]);
+
+  // 可管理（改设定/绑定/删除）：创建者或空间所有者；存量无 owner 的助手放行
+  const canManage =
+    !!soul && (soul.owner_id == null || soul.owner_id === user?.id || role === "owner");
 
   const ensureThread = async () => {
     const t = await api.createSoulThread(id);
@@ -91,12 +97,18 @@ export default function SoulWorkbench() {
               </span>
               <div className="min-w-0 flex-1">
                 <div className="truncate font-display text-lg font-medium text-ink">{soul.name}</div>
+                {soul.visibility === "workspace" && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-gold-strong">
+                    <Users className="size-3" />
+                    团队共享 · 对话沉淀为团队记忆
+                  </span>
+                )}
               </div>
             </div>
           ) : (
             <Skeleton className="h-9 w-40" />
           )}
-          {soul && (
+          {soul && canManage && (
             <div className="mt-3 flex items-center gap-1.5">
               <PersonaDialog
                 soul={soul}
@@ -179,7 +191,7 @@ export default function SoulWorkbench() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* 零绑定引导：没有依据的回答只会说「资料中未提及」 */}
-        {soul && bindings !== null && bindings.filter((b) => b.target_type === "source").length === 0 && (
+        {soul && canManage && bindings !== null && bindings.filter((b) => b.target_type === "source").length === 0 && (
           <div className="flex flex-wrap items-center gap-2.5 border-b border-gold/30 bg-gold-soft px-4 py-2.5 text-sm text-gold-strong">
             <TriangleAlert className="size-4 shrink-0" />
             <span className="min-w-0 flex-1">

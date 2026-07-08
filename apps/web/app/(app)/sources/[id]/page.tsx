@@ -23,7 +23,7 @@ const ACTIVE = ["pending", "loading", "extracting"];
 export default function SourceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { capabilities } = useApp();
+  const { capabilities, canWrite } = useApp();
   const { openSearch } = useSearch();
   const [source, setSource] = React.useState<Source | null>(null);
   const [documents, setDocuments] = React.useState<Doc[] | null>(null);
@@ -102,15 +102,17 @@ export default function SourceDetailPage() {
             <Search className="size-4" />
             搜索此信源
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            title="删除信源"
-            onClick={() => setConfirmDelete(true)}
-            className="text-ink-muted hover:text-danger"
-          >
-            <Trash2 className="size-4" />
-          </Button>
+          {canWrite && (
+            <Button
+              variant="ghost"
+              size="icon"
+              title="删除信源"
+              onClick={() => setConfirmDelete(true)}
+              className="text-ink-muted hover:text-danger"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          )}
           <ConfirmDialog
             open={confirmDelete}
             onOpenChange={setConfirmDelete}
@@ -138,11 +140,18 @@ export default function SourceDetailPage() {
         )}
 
         {source &&
+          canWrite &&
           (source.connector_kind === "file_upload" ? (
             <UploadZone sourceId={id} onUploaded={refresh} maxMb={capabilities?.max_upload_mb ?? 25} />
           ) : (
             <SyncPanel sourceId={id} onSynced={refresh} />
           ))}
+        {source && !canWrite && (
+          <div className="flex items-center gap-2 rounded-md border border-hairline bg-surface-2/50 px-4 py-3 text-sm text-ink-muted">
+            <Search className="size-4 shrink-0 text-ink-faint" />
+            你是本空间的只读成员，可检索与查看文档，但不能上传或删除。
+          </div>
+        )}
 
         <div>
           <h2 className="mb-3 text-sm font-medium text-ink-muted">

@@ -4,7 +4,13 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from zleap_api.core.db import get_session
-from zleap_api.core.deps import get_engine_manager, get_llm, get_workspace_id
+from zleap_api.core.deps import (
+    get_current_user,
+    get_engine_manager,
+    get_llm,
+    get_workspace_id,
+    require_editor,
+)
 from zleap_api.generation import LLMClient
 from zleap_api.sag import EngineManager
 from zleap_api.schemas.insight import EntityOut
@@ -35,12 +41,20 @@ async def to_soul(
     source_id: str,
     entity_id: str,
     workspace_id: str = Depends(get_workspace_id),
+    user=Depends(get_current_user),
+    _editor=Depends(require_editor),
     session: AsyncSession = Depends(get_session),
     engine_manager: EngineManager = Depends(get_engine_manager),
     llm: LLMClient = Depends(get_llm),
 ) -> SoulOut:
     source = await get_source(session, workspace_id, source_id)
     soul = await entity_to_soul(
-        session, workspace_id, source, entity_id, engine_manager=engine_manager, llm=llm
+        session,
+        workspace_id,
+        source,
+        entity_id,
+        owner_id=user.id,
+        engine_manager=engine_manager,
+        llm=llm,
     )
     return SoulOut.model_validate(soul)

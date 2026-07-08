@@ -10,10 +10,11 @@ from zleap_api.api.v1 import (
     souls,
     sources,
     system,
+    workspaces,
 )
 
 api_router = APIRouter(prefix="/api/v1")
-for _module in (auth, namespaces, sources, documents, insights, jobs, search, souls, system):
+for _module in (auth, workspaces, namespaces, sources, documents, insights, jobs, search, souls, system):
     api_router.include_router(_module.router)
 api_router.include_router(search.global_router)
 

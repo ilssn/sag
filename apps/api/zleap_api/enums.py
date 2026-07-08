@@ -75,6 +75,11 @@ class MessageRole(StrEnum):
     SYSTEM = "system"
 
 
+class SoulVisibility(StrEnum):
+    PRIVATE = "private"      # 仅创建者可见
+    WORKSPACE = "workspace"  # 空间内成员可见（共享助手）
+
+
 class SoulOrigin(StrEnum):
     USER = "user"
     BOOK_ENTITY = "book_entity"

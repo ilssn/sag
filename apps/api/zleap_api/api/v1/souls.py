@@ -14,9 +14,12 @@ from zleap_api.core.deps import (
     get_job_queue,
     get_llm,
     get_workspace_id,
+    get_workspace_role,
+    require_editor,
 )
 from zleap_api.core.errors import ConfigurationError, MuseError
 from zleap_api.db.models import User
+from zleap_api.enums import WorkspaceRole
 from zleap_api.generation import LLMClient
 from zleap_api.jobs import JobQueue
 from zleap_api.sag import EngineManager
@@ -43,23 +46,46 @@ def _sse(event: str, payload: dict) -> dict:
 
 # ── CRUD ────────────────────────────────────────────────────────────
 @router.get("", response_model=list[SoulOut])
-async def list_(ws: str = Depends(get_workspace_id), session: AsyncSession = Depends(get_session)):
-    return [SoulOut.model_validate(s) for s in await svc.list_souls(session, ws)]
+async def list_(
+    ws: str = Depends(get_workspace_id),
+    role: WorkspaceRole = Depends(get_workspace_role),
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    souls = await svc.list_souls(session, ws, user_id=user.id, role=role)
+    return [SoulOut.model_validate(s) for s in souls]
 
 
 @router.post("", response_model=SoulOut, status_code=201)
 async def create(
     body: SoulCreate,
     ws: str = Depends(get_workspace_id),
+    user: User = Depends(get_current_user),
+    _editor=Depends(require_editor),
     session: AsyncSession = Depends(get_session),
 ):
-    soul = await svc.create_soul(session, ws, name=body.name, avatar=body.avatar, persona=body.persona)
+    soul = await svc.create_soul(
+        session,
+        ws,
+        name=body.name,
+        owner_id=user.id,
+        avatar=body.avatar,
+        persona=body.persona,
+        visibility=body.visibility,
+    )
     return SoulOut.model_validate(soul)
 
 
 @router.get("/{soul_id}", response_model=SoulOut)
-async def get_(soul_id: str, ws: str = Depends(get_workspace_id), session: AsyncSession = Depends(get_session)):
-    return SoulOut.model_validate(await svc.get_soul(session, ws, soul_id))
+async def get_(
+    soul_id: str,
+    ws: str = Depends(get_workspace_id),
+    role: WorkspaceRole = Depends(get_workspace_role),
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    soul = await svc.get_soul(session, ws, soul_id, user_id=user.id, role=role)
+    return SoulOut.model_validate(soul)
 
 
 @router.patch("/{soul_id}", response_model=SoulOut)
@@ -67,17 +93,35 @@ async def update_(
     soul_id: str,
     body: SoulUpdate,
     ws: str = Depends(get_workspace_id),
+    role: WorkspaceRole = Depends(get_workspace_role),
+    user: User = Depends(get_current_user),
+    _editor=Depends(require_editor),
     session: AsyncSession = Depends(get_session),
 ):
     soul = await svc.update_soul(
-        session, ws, soul_id, name=body.name, avatar=body.avatar, persona=body.persona
+        session,
+        ws,
+        soul_id,
+        user_id=user.id,
+        role=role,
+        name=body.name,
+        avatar=body.avatar,
+        persona=body.persona,
+        visibility=body.visibility,
     )
     return SoulOut.model_validate(soul)
 
 
 @router.delete("/{soul_id}", response_model=Ok)
-async def delete_(soul_id: str, ws: str = Depends(get_workspace_id), session: AsyncSession = Depends(get_session)):
-    await svc.delete_soul(session, ws, soul_id)
+async def delete_(
+    soul_id: str,
+    ws: str = Depends(get_workspace_id),
+    role: WorkspaceRole = Depends(get_workspace_role),
+    user: User = Depends(get_current_user),
+    _editor=Depends(require_editor),
+    session: AsyncSession = Depends(get_session),
+):
+    await svc.delete_soul(session, ws, soul_id, user_id=user.id, role=role)
     return Ok(detail="助手已删除")
 
 
@@ -86,9 +130,11 @@ async def delete_(soul_id: str, ws: str = Depends(get_workspace_id), session: As
 async def list_bindings(
     soul_id: str,
     ws: str = Depends(get_workspace_id),
+    role: WorkspaceRole = Depends(get_workspace_role),
+    user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    soul = await svc.get_soul(session, ws, soul_id)
+    soul = await svc.get_soul(session, ws, soul_id, user_id=user.id, role=role)
     return [BindingOut.model_validate(b) for b in await svc.list_bindings(session, soul)]
 
 
@@ -97,12 +143,14 @@ async def add_binding(
     soul_id: str,
     body: BindingCreate,
     ws: str = Depends(get_workspace_id),
+    role: WorkspaceRole = Depends(get_workspace_role),
+    user: User = Depends(get_current_user),
+    _editor=Depends(require_editor),
     session: AsyncSession = Depends(get_session),
 ):
-    soul = await svc.get_soul(session, ws, soul_id)
-    b = await svc.add_binding(
-        session, ws, soul, target_type=body.target_type, target_id=body.target_id
-    )
+    soul = await svc.get_soul(session, ws, soul_id, user_id=user.id, role=role)
+    svc.ensure_manageable(soul, user.id, role)
+    b = await svc.add_binding(session, ws, soul, target_type=body.target_type, target_id=body.target_id)
     return BindingOut.model_validate(b)
 
 
@@ -111,29 +159,41 @@ async def remove_binding(
     soul_id: str,
     binding_id: str,
     ws: str = Depends(get_workspace_id),
+    role: WorkspaceRole = Depends(get_workspace_role),
+    user: User = Depends(get_current_user),
+    _editor=Depends(require_editor),
     session: AsyncSession = Depends(get_session),
 ):
-    soul = await svc.get_soul(session, ws, soul_id)
+    soul = await svc.get_soul(session, ws, soul_id, user_id=user.id, role=role)
+    svc.ensure_manageable(soul, user.id, role)
     await svc.remove_binding(session, soul, binding_id)
     return Ok(detail="已解绑")
 
 
-# ── 会话 ────────────────────────────────────────────────────────────
+# ── 会话（按人隔离）──────────────────────────────────────────────────
 @router.get("/{soul_id}/threads", response_model=list[SoulThreadOut])
-async def list_threads(soul_id: str, ws: str = Depends(get_workspace_id), session: AsyncSession = Depends(get_session)):
-    soul = await svc.get_soul(session, ws, soul_id)
-    return [SoulThreadOut.model_validate(t) for t in await svc.list_threads(session, soul.id)]
+async def list_threads(
+    soul_id: str,
+    ws: str = Depends(get_workspace_id),
+    role: WorkspaceRole = Depends(get_workspace_role),
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    soul = await svc.get_soul(session, ws, soul_id, user_id=user.id, role=role)
+    threads = await svc.list_threads(session, soul.id, user_id=user.id)
+    return [SoulThreadOut.model_validate(t) for t in threads]
 
 
 @router.post("/{soul_id}/threads", response_model=SoulThreadOut, status_code=201)
 async def create_thread(
     soul_id: str,
     body: SoulThreadCreate,
-    user: User = Depends(get_current_user),
     ws: str = Depends(get_workspace_id),
+    role: WorkspaceRole = Depends(get_workspace_role),
+    user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    soul = await svc.get_soul(session, ws, soul_id)
+    soul = await svc.get_soul(session, ws, soul_id, user_id=user.id, role=role)
     thread = await svc.create_thread(session, soul, user.id, body.title)
     return SoulThreadOut.model_validate(thread)
 
@@ -143,10 +203,12 @@ async def messages(
     soul_id: str,
     thread_id: str,
     ws: str = Depends(get_workspace_id),
+    role: WorkspaceRole = Depends(get_workspace_role),
+    user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    soul = await svc.get_soul(session, ws, soul_id)
-    thread = await svc.get_thread(session, soul.id, thread_id)
+    soul = await svc.get_soul(session, ws, soul_id, user_id=user.id, role=role)
+    thread = await svc.get_thread(session, soul.id, thread_id, user_id=user.id)
     return [SoulMessageOut.model_validate(m) for m in await svc.list_messages(session, thread.id)]
 
 
@@ -155,10 +217,12 @@ async def delete_thread(
     soul_id: str,
     thread_id: str,
     ws: str = Depends(get_workspace_id),
+    role: WorkspaceRole = Depends(get_workspace_role),
+    user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    soul = await svc.get_soul(session, ws, soul_id)
-    await svc.delete_thread(session, soul.id, thread_id)
+    soul = await svc.get_soul(session, ws, soul_id, user_id=user.id, role=role)
+    await svc.delete_thread(session, soul.id, thread_id, user_id=user.id)
     return Ok(detail="会话已删除")
 
 
@@ -168,18 +232,25 @@ async def ask(
     thread_id: str,
     body: SoulAskRequest,
     ws: str = Depends(get_workspace_id),
+    role: WorkspaceRole = Depends(get_workspace_role),
+    user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     engine_manager: EngineManager = Depends(get_engine_manager),
     llm: LLMClient = Depends(get_llm),
     job_queue: JobQueue = Depends(get_job_queue),
 ) -> EventSourceResponse:
-    soul = await svc.get_soul(session, ws, soul_id)
-    thread = await svc.get_thread(session, soul.id, thread_id)
+    soul = await svc.get_soul(session, ws, soul_id, user_id=user.id, role=role)
+    thread = await svc.get_thread(session, soul.id, thread_id, user_id=user.id)
     if not llm.configured:
         raise ConfigurationError("尚未配置 LLM，无法生成回答")
 
     messages, citations = await svc.prepare_ask(
-        session, soul=soul, thread=thread, query=body.query, engine_manager=engine_manager, author=body.author
+        session,
+        soul=soul,
+        thread=thread,
+        query=body.query,
+        engine_manager=engine_manager,
+        author=body.author or user.name,
     )
     thread_id_val = thread.id
     question = body.query
@@ -196,7 +267,7 @@ async def ask(
             return
         answer = "".join(acc)
         message_id = await svc.persist_answer(SessionLocal, thread_id_val, answer, citations)
-        # 记忆闭环：把本轮问答写入会话记忆信源 → 自动 ingest/extract
+        # 记忆闭环：共享助手 = 团队共享记忆；私有助手 = 个人记忆
         await svc.remember_exchange(
             SessionLocal,
             job_queue,

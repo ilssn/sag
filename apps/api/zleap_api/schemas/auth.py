@@ -5,6 +5,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from zleap_api.enums import UserRole
+from zleap_api.schemas.workspace import WorkspaceOut
 
 
 class RegisterRequest(BaseModel):
@@ -39,6 +40,8 @@ class UserOut(BaseModel):
     name: str
     role: UserRole
     created_at: datetime
+    # 我所属的空间（仅 /me 填充；登录/注册响应为空列表）
+    memberships: list[WorkspaceOut] = []
 
 
 class TokenResponse(BaseModel):

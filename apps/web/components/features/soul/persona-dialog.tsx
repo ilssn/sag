@@ -1,10 +1,12 @@
 "use client";
 
 import * as React from "react";
+import { Lock, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
-import type { Soul } from "@/lib/types";
+import type { Soul, SoulVisibility } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -35,6 +37,8 @@ export function PersonaDialog({
   const [greeting, setGreeting] = React.useState(soul.persona?.greeting ?? "");
   const [guardrails, setGuardrails] = React.useState((soul.persona?.guardrails ?? []).join("\n"));
   const [topK, setTopK] = React.useState(String(soul.persona?.top_k ?? ""));
+  const [visibility, setVisibility] = React.useState<SoulVisibility>(soul.visibility);
+  const [isTeam, setIsTeam] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
 
   React.useEffect(() => {
@@ -45,6 +49,11 @@ export function PersonaDialog({
     setGreeting(soul.persona?.greeting ?? "");
     setGuardrails((soul.persona?.guardrails ?? []).join("\n"));
     setTopK(String(soul.persona?.top_k ?? ""));
+    setVisibility(soul.visibility);
+    api
+      .listMembers()
+      .then((m) => setIsTeam(m.length > 1))
+      .catch(() => setIsTeam(false));
   }, [open, soul]);
 
   async function save(e: React.FormEvent) {
@@ -54,6 +63,7 @@ export function PersonaDialog({
       const updated = await api.updateSoul(soul.id, {
         name,
         avatar,
+        visibility: isTeam ? visibility : undefined,
         persona: {
           ...soul.persona,
           system_prompt: systemPrompt,
@@ -113,6 +123,46 @@ export function PersonaDialog({
             <Label htmlFor="p-topk">检索条数 top_k（可选）</Label>
             <Input id="p-topk" type="number" min={1} max={50} value={topK} onChange={(e) => setTopK(e.target.value)} className="w-24" />
           </div>
+          {isTeam && (
+            <div className="flex flex-col gap-1.5">
+              <Label>可见性</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {(
+                  [
+                    { key: "private" as const, icon: Lock, title: "私有", desc: "仅你可见与对话" },
+                    {
+                      key: "workspace" as const,
+                      icon: Users,
+                      title: "团队",
+                      desc: "空间成员共享，对话沉淀为团队记忆",
+                    },
+                  ]
+                ).map((o) => {
+                  const Icon = o.icon;
+                  const on = visibility === o.key;
+                  return (
+                    <button
+                      key={o.key}
+                      type="button"
+                      onClick={() => setVisibility(o.key)}
+                      className={cn(
+                        "flex flex-col items-start gap-1 rounded-lg border p-2.5 text-left transition-colors",
+                        on
+                          ? "border-gold/60 bg-gold-soft/60"
+                          : "border-hairline hover:border-gold/30 hover:bg-surface-2",
+                      )}
+                    >
+                      <span className="flex items-center gap-1.5 text-sm font-medium text-ink">
+                        <Icon className="size-3.5" />
+                        {o.title}
+                      </span>
+                      <span className="text-xs leading-snug text-ink-faint">{o.desc}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <DialogFooter>
             <Button type="submit" variant="gold" disabled={loading || !name.trim()}>
               {loading ? "保存中…" : "保存"}

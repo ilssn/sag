@@ -1,6 +1,9 @@
 import { clearToken, getToken } from "./auth";
+import { getActiveWorkspace } from "./workspace";
 import type {
   Binding,
+  Member,
+  Membership,
   BindingTargetType,
   Capabilities,
   Doc,
@@ -34,6 +37,8 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
     headers["Content-Type"] = "application/json";
   }
   if (token) headers["Authorization"] = `Bearer ${token}`;
+  const ws = getActiveWorkspace();
+  if (ws) headers["X-Workspace-Id"] = ws;
 
   const res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
 
@@ -101,9 +106,12 @@ export const api = {
   // 助手（内部路径沿用 /souls）
   listSouls: () => request<Soul[]>("/api/v1/souls"),
   getSoul: (id: string) => request<Soul>(`/api/v1/souls/${id}`),
-  createSoul: (b: { name: string; avatar?: string; persona?: Persona }) =>
+  createSoul: (b: { name: string; avatar?: string; persona?: Persona; visibility?: "private" | "workspace" }) =>
     request<Soul>("/api/v1/souls", { method: "POST", body: JSON.stringify(b) }),
-  updateSoul: (id: string, b: { name?: string; avatar?: string; persona?: Persona }) =>
+  updateSoul: (
+    id: string,
+    b: { name?: string; avatar?: string; persona?: Persona; visibility?: "private" | "workspace" },
+  ) =>
     request<Soul>(`/api/v1/souls/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
   deleteSoul: (id: string) => request<{ ok: boolean }>(`/api/v1/souls/${id}`, { method: "DELETE" }),
 
@@ -120,6 +128,19 @@ export const api = {
     request<SoulMessage[]>(`/api/v1/souls/${id}/threads/${tid}/messages`),
   deleteSoulThread: (id: string, tid: string) =>
     request(`/api/v1/souls/${id}/threads/${tid}`, { method: "DELETE" }),
+
+  // 空间与成员
+  myWorkspaces: () => request<Membership[]>("/api/v1/workspaces"),
+  listMembers: () => request<Member[]>("/api/v1/workspaces/current/members"),
+  inviteMember: (b: { email: string; role?: "editor" | "viewer" }) =>
+    request<Member>("/api/v1/workspaces/current/members", { method: "POST", body: JSON.stringify(b) }),
+  updateMemberRole: (userId: string, role: "owner" | "editor" | "viewer") =>
+    request<Member>(`/api/v1/workspaces/current/members/${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    }),
+  removeMember: (userId: string) =>
+    request<{ ok: boolean }>(`/api/v1/workspaces/current/members/${userId}`, { method: "DELETE" }),
 
   // 搜索
   globalSearch: (b: { query: string; source_ids?: string[]; top_k?: number }) =>

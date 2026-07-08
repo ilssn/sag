@@ -1,12 +1,14 @@
 "use client";
 
 import * as React from "react";
-import { Plus, Sparkles } from "lucide-react";
+import { Lock, Plus, Sparkles, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
-import type { Soul, Source } from "@/lib/types";
+import type { Soul, Source, SoulVisibility } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useApp } from "@/components/features/app-shell";
+import { ReadOnlyButton } from "@/components/features/read-only-button";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -28,6 +30,7 @@ export function CreateSoulDialog({
   onCreated: (s: Soul) => void;
   trigger?: React.ReactNode;
 }) {
+  const { canWrite } = useApp();
   const [open, setOpen] = React.useState(false);
   const [name, setName] = React.useState("");
   const [avatar, setAvatar] = React.useState("");
@@ -35,6 +38,8 @@ export function CreateSoulDialog({
   const [greeting, setGreeting] = React.useState("");
   const [sources, setSources] = React.useState<Source[]>([]);
   const [picked, setPicked] = React.useState<Set<string>>(new Set());
+  const [visibility, setVisibility] = React.useState<SoulVisibility>("private");
+  const [isTeam, setIsTeam] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
 
   React.useEffect(() => {
@@ -47,6 +52,11 @@ export function CreateSoulDialog({
         setPicked(s.length === 1 ? new Set([s[0].id]) : new Set());
       })
       .catch(() => setSources([]));
+    // 仅在多人空间显示可见性开关，个人空间保持简洁
+    api
+      .listMembers()
+      .then((m) => setIsTeam(m.length > 1))
+      .catch(() => setIsTeam(false));
   }, [open]);
 
   function toggle(id: string) {
@@ -66,6 +76,7 @@ export function CreateSoulDialog({
         name,
         avatar: avatar || name.slice(0, 1),
         persona: { system_prompt: systemPrompt, greeting },
+        visibility: isTeam ? visibility : undefined,
       });
       let bound = 0;
       for (const id of picked) {
@@ -84,12 +95,15 @@ export function CreateSoulDialog({
       setSystemPrompt("");
       setGreeting("");
       setPicked(new Set());
+      setVisibility("private");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "创建失败");
     } finally {
       setLoading(false);
     }
   }
+
+  if (!canWrite) return <ReadOnlyButton label="创建助手" icon={<Plus className="size-4" />} />;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -191,6 +205,52 @@ export function CreateSoulDialog({
               placeholder="我在。今天想理清什么？"
             />
           </div>
+
+          {isTeam && (
+            <div className="flex flex-col gap-1.5">
+              <Label>可见性</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {(
+                  [
+                    {
+                      key: "private" as const,
+                      icon: Lock,
+                      title: "私有",
+                      desc: "仅你可见与对话",
+                    },
+                    {
+                      key: "workspace" as const,
+                      icon: Users,
+                      title: "团队",
+                      desc: "空间成员共享，对话沉淀为团队记忆",
+                    },
+                  ]
+                ).map((o) => {
+                  const Icon = o.icon;
+                  const on = visibility === o.key;
+                  return (
+                    <button
+                      key={o.key}
+                      type="button"
+                      onClick={() => setVisibility(o.key)}
+                      className={cn(
+                        "flex flex-col items-start gap-1 rounded-lg border p-2.5 text-left transition-colors",
+                        on
+                          ? "border-gold/60 bg-gold-soft/60"
+                          : "border-hairline hover:border-gold/30 hover:bg-surface-2",
+                      )}
+                    >
+                      <span className="flex items-center gap-1.5 text-sm font-medium text-ink">
+                        <Icon className="size-3.5" />
+                        {o.title}
+                      </span>
+                      <span className="text-xs leading-snug text-ink-faint">{o.desc}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           <DialogFooter>
             <Button type="submit" variant="gold" disabled={loading || !name.trim()}>

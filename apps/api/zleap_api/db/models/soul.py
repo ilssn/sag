@@ -5,7 +5,7 @@ from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
 from zleap_api.db.base import Base, IDMixin, TimestampMixin
-from zleap_api.enums import BindingTargetType, MessageRole, SoulOrigin, SoulStatus
+from zleap_api.enums import BindingTargetType, MessageRole, SoulOrigin, SoulStatus, SoulVisibility
 
 
 class Soul(IDMixin, TimestampMixin, Base):
@@ -15,6 +15,11 @@ class Soul(IDMixin, TimestampMixin, Base):
 
     workspace_id: Mapped[str] = mapped_column(
         ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    # 创建者与可见性（private=仅创建者；workspace=空间共享）
+    owner_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    visibility: Mapped[SoulVisibility] = mapped_column(
+        SAEnum(SoulVisibility, native_enum=False, length=16), default=SoulVisibility.PRIVATE
     )
     name: Mapped[str] = mapped_column(String(120))
     avatar: Mapped[str] = mapped_column(String(64), default="")  # emoji / 首字母 / url

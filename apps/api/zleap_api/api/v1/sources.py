@@ -5,7 +5,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from zleap_api.connectors import registry
 from zleap_api.core.db import get_session
-from zleap_api.core.deps import get_engine_manager, get_job_queue, get_workspace_id
+from zleap_api.core.deps import (
+    get_engine_manager,
+    get_job_queue,
+    get_workspace_id,
+    require_editor,
+)
 from zleap_api.jobs import JobQueue
 from zleap_api.sag import EngineManager
 from zleap_api.schemas.common import Ok
@@ -43,6 +48,7 @@ async def list_(
 async def create(
     body: SourceCreate,
     workspace_id: str = Depends(get_workspace_id),
+    _editor=Depends(require_editor),
     session: AsyncSession = Depends(get_session),
     engine_manager: EngineManager = Depends(get_engine_manager),
 ) -> SourceOut:
@@ -64,6 +70,7 @@ async def update_(
     source_id: str,
     body: SourceUpdate,
     workspace_id: str = Depends(get_workspace_id),
+    _editor=Depends(require_editor),
     session: AsyncSession = Depends(get_session),
 ) -> SourceOut:
     return SourceOut.model_validate(await update_source(session, workspace_id, source_id, body))
@@ -73,6 +80,7 @@ async def update_(
 async def delete_(
     source_id: str,
     workspace_id: str = Depends(get_workspace_id),
+    _editor=Depends(require_editor),
     session: AsyncSession = Depends(get_session),
     engine_manager: EngineManager = Depends(get_engine_manager),
 ) -> Ok:
@@ -110,6 +118,7 @@ async def get_chunk(
 async def sync(
     source_id: str,
     workspace_id: str = Depends(get_workspace_id),
+    _editor=Depends(require_editor),
     session: AsyncSession = Depends(get_session),
     job_queue: JobQueue = Depends(get_job_queue),
 ) -> JobOut:

@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from zleap_api.core.config import settings
 from zleap_api.core.db import get_session
-from zleap_api.core.deps import get_job_queue, get_workspace_id
+from zleap_api.core.deps import get_job_queue, get_workspace_id, require_editor
 from zleap_api.core.errors import ValidationError
 from zleap_api.jobs import JobQueue
 from zleap_api.schemas.common import Ok
@@ -39,6 +39,7 @@ async def upload(
     source_id: str,
     file: UploadFile = File(...),
     workspace_id: str = Depends(get_workspace_id),
+    _editor=Depends(require_editor),
     session: AsyncSession = Depends(get_session),
     job_queue: JobQueue = Depends(get_job_queue),
 ) -> DocumentOut:
@@ -65,6 +66,7 @@ async def ingest(
     source_id: str,
     body: IngestRequest,
     workspace_id: str = Depends(get_workspace_id),
+    _editor=Depends(require_editor),
     session: AsyncSession = Depends(get_session),
     job_queue: JobQueue = Depends(get_job_queue),
 ) -> DocumentOut:
@@ -98,6 +100,7 @@ async def reprocess(
     source_id: str,
     document_id: str,
     workspace_id: str = Depends(get_workspace_id),
+    _editor=Depends(require_editor),
     session: AsyncSession = Depends(get_session),
     job_queue: JobQueue = Depends(get_job_queue),
 ) -> JobOut:
@@ -111,6 +114,7 @@ async def delete_(
     source_id: str,
     document_id: str,
     workspace_id: str = Depends(get_workspace_id),
+    _editor=Depends(require_editor),
     session: AsyncSession = Depends(get_session),
 ) -> Ok:
     source = await get_source(session, workspace_id, source_id)
