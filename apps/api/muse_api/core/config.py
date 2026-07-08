@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     secret_key: str = "dev-insecure-secret-change-me-in-production-0123456789"
     access_token_expire_minutes: int = 60 * 24 * 7  # 7 天
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    # 关闭后仅允许首个用户注册（部署引导），其余返回 403
+    allow_registration: bool = True
 
     # ── muse 元数据库 ───────────────────────────────────────────────────
     database_url: str = "sqlite+aiosqlite:///./.muse/muse.db"

@@ -29,6 +29,7 @@ services:
       MUSE_DEBUG: "false"
       MUSE_SECRET_KEY: ${MUSE_SECRET_KEY:-please-change-this-in-production-0123456789}
       MUSE_CORS_ORIGINS: ${MUSE_CORS_ORIGINS:-http://localhost:3000}
+      MUSE_ALLOW_REGISTRATION: ${MUSE_ALLOW_REGISTRATION:-true}
       # muse 元数据 → Postgres
       MUSE_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-muse}:${POSTGRES_PASSWORD:-muse}@db:5432/${POSTGRES_DB:-muse}
       MUSE_DATA_DIR: /data/zleap

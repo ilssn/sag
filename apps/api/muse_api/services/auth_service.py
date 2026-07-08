@@ -13,12 +13,16 @@ from muse_api.enums import UserRole, WorkspaceRole
 
 
 async def register_user(session: AsyncSession, *, email: str, password: str, name: str = "") -> User:
+    from muse_api.core.config import settings
+
     existing = await session.scalar(select(User).where(User.email == email))
     if existing is not None:
         raise ConflictError("该邮箱已注册")
 
-    # 首个注册用户成为管理员
+    # 首个注册用户成为管理员；注册关闭时仅放行首个用户（部署引导）
     user_count = await session.scalar(select(func.count()).select_from(User)) or 0
+    if user_count > 0 and not settings.allow_registration:
+        raise ForbiddenError("注册已关闭，请联系管理员开通账号")
     role = UserRole.ADMIN if user_count == 0 else UserRole.MEMBER
 
     user = User(

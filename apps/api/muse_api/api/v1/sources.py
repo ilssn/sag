@@ -74,8 +74,17 @@ async def delete_(
     source_id: str,
     workspace_id: str = Depends(get_workspace_id),
     session: AsyncSession = Depends(get_session),
+    engine_manager: EngineManager = Depends(get_engine_manager),
 ) -> Ok:
-    await delete_source(session, workspace_id, source_id)
+    from muse_api.core.config import settings
+
+    await delete_source(
+        session,
+        workspace_id,
+        source_id,
+        engine_manager=engine_manager,
+        upload_dir=settings.upload_dir,
+    )
     return Ok(detail="信源已删除")
 
 

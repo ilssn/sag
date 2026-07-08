@@ -3,11 +3,11 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Link2, Plus, SlidersHorizontal, Trash2 } from "lucide-react";
+import { ArrowLeft, Link2, Plus, SlidersHorizontal, Trash2, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
-import type { Soul, SoulThread } from "@/lib/types";
+import type { Binding, Soul, SoulThread } from "@/lib/types";
 import { relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { BindingDialog } from "@/components/features/soul/binding-dialog";
@@ -36,10 +36,16 @@ export default function SoulWorkbench() {
     api.listSoulThreads(id).then(setThreads).catch(() => {});
   }, [id]);
 
+  const [bindings, setBindings] = React.useState<Binding[] | null>(null);
+  const loadBindings = React.useCallback(() => {
+    api.listBindings(id).then(setBindings).catch(() => {});
+  }, [id]);
+
   React.useEffect(() => {
     loadSoul();
     loadThreads();
-  }, [loadSoul, loadThreads]);
+    loadBindings();
+  }, [loadSoul, loadThreads, loadBindings]);
 
   const ensureThread = async () => {
     const t = await api.createSoulThread(id);
@@ -104,7 +110,10 @@ export default function SoulWorkbench() {
               />
               <BindingDialog
                 soulId={id}
-                onChanged={loadSoul}
+                onChanged={() => {
+                  loadSoul();
+                  loadBindings();
+                }}
                 trigger={
                   <Button variant="outline" size="sm" className="flex-1">
                     <Link2 className="size-3.5" />
@@ -168,19 +177,43 @@ export default function SoulWorkbench() {
         </div>
       </aside>
 
-      <div className="min-w-0 flex-1">
-        {soul && (
-          <SoulChat
-            key={soul.id}
-            soulId={soul.id}
-            soulName={soul.name}
-            avatar={soul.avatar}
-            greeting={soul.persona?.greeting}
-            threadId={threadId}
-            ensureThread={ensureThread}
-            onActivity={loadThreads}
-          />
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* 零绑定引导：没有依据的回答只会说「资料中未提及」 */}
+        {soul && bindings !== null && bindings.filter((b) => b.target_type === "source").length === 0 && (
+          <div className="flex flex-wrap items-center gap-2.5 border-b border-gold/30 bg-gold-soft px-4 py-2.5 text-sm text-gold-strong">
+            <TriangleAlert className="size-4 shrink-0" />
+            <span className="min-w-0 flex-1">
+              「{soul.name}」尚未绑定信源——回答将没有依据。
+            </span>
+            <BindingDialog
+              soulId={id}
+              onChanged={() => {
+                loadSoul();
+                loadBindings();
+              }}
+              trigger={
+                <Button variant="gold" size="sm">
+                  <Link2 className="size-3.5" />
+                  绑定信源
+                </Button>
+              }
+            />
+          </div>
         )}
+        <div className="min-h-0 flex-1">
+          {soul && (
+            <SoulChat
+              key={soul.id}
+              soulId={soul.id}
+              soulName={soul.name}
+              avatar={soul.avatar}
+              greeting={soul.persona?.greeting}
+              threadId={threadId}
+              ensureThread={ensureThread}
+              onActivity={loadThreads}
+            />
+          )}
+        </div>
       </div>
     </div>
   );

@@ -223,6 +223,17 @@ class EngineManager:
                     snippets.append(str(text)[:500])
         return snippets
 
+    async def release(self, source_config_id: str) -> None:
+        """关闭并移除某源的引擎槽（信源删除时调用；幂等）。"""
+        slot = self._slots.pop(source_config_id, None)
+        if slot is None:
+            return
+        try:
+            async with slot.lock:  # 等待在途操作结束
+                await slot.engine.aclose()
+        except Exception as e:  # noqa: BLE001
+            log.warning("释放引擎失败 %s: %s", source_config_id, e)
+
     async def aclose_all(self) -> None:
         for scid, slot in list(self._slots.items()):
             try:

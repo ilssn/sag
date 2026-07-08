@@ -22,9 +22,22 @@ from muse_api.sag import EngineManager
 log = get_logger("app")
 
 
+# 已知不安全的默认密钥（生产环境拒绝启动）
+_INSECURE_SECRETS = {
+    "dev-insecure-secret-change-me-in-production-0123456789",
+    "please-change-this-in-production-0123456789",
+    "dev-secret-change-me",
+}
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging("DEBUG" if settings.debug else "INFO")
+    if settings.environment == "prod" and settings.secret_key in _INSECURE_SECRETS:
+        raise RuntimeError(
+            "生产环境禁止使用默认 MUSE_SECRET_KEY。"
+            "请设置强随机值（≥32 字节），例如：openssl rand -hex 32"
+        )
     os.makedirs(settings.data_dir, exist_ok=True)
     os.makedirs(settings.upload_dir, exist_ok=True)
 

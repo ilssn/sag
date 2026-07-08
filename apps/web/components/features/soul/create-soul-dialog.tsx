@@ -5,7 +5,8 @@ import { Plus, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
-import type { Soul } from "@/lib/types";
+import type { Soul, Source } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -32,7 +33,30 @@ export function CreateSoulDialog({
   const [avatar, setAvatar] = React.useState("");
   const [systemPrompt, setSystemPrompt] = React.useState("");
   const [greeting, setGreeting] = React.useState("");
+  const [sources, setSources] = React.useState<Source[]>([]);
+  const [picked, setPicked] = React.useState<Set<string>>(new Set());
   const [loading, setLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!open) return;
+    api
+      .listSources()
+      .then((s) => {
+        setSources(s);
+        // 只有一个信源时默认勾选，顺滑走完黄金路径
+        setPicked(s.length === 1 ? new Set([s[0].id]) : new Set());
+      })
+      .catch(() => setSources([]));
+  }, [open]);
+
+  function toggle(id: string) {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -43,13 +67,23 @@ export function CreateSoulDialog({
         avatar: avatar || name.slice(0, 1),
         persona: { system_prompt: systemPrompt, greeting },
       });
-      toast.success("Agent已创建");
+      let bound = 0;
+      for (const id of picked) {
+        try {
+          await api.addBinding(soul.id, { target_type: "source", target_id: id });
+          bound += 1;
+        } catch {
+          /* 单个失败不阻断创建 */
+        }
+      }
+      toast.success(bound > 0 ? `助手已创建，绑定了 ${bound} 个信源` : "助手已创建");
       onCreated(soul);
       setOpen(false);
       setName("");
       setAvatar("");
       setSystemPrompt("");
       setGreeting("");
+      setPicked(new Set());
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "创建失败");
     } finally {
@@ -94,18 +128,58 @@ export function CreateSoulDialog({
                 required
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="如：阿默 / 决策脑 / 关羽"
+                placeholder="如：阿默 / 决策脑"
               />
             </div>
           </div>
+
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="soul-sp">角色说明（System Prompt）</Label>
+            <Label>
+              绑定信源
+              {picked.size > 0 && <span className="ml-1 text-ink-faint">（已选 {picked.size}）</span>}
+            </Label>
+            {sources.length === 0 ? (
+              <p className="rounded-sm border border-dashed border-hairline px-3 py-2.5 text-xs text-ink-faint">
+                还没有信源。也可以先创建助手，稍后在工作台里绑定。
+              </p>
+            ) : (
+              <div className="max-h-32 overflow-y-auto rounded-sm border border-hairline">
+                {sources.map((s, i) => {
+                  const on = picked.has(s.id);
+                  return (
+                    <label
+                      key={s.id}
+                      className={cn(
+                        "flex cursor-pointer items-center gap-2.5 px-3 py-2 text-sm transition-colors",
+                        i > 0 && "border-t border-hairline",
+                        on ? "bg-gold-soft/60" : "hover:bg-surface-2",
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={() => toggle(s.id)}
+                        className="size-3.5 accent-[var(--gold)]"
+                      />
+                      <span className="min-w-0 flex-1 truncate text-ink">{s.name}</span>
+                      <span className="shrink-0 text-[11px] tabular-nums text-ink-faint">
+                        {s.document_count} 文档
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="soul-sp">设定（可选）</Label>
             <Textarea
               id="soul-sp"
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
               placeholder="你是阿默，简洁、克制、可靠。只依据绑定的信源作答。"
-              rows={3}
+              rows={2}
             />
           </div>
           <div className="flex flex-col gap-1.5">
@@ -121,7 +195,7 @@ export function CreateSoulDialog({
           <DialogFooter>
             <Button type="submit" variant="gold" disabled={loading || !name.trim()}>
               <Sparkles className="size-4" />
-              {loading ? "创建中…" : "创建"}
+              {loading ? "创建中…" : "创建助手"}
             </Button>
           </DialogFooter>
         </form>
