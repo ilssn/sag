@@ -22,7 +22,7 @@ db/ · core/    模型 / 配置 / 安全 / 错误 / 日志
 
 ## 错误模型
 
-- 领域异常统一继承 `MuseError`（`core/errors.py`），自带 `status_code/code/message`；
+- 领域异常统一继承 `ApiError`（`core/errors.py`），自带 `status_code/code/message`；
   全局 handler 映射为 `{"error": {code, message}}`。路由**不写** try/except 转换。
 - 边界失败要分级：单信源检索失败不阻断 fan-out（log + 跳过）；单文件上传失败不阻断批量；
   MCP 单个 server 连不上只跳过该 server。**局部失败绝不放大为整体失败。**

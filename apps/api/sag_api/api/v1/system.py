@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sag_api.core.config import settings
 from sag_api.core.db import SessionLocal, get_session
 from sag_api.core.deps import get_current_user
-from sag_api.core.errors import MuseError
+from sag_api.core.errors import ApiError
 from sag_api.core.logging import get_logger
 from sag_api.db.models import User
 from sag_api.generation import LLMClient
@@ -93,7 +93,7 @@ async def test_model_config(
     try:
         await llm.complete([{"role": "user", "content": "ping"}])
         return {"ok": True, "message": f"连接成功 · {settings.llm_model}"}
-    except MuseError as e:
+    except ApiError as e:
         return {"ok": False, "message": e.message}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "message": str(e)}

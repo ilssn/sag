@@ -51,7 +51,7 @@ services:
       SAG_EMBEDDING_BASE_URL: ${SAG_EMBEDDING_BASE_URL:-}
       SAG_EMBEDDING_API_KEY: ${SAG_EMBEDDING_API_KEY:-}
     volumes:
-      - musedata:/data
+      - sagdata:/data
     ports:
       - "${API_PORT:-8000}:8000"
     healthcheck:
@@ -83,4 +83,4 @@ services:
 
 volumes:
   pgdata:
-  musedata:
+  sagdata:

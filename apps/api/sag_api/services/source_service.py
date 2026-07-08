@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sag_api.connectors import registry
-from sag_api.core.errors import MuseError, NotFoundError, ValidationError
+from sag_api.core.errors import ApiError, NotFoundError, ValidationError
 from sag_api.core.logging import get_logger
 from sag_api.db.base import new_id
 from sag_api.db.models import AgentBinding, Job, Source
@@ -55,7 +55,7 @@ async def create_source(
     # 预建引擎 schema（幂等）；失败不阻断创建，处理文档时会重试
     try:
         await engine_manager.provision(source.sag_source_config_id, source)
-    except MuseError as e:
+    except ApiError as e:
         log.warning("信源引擎预建失败 %s：%s", source.sag_source_config_id, e.message)
     return source
 

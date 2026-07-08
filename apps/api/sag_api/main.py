@@ -14,7 +14,7 @@ from sag_api import __version__
 from sag_api.api.v1 import api_router
 from sag_api.core.config import settings
 from sag_api.core.db import SessionLocal, dispose_db, init_db
-from sag_api.core.errors import MuseError
+from sag_api.core.errors import ApiError
 from sag_api.core.logging import RequestContextMiddleware, configure_logging, get_logger
 from sag_api.generation import LLMClient
 from sag_api.jobs import InProcessAsyncQueue
@@ -138,8 +138,8 @@ def create_app() -> FastAPI:
     # 请求追踪（放在 CORS 之后添加 → 更外层执行，最先分配 request_id）
     app.add_middleware(RequestContextMiddleware)
 
-    @app.exception_handler(MuseError)
-    async def _handle_muse_error(_request: Request, exc: MuseError) -> JSONResponse:
+    @app.exception_handler(ApiError)
+    async def _handle_api_error(_request: Request, exc: ApiError) -> JSONResponse:
         return JSONResponse(
             status_code=exc.status_code,
             content={"error": {"code": exc.code, "message": exc.message}},
