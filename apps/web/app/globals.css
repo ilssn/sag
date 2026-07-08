@@ -128,6 +128,28 @@
 }
 
 @layer components {
+  /* 搜索图谱（React Flow）主题化：边/控件走语义 token，亮暗两态一致 */
+  .sag-graph .react-flow__edge-path {
+    stroke: hsl(var(--border));
+    stroke-width: 1.25;
+  }
+  .sag-graph .react-flow__controls {
+    border: 1px solid hsl(var(--border));
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .sag-graph .react-flow__controls-button {
+    background: hsl(var(--card));
+    border-bottom: 1px solid hsl(var(--border));
+    color: hsl(var(--foreground));
+  }
+  .sag-graph .react-flow__controls-button:hover {
+    background: hsl(var(--muted));
+  }
+  .sag-graph .react-flow__controls-button svg {
+    fill: currentColor;
+  }
+
   /* 展示字：无衬线、紧字距、光学 */
   .font-display {
     font-family: var(--font-sans);
