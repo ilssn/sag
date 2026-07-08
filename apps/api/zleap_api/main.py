@@ -14,7 +14,7 @@ from zleap_api.api.v1 import api_router
 from zleap_api.core.config import settings
 from zleap_api.core.db import SessionLocal, dispose_db, init_db
 from zleap_api.core.errors import MuseError
-from zleap_api.core.logging import configure_logging, get_logger
+from zleap_api.core.logging import RequestContextMiddleware, configure_logging, get_logger
 from zleap_api.generation import LLMClient
 from zleap_api.jobs import InProcessAsyncQueue
 from zleap_api.sag import EngineManager
@@ -78,7 +78,10 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Request-Id"],
     )
+    # 请求追踪（放在 CORS 之后添加 → 更外层执行，最先分配 request_id）
+    app.add_middleware(RequestContextMiddleware)
 
     @app.exception_handler(MuseError)
     async def _handle_muse_error(_request: Request, exc: MuseError) -> JSONResponse:

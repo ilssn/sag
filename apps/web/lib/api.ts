@@ -2,6 +2,7 @@ import { clearToken, getToken } from "./auth";
 import { getActiveWorkspace } from "./workspace";
 import type {
   Binding,
+  AuditPage,
   Member,
   Membership,
   BindingTargetType,
@@ -141,6 +142,29 @@ export const api = {
     }),
   removeMember: (userId: string) =>
     request<{ ok: boolean }>(`/api/v1/workspaces/current/members/${userId}`, { method: "DELETE" }),
+
+  // 审计（owner）
+  listAudit: (p: { action?: string; actor?: string; limit?: number; offset?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (p.action) q.set("action", p.action);
+    if (p.actor) q.set("actor", p.actor);
+    q.set("limit", String(p.limit ?? 50));
+    q.set("offset", String(p.offset ?? 0));
+    return request<AuditPage>(`/api/v1/audit?${q.toString()}`);
+  },
+  exportAuditCsv: async (p: { action?: string; actor?: string } = {}): Promise<Blob> => {
+    const q = new URLSearchParams();
+    if (p.action) q.set("action", p.action);
+    if (p.actor) q.set("actor", p.actor);
+    const headers: Record<string, string> = {};
+    const token = getToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const ws = getActiveWorkspace();
+    if (ws) headers["X-Workspace-Id"] = ws;
+    const res = await fetch(`${API_BASE}/api/v1/audit/export?${q.toString()}`, { headers });
+    if (!res.ok) throw new ApiError(res.status, "export_failed", "导出失败");
+    return res.blob();
+  },
 
   // 搜索
   globalSearch: (b: { query: string; source_ids?: string[]; top_k?: number }) =>

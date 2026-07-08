@@ -1,5 +1,6 @@
 """ORM 模型聚合导入 —— 保证 Base.metadata 注册全部表。"""
 
+from zleap_api.db.models.audit import AuditLog
 from zleap_api.db.models.chat import ChatMessage, ChatThread
 from zleap_api.db.models.document import Document
 from zleap_api.db.models.job import Job
@@ -11,6 +12,7 @@ from zleap_api.db.models.user import User
 from zleap_api.db.models.workspace import Membership, Workspace
 
 __all__ = [
+    "AuditLog",
     "ChatMessage",
     "ChatThread",
     "Document",

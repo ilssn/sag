@@ -5,6 +5,7 @@ import { Check, Monitor, Moon, Sun, X } from "lucide-react";
 import { useTheme } from "next-themes";
 
 import { useApp } from "@/components/features/app-shell";
+import { AuditCard } from "@/components/features/audit-card";
 import { MembersCard } from "@/components/features/members-card";
 import { PageHeader } from "@/components/features/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -55,7 +56,7 @@ function ThemeSegment() {
 }
 
 export default function SettingsPage() {
-  const { user, capabilities, logout } = useApp();
+  const { user, capabilities, role, logout } = useApp();
 
   return (
     <>
@@ -83,6 +84,8 @@ export default function SettingsPage() {
         </Card>
 
         <MembersCard />
+
+        {role === "owner" && <AuditCard />}
 
         <Card>
           <CardHeader>

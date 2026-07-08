@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from zleap_api.core.config import settings
 from zleap_api.core.db import get_session
 from zleap_api.core.deps import get_job_queue, get_workspace_id, require_editor
 from zleap_api.core.errors import ValidationError
+from zleap_api.enums import AuditAction
 from zleap_api.jobs import JobQueue
 from zleap_api.schemas.common import Ok
 from zleap_api.schemas.document import DocumentOut, IngestRequest
 from zleap_api.schemas.job import JobOut
+from zleap_api.services import audit_service
 from zleap_api.services.document_service import (
     create_document_from_upload,
     delete_document,
@@ -37,6 +39,7 @@ async def list_(
 @router.post("", response_model=DocumentOut, status_code=201)
 async def upload(
     source_id: str,
+    request: Request,
     file: UploadFile = File(...),
     workspace_id: str = Depends(get_workspace_id),
     _editor=Depends(require_editor),
@@ -58,7 +61,16 @@ async def upload(
         upload_dir=settings.upload_dir,
         job_queue=job_queue,
     )
-    return DocumentOut.model_validate(document)
+    out = DocumentOut.model_validate(document)
+    await audit_service.record_request(
+        request,
+        AuditAction.DOCUMENT_UPLOAD,
+        target_type="document",
+        target_id=document.id,
+        target_label=document.filename,
+        meta={"source_id": source.id, "source_name": source.name},
+    )
+    return out
 
 
 @router.post("/ingest", response_model=DocumentOut, status_code=201)
@@ -99,6 +111,7 @@ async def get_(
 async def reprocess(
     source_id: str,
     document_id: str,
+    request: Request,
     workspace_id: str = Depends(get_workspace_id),
     _editor=Depends(require_editor),
     session: AsyncSession = Depends(get_session),
@@ -106,17 +119,36 @@ async def reprocess(
 ) -> JobOut:
     source = await get_source(session, workspace_id, source_id)
     job = await reprocess_document(session, source, document_id, job_queue=job_queue)
-    return JobOut.model_validate(job)
+    out = JobOut.model_validate(job)
+    await audit_service.record_request(
+        request,
+        AuditAction.DOCUMENT_REPROCESS,
+        target_type="document",
+        target_id=document_id,
+        meta={"source_id": source.id},
+    )
+    return out
 
 
 @router.delete("/{document_id}", response_model=Ok)
 async def delete_(
     source_id: str,
     document_id: str,
+    request: Request,
     workspace_id: str = Depends(get_workspace_id),
     _editor=Depends(require_editor),
     session: AsyncSession = Depends(get_session),
 ) -> Ok:
     source = await get_source(session, workspace_id, source_id)
+    doc = await get_document(session, source, document_id)
+    label = doc.filename
     await delete_document(session, source, document_id)
+    await audit_service.record_request(
+        request,
+        AuditAction.DOCUMENT_DELETE,
+        target_type="document",
+        target_id=document_id,
+        target_label=label,
+        meta={"source_id": source.id, "source_name": source.name},
+    )
     return Ok(detail="文档已删除")

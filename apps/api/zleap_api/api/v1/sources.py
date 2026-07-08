@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from zleap_api.connectors import registry
@@ -11,11 +11,13 @@ from zleap_api.core.deps import (
     get_workspace_id,
     require_editor,
 )
+from zleap_api.enums import AuditAction
 from zleap_api.jobs import JobQueue
 from zleap_api.sag import EngineManager
 from zleap_api.schemas.common import Ok
 from zleap_api.schemas.job import JobOut
 from zleap_api.schemas.source import ConnectorOut, SourceCreate, SourceOut, SourceUpdate
+from zleap_api.services import audit_service
 from zleap_api.services.source_service import (
     create_source,
     delete_source,
@@ -47,13 +49,22 @@ async def list_(
 @router.post("", response_model=SourceOut, status_code=201)
 async def create(
     body: SourceCreate,
+    request: Request,
     workspace_id: str = Depends(get_workspace_id),
     _editor=Depends(require_editor),
     session: AsyncSession = Depends(get_session),
     engine_manager: EngineManager = Depends(get_engine_manager),
 ) -> SourceOut:
     source = await create_source(session, workspace_id, body, engine_manager=engine_manager)
-    return SourceOut.model_validate(source)
+    out = SourceOut.model_validate(source)
+    await audit_service.record_request(
+        request,
+        AuditAction.SOURCE_CREATE,
+        target_type="source",
+        target_id=source.id,
+        target_label=source.name,
+    )
+    return out
 
 
 @router.get("/{source_id}", response_model=SourceOut)
@@ -79,6 +90,7 @@ async def update_(
 @router.delete("/{source_id}", response_model=Ok)
 async def delete_(
     source_id: str,
+    request: Request,
     workspace_id: str = Depends(get_workspace_id),
     _editor=Depends(require_editor),
     session: AsyncSession = Depends(get_session),
@@ -86,12 +98,21 @@ async def delete_(
 ) -> Ok:
     from zleap_api.core.config import settings
 
+    source = await get_source(session, workspace_id, source_id)  # 捕获名称用于审计
+    label = source.name
     await delete_source(
         session,
         workspace_id,
         source_id,
         engine_manager=engine_manager,
         upload_dir=settings.upload_dir,
+    )
+    await audit_service.record_request(
+        request,
+        AuditAction.SOURCE_DELETE,
+        target_type="source",
+        target_id=source_id,
+        target_label=label,
     )
     return Ok(detail="信源已删除")
 
@@ -117,10 +138,15 @@ async def get_chunk(
 @router.post("/{source_id}/sync", response_model=JobOut)
 async def sync(
     source_id: str,
+    request: Request,
     workspace_id: str = Depends(get_workspace_id),
     _editor=Depends(require_editor),
     session: AsyncSession = Depends(get_session),
     job_queue: JobQueue = Depends(get_job_queue),
 ) -> JobOut:
     job = await sync_source(session, workspace_id, source_id, job_queue=job_queue)
-    return JobOut.model_validate(job)
+    out = JobOut.model_validate(job)
+    await audit_service.record_request(
+        request, AuditAction.SOURCE_SYNC, target_type="source", target_id=source_id
+    )
+    return out

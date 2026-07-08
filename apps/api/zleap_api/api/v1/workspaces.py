@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from zleap_api.core.db import get_session
@@ -12,7 +12,7 @@ from zleap_api.core.deps import (
 )
 from zleap_api.core.errors import ForbiddenError
 from zleap_api.db.models import User
-from zleap_api.enums import WorkspaceRole
+from zleap_api.enums import AuditAction, WorkspaceRole
 from zleap_api.schemas.common import Ok
 from zleap_api.schemas.workspace import (
     InviteRequest,
@@ -20,6 +20,7 @@ from zleap_api.schemas.workspace import (
     RoleUpdateRequest,
     WorkspaceOut,
 )
+from zleap_api.services import audit_service
 from zleap_api.services import workspace_service as svc
 
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
@@ -44,11 +45,20 @@ async def members(
 @router.post("/current/members", response_model=MemberOut, status_code=201)
 async def invite(
     body: InviteRequest,
+    request: Request,
     workspace_id: str = Depends(get_workspace_id),
     _owner=Depends(require_owner),
     session: AsyncSession = Depends(get_session),
 ) -> MemberOut:
     m = await svc.invite_member(session, workspace_id, email=body.email, role=body.role)
+    await audit_service.record_request(
+        request,
+        AuditAction.MEMBER_INVITE,
+        target_type="user",
+        target_id=m["user_id"],
+        target_label=m["email"],
+        meta={"role": str(m["role"])},
+    )
     return MemberOut(**m)
 
 
@@ -56,17 +66,27 @@ async def invite(
 async def update_role(
     member_user_id: str,
     body: RoleUpdateRequest,
+    request: Request,
     workspace_id: str = Depends(get_workspace_id),
     _owner=Depends(require_owner),
     session: AsyncSession = Depends(get_session),
 ) -> MemberOut:
     m = await svc.update_member_role(session, workspace_id, member_user_id, role=body.role)
+    await audit_service.record_request(
+        request,
+        AuditAction.MEMBER_ROLE,
+        target_type="user",
+        target_id=member_user_id,
+        target_label=m["email"],
+        meta={"role": str(m["role"])},
+    )
     return MemberOut(**m)
 
 
 @router.delete("/current/members/{member_user_id}", response_model=Ok)
 async def remove(
     member_user_id: str,
+    request: Request,
     workspace_id: str = Depends(get_workspace_id),
     role: WorkspaceRole = Depends(get_workspace_role),
     user: User = Depends(get_current_user),
@@ -77,4 +97,11 @@ async def remove(
     if not leaving and role != WorkspaceRole.OWNER:
         raise ForbiddenError("仅空间所有者可移除其他成员")
     await svc.remove_member(session, workspace_id, member_user_id)
+    await audit_service.record_request(
+        request,
+        AuditAction.MEMBER_REMOVE,
+        target_type="user",
+        target_id=member_user_id,
+        meta={"self": leaving},
+    )
     return Ok(detail="已退出空间" if leaving else "成员已移除")

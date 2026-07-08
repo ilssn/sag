@@ -35,13 +35,15 @@ engine: AsyncEngine = create_async_engine(
     pool_pre_ping=True,
 )
 
-# SQLite：开启外键约束
+# SQLite：外键约束 + 并发友好（WAL 读写并行，busy_timeout 让写入等待而非立即报锁）
 if settings.database_url.startswith("sqlite"):
 
     @event.listens_for(engine.sync_engine, "connect")
-    def _fk_pragma(dbapi_conn, _record):  # noqa: ANN001
+    def _sqlite_pragmas(dbapi_conn, _record):  # noqa: ANN001
         cur = dbapi_conn.cursor()
         cur.execute("PRAGMA foreign_keys=ON")
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA busy_timeout=5000")
         cur.close()
 
 

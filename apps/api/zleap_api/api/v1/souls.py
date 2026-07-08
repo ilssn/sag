@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
@@ -19,7 +19,7 @@ from zleap_api.core.deps import (
 )
 from zleap_api.core.errors import ConfigurationError, MuseError
 from zleap_api.db.models import User
-from zleap_api.enums import WorkspaceRole
+from zleap_api.enums import AuditAction, WorkspaceRole
 from zleap_api.generation import LLMClient
 from zleap_api.jobs import JobQueue
 from zleap_api.sag import EngineManager
@@ -35,6 +35,7 @@ from zleap_api.schemas.soul import (
     SoulThreadOut,
     SoulUpdate,
 )
+from zleap_api.services import audit_service
 from zleap_api.services import soul_service as svc
 
 router = APIRouter(prefix="/souls", tags=["souls"])
@@ -59,6 +60,7 @@ async def list_(
 @router.post("", response_model=SoulOut, status_code=201)
 async def create(
     body: SoulCreate,
+    request: Request,
     ws: str = Depends(get_workspace_id),
     user: User = Depends(get_current_user),
     _editor=Depends(require_editor),
@@ -73,7 +75,16 @@ async def create(
         persona=body.persona,
         visibility=body.visibility,
     )
-    return SoulOut.model_validate(soul)
+    out = SoulOut.model_validate(soul)
+    await audit_service.record_request(
+        request,
+        AuditAction.SOUL_CREATE,
+        target_type="soul",
+        target_id=soul.id,
+        target_label=soul.name,
+        meta={"visibility": str(soul.visibility)},
+    )
+    return out
 
 
 @router.get("/{soul_id}", response_model=SoulOut)
@@ -92,12 +103,15 @@ async def get_(
 async def update_(
     soul_id: str,
     body: SoulUpdate,
+    request: Request,
     ws: str = Depends(get_workspace_id),
     role: WorkspaceRole = Depends(get_workspace_role),
     user: User = Depends(get_current_user),
     _editor=Depends(require_editor),
     session: AsyncSession = Depends(get_session),
 ):
+    before = await svc.get_soul(session, ws, soul_id, user_id=user.id, role=role)
+    prev_visibility = before.visibility
     soul = await svc.update_soul(
         session,
         ws,
@@ -109,19 +123,40 @@ async def update_(
         persona=body.persona,
         visibility=body.visibility,
     )
-    return SoulOut.model_validate(soul)
+    out = SoulOut.model_validate(soul)
+    # 可见性变化是团队安全相关事件，单独审计
+    if body.visibility is not None and body.visibility != prev_visibility:
+        await audit_service.record_request(
+            request,
+            AuditAction.SOUL_VISIBILITY,
+            target_type="soul",
+            target_id=soul.id,
+            target_label=soul.name,
+            meta={"from": str(prev_visibility), "to": str(soul.visibility)},
+        )
+    return out
 
 
 @router.delete("/{soul_id}", response_model=Ok)
 async def delete_(
     soul_id: str,
+    request: Request,
     ws: str = Depends(get_workspace_id),
     role: WorkspaceRole = Depends(get_workspace_role),
     user: User = Depends(get_current_user),
     _editor=Depends(require_editor),
     session: AsyncSession = Depends(get_session),
 ):
+    before = await svc.get_soul(session, ws, soul_id, user_id=user.id, role=role)
+    label = before.name
     await svc.delete_soul(session, ws, soul_id, user_id=user.id, role=role)
+    await audit_service.record_request(
+        request,
+        AuditAction.SOUL_DELETE,
+        target_type="soul",
+        target_id=soul_id,
+        target_label=label,
+    )
     return Ok(detail="助手已删除")
 
 

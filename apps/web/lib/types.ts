@@ -8,6 +8,26 @@ export interface Membership {
   role: WorkspaceRole;
 }
 
+export interface AuditEntry {
+  id: string;
+  actor_id: string | null;
+  actor_email: string;
+  action: string;
+  target_type: string;
+  target_id: string;
+  target_label: string;
+  meta_json: string;
+  ip: string;
+  created_at: string;
+}
+
+export interface AuditPage {
+  items: AuditEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface Member {
   user_id: string;
   email: string;

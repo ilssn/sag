@@ -95,3 +95,27 @@ class SoulStatus(StrEnum):
 class BindingTargetType(StrEnum):
     NAMESPACE = "namespace"
     SOURCE = "source"
+
+
+class AuditAction(StrEnum):
+    """审计动作枚举（集中定义，避免散落魔法字符串）。"""
+
+    # 认证
+    USER_REGISTER = "user.register"
+    USER_LOGIN = "user.login"
+    # 信源
+    SOURCE_CREATE = "source.create"
+    SOURCE_DELETE = "source.delete"
+    SOURCE_SYNC = "source.sync"
+    # 文档
+    DOCUMENT_UPLOAD = "document.upload"
+    DOCUMENT_DELETE = "document.delete"
+    DOCUMENT_REPROCESS = "document.reprocess"
+    # 助手
+    SOUL_CREATE = "soul.create"
+    SOUL_DELETE = "soul.delete"
+    SOUL_VISIBILITY = "soul.visibility"
+    # 成员
+    MEMBER_INVITE = "member.invite"
+    MEMBER_ROLE = "member.role"
+    MEMBER_REMOVE = "member.remove"
