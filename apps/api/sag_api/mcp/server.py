@@ -111,6 +111,97 @@ def build_source_mcp(*, stateless_http: bool = False) -> FastMCP:
         body = "\n\n".join(snippets) if snippets else (match.description or "")
         return f"实体「{match.name}」（{match.type}）：\n{body}".strip()
 
+    @mcp.tool(description="列出该信源的全部文档（id/文件名/状态/计数），探索的起点。")
+    async def list_documents() -> str:
+        scope = _require_scope()
+        from sqlalchemy import select
+
+        from sag_api.core.db import SessionLocal
+        from sag_api.db.models import Document
+
+        async with SessionLocal() as session:
+            docs = (
+                (
+                    await session.execute(
+                        select(Document)
+                        .where(Document.source_id == scope.source.id)
+                        .order_by(Document.created_at)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        if not docs:
+            return "（该信源还没有文档）"
+        return "\n".join(
+            f"- {d.filename} · id={d.id} · {d.status.value} · {d.chunk_count} 分块"
+            for d in docs
+        )
+
+    @mcp.tool(description="某文档的大纲（分块 heading 按顺序），先看结构再精确取内容。")
+    async def outline(document_id: str) -> str:
+        scope = _require_scope()
+        from sag_api.core.db import SessionLocal
+        from sag_api.db.models import Document
+
+        async with SessionLocal() as session:
+            doc = await session.get(Document, (document_id or "").strip())
+        if doc is None or doc.source_id != scope.source.id:
+            return "（未找到该文档）"
+        rows = await scope.engine_manager.list_chunk_headings(
+            scope.source.sag_source_config_id,
+            source=scope.source,
+            doc_sag_id=doc.sag_source_id,
+        )
+        if not rows:
+            return "（尚无大纲：文档可能仍在处理中）"
+        return "\n".join(
+            f"{r['rank']:>3}. {r['heading'] or '（无标题分块）'}（chunk_id={r['chunk_id']}）"
+            for r in rows
+        )
+
+    @mcp.tool(description="精确文本匹配（大小写不敏感）：找专名/编号/代码段等确定性内容。")
+    async def grep(pattern: str, limit: int = 20) -> str:
+        scope = _require_scope()
+        needle = (pattern or "").strip()
+        if not needle:
+            return "（空匹配串）"
+        rows = await scope.engine_manager.grep_chunks(
+            scope.source.sag_source_config_id, needle, source=scope.source, limit=limit
+        )
+        if not rows:
+            return "（未匹配到内容）"
+        return "\n\n".join(
+            f"[{i}] {r['heading'] or '片段'}（chunk_id={r['chunk_id']}）\n{r['snippet']}"
+            for i, r in enumerate(rows, start=1)
+        )
+
+    @mcp.tool(description="按行分页读取文档原始文件（offset 从 1 起，limit 默认 120 行）。")
+    async def read(document_id: str, offset: int = 1, limit: int = 120) -> str:
+        scope = _require_scope()
+        import os
+
+        from sag_api.core.db import SessionLocal
+        from sag_api.db.models import Document
+
+        async with SessionLocal() as session:
+            doc = await session.get(Document, (document_id or "").strip())
+        if doc is None or doc.source_id != scope.source.id:
+            return "（未找到该文档）"
+        if not doc.storage_path or not os.path.isfile(doc.storage_path):
+            return "（原始文件不存在或已清理）"
+        try:
+            with open(doc.storage_path, encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()
+        except OSError:
+            return "（文件读取失败）"
+        start = max(0, offset - 1)
+        page = lines[start : start + max(1, min(limit, 500))]
+        if not page:
+            return f"（超出范围：全文共 {len(lines)} 行）"
+        body = "".join(f"{start + i + 1:>5}\t{ln}" for i, ln in enumerate(page))
+        return f"{doc.filename} · 第 {start + 1}-{start + len(page)} 行 / 共 {len(lines)} 行\n{body}"
+
     @mcp.tool(description="按 chunk_id 读取该信源中某个分块的完整原文（引用溯源）。")
     async def get_chunk(chunk_id: str) -> str:
         scope = _require_scope()

@@ -250,6 +250,78 @@ class EngineManager:
                     snippets.append(str(text)[:500])
         return snippets
 
+    async def list_chunk_headings(
+        self,
+        source_config_id: str,
+        *,
+        source: Source | None = None,
+        doc_sag_id: str | None = None,
+        limit: int = 300,
+    ) -> list[dict]:
+        """分块大纲：heading + rank（可限定单文档），供 MCP outline。"""
+        await self._slot(source_config_id, source)
+        from sqlalchemy import select
+        from zleap.sag.db import get_session_factory
+        from zleap.sag.db.models import SourceChunk
+
+        conds = [SourceChunk.source_config_id == source_config_id]
+        if doc_sag_id:
+            conds.append(SourceChunk.source_id == doc_sag_id)
+        stmt = (
+            select(SourceChunk.id, SourceChunk.heading, SourceChunk.rank)
+            .where(*conds)
+            .order_by(SourceChunk.rank)
+            .limit(limit)
+        )
+        sf = get_session_factory()
+        async with sf() as s:
+            rows = (await s.execute(stmt)).all()
+        return [
+            {"chunk_id": cid, "heading": (h or "").strip(), "rank": int(r or 0)}
+            for cid, h, r in rows
+        ]
+
+    async def grep_chunks(
+        self,
+        source_config_id: str,
+        pattern: str,
+        *,
+        source: Source | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """精确文本匹配（LIKE，大小写不敏感）：语义检索之外的确定性查找。"""
+        await self._slot(source_config_id, source)
+        from sqlalchemy import select
+        from zleap.sag.db import get_session_factory
+        from zleap.sag.db.models import SourceChunk
+
+        needle = pattern.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        stmt = (
+            select(SourceChunk.id, SourceChunk.heading, SourceChunk.content)
+            .where(
+                SourceChunk.source_config_id == source_config_id,
+                SourceChunk.content.ilike(f"%{needle}%", escape="\\"),
+            )
+            .order_by(SourceChunk.rank)
+            .limit(limit)
+        )
+        sf = get_session_factory()
+        async with sf() as s:
+            rows = (await s.execute(stmt)).all()
+        out = []
+        for cid, heading, content in rows:
+            text = content or ""
+            i = text.lower().find(pattern.lower())
+            lo = max(0, i - 80)
+            out.append(
+                {
+                    "chunk_id": cid,
+                    "heading": (heading or "").strip(),
+                    "snippet": text[lo : lo + 240].strip(),
+                }
+            )
+        return out
+
     async def get_chunk(
         self,
         source_config_id: str,
