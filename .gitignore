@@ -36,3 +36,6 @@ npm-debug.log*
 .idea/
 .vscode/
 *.log
+
+# skill installer output (npx skills add)
+.agents/

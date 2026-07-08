@@ -8,7 +8,7 @@ export function SourceCard({ source }: { source: Source }) {
   return (
     <Link
       href={`/sources/${source.id}`}
-      className="group flex flex-col rounded-lg border border-hairline bg-surface p-5 shadow-soft transition-all duration-150 ease-smooth hover:-translate-y-0.5 hover:border-gold/40 hover:shadow-lift"
+      className="group flex flex-col rounded-lg border border-hairline bg-surface p-5 shadow-soft transition-all duration-150 ease-smooth hover:border-foreground/15 hover:shadow-lift"
     >
       <div className="flex items-start justify-between gap-3">
         <h3 className="font-display text-lg font-medium leading-tight text-ink group-hover:text-gold-strong">

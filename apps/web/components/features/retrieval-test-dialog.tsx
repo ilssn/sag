@@ -1,11 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { FlaskConical, Loader2, Search, Wand2 } from "lucide-react";
+import { FlaskConical, Loader2, Search } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
-import type { Section, Soul } from "@/lib/types";
+import type { Section } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -32,14 +32,11 @@ export function RetrievalTestDialog({
   const [topK, setTopK] = React.useState(8);
   const [results, setResults] = React.useState<Section[] | null>(null);
   const [busy, setBusy] = React.useState(false);
-  const [souls, setSouls] = React.useState<Soul[]>([]);
-  const [applyTo, setApplyTo] = React.useState("");
 
   React.useEffect(() => {
     if (!open) return;
     setResults(null);
     setQuery("");
-    api.listSouls().then(setSouls).catch(() => setSouls([]));
   }, [open]);
 
   async function run(e?: React.FormEvent) {
@@ -56,17 +53,6 @@ export function RetrievalTestDialog({
     }
   }
 
-  async function applyToSoul() {
-    if (!applyTo) return;
-    try {
-      const soul = await api.getSoul(applyTo);
-      await api.updateSoul(applyTo, { persona: { ...soul.persona, top_k: topK } });
-      toast.success(`已把 top_k=${topK} 应用到「${soul.name}」`);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "应用失败");
-    }
-  }
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
@@ -76,7 +62,7 @@ export function RetrievalTestDialog({
             检索测试 · {sourceName}
           </DialogTitle>
           <DialogDescription>
-            用真实查询验证召回效果，调好参数后可一键应用到助手——所见即所得，不必反复试错。
+            用真实查询验证召回效果——所见即所得，先看看能捞回哪些片段。
           </DialogDescription>
         </DialogHeader>
 
@@ -112,26 +98,6 @@ export function RetrievalTestDialog({
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between text-xs text-ink-faint">
               <span>召回 {results.length} 条</span>
-              {souls.length > 0 && results.length > 0 && (
-                <div className="flex items-center gap-1.5">
-                  <select
-                    value={applyTo}
-                    onChange={(e) => setApplyTo(e.target.value)}
-                    className="h-7 rounded-md border border-hairline bg-surface px-2 text-xs text-ink outline-none focus-visible:ring-2 focus-visible:ring-gold"
-                  >
-                    <option value="">选择助手…</option>
-                    {souls.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                  <Button variant="outline" size="sm" onClick={applyToSoul} disabled={!applyTo}>
-                    <Wand2 className="size-3.5" />
-                    应用 top_k
-                  </Button>
-                </div>
-              )}
             </div>
 
             <div className="max-h-[22rem] overflow-y-auto rounded-lg border border-hairline">

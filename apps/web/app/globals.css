@@ -3,143 +3,179 @@
 @tailwind utilities;
 
 /* ─────────────────────────────────────────────────────────
-   zleap 设计令牌 · 纸墨极简 + 淡金
-   克制、优雅、风格化统一；亮暗双主题。
+   zleap 设计令牌 · shadcn 规范中性（zinc）
+   单色、边框优先、亮暗双主题；主操作近黑、强调走中性灰。
    ───────────────────────────────────────────────────────── */
-:root {
-  --paper: #faf9f6;
-  --surface: #ffffff;
-  --surface-2: #f4f2ec;
-  --ink: #1b1a17;
-  --ink-muted: #6b675e;
-  --ink-faint: #9a9488;
-  --hairline: #e7e3d9;
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 10% 3.9%;
+    --radius: 0.625rem;
 
-  --gold: #b8955a;
-  --gold-soft: #efe7d2;
-  --gold-strong: #9c7c42;
+    --chart-1: 240 6% 20%;
+    --chart-2: 240 5% 42%;
+    --chart-3: 240 5% 58%;
+    --chart-4: 240 5% 72%;
+    --chart-5: 240 5% 84%;
 
-  --danger: #b4453a;
-  --success: #4f7a52;
+    --sidebar-background: 240 5% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.2%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 240 5.9% 90%;
+    --sidebar-ring: 240 10% 3.9%;
 
-  --ring: var(--gold);
+    /* 语义别名（沿用既有类名，全部指向中性调色板）*/
+    --ink-faint: 240 4% 64%;
+    --success: 142 52% 40%;
+    --paper: var(--background);
+    --surface: var(--card);
+    --surface-2: var(--muted);
+    --ink: var(--foreground);
+    --ink-muted: var(--muted-foreground);
+    --hairline: var(--border);
+    --gold: var(--primary);
+    --gold-strong: var(--foreground);
+    --gold-soft: var(--accent);
+    --gold-foreground: var(--primary-foreground);
+    --signal: var(--primary);
+    --signal-strong: var(--foreground);
+    --signal-soft: var(--accent);
+    --signal-foreground: var(--primary-foreground);
+    --danger: var(--destructive);
 
-  --font-sans: var(--font-inter), "PingFang SC", "Hiragino Sans GB",
-    "Microsoft YaHei", system-ui, sans-serif;
-  --font-serif: var(--font-fraunces), "Songti SC", "Noto Serif SC", Georgia, serif;
-  --font-mono: var(--font-jbmono), "SFMono-Regular", ui-monospace, Menlo, monospace;
+    --font-sans: var(--font-inter), "PingFang SC", "Hiragino Sans GB",
+      "Microsoft YaHei", system-ui, sans-serif;
+    --font-mono: var(--font-jbmono), "SFMono-Regular", ui-monospace, Menlo, monospace;
+  }
+
+  .dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 8% 6%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 8% 6%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 72% 58%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 240 4.9% 83.9%;
+
+    --chart-1: 0 0% 92%;
+    --chart-2: 240 5% 74%;
+    --chart-3: 240 5% 58%;
+    --chart-4: 240 4% 44%;
+    --chart-5: 240 4% 32%;
+
+    --sidebar-background: 240 8% 6%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 0 0% 98%;
+    --sidebar-primary-foreground: 240 5.9% 10%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 240 4.9% 83.9%;
+
+    --ink-faint: 240 5% 44%;
+    --success: 142 45% 55%;
+  }
 }
 
-.dark {
-  --paper: #15140f;
-  --surface: #1d1b15;
-  --surface-2: #24221a;
-  --ink: #ede9de;
-  --ink-muted: #a39c8b;
-  --ink-faint: #756f61;
-  --hairline: #2c2a22;
-
-  --gold: #d4b36b;
-  --gold-soft: #33301f;
-  --gold-strong: #e4c77e;
-
-  --danger: #e07a6e;
-  --success: #86b98a;
-}
-
-* {
-  border-color: var(--hairline);
-}
-
-html {
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-}
-
-body {
-  background: var(--paper);
-  color: var(--ink);
-  font-family: var(--font-sans);
-  font-feature-settings: "cv02", "cv11", "ss01";
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
 }
 
 ::selection {
-  background: var(--gold-soft);
-  color: var(--ink);
-}
-
-/* 焦点环：淡金，恒可见 */
-:focus-visible {
-  outline: 2px solid var(--gold);
-  outline-offset: 2px;
-  border-radius: 4px;
+  background: hsl(var(--foreground) / 0.12);
 }
 
 /* 细腻滚动条 */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 11px;
+  height: 11px;
 }
 ::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--ink-faint) 40%, transparent);
+  background: hsl(var(--ink-faint) / 0.35);
   border-radius: 999px;
   border: 3px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--ink-faint) 65%, transparent);
+  background: hsl(var(--ink-faint) / 0.55);
   background-clip: content-box;
 }
 
 @layer components {
-  /* 品牌字：衬线、紧字距 */
+  /* 展示字：无衬线、紧字距、光学 */
   .font-display {
-    font-family: var(--font-serif);
-    letter-spacing: -0.01em;
-    font-optical-sizing: auto;
+    font-family: var(--font-sans);
+    letter-spacing: -0.02em;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
   }
 
-  /* 淡金细分隔线（可用于标题下的装饰线） */
-  .rule-gold {
-    height: 1px;
-    background: linear-gradient(
-      to right,
-      var(--gold) 0%,
-      color-mix(in srgb, var(--gold) 30%, transparent) 40%,
-      transparent 100%
-    );
-  }
-
-  /* 骨架微光 */
   .skeleton {
     position: relative;
     overflow: hidden;
-    background: var(--surface-2);
+    background: hsl(var(--muted));
   }
   .skeleton::after {
     content: "";
     position: absolute;
     inset: 0;
     transform: translateX(-100%);
-    background: linear-gradient(
-      90deg,
-      transparent,
-      color-mix(in srgb, var(--ink) 6%, transparent),
-      transparent
-    );
+    background: linear-gradient(90deg, transparent, hsl(var(--foreground) / 0.05), transparent);
     animation: shimmer 1.6s infinite;
   }
 
   /* 答案正文排版 */
   .answer-prose {
     line-height: 1.75;
-    font-size: 0.95rem;
+    font-size: 0.9375rem;
   }
   .answer-prose p {
     margin: 0.5rem 0;
   }
   .answer-prose strong {
-    color: var(--ink);
+    color: hsl(var(--foreground));
     font-weight: 600;
   }
   .answer-prose ul,
@@ -153,15 +189,16 @@ body {
   .answer-prose code {
     font-family: var(--font-mono);
     font-size: 0.85em;
-    background: var(--surface-2);
+    background: hsl(var(--muted));
     padding: 0.1em 0.35em;
     border-radius: 5px;
   }
   .answer-prose pre {
     margin: 0.75rem 0;
     overflow-x: auto;
-    border-radius: 6px;
-    background: var(--surface-2);
+    border-radius: 8px;
+    background: hsl(var(--muted));
+    border: 1px solid hsl(var(--border));
     padding: 0.75rem 1rem;
   }
   .answer-prose pre code {
@@ -170,18 +207,18 @@ body {
   }
   .answer-prose blockquote {
     margin: 0.75rem 0;
-    border-left: 3px solid var(--gold);
+    border-left: 2px solid hsl(var(--border));
     padding-left: 0.875rem;
-    color: var(--ink-muted);
+    color: hsl(var(--muted-foreground));
   }
   .answer-prose h1,
   .answer-prose h2,
   .answer-prose h3,
   .answer-prose h4 {
-    margin: 1rem 0 0.5rem;
-    font-family: var(--font-serif);
-    font-weight: 600;
-    line-height: 1.35;
+    margin: 1.1rem 0 0.5rem;
+    font-weight: 650;
+    letter-spacing: -0.011em;
+    line-height: 1.3;
     text-wrap: balance;
   }
   .answer-prose h1 {
@@ -195,16 +232,16 @@ body {
     font-size: 1rem;
   }
   .answer-prose a {
-    color: var(--gold-strong);
+    color: hsl(var(--foreground));
     text-decoration: underline;
     text-underline-offset: 2px;
+    text-decoration-thickness: 1px;
   }
   .answer-prose hr {
     margin: 1rem 0;
     border: none;
-    border-top: 1px solid var(--hairline);
+    border-top: 1px solid hsl(var(--border));
   }
-  /* GFM 表格：细边、表头浅底、超宽横向滚动（不撑破对话列） */
   .answer-prose table {
     display: block;
     margin: 0.75rem 0;
@@ -216,22 +253,21 @@ body {
   }
   .answer-prose th,
   .answer-prose td {
-    border: 1px solid var(--hairline);
+    border: 1px solid hsl(var(--border));
     padding: 0.4rem 0.75rem;
     text-align: left;
     vertical-align: top;
   }
   .answer-prose th {
-    background: var(--surface-2);
+    background: hsl(var(--muted));
     font-weight: 600;
     white-space: nowrap;
   }
   .answer-prose tbody tr:nth-child(even) {
-    background: color-mix(in srgb, var(--surface-2) 45%, transparent);
+    background: hsl(var(--muted) / 0.5);
   }
 }
 
-/* 骨架微光关键帧（.skeleton 直接引用，非经工具类） */
 @keyframes shimmer {
   100% {
     transform: translateX(100%);

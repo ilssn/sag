@@ -21,6 +21,7 @@ dependencies = [
     "zleap-sag>=0.7.1",
     "alembic>=1.13",
     "trafilatura>=1.8",
+    "mcp>=1.28,<2",
 ]
 
 [project.optional-dependencies]

@@ -1,20 +1,16 @@
 import { clearToken, getToken } from "./auth";
-import { getActiveWorkspace } from "./workspace";
 import type {
+  Agent,
   Binding,
-  AuditPage,
-  Member,
-  Membership,
   BindingTargetType,
   Capabilities,
   Doc,
-  MemoryStats,
+  Message,
   Persona,
   SearchResponse,
-  Soul,
-  SoulMessage,
-  SoulThread,
   Source,
+  SourceMcpDescriptor,
+  Thread,
   TokenResponse,
   User,
 } from "./types";
@@ -39,8 +35,6 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
     headers["Content-Type"] = "application/json";
   }
   if (token) headers["Authorization"] = `Bearer ${token}`;
-  const ws = getActiveWorkspace();
-  if (ws) headers["X-Workspace-Id"] = ws;
 
   // 30s 超时护栏（SSE 流式接口不走此函数，不受影响）
   const signal = opts.signal ?? AbortSignal.timeout(30_000);
@@ -99,7 +93,6 @@ export const api = {
     request<Source>(`/api/v1/sources/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
   deleteSource: (id: string) =>
     request<{ ok: boolean }>(`/api/v1/sources/${id}`, { method: "DELETE" }),
-  // 存量网页信源的同步（新建入口暂不提供连接器）
   syncSource: (id: string) =>
     request<{ id: string; type: string }>(`/api/v1/sources/${id}/sync`, { method: "POST" }),
 
@@ -115,72 +108,30 @@ export const api = {
   deleteDocument: (sid: string, did: string) =>
     request(`/api/v1/sources/${sid}/documents/${did}`, { method: "DELETE" }),
 
-  // 助手（内部路径沿用 /souls）
-  listSouls: () => request<Soul[]>("/api/v1/souls"),
-  getSoul: (id: string) => request<Soul>(`/api/v1/souls/${id}`),
-  createSoul: (b: { name: string; avatar?: string; persona?: Persona; visibility?: "private" | "workspace" }) =>
-    request<Soul>("/api/v1/souls", { method: "POST", body: JSON.stringify(b) }),
-  updateSoul: (
+  // Agent
+  listAgents: () => request<Agent[]>("/api/v1/agents"),
+  getAgent: (id: string) => request<Agent>(`/api/v1/agents/${id}`),
+  createAgent: (b: { name: string; avatar?: string; persona?: Persona }) =>
+    request<Agent>("/api/v1/agents", { method: "POST", body: JSON.stringify(b) }),
+  updateAgent: (id: string, b: { name?: string; avatar?: string; persona?: Persona }) =>
+    request<Agent>(`/api/v1/agents/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
+  deleteAgent: (id: string) => request<{ ok: boolean }>(`/api/v1/agents/${id}`, { method: "DELETE" }),
+
+  listBindings: (id: string) => request<Binding[]>(`/api/v1/agents/${id}/bindings`),
+  addBinding: (
     id: string,
-    b: { name?: string; avatar?: string; persona?: Persona; visibility?: "private" | "workspace" },
-  ) =>
-    request<Soul>(`/api/v1/souls/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
-  deleteSoul: (id: string) => request<{ ok: boolean }>(`/api/v1/souls/${id}`, { method: "DELETE" }),
-
-  // 记忆面板
-  getMemory: (id: string) => request<MemoryStats>(`/api/v1/souls/${id}/memory`),
-  clearMemory: (id: string) =>
-    request<{ ok: boolean; detail: string }>(`/api/v1/souls/${id}/memory`, { method: "DELETE" }),
-
-  listBindings: (id: string) => request<Binding[]>(`/api/v1/souls/${id}/bindings`),
-  addBinding: (id: string, b: { target_type: BindingTargetType; target_id: string }) =>
-    request<Binding>(`/api/v1/souls/${id}/bindings`, { method: "POST", body: JSON.stringify(b) }),
+    b: { target_type: BindingTargetType; target_id?: string; config?: Record<string, unknown> },
+  ) => request<Binding>(`/api/v1/agents/${id}/bindings`, { method: "POST", body: JSON.stringify(b) }),
   removeBinding: (id: string, bindingId: string) =>
-    request<{ ok: boolean }>(`/api/v1/souls/${id}/bindings/${bindingId}`, { method: "DELETE" }),
+    request<{ ok: boolean }>(`/api/v1/agents/${id}/bindings/${bindingId}`, { method: "DELETE" }),
 
-  listSoulThreads: (id: string) => request<SoulThread[]>(`/api/v1/souls/${id}/threads`),
-  createSoulThread: (id: string, title = "新会话") =>
-    request<SoulThread>(`/api/v1/souls/${id}/threads`, { method: "POST", body: JSON.stringify({ title }) }),
-  listSoulMessages: (id: string, tid: string) =>
-    request<SoulMessage[]>(`/api/v1/souls/${id}/threads/${tid}/messages`),
-  deleteSoulThread: (id: string, tid: string) =>
-    request(`/api/v1/souls/${id}/threads/${tid}`, { method: "DELETE" }),
-
-  // 空间与成员
-  myWorkspaces: () => request<Membership[]>("/api/v1/workspaces"),
-  listMembers: () => request<Member[]>("/api/v1/workspaces/current/members"),
-  inviteMember: (b: { email: string; role?: "editor" | "viewer" }) =>
-    request<Member>("/api/v1/workspaces/current/members", { method: "POST", body: JSON.stringify(b) }),
-  updateMemberRole: (userId: string, role: "owner" | "editor" | "viewer") =>
-    request<Member>(`/api/v1/workspaces/current/members/${userId}`, {
-      method: "PATCH",
-      body: JSON.stringify({ role }),
-    }),
-  removeMember: (userId: string) =>
-    request<{ ok: boolean }>(`/api/v1/workspaces/current/members/${userId}`, { method: "DELETE" }),
-
-  // 审计（owner）
-  listAudit: (p: { action?: string; actor?: string; limit?: number; offset?: number } = {}) => {
-    const q = new URLSearchParams();
-    if (p.action) q.set("action", p.action);
-    if (p.actor) q.set("actor", p.actor);
-    q.set("limit", String(p.limit ?? 50));
-    q.set("offset", String(p.offset ?? 0));
-    return request<AuditPage>(`/api/v1/audit?${q.toString()}`);
-  },
-  exportAuditCsv: async (p: { action?: string; actor?: string } = {}): Promise<Blob> => {
-    const q = new URLSearchParams();
-    if (p.action) q.set("action", p.action);
-    if (p.actor) q.set("actor", p.actor);
-    const headers: Record<string, string> = {};
-    const token = getToken();
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-    const ws = getActiveWorkspace();
-    if (ws) headers["X-Workspace-Id"] = ws;
-    const res = await fetch(`${API_BASE}/api/v1/audit/export?${q.toString()}`, { headers });
-    if (!res.ok) throw new ApiError(res.status, "export_failed", "导出失败");
-    return res.blob();
-  },
+  listThreads: (id: string) => request<Thread[]>(`/api/v1/agents/${id}/threads`),
+  createThread: (id: string, title = "新会话") =>
+    request<Thread>(`/api/v1/agents/${id}/threads`, { method: "POST", body: JSON.stringify({ title }) }),
+  listMessages: (id: string, tid: string) =>
+    request<Message[]>(`/api/v1/agents/${id}/threads/${tid}/messages`),
+  deleteThread: (id: string, tid: string) =>
+    request(`/api/v1/agents/${id}/threads/${tid}`, { method: "DELETE" }),
 
   // 搜索
   globalSearch: (b: { query: string; source_ids?: string[]; top_k?: number }) =>
@@ -191,4 +142,8 @@ export const api = {
     request<{ chunk_id: string; heading: string; content: string; source_id: string; source_name: string }>(
       `/api/v1/sources/${sourceId}/chunks/${chunkId}`,
     ),
+
+  // 信源即 MCP：外部宿主（Claude Desktop / Cursor）挂载信息
+  sourceMcp: (sourceId: string) =>
+    request<SourceMcpDescriptor>(`/api/v1/sources/${sourceId}/mcp`),
 };

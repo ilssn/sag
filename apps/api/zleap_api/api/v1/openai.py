@@ -1,10 +1,10 @@
-"""OpenAI 兼容对话端点——把任意 zleap 助手当作一个「带记忆与引用的模型」调用。
+"""OpenAI 兼容对话端点——把任意 Agent 当作一个「带引用的模型」调用。
 
-    POST /api/v1/openai/{soul_id}/chat/completions
+    POST /api/v1/openai/{agent_id}/chat/completions
     Authorization: Bearer <zleap JWT>
 
 支持 stream / 非流两种；请求体沿用 OpenAI Chat Completions 结构。
-检索、人格注入、防幻觉短路与站内对话完全一致，便于外部系统无缝接入。
+检索、系统提示、防幻觉短路与站内对话完全一致，便于外部系统无缝接入。
 """
 
 from __future__ import annotations
@@ -17,20 +17,20 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from zleap_api.core.db import get_session
+from zleap_api.core.db import SessionLocal, get_session
 from zleap_api.core.deps import (
     get_current_user,
     get_engine_manager,
     get_llm,
-    get_workspace_id,
-    get_workspace_role,
+    get_tool_registry,
 )
-from zleap_api.core.errors import ConfigurationError, ValidationError
+from zleap_api.core.errors import ConfigurationError, UpstreamError, ValidationError
 from zleap_api.db.models import User
-from zleap_api.enums import WorkspaceRole
 from zleap_api.generation import LLMClient
 from zleap_api.sag import EngineManager
-from zleap_api.services import soul_service as svc
+from zleap_api.services import agent_domain as svc
+from zleap_api.services import agent_service
+from zleap_api.tools import ToolRegistry
 
 router = APIRouter(prefix="/openai", tags=["openai"])
 
@@ -63,29 +63,40 @@ def _split_query(messages: list[ChatMessage]) -> tuple[str, list[dict[str, str]]
     return query, history
 
 
-@router.post("/{soul_id}/chat/completions")
+@router.post("/{agent_id}/chat/completions")
 async def chat_completions(
-    soul_id: str,
+    agent_id: str,
     body: ChatCompletionRequest,
-    ws: str = Depends(get_workspace_id),
-    role: WorkspaceRole = Depends(get_workspace_role),
-    user: User = Depends(get_current_user),
+    _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     engine_manager: EngineManager = Depends(get_engine_manager),
     llm: LLMClient = Depends(get_llm),
+    tool_registry: ToolRegistry = Depends(get_tool_registry),
 ):
-    soul = await svc.get_soul(session, ws, soul_id, user_id=user.id, role=role)
+    agent = await svc.get_agent(session, agent_id)
     query, history = _split_query(body.messages)
 
     plan = await svc.build_ask_context(
-        session, soul=soul, query=query, engine_manager=engine_manager, history=history
+        session, agent=agent, query=query, engine_manager=engine_manager, history=history
     )
     if plan.short_circuit is None and not llm.configured:
         raise ConfigurationError("尚未配置 LLM，无法生成回答")
 
     created = int(time.time())
-    model = body.model or f"zleap:{soul.name}"
-    cid = f"chatcmpl-{soul_id[:12]}-{created}"
+    model = body.model or f"zleap:{agent.name}"
+    cid = f"chatcmpl-{agent_id[:12]}-{created}"
+
+    def _events():
+        # 无状态：thread_id=None → 不落库；复用同一 Agent 循环
+        return agent_service.generate_stream(
+            SessionLocal,
+            plan=plan,
+            agent=agent,
+            thread_id=None,
+            engine_manager=engine_manager,
+            llm=llm,
+            tool_registry=tool_registry,
+        )
 
     if body.stream:
         async def gen():
@@ -100,18 +111,26 @@ async def chat_completions(
                 return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
             yield chunk({"role": "assistant"})
-            if plan.short_circuit is not None:
-                yield chunk({"content": plan.short_circuit})
-            else:
-                async for token in llm.stream(plan.messages):
-                    yield chunk({"content": token})
+            async for name, payload in _events():
+                if name == "token":
+                    yield chunk({"content": payload["text"]})
+                elif name == "error":
+                    yield chunk({"content": f"\n[错误] {payload['message']}"})
             yield chunk({}, finish="stop")
             yield "data: [DONE]\n\n"
 
         return StreamingResponse(gen(), media_type="text/event-stream")
 
-    # 非流式
-    answer = plan.short_circuit if plan.short_circuit is not None else await llm.complete(plan.messages)
+    # 非流式：消费同一事件流，聚合为最终答案
+    parts: list[str] = []
+    citations = plan.citations
+    async for name, payload in _events():
+        if name == "token":
+            parts.append(payload["text"])
+        elif name == "meta":
+            citations = payload["citations"]
+        elif name == "error":
+            raise UpstreamError(payload["message"])
     return {
         "id": cid,
         "object": "chat.completion",
@@ -120,11 +139,11 @@ async def chat_completions(
         "choices": [
             {
                 "index": 0,
-                "message": {"role": "assistant", "content": answer},
+                "message": {"role": "assistant", "content": "".join(parts)},
                 "finish_reason": "stop",
             }
         ],
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         # zleap 扩展：引用溯源（标准客户端忽略未知字段）
-        "zleap": {"citations": plan.citations, "sources": plan.section_count},
+        "zleap": {"citations": citations, "sources": plan.section_count},
     }

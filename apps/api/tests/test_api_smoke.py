@@ -16,14 +16,13 @@ async def test_end_to_end_offline():
             caps = (await c.get("/api/v1/system/capabilities")).json()
             assert caps["llm_configured"] is False
 
-            # 认证：首用户 admin
+            # 认证：注册单账号
             r = await c.post(
                 "/api/v1/auth/register",
                 json={"email": "a@b.com", "password": "password123", "name": "Ada"},
             )
             assert r.status_code == 201
             tok = r.json()["access_token"]
-            assert r.json()["user"]["role"] == "admin"
             H = {"Authorization": f"Bearer {tok}"}
 
             assert (await c.get("/api/v1/auth/me", headers=H)).json()["email"] == "a@b.com"
@@ -37,19 +36,15 @@ async def test_end_to_end_offline():
             conns = (await c.get("/api/v1/sources/connectors", headers=H)).json()
             assert any(x["kind"] == "file_upload" for x in conns)
 
-            # 命名空间：注册即播种「会话记忆」+「知识」
-            ns = (await c.get("/api/v1/namespaces", headers=H)).json()
-            assert {"memory", "knowledge"} <= {n["kind"] for n in ns}
-            knowledge = next(n for n in ns if n["kind"] == "knowledge")
-
             r = await c.post("/api/v1/sources", headers=H, json={"name": "手册"})
             assert r.status_code == 201
             sid = r.json()["id"]
-            # 新建源默认落「知识」，类型 document
-            assert r.json()["namespace_id"] == knowledge["id"]
             assert r.json()["source_type"] == "document"
-            in_ns = (await c.get(f"/api/v1/sources?namespace_id={knowledge['id']}", headers=H)).json()
-            assert len(in_ns) == 1 and in_ns[0]["id"] == sid
+            # 共享测试库 → 用存在性/按 id 定位而非精确计数
+            def _find(sources):
+                return next(s for s in sources if s["id"] == sid)
+
+            assert _find((await c.get("/api/v1/sources", headers=H)).json())["id"] == sid
 
             # 上传（不等待后台完成，避免 401 重试拖慢测试）
             up = await c.post(
@@ -58,7 +53,7 @@ async def test_end_to_end_offline():
                 files={"file": ("a.md", b"# T\n\nhello world\n", "text/markdown")},
             )
             assert up.status_code == 201 and up.json()["status"] == "pending"
-            assert (await c.get("/api/v1/sources", headers=H)).json()[0]["document_count"] == 1
+            assert _find((await c.get("/api/v1/sources", headers=H)).json())["document_count"] == 1
 
             # 统一写入接口：持续推送一批消息 → 归一为文档进入管线
             ing = await c.post(
@@ -67,7 +62,7 @@ async def test_end_to_end_offline():
                 json={"messages": [{"author": "张三", "text": "明天评审几点？", "ts": "2026-07-07T09:00Z"}]},
             )
             assert ing.status_code == 201 and ing.json()["status"] == "pending"
-            assert (await c.get("/api/v1/sources", headers=H)).json()[0]["document_count"] == 2
+            assert _find((await c.get("/api/v1/sources", headers=H)).json())["document_count"] == 2
 
             # 全局搜索：离线（无 embedding）单源失败被吞，返回 200 + 空结果
             gs = await c.post("/api/v1/search", headers=H, json={"query": "hello"})

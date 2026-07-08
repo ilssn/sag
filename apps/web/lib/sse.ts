@@ -81,12 +81,12 @@ async function streamPost(
   if (buffer.trim()) dispatch(buffer);
 }
 
-export function streamSoulAsk(
-  soulId: string,
+export function streamAgentAsk(
+  agentId: string,
   threadId: string,
-  body: { query: string; author?: string },
+  body: { query: string },
   handlers: AskHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
-  return streamPost(`/api/v1/souls/${soulId}/threads/${threadId}/ask`, body, handlers, signal);
+  return streamPost(`/api/v1/agents/${agentId}/threads/${threadId}/ask`, body, handlers, signal);
 }
