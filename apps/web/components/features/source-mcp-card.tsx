@@ -1,44 +1,12 @@
 "use client";
 
 import * as React from "react";
-import { Check, Copy, Plug } from "lucide-react";
-import { toast } from "sonner";
+import { Plug } from "lucide-react";
 
 import { api } from "@/lib/api";
 import type { SourceMcpDescriptor } from "@/lib/types";
-import { Button } from "@/components/ui/button";
-
-function CopyButton({ text, label }: { text: string; label: string }) {
-  const [done, setDone] = React.useState(false);
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="h-7 gap-1.5 px-2 text-xs"
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(text);
-          setDone(true);
-          toast.success(`${label}已复制`);
-          setTimeout(() => setDone(false), 1500);
-        } catch {
-          toast.error("复制失败");
-        }
-      }}
-    >
-      {done ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-      复制
-    </Button>
-  );
-}
-
-function CodeBlock({ children }: { children: string }) {
-  return (
-    <pre className="max-w-full overflow-x-auto rounded-md border bg-muted/40 p-3 font-mono text-xs leading-relaxed">
-      {children}
-    </pre>
-  );
-}
+import { CodeBlock } from "@/components/features/code-block";
+import { CopyButton } from "@/components/features/copy-button";
 
 export function SourceMcpCard({ sourceId }: { sourceId: string }) {
   const [desc, setDesc] = React.useState<SourceMcpDescriptor | null>(null);

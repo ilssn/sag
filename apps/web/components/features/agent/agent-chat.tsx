@@ -45,7 +45,7 @@ export function AgentChat({
   const glyph = avatar || agentName.slice(0, 1);
   const avatarNode = React.useMemo(
     () => (
-      <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-full bg-gold-soft text-[11px] font-semibold text-gold-strong">
+      <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-full bg-muted text-[11px] font-semibold text-foreground">
         {glyph}
       </span>
     ),
@@ -53,7 +53,7 @@ export function AgentChat({
   );
   const heroNode = React.useMemo(
     () => (
-      <span className="grid size-12 place-items-center rounded-full bg-gold-soft font-display text-xl font-semibold text-gold-strong">
+      <span className="grid size-12 place-items-center rounded-full bg-muted font-display text-xl font-semibold text-foreground">
         {glyph}
       </span>
     ),

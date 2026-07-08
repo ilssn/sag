@@ -25,19 +25,19 @@ export function SyncPanel({ sourceId, onSynced }: { sourceId: string; onSynced: 
   }
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-hairline bg-surface/40 p-5">
+    <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border bg-card/40 p-5">
       <div className="flex items-start gap-3">
-        <div className="grid size-10 place-items-center rounded-full bg-surface-2 text-gold-strong">
+        <div className="grid size-10 place-items-center rounded-full bg-muted text-foreground">
           <Globe className="size-5" />
         </div>
         <div>
-          <div className="text-sm font-medium text-ink">网页同步</div>
-          <p className="mt-0.5 text-xs text-ink-muted">
+          <div className="text-sm font-medium text-foreground">网页同步</div>
+          <p className="mt-0.5 text-xs text-muted-foreground">
             抓取信源配置的网页正文，解析入库并抽取事件。可随时重新同步以获取更新。
           </p>
         </div>
       </div>
-      <Button variant="gold" onClick={sync} disabled={busy}>
+      <Button onClick={sync} disabled={busy}>
         <RefreshCw className={cn("size-4", busy && "animate-spin")} />
         {busy ? "同步中…" : "同步"}
       </Button>

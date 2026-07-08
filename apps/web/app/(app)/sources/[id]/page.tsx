@@ -16,6 +16,7 @@ import { RetrievalTestDialog } from "@/components/features/retrieval-test-dialog
 import { SourceMcpCard } from "@/components/features/source-mcp-card";
 import { SyncPanel } from "@/components/features/sync-panel";
 import { UploadZone } from "@/components/features/upload-zone";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -73,21 +74,21 @@ export default function SourceDetailPage() {
 
   return (
     <>
-      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-hairline px-6 py-6 md:px-8">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b px-6 py-6 md:px-8">
         <div className="min-w-0">
           <Link
             href="/sources"
-            className="mb-2 inline-flex items-center gap-1 text-xs text-ink-faint transition-colors hover:text-ink-muted"
+            className="mb-2 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-muted-foreground"
           >
             <ArrowLeft className="size-3.5" />
             全部信源
           </Link>
           {source ? (
             <>
-              <h1 className="font-display text-2xl font-medium tracking-tight text-ink">
+              <h1 className="font-display text-2xl font-medium tracking-tight text-foreground">
                 {source.name}
               </h1>
-              <p className="mt-1.5 text-sm text-ink-muted">
+              <p className="mt-1.5 text-sm text-muted-foreground">
                 {source.document_count} 文档 · {source.chunk_count} 块 · {source.event_count} 事件
                 {source.description ? ` · ${source.description}` : ""}
               </p>
@@ -107,7 +108,7 @@ export default function SourceDetailPage() {
             检索测试
           </Button>
           <Button
-            variant="gold"
+           
             onClick={() => source && openSearch({ id: source.id, name: source.name })}
             disabled={!source}
           >
@@ -119,7 +120,7 @@ export default function SourceDetailPage() {
             size="icon"
             title="删除信源"
             onClick={() => setConfirmDelete(true)}
-            className="text-ink-muted hover:text-danger"
+            className="text-muted-foreground hover:text-destructive"
           >
             <Trash2 className="size-4" />
           </Button>
@@ -136,17 +137,17 @@ export default function SourceDetailPage() {
 
       <div className="mx-auto flex max-w-4xl flex-col gap-6 p-6 md:p-8">
         {capabilities && !capabilities.llm_configured && (
-          <div className="flex items-start gap-2.5 rounded-md border border-gold/30 bg-gold-soft px-4 py-3 text-sm text-gold-strong">
-            <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-            <span>
-              尚未配置模型：文档仍可上传并解析入库，但<strong>事件抽取</strong>与
-              <strong>问答</strong>需要在
-              <Link href="/settings" className="underline underline-offset-2">
+          <Alert>
+            <TriangleAlert className="size-4" />
+            <AlertTitle>尚未配置模型</AlertTitle>
+            <AlertDescription>
+              文档仍可上传并解析入库，但<strong>事件抽取</strong>与<strong>问答</strong>需要在
+              <Link href="/settings" className="font-medium underline underline-offset-2">
                 设置
               </Link>
               中配置 LLM。
-            </span>
-          </div>
+            </AlertDescription>
+          </Alert>
         )}
 
         {source &&
@@ -162,7 +163,7 @@ export default function SourceDetailPage() {
           ))}
 
         <div>
-          <h2 className="mb-3 text-sm font-medium text-ink-muted">
+          <h2 className="mb-3 text-sm font-medium text-muted-foreground">
             文档 {documents ? `（${documents.length}）` : ""}
           </h2>
           {documents === null ? (

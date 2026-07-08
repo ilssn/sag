@@ -1,12 +1,13 @@
 "use client";
 
 import * as React from "react";
-import { FlaskConical, Loader2, Search } from "lucide-react";
+import { FlaskConical, Search } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
 import type { Section } from "@/lib/types";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Dialog,
   DialogContent,
@@ -58,7 +59,7 @@ export function RetrievalTestDialog({
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <FlaskConical className="size-4 text-gold-strong" />
+            <FlaskConical className="size-4 text-foreground" />
             检索测试 · {sourceName}
           </DialogTitle>
           <DialogDescription>
@@ -88,45 +89,45 @@ export function RetrievalTestDialog({
               onChange={(e) => setTopK(Math.max(1, Math.min(50, Number(e.target.value) || 1)))}
             />
           </div>
-          <Button type="submit" variant="gold" disabled={busy || !query.trim()}>
-            {busy ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
+          <Button type="submit" disabled={busy || !query.trim()}>
+            {busy ? <Spinner /> : <Search className="size-4" />}
             检索
           </Button>
         </form>
 
         {results && (
           <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between text-xs text-ink-faint">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>召回 {results.length} 条</span>
             </div>
 
-            <div className="max-h-[22rem] overflow-y-auto rounded-lg border border-hairline">
+            <div className="max-h-[22rem] overflow-y-auto rounded-lg border">
               {results.length === 0 ? (
-                <p className="px-3 py-8 text-center text-sm text-ink-faint">
+                <p className="px-3 py-8 text-center text-sm text-muted-foreground">
                   没有召回任何内容。换个说法，或确认文档已处理完成。
                 </p>
               ) : (
                 results.map((s, i) => (
-                  <div key={`${s.chunk_id}-${i}`} className="border-t border-hairline p-3 first:border-t-0">
+                  <div key={`${s.chunk_id}-${i}`} className="border-t p-3 first:border-t-0">
                     <div className="mb-1 flex items-center gap-2">
-                      <span className="grid size-5 shrink-0 place-items-center rounded-[6px] bg-gold-soft text-[11px] font-semibold text-gold-strong">
+                      <span className="grid size-5 shrink-0 place-items-center rounded-[6px] bg-muted text-[11px] font-semibold text-foreground">
                         {i + 1}
                       </span>
-                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
                         {s.heading || "片段"}
                       </span>
-                      <span className="shrink-0 font-mono text-[11px] tabular-nums text-ink-faint">
+                      <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
                         {s.score.toFixed(4)}
                       </span>
                     </div>
                     {/* 分数条：直观对比召回强弱 */}
-                    <div className="mb-1.5 ml-7 h-1 overflow-hidden rounded-full bg-surface-2">
+                    <div className="mb-1.5 ml-7 h-1 overflow-hidden rounded-full bg-muted">
                       <div
-                        className="h-full rounded-full bg-gold"
+                        className="h-full rounded-full bg-primary"
                         style={{ width: `${Math.max(4, Math.min(100, s.score * 100))}%` }}
                       />
                     </div>
-                    <p className="ml-7 line-clamp-2 text-xs text-ink-muted">{s.content}</p>
+                    <p className="ml-7 line-clamp-2 text-xs text-muted-foreground">{s.content}</p>
                   </div>
                 ))
               )}

@@ -17,7 +17,7 @@ export function PromptPreview({ preview }: { preview: string }) {
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <button className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-ink-faint transition-colors hover:text-gold-strong">
+        <button className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground">
           <Lightbulb className="size-3" />
           查看本轮 prompt
         </button>
@@ -29,7 +29,7 @@ export function PromptPreview({ preview }: { preview: string }) {
             这是实际发送给模型的完整提示词（含人格、约束与检索到的资料）。透明可核查。
           </DialogDescription>
         </DialogHeader>
-        <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap rounded-lg border border-hairline bg-surface-2/50 p-3 text-xs leading-relaxed text-ink-muted">
+        <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap rounded-lg border bg-muted/50 p-3 text-xs leading-relaxed text-muted-foreground">
           {preview}
         </pre>
       </DialogContent>

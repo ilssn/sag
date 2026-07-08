@@ -48,22 +48,22 @@ export function DocumentList({
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-hairline bg-surface">
+    <div className="overflow-hidden rounded-lg border bg-card">
       {documents.map((d, i) => (
         <div
           key={d.id}
           className={
-            "flex items-center gap-3 px-4 py-3 transition-colors hover:bg-surface-2/60 " +
-            (i > 0 ? "border-t border-hairline" : "")
+            "flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/60 " +
+            (i > 0 ? "border-t" : "")
           }
         >
-          <div className="grid size-9 shrink-0 place-items-center rounded-md bg-surface-2 text-ink-faint">
+          <div className="grid size-9 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
             <FileText className="size-4" />
           </div>
 
           <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-medium text-ink">{d.filename}</div>
-            <div className="mt-0.5 flex items-center gap-2 text-xs text-ink-faint">
+            <div className="truncate text-sm font-medium text-foreground">{d.filename}</div>
+            <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
               <span>{formatBytes(d.size_bytes)}</span>
               <span>·</span>
               <span>{relativeTime(d.created_at)}</span>
@@ -78,7 +78,7 @@ export function DocumentList({
               {d.status === "failed" && d.error && (
                 <>
                   <span>·</span>
-                  <span className="truncate text-danger" title={d.error}>
+                  <span className="truncate text-destructive" title={d.error}>
                     {d.error}
                   </span>
                 </>
@@ -106,7 +106,7 @@ export function DocumentList({
               title="删除"
               disabled={pending === d.id}
               onClick={() => remove(d)}
-              className="text-ink-muted hover:text-danger"
+              className="text-muted-foreground hover:text-destructive"
             >
               <Trash2 className="size-4" />
             </Button>

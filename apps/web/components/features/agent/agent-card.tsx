@@ -7,19 +7,19 @@ export function AgentCard({ agent }: { agent: Agent }) {
   return (
     <Link
       href={`/assistants/${agent.id}`}
-      className="group flex flex-col rounded-lg border border-hairline bg-surface p-5 shadow-soft transition-all duration-150 ease-smooth hover:border-foreground/15 hover:shadow-lift"
+      className="group flex flex-col rounded-lg border bg-card p-5 shadow-soft transition-all duration-150 ease-smooth hover:border-foreground/15 hover:shadow-lift"
     >
       <div className="flex items-center gap-3">
         <span className="grid size-11 shrink-0 place-items-center rounded-full bg-muted font-display text-lg font-semibold text-foreground">
           {agent.avatar || agent.name.slice(0, 1)}
         </span>
         <div className="min-w-0 flex-1">
-          <h3 className="truncate font-display text-lg font-medium leading-tight text-ink">
+          <h3 className="truncate font-display text-lg font-medium leading-tight text-foreground">
             {agent.name}
           </h3>
         </div>
       </div>
-      <p className="mt-3 line-clamp-2 min-h-[2.5rem] text-sm text-ink-muted">{snippet}</p>
+      <p className="mt-3 line-clamp-2 min-h-[2.5rem] text-sm text-muted-foreground">{snippet}</p>
     </Link>
   );
 }

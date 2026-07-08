@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Check, Loader2, Plug, Save, X } from "lucide-react";
+import { Check, Plug, Save, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
@@ -10,8 +10,12 @@ import { cn } from "@/lib/utils";
 import { useApp } from "@/components/features/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -21,28 +25,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
-
-function Field({
-  label,
-  htmlFor,
-  hint,
-  children,
-  className,
-}: {
-  label: string;
-  htmlFor?: string;
-  hint?: React.ReactNode;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={cn("flex flex-col gap-2", className)}>
-      <Label htmlFor={htmlFor}>{label}</Label>
-      {children}
-      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-    </div>
-  );
-}
+import { Spinner } from "@/components/ui/spinner";
 
 const STRATEGY_LABELS: Record<string, string> = {
   multi: "multi · 图谱增强（推荐）",
@@ -154,15 +137,18 @@ export function ModelConfigForm() {
           <CardDescription>OpenAI 兼容端点，用于事件抽取与答案生成。</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
-          <Field label="Base URL" htmlFor="llm-url" hint="OpenAI 兼容地址，如 https://api.openai.com/v1">
+          <Field>
+            <FieldLabel htmlFor="llm-url">Base URL</FieldLabel>
             <Input
               id="llm-url"
               value={llmBaseUrl}
               onChange={(e) => setLlmBaseUrl(e.target.value)}
               placeholder="https://…/v1"
             />
+            <FieldDescription>OpenAI 兼容地址，如 https://api.openai.com/v1</FieldDescription>
           </Field>
-          <Field label="API Key" htmlFor="llm-key">
+          <Field>
+            <FieldLabel htmlFor="llm-key">API Key</FieldLabel>
             <Input
               id="llm-key"
               type="password"
@@ -172,7 +158,8 @@ export function ModelConfigForm() {
               placeholder={keyPlaceholder(cfg.llm_api_key_set)}
             />
           </Field>
-          <Field label="模型" htmlFor="llm-model">
+          <Field>
+            <FieldLabel htmlFor="llm-model">模型</FieldLabel>
             <Input
               id="llm-model"
               value={llmModel}
@@ -180,7 +167,8 @@ export function ModelConfigForm() {
               placeholder="gpt-4o-mini"
             />
           </Field>
-          <Field label="最大 tokens" htmlFor="llm-maxtok">
+          <Field>
+            <FieldLabel htmlFor="llm-maxtok">最大 tokens</FieldLabel>
             <Input
               id="llm-maxtok"
               type="number"
@@ -190,11 +178,8 @@ export function ModelConfigForm() {
               onChange={(e) => setMaxTokens(Math.max(1, Number(e.target.value) || 1))}
             />
           </Field>
-          <Field
-            label="温度"
-            className="sm:col-span-2"
-            hint="越低越确定、越高越发散。事件抽取建议 ≤ 0.3。"
-          >
+          <Field className="sm:col-span-2">
+            <FieldLabel>温度</FieldLabel>
             <div className="flex items-center gap-4">
               <Slider
                 value={[temperature]}
@@ -208,6 +193,7 @@ export function ModelConfigForm() {
                 {temperature.toFixed(1)}
               </span>
             </div>
+            <FieldDescription>越低越确定、越高越发散。事件抽取建议 ≤ 0.3。</FieldDescription>
           </Field>
         </CardContent>
       </Card>
@@ -218,7 +204,8 @@ export function ModelConfigForm() {
           <CardDescription>用于文档向量化与语义检索。Base URL / Key 留空则复用 LLM 的配置。</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
-          <Field label="模型" htmlFor="emb-model">
+          <Field>
+            <FieldLabel htmlFor="emb-model">模型</FieldLabel>
             <Input
               id="emb-model"
               value={embModel}
@@ -226,7 +213,8 @@ export function ModelConfigForm() {
               placeholder="bge-large-zh-v1.5"
             />
           </Field>
-          <Field label="维度（可选）" htmlFor="emb-dims" hint="留空按模型默认。">
+          <Field>
+            <FieldLabel htmlFor="emb-dims">维度（可选）</FieldLabel>
             <Input
               id="emb-dims"
               type="number"
@@ -236,8 +224,10 @@ export function ModelConfigForm() {
               onChange={(e) => setEmbDims(e.target.value)}
               placeholder="默认"
             />
+            <FieldDescription>留空按模型默认。</FieldDescription>
           </Field>
-          <Field label="Base URL（可选）" htmlFor="emb-url">
+          <Field>
+            <FieldLabel htmlFor="emb-url">Base URL（可选）</FieldLabel>
             <Input
               id="emb-url"
               value={embBaseUrl}
@@ -245,7 +235,8 @@ export function ModelConfigForm() {
               placeholder="复用 LLM"
             />
           </Field>
-          <Field label="API Key（可选）" htmlFor="emb-key">
+          <Field>
+            <FieldLabel htmlFor="emb-key">API Key（可选）</FieldLabel>
             <Input
               id="emb-key"
               type="password"
@@ -264,7 +255,8 @@ export function ModelConfigForm() {
           <CardDescription>召回策略、条数与抽取语言。</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
-          <Field label="检索策略" htmlFor="strategy">
+          <Field>
+            <FieldLabel htmlFor="strategy">检索策略</FieldLabel>
             <Select value={strategy} onValueChange={(v) => setStrategy(v as typeof strategy)}>
               <SelectTrigger id="strategy">
                 <SelectValue />
@@ -278,7 +270,8 @@ export function ModelConfigForm() {
               </SelectContent>
             </Select>
           </Field>
-          <Field label="抽取语言" htmlFor="language">
+          <Field>
+            <FieldLabel htmlFor="language">抽取语言</FieldLabel>
             <Select value={language} onValueChange={(v) => setLanguage(v as typeof language)}>
               <SelectTrigger id="language">
                 <SelectValue />
@@ -289,7 +282,8 @@ export function ModelConfigForm() {
               </SelectContent>
             </Select>
           </Field>
-          <Field label={`召回条数 top_k · ${topK}`} className="sm:col-span-2">
+          <Field className="sm:col-span-2">
+            <FieldLabel>{`召回条数 top_k · ${topK}`}</FieldLabel>
             <Slider
               value={[topK]}
               min={1}
@@ -303,11 +297,11 @@ export function ModelConfigForm() {
 
       <div className="flex flex-wrap items-center gap-3">
         <Button onClick={save} disabled={saving}>
-          {saving ? <Loader2 className="animate-spin" /> : <Save />}
+          {saving ? <Spinner /> : <Save />}
           {saving ? "保存中…" : "保存并生效"}
         </Button>
         <Button variant="outline" onClick={test} disabled={testing}>
-          {testing ? <Loader2 className="animate-spin" /> : <Plug />}
+          {testing ? <Spinner /> : <Plug />}
           测试连接
         </Button>
         {testResult && (

@@ -2,7 +2,9 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ArrowUpRight, Loader2 } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
+
+import { Spinner } from "@/components/ui/spinner";
 
 import { api, ApiError } from "@/lib/api";
 import {
@@ -51,7 +53,7 @@ export function ChunkDialog({
             {chunk && (
               <Link
                 href={`/sources/${chunk.sourceId}`}
-                className="inline-flex items-center gap-0.5 text-gold-strong underline underline-offset-2 hover:opacity-80"
+                className="inline-flex items-center gap-0.5 text-foreground underline underline-offset-2 hover:opacity-80"
                 onClick={() => onOpenChange(false)}
               >
                 {chunk.sourceName || "信源"}
@@ -62,15 +64,15 @@ export function ChunkDialog({
         </DialogHeader>
 
         {error ? (
-          <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>
+          <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
         ) : content === null ? (
-          <div className="flex items-center gap-2 py-6 text-sm text-ink-faint">
-            <Loader2 className="size-4 animate-spin" />
+          <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+            <Spinner />
             载入原文…
           </div>
         ) : (
-          <div className="max-h-[55vh] overflow-y-auto overscroll-contain rounded-md border border-hairline bg-surface-2/40 px-4 py-3">
-            <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink">{content}</p>
+          <div className="max-h-[55vh] overflow-y-auto overscroll-contain rounded-md border bg-muted/40 px-4 py-3">
+            <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">{content}</p>
           </div>
         )}
       </DialogContent>

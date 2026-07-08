@@ -19,7 +19,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 
 export function CreateAgentDialog({
@@ -112,8 +112,8 @@ export function CreateAgentDialog({
 
         <form onSubmit={submit} className="flex flex-col gap-4">
           <div className="flex gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="agent-avatar">头像</Label>
+            <Field>
+              <FieldLabel htmlFor="agent-avatar">头像</FieldLabel>
               <Input
                 id="agent-avatar"
                 value={avatar}
@@ -121,9 +121,9 @@ export function CreateAgentDialog({
                 placeholder={name.slice(0, 1) || "🙂"}
                 className="w-16 text-center"
               />
-            </div>
-            <div className="flex flex-1 flex-col gap-1.5">
-              <Label htmlFor="agent-name">名字</Label>
+            </Field>
+            <Field className="flex-1">
+              <FieldLabel htmlFor="agent-name">名字</FieldLabel>
               <Input
                 id="agent-name"
                 required
@@ -131,16 +131,16 @@ export function CreateAgentDialog({
                 onChange={(e) => setName(e.target.value)}
                 placeholder="如：阿默 / 决策脑"
               />
-            </div>
+            </Field>
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label>
+          <Field>
+            <FieldLabel>
               绑定信源
               {picked.size > 0 && (
                 <span className="ml-1 text-muted-foreground">（已选 {picked.size}）</span>
               )}
-            </Label>
+            </FieldLabel>
             {sources.length === 0 ? (
               <p className="rounded-md border border-dashed px-3 py-2.5 text-xs text-muted-foreground">
                 还没有信源。也可以先创建助手，稍后在工作台里绑定。
@@ -177,10 +177,10 @@ export function CreateAgentDialog({
                 })}
               </div>
             )}
-          </div>
+          </Field>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="agent-sp">设定（可选）</Label>
+          <Field>
+            <FieldLabel htmlFor="agent-sp">设定（可选）</FieldLabel>
             <Textarea
               id="agent-sp"
               value={systemPrompt}
@@ -188,16 +188,16 @@ export function CreateAgentDialog({
               placeholder="你是阿默，简洁、克制、可靠。只依据绑定的信源作答。"
               rows={2}
             />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="agent-greet">开场白（可选）</Label>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="agent-greet">开场白（可选）</FieldLabel>
             <Input
               id="agent-greet"
               value={greeting}
               onChange={(e) => setGreeting(e.target.value)}
               placeholder="我在。今天想理清什么？"
             />
-          </div>
+          </Field>
 
           <DialogFooter>
             <Button type="submit" disabled={loading || !name.trim()}>

@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import type { Source } from "@/lib/types";
 import { CreateSourceDialog } from "@/components/features/create-source-dialog";
 import { EmptyState } from "@/components/features/empty-state";
+import { PageHeader } from "@/components/features/page-header";
 import { SourceCard } from "@/components/features/source-card";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -23,15 +24,11 @@ export default function SourcesPage() {
 
   return (
     <div className="flex flex-col gap-6 p-4 md:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="font-display text-2xl font-semibold">信源</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            装内容的地方：上传文档，自动解析入库，供助手与搜索使用。
-          </p>
-        </div>
-        <CreateSourceDialog onCreated={load} />
-      </div>
+      <PageHeader
+        title="信源"
+        description="装内容的地方：上传文档，自动解析入库，供助手与搜索使用。"
+        actions={<CreateSourceDialog onCreated={load} />}
+      />
 
       <div>
         {sources === null ? (

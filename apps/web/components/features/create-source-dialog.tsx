@@ -17,7 +17,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Field, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 
 export function CreateSourceDialog({ onCreated }: { onCreated: (s: Source) => void }) {
@@ -46,7 +46,7 @@ export function CreateSourceDialog({ onCreated }: { onCreated: (s: Source) => vo
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="gold">
+        <Button>
           <Plus className="size-4" />
           新建信源
         </Button>
@@ -60,8 +60,8 @@ export function CreateSourceDialog({ onCreated }: { onCreated: (s: Source) => vo
         </DialogHeader>
 
         <form onSubmit={submit} className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="s-name">名称</Label>
+          <Field>
+            <FieldLabel htmlFor="s-name">名称</FieldLabel>
             <Input
               id="s-name"
               required
@@ -71,9 +71,9 @@ export function CreateSourceDialog({ onCreated }: { onCreated: (s: Source) => vo
               placeholder="如：产品手册"
               maxLength={200}
             />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="s-desc">描述（可选）</Label>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="s-desc">描述（可选）</FieldLabel>
             <Textarea
               id="s-desc"
               value={description}
@@ -81,10 +81,10 @@ export function CreateSourceDialog({ onCreated }: { onCreated: (s: Source) => vo
               placeholder="这个信源包含什么内容？"
               rows={2}
             />
-          </div>
+          </Field>
 
           <DialogFooter>
-            <Button type="submit" variant="gold" disabled={loading || !name.trim()}>
+            <Button type="submit" disabled={loading || !name.trim()}>
               {loading ? "创建中…" : "创建信源"}
             </Button>
           </DialogFooter>
