@@ -72,11 +72,11 @@ export default function SourceDetailPage() {
 
   return (
     <>
-      <div className="flex flex-wrap items-start justify-between gap-4 border-b px-6 py-6 md:px-8">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b px-4 py-5 md:px-6">
         <div className="min-w-0">
           <Link
             href="/knowledge"
-            className="mb-2 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-muted-foreground"
+            className="mb-2 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
           >
             <ArrowLeft className="size-3.5" />
             全部信源
@@ -131,7 +131,7 @@ export default function SourceDetailPage() {
         </div>
       </div>
 
-      <div className="mx-auto flex max-w-4xl flex-col gap-6 p-6 md:p-8">
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 p-4 md:p-6">
         {capabilities && !capabilities.llm_configured && (
           <Alert>
             <TriangleAlert className="size-4" />

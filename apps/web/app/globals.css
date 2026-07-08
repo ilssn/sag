@@ -135,20 +135,6 @@
     font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
   }
 
-  .skeleton {
-    position: relative;
-    overflow: hidden;
-    background: hsl(var(--muted));
-  }
-  .skeleton::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    transform: translateX(-100%);
-    background: linear-gradient(90deg, transparent, hsl(var(--foreground) / 0.05), transparent);
-    animation: shimmer 1.6s infinite;
-  }
-
   /* 答案正文排版 */
   .answer-prose {
     line-height: 1.75;
