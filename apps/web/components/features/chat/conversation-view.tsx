@@ -1,0 +1,320 @@
+"use client";
+
+import dynamic from "next/dynamic";
+import * as React from "react";
+import { ArrowUp, Square } from "lucide-react";
+import { toast } from "sonner";
+
+import type { AskHandlers } from "@/lib/sse";
+import type { Citation } from "@/lib/types";
+import { useApp } from "@/components/features/app-shell";
+import { CitationBlock } from "@/components/features/chat/citation-block";
+import { PromptPreview } from "@/components/features/chat/prompt-preview";
+import { Button } from "@/components/ui/button";
+
+const MarkdownContent = dynamic(
+  () => import("@/components/features/markdown-content").then((m) => m.MarkdownContent),
+  { loading: () => null, ssr: false },
+);
+
+export interface ConvMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  citations: Citation[];
+  author?: string | null;
+  promptPreview?: string;
+}
+
+type Streamer = (
+  threadId: string,
+  query: string,
+  handlers: AskHandlers,
+  signal: AbortSignal,
+) => Promise<void>;
+
+const MessageItem = React.memo(
+  function MessageItem({
+    message,
+    streaming,
+    avatar,
+  }: {
+    message: ConvMessage;
+    streaming?: boolean;
+    avatar: React.ReactNode;
+  }) {
+    if (message.role === "user") {
+      return (
+        <div className="flex justify-end">
+          <div className="max-w-[85%] whitespace-pre-wrap rounded-lg rounded-tr-sm bg-ink px-4 py-2.5 text-sm text-paper">
+            {message.content}
+          </div>
+        </div>
+      );
+    }
+    const thinking = streaming && !message.content;
+    return (
+      <div className="flex gap-3">
+        {avatar}
+        <div className="min-w-0 flex-1">
+          {thinking ? (
+            <div className="flex items-center gap-1.5 py-1 text-sm text-ink-faint">
+              <span className="size-1.5 animate-blink rounded-full bg-gold" />
+              检索并生成中…
+            </div>
+          ) : streaming ? (
+            <div className="answer-prose whitespace-pre-wrap text-ink">
+              {message.content}
+              <span className="ml-0.5 inline-block h-4 w-[2px] animate-blink bg-gold align-middle" />
+            </div>
+          ) : (
+            <MarkdownContent content={message.content} />
+          )}
+          {!streaming && <CitationBlock citations={message.citations} />}
+          {!streaming && message.promptPreview && <PromptPreview preview={message.promptPreview} />}
+        </div>
+      </div>
+    );
+  },
+  (prev, next) =>
+    prev.message === next.message && prev.streaming === next.streaming && prev.avatar === next.avatar,
+);
+
+/**
+ * 统一对话视图：信源问答与Agent对话共用。
+ * 承载流式（rAF 批量刷新 token）、竞态防护（loadGeneration）、结束后强制回读的完整状态机。
+ * `avatarNode` / `heroNode` 应在调用方 useMemo 保持稳定，以维持消息列表的 memo 优化。
+ */
+export function ConversationView({
+  conversationKey,
+  threadId,
+  listMessages,
+  stream,
+  ensureThread,
+  onActivity,
+  avatarNode,
+  heroNode,
+  emptyTitle,
+  emptyHint,
+  placeholder = "输入你的问题，Enter 发送 · Shift+Enter 换行",
+}: {
+  conversationKey: string;
+  threadId: string | null;
+  listMessages: (threadId: string) => Promise<ConvMessage[]>;
+  stream: Streamer;
+  ensureThread: () => Promise<string>;
+  onActivity?: () => void;
+  avatarNode: React.ReactNode;
+  heroNode: React.ReactNode;
+  emptyTitle: string;
+  emptyHint: string;
+  placeholder?: string;
+}) {
+  const { capabilities } = useApp();
+  const [messages, setMessages] = React.useState<ConvMessage[]>([]);
+  const [input, setInput] = React.useState("");
+  const [streaming, setStreaming] = React.useState(false);
+  const abortRef = React.useRef<AbortController | null>(null);
+  const bottomRef = React.useRef<HTMLDivElement>(null);
+  const streamingId = React.useRef<string | null>(null);
+  const activeThreadRef = React.useRef<string | null | undefined>(undefined);
+  const streamingRef = React.useRef(false);
+  const loadGeneration = React.useRef(0);
+  const pendingTokens = React.useRef("");
+  const rafId = React.useRef<number | null>(null);
+  const lastScrollAt = React.useRef(0);
+
+  const loadMessages = React.useCallback(
+    (tid: string, opts?: { force?: boolean }) => {
+      const gen = ++loadGeneration.current;
+      return listMessages(tid)
+        .then((msgs) => {
+          if (gen !== loadGeneration.current) return;
+          if (streamingRef.current && !opts?.force) return;
+          setMessages(msgs);
+        })
+        .catch(() => {
+          if (gen !== loadGeneration.current) return;
+          if (streamingRef.current && !opts?.force) return;
+          setMessages([]);
+        });
+    },
+    [listMessages],
+  );
+
+  React.useEffect(() => {
+    if (threadId === activeThreadRef.current) return;
+    activeThreadRef.current = threadId;
+    if (!threadId) {
+      setMessages([]);
+      return;
+    }
+    if (streamingRef.current) return;
+    loadMessages(threadId);
+  }, [conversationKey, threadId, loadMessages]);
+
+  React.useEffect(() => {
+    const el = bottomRef.current;
+    if (!el) return;
+    const now = Date.now();
+    if (streaming && now - lastScrollAt.current < 120) return;
+    lastScrollAt.current = now;
+    el.scrollIntoView({ behavior: "auto", block: "end" });
+  }, [messages, streaming]);
+
+  const flushTokens = React.useCallback((botId: string) => {
+    const chunk = pendingTokens.current;
+    if (!chunk) return;
+    pendingTokens.current = "";
+    setMessages((list) => list.map((x) => (x.id === botId ? { ...x, content: x.content + chunk } : x)));
+  }, []);
+
+  const scheduleTokenFlush = React.useCallback(
+    (botId: string) => {
+      if (rafId.current !== null) return;
+      rafId.current = requestAnimationFrame(() => {
+        rafId.current = null;
+        flushTokens(botId);
+      });
+    },
+    [flushTokens],
+  );
+
+  async function send() {
+    const q = input.trim();
+    if (!q || streaming) return;
+    if (!capabilities?.llm_configured) {
+      toast.error("尚未配置模型，无法问答。请前往设置。");
+      return;
+    }
+    setInput("");
+
+    let tid = threadId;
+    if (!tid) {
+      loadGeneration.current++;
+      try {
+        tid = await ensureThread();
+        activeThreadRef.current = tid;
+        loadGeneration.current++;
+      } catch {
+        toast.error("创建会话失败");
+        return;
+      }
+    }
+
+    const now = Date.now();
+    const botId = `local-a-${now}`;
+    streamingId.current = botId;
+    streamingRef.current = true;
+    pendingTokens.current = "";
+
+    setMessages((m) => [
+      ...m,
+      { id: `local-u-${now}`, role: "user", content: q, citations: [] },
+      { id: botId, role: "assistant", content: "", citations: [] },
+    ]);
+
+    setStreaming(true);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    const patch = (fn: (m: ConvMessage) => ConvMessage) =>
+      setMessages((list) => list.map((x) => (x.id === botId ? fn(x) : x)));
+
+    try {
+      await stream(
+        tid,
+        q,
+        {
+          onMeta: (citations, promptPreview) =>
+            patch((x) => ({ ...x, citations, promptPreview })),
+          onToken: (t) => {
+            pendingTokens.current += t;
+            scheduleTokenFlush(botId);
+          },
+          onError: (msg) => {
+            flushTokens(botId);
+            toast.error(msg);
+            patch((x) => ({ ...x, content: x.content || `⚠︎ ${msg}` }));
+          },
+          onDone: () => onActivity?.(),
+        },
+        ctrl.signal,
+      );
+    } catch {
+      /* aborted or network */
+    } finally {
+      flushTokens(botId);
+      if (rafId.current !== null) {
+        cancelAnimationFrame(rafId.current);
+        rafId.current = null;
+      }
+      setStreaming(false);
+      abortRef.current = null;
+      streamingId.current = null;
+      streamingRef.current = false;
+      loadGeneration.current++;
+      await loadMessages(tid, { force: true });
+    }
+  }
+
+  function stop() {
+    abortRef.current?.abort();
+    setStreaming(false);
+    streamingRef.current = false;
+  }
+
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      send();
+    }
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <div className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-6">
+          {messages.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 py-16 text-center">
+              {heroNode}
+              <div className="font-display text-xl text-ink">{emptyTitle}</div>
+              <p className="max-w-sm text-sm text-ink-muted">{emptyHint}</p>
+            </div>
+          ) : (
+            messages.map((m) => (
+              <MessageItem
+                key={m.id}
+                message={m}
+                avatar={avatarNode}
+                streaming={streaming && m.id === streamingId.current}
+              />
+            ))
+          )}
+          <div ref={bottomRef} />
+        </div>
+      </div>
+
+      <div className="border-t border-hairline bg-paper px-4 py-3">
+        <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-lg border border-hairline bg-surface p-2 shadow-soft focus-within:border-gold/50">
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={onKeyDown}
+            rows={1}
+            placeholder={placeholder}
+            className="max-h-40 min-h-[36px] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-ink outline-none placeholder:text-ink-faint"
+          />
+          {streaming ? (
+            <Button variant="outline" size="icon" onClick={stop} title="停止">
+              <Square className="size-4" />
+            </Button>
+          ) : (
+            <Button variant="gold" size="icon" onClick={send} disabled={!input.trim()} title="发送">
+              <ArrowUp className="size-4" />
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

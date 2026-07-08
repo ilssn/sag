@@ -14,12 +14,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 export default function SourcesPage() {
   const [sources, setSources] = React.useState<Source[] | null>(null);
 
-  const load = React.useCallback(async () => {
-    try {
-      setSources(await api.listSources());
-    } catch {
-      setSources([]);
-    }
+  const load = React.useCallback(() => {
+    api.listSources().then(setSources).catch(() => setSources([]));
   }, []);
 
   React.useEffect(() => {
@@ -28,8 +24,8 @@ export default function SourcesPage() {
 
   return (
     <>
-      <PageHeader title="信源" description="每个信源是一个独立的知识库，可上传文档并就其提问。">
-        <CreateSourceDialog onCreated={() => load()} />
+      <PageHeader title="信源" description="装内容的地方：上传文档，自动解析入库，供助手与搜索使用。">
+        <CreateSourceDialog onCreated={load} />
       </PageHeader>
 
       <div className="p-6 md:p-8">
@@ -43,8 +39,8 @@ export default function SourcesPage() {
           <EmptyState
             icon={Layers}
             title="还没有信源"
-            description="创建第一个信源，上传文档，muse 会解析入库并让你就其提问。"
-            action={<CreateSourceDialog onCreated={() => load()} />}
+            description="新建一个信源并上传文档，zleap 会解析入库，让内容可被搜索与问答。"
+            action={<CreateSourceDialog onCreated={load} />}
           />
         ) : (
           <div className="grid animate-fade-in gap-4 sm:grid-cols-2 xl:grid-cols-3">

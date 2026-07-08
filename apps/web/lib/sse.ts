@@ -3,7 +3,7 @@ import { getToken } from "./auth";
 import type { Citation } from "./types";
 
 export interface AskHandlers {
-  onMeta?: (citations: Citation[]) => void;
+  onMeta?: (citations: Citation[], promptPreview?: string) => void;
   onToken?: (text: string) => void;
   onError?: (message: string) => void;
   onDone?: (messageId: string) => void;
@@ -12,26 +12,22 @@ export interface AskHandlers {
 /**
  * 通过 fetch 消费 SSE 流（因 ask 是带鉴权的 POST，原生 EventSource 无法胜任）。
  */
-export async function streamAsk(
-  sourceId: string,
-  threadId: string,
-  body: { query: string; strategy?: string; top_k?: number },
+async function streamPost(
+  path: string,
+  body: Record<string, unknown>,
   handlers: AskHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
   const token = getToken();
-  const res = await fetch(
-    `${API_BASE}/api/v1/sources/${sourceId}/threads/${threadId}/ask`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(body),
-      signal,
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-  );
+    body: JSON.stringify(body),
+    signal,
+  });
 
   if (!res.ok || !res.body) {
     let message = "生成失败";
@@ -55,7 +51,7 @@ export async function streamAsk(
     const dataLines: string[] = [];
     for (const line of lines) {
       if (line.startsWith("event:")) event = line.slice(6).trim();
-      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
     }
     if (!dataLines.length) return;
     let payload: Record<string, unknown> = {};
@@ -64,7 +60,8 @@ export async function streamAsk(
     } catch {
       return;
     }
-    if (event === "meta") handlers.onMeta?.((payload.citations as Citation[]) || []);
+    if (event === "meta")
+      handlers.onMeta?.((payload.citations as Citation[]) || [], payload.prompt_preview as string);
     else if (event === "token") handlers.onToken?.((payload.text as string) || "");
     else if (event === "error") handlers.onError?.((payload.message as string) || "生成失败");
     else if (event === "done") handlers.onDone?.((payload.message_id as string) || "");
@@ -73,7 +70,7 @@ export async function streamAsk(
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
     let idx: number;
     while ((idx = buffer.indexOf("\n\n")) >= 0) {
       const frame = buffer.slice(0, idx);
@@ -82,4 +79,14 @@ export async function streamAsk(
     }
   }
   if (buffer.trim()) dispatch(buffer);
+}
+
+export function streamSoulAsk(
+  soulId: string,
+  threadId: string,
+  body: { query: string; author?: string },
+  handlers: AskHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  return streamPost(`/api/v1/souls/${soulId}/threads/${threadId}/ask`, body, handlers, signal);
 }

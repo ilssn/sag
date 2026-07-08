@@ -6,7 +6,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_end_to_end_offline():
-    from muse_api.main import app
+    from zleap_api.main import app
 
     transport = httpx.ASGITransport(app=app)
     async with app.router.lifespan_context(app):
@@ -36,9 +36,20 @@ async def test_end_to_end_offline():
             # 连接器 + 信源
             conns = (await c.get("/api/v1/sources/connectors", headers=H)).json()
             assert any(x["kind"] == "file_upload" for x in conns)
+
+            # 命名空间：注册即播种「会话记忆」+「知识」
+            ns = (await c.get("/api/v1/namespaces", headers=H)).json()
+            assert {"memory", "knowledge"} <= {n["kind"] for n in ns}
+            knowledge = next(n for n in ns if n["kind"] == "knowledge")
+
             r = await c.post("/api/v1/sources", headers=H, json={"name": "手册"})
             assert r.status_code == 201
             sid = r.json()["id"]
+            # 新建源默认落「知识」，类型 document
+            assert r.json()["namespace_id"] == knowledge["id"]
+            assert r.json()["source_type"] == "document"
+            in_ns = (await c.get(f"/api/v1/sources?namespace_id={knowledge['id']}", headers=H)).json()
+            assert len(in_ns) == 1 and in_ns[0]["id"] == sid
 
             # 上传（不等待后台完成，避免 401 重试拖慢测试）
             up = await c.post(
@@ -49,15 +60,22 @@ async def test_end_to_end_offline():
             assert up.status_code == 201 and up.json()["status"] == "pending"
             assert (await c.get("/api/v1/sources", headers=H)).json()[0]["document_count"] == 1
 
-            # 未配置 LLM 时问答 → 400
-            th = (
-                await c.post(
-                    f"/api/v1/sources/{sid}/threads", headers=H, json={"source_id": sid}
-                )
-            ).json()
-            ask = await c.post(
-                f"/api/v1/sources/{sid}/threads/{th['id']}/ask",
+            # 统一写入接口：持续推送一批消息 → 归一为文档进入管线
+            ing = await c.post(
+                f"/api/v1/sources/{sid}/documents/ingest",
                 headers=H,
-                json={"query": "hi"},
+                json={"messages": [{"author": "张三", "text": "明天评审几点？", "ts": "2026-07-07T09:00Z"}]},
             )
-            assert ask.status_code == 400
+            assert ing.status_code == 201 and ing.json()["status"] == "pending"
+            assert (await c.get("/api/v1/sources", headers=H)).json()[0]["document_count"] == 2
+
+            # 全局搜索：离线（无 embedding）单源失败被吞，返回 200 + 空结果
+            gs = await c.post("/api/v1/search", headers=H, json={"query": "hello"})
+            assert gs.status_code == 200
+            body = gs.json()
+            assert body["query"] == "hello" and isinstance(body["sections"], list)
+            # 收窄到指定信源
+            gs2 = await c.post(
+                "/api/v1/search", headers=H, json={"query": "hello", "source_ids": [sid]}
+            )
+            assert gs2.status_code == 200

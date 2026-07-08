@@ -2,10 +2,10 @@
 
 import pytest
 
-from muse_api.connectors import registry
-from muse_api.connectors.web import WebConnector, _filename_for, _parse_urls
-from muse_api.core.errors import ValidationError
-from muse_api.enums import ConnectorKind
+from zleap_api.connectors import registry
+from zleap_api.connectors.web import WebConnector, _filename_for, _parse_urls
+from zleap_api.core.errors import ValidationError
+from zleap_api.enums import ConnectorKind
 
 
 def test_registry_has_web_and_file():

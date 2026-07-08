@@ -2,14 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutGrid, Layers, MessagesSquare, Settings } from "lucide-react";
+import { LayoutGrid, Layers, Settings, Sparkles } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
 const NAV = [
-  { href: "/overview", label: "概览", icon: LayoutGrid },
+  { href: "/overview", label: "总览", icon: LayoutGrid },
+  { href: "/assistants", label: "助手", icon: Sparkles },
   { href: "/sources", label: "信源", icon: Layers },
-  { href: "/ask", label: "问答", icon: MessagesSquare },
   { href: "/settings", label: "设置", icon: Settings },
 ];
 
@@ -19,9 +19,9 @@ export function Sidebar() {
     <aside className="hidden w-[236px] shrink-0 flex-col border-r border-hairline bg-surface/60 md:flex">
       <div className="flex h-14 items-center gap-2.5 px-5">
         <span className="grid size-6 place-items-center rounded-[7px] bg-gold text-[13px] font-bold text-[#1b1a17] shadow-sm">
-          m
+          z
         </span>
-        <span className="font-display text-[1.35rem] font-medium tracking-tight">muse</span>
+        <span className="font-display text-[1.35rem] font-medium tracking-tight">zleap</span>
       </div>
 
       <nav className="flex flex-1 flex-col gap-0.5 px-3 py-3">

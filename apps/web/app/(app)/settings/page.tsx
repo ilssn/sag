@@ -5,6 +5,8 @@ import { Check, Monitor, Moon, Sun, X } from "lucide-react";
 import { useTheme } from "next-themes";
 
 import { useApp } from "@/components/features/app-shell";
+import { AuditCard } from "@/components/features/audit-card";
+import { MembersCard } from "@/components/features/members-card";
 import { PageHeader } from "@/components/features/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -54,7 +56,7 @@ function ThemeSegment() {
 }
 
 export default function SettingsPage() {
-  const { user, capabilities, logout } = useApp();
+  const { user, capabilities, role, logout } = useApp();
 
   return (
     <>
@@ -80,6 +82,10 @@ export default function SettingsPage() {
             </div>
           </CardContent>
         </Card>
+
+        <MembersCard />
+
+        {role === "owner" && <AuditCard />}
 
         <Card>
           <CardHeader>
@@ -119,10 +125,10 @@ export default function SettingsPage() {
 
         <div className="rounded-md border border-hairline bg-surface-2/50 p-4 text-xs leading-relaxed text-ink-muted">
           当前版本模型配置通过后端环境变量设置：
-          <span className="font-mono"> MUSE_LLM_BASE_URL</span>、
-          <span className="font-mono"> MUSE_LLM_API_KEY</span>、
-          <span className="font-mono"> MUSE_LLM_MODEL</span>、
-          <span className="font-mono"> MUSE_EMBEDDING_MODEL</span>。
+          <span className="font-mono"> ZLEAP_LLM_BASE_URL</span>、
+          <span className="font-mono"> ZLEAP_LLM_API_KEY</span>、
+          <span className="font-mono"> ZLEAP_LLM_MODEL</span>、
+          <span className="font-mono"> ZLEAP_EMBEDDING_MODEL</span>。
           修改 <span className="font-mono">apps/api/.env</span> 后重启后端即可生效。可视化配置将在后续版本提供。
         </div>
 

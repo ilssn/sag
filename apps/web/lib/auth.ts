@@ -1,6 +1,6 @@
 // 轻量令牌存储：cookie（供中间件路由守卫）+ 本地读取（供 API 客户端加 Bearer 头）。
 // MVP 方案；生产可升级为 httpOnly cookie + route handler 代理。
-const TOKEN_KEY = "muse_token";
+const TOKEN_KEY = "zleap_token";
 
 export function setToken(token: string) {
   if (typeof document === "undefined") return;

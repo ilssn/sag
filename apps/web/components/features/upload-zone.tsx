@@ -11,20 +11,33 @@ export function UploadZone({
   sourceId,
   onUploaded,
   maxMb = 25,
+  allowedExts,
 }: {
   sourceId: string;
   onUploaded: () => void;
   maxMb?: number;
+  allowedExts?: string[];
 }) {
   const inputRef = React.useRef<HTMLInputElement>(null);
   const [drag, setDrag] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+
+  const extOf = (name: string) => {
+    const i = name.lastIndexOf(".");
+    return i >= 0 ? name.slice(i).toLowerCase() : "";
+  };
+  const accept = allowedExts && allowedExts.length > 0 ? allowedExts.join(",") : undefined;
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
     setBusy(true);
     let ok = 0;
     for (const file of Array.from(files)) {
+      // 客户端先行拦截：不支持的扩展名即时提示，省一次往返
+      if (allowedExts && allowedExts.length > 0 && !allowedExts.includes(extOf(file.name))) {
+        toast.error(`${file.name}：不支持的文件类型`);
+        continue;
+      }
       try {
         await api.uploadDocument(sourceId, file);
         ok += 1;
@@ -64,6 +77,7 @@ export function UploadZone({
         ref={inputRef}
         type="file"
         multiple
+        accept={accept}
         className="hidden"
         onChange={(e) => handleFiles(e.target.files)}
       />

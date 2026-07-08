@@ -3,7 +3,7 @@ __pycache__/
 .venv/
 .pytest_cache/
 .ruff_cache/
-.muse/
+.zleap/
 *.db
 .env
 tests/

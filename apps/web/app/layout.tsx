@@ -6,8 +6,8 @@ import { Providers } from "@/components/providers";
 import { fontVars } from "./fonts";
 
 export const metadata: Metadata = {
-  title: "muse · 知识库",
-  description: "从信息源到知识问答 · 开源知识库平台",
+  title: "zleap",
+  description: "上传信息，创建助手，带引用对话 · 开源知识助手平台",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

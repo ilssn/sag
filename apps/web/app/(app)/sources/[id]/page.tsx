@@ -3,17 +3,20 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, FileText, MessagesSquare, TriangleAlert, Trash2 } from "lucide-react";
+import { ArrowLeft, FileText, FlaskConical, Search, TriangleAlert, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
 import type { Doc, Source } from "@/lib/types";
 import { useApp } from "@/components/features/app-shell";
+import { useSearch } from "@/components/features/search-overlay";
 import { DocumentList } from "@/components/features/document-list";
 import { EmptyState } from "@/components/features/empty-state";
+import { RetrievalTestDialog } from "@/components/features/retrieval-test-dialog";
 import { SyncPanel } from "@/components/features/sync-panel";
 import { UploadZone } from "@/components/features/upload-zone";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const ACTIVE = ["pending", "loading", "extracting"];
@@ -21,7 +24,8 @@ const ACTIVE = ["pending", "loading", "extracting"];
 export default function SourceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const { capabilities } = useApp();
+  const { capabilities, canWrite } = useApp();
+  const { openSearch } = useSearch();
   const [source, setSource] = React.useState<Source | null>(null);
   const [documents, setDocuments] = React.useState<Doc[] | null>(null);
 
@@ -42,12 +46,21 @@ export default function SourceDetailPage() {
   const active = documents?.some((d) => ACTIVE.includes(d.status)) ?? false;
   React.useEffect(() => {
     if (!active) return;
-    const t = setInterval(refresh, 2500);
-    return () => clearInterval(t);
+    let t: ReturnType<typeof setInterval> | null = null;
+    const tick = () => {
+      if (document.hidden) return;
+      refresh();
+    };
+    t = setInterval(tick, 4000);
+    return () => {
+      if (t) clearInterval(t);
+    };
   }, [active, refresh]);
 
+  const [confirmDelete, setConfirmDelete] = React.useState(false);
+  const [retrievalOpen, setRetrievalOpen] = React.useState(false);
+
   async function deleteSource() {
-    if (!window.confirm("确定删除该信源？其文档与检索数据将不可再访问。")) return;
     try {
       await api.deleteSource(id);
       toast.success("信源已删除");
@@ -83,15 +96,42 @@ export default function SourceDetailPage() {
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Button asChild variant="gold">
-            <Link href={`/ask?source=${id}`}>
-              <MessagesSquare className="size-4" />
-              去问答
-            </Link>
+          <Button
+            variant="outline"
+            onClick={() => setRetrievalOpen(true)}
+            disabled={!source}
+            title="用真实查询验证召回效果"
+          >
+            <FlaskConical className="size-4" />
+            检索测试
           </Button>
-          <Button variant="ghost" size="icon" title="删除信源" onClick={deleteSource} className="text-ink-muted hover:text-danger">
-            <Trash2 className="size-4" />
+          <Button
+            variant="gold"
+            onClick={() => source && openSearch({ id: source.id, name: source.name })}
+            disabled={!source}
+          >
+            <Search className="size-4" />
+            搜索此信源
           </Button>
+          {canWrite && (
+            <Button
+              variant="ghost"
+              size="icon"
+              title="删除信源"
+              onClick={() => setConfirmDelete(true)}
+              className="text-ink-muted hover:text-danger"
+            >
+              <Trash2 className="size-4" />
+            </Button>
+          )}
+          <ConfirmDialog
+            open={confirmDelete}
+            onOpenChange={setConfirmDelete}
+            title="删除信源"
+            description={`「${source?.name ?? ""}」及其文档、会话将被删除，检索数据不可再访问。此操作无法撤销。`}
+            confirmLabel="删除信源"
+            onConfirm={deleteSource}
+          />
         </div>
       </div>
 
@@ -111,11 +151,23 @@ export default function SourceDetailPage() {
         )}
 
         {source &&
+          canWrite &&
           (source.connector_kind === "file_upload" ? (
-            <UploadZone sourceId={id} onUploaded={refresh} maxMb={capabilities?.max_upload_mb ?? 25} />
+            <UploadZone
+              sourceId={id}
+              onUploaded={refresh}
+              maxMb={capabilities?.max_upload_mb ?? 25}
+              allowedExts={capabilities?.allowed_upload_exts}
+            />
           ) : (
             <SyncPanel sourceId={id} onSynced={refresh} />
           ))}
+        {source && !canWrite && (
+          <div className="flex items-center gap-2 rounded-md border border-hairline bg-surface-2/50 px-4 py-3 text-sm text-ink-muted">
+            <Search className="size-4 shrink-0 text-ink-faint" />
+            你是本空间的只读成员，可检索与查看文档，但不能上传或删除。
+          </div>
+        )}
 
         <div>
           <h2 className="mb-3 text-sm font-medium text-ink-muted">
@@ -131,13 +183,23 @@ export default function SourceDetailPage() {
             <EmptyState
               icon={FileText}
               title="还没有文档"
-              description="上传文档后，muse 会自动解析、分块、向量化并抽取事件与实体。"
+              description="上传文档后，zleap 会自动解析、分块、向量化并抽取事件与实体。"
             />
           ) : (
             <DocumentList sourceId={id} documents={documents} onChange={refresh} />
           )}
         </div>
+
       </div>
+
+      {source && (
+        <RetrievalTestDialog
+          sourceId={source.id}
+          sourceName={source.name}
+          open={retrievalOpen}
+          onOpenChange={setRetrievalOpen}
+        />
+      )}
     </>
   );
 }
