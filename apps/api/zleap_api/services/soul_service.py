@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -20,7 +22,7 @@ from zleap_api.enums import (
     SourceType,
     WorkspaceRole,
 )
-from zleap_api.generation import build_citations, build_soul_messages
+from zleap_api.generation import build_citations, build_prompt_preview, build_soul_messages
 from zleap_api.sag import EngineManager
 from zleap_api.services.namespace_service import default_namespace
 
@@ -266,6 +268,64 @@ async def remember_exchange(
         log.info("记忆写入 soul=%s thread=%s source=%s", soul.id, thread.id, src.id)
 
 
+async def _memory_sources(session: AsyncSession, soul: Soul) -> list[Source]:
+    rows = await session.execute(
+        select(Source).where(
+            Source.soul_id == soul.id, Source.source_type == SourceType.CONVERSATION
+        )
+    )
+    return list(rows.scalars().all())
+
+
+async def memory_stats(session: AsyncSession, soul: Soul) -> dict:
+    """助手记忆概况：沉淀的对话条数、分块与事件数、最近若干条。"""
+    from zleap_api.db.models import Document
+
+    srcs = await _memory_sources(session, soul)
+    src_ids = [s.id for s in srcs]
+    docs: list = []
+    if src_ids:
+        rows = await session.execute(
+            select(Document)
+            .where(Document.source_id.in_(src_ids))
+            .order_by(Document.created_at.desc())
+        )
+        docs = list(rows.scalars().all())
+    return {
+        "document_count": len(docs),
+        "chunk_count": sum(d.chunk_count for d in docs),
+        "event_count": sum(d.event_count for d in docs),
+        "recent": [
+            {"id": d.id, "status": str(d.status), "created_at": d.created_at} for d in docs[:12]
+        ],
+    }
+
+
+async def clear_memory(
+    session: AsyncSession, soul: Soul, *, engine_manager: EngineManager, upload_dir: str
+) -> int:
+    """清空助手的会话记忆：删除记忆信源（含引擎槽与落盘文件），并解除会话引用。返回删除数。"""
+    from zleap_api.services.source_service import delete_source
+
+    srcs = await _memory_sources(session, soul)
+    for s in srcs:
+        # 解除引用该记忆源的会话，下一轮对话会重新懒创建
+        await session.execute(
+            SoulThread.__table__.update()
+            .where(SoulThread.memory_source_id == s.id)
+            .values(memory_source_id=None)
+        )
+        await session.commit()
+        await delete_source(
+            session,
+            soul.workspace_id,
+            s.id,
+            engine_manager=engine_manager,
+            upload_dir=upload_dir,
+        )
+    return len(srcs)
+
+
 # ── 会话 ────────────────────────────────────────────────────────────
 async def list_threads(session: AsyncSession, soul_id: str, *, user_id: str) -> list[SoulThread]:
     """会话按人隔离：共享助手下互相看不到彼此的会话。"""
@@ -321,25 +381,27 @@ async def _history(session: AsyncSession, thread_id: str, exclude_id: str) -> li
     return history[-_HISTORY_LIMIT:]
 
 
-async def prepare_ask(
+@dataclass
+class AskPlan:
+    """一次问答的检索与提示词计划。"""
+
+    messages: list[dict[str, str]] = field(default_factory=list)
+    citations: list[dict] = field(default_factory=list)
+    section_count: int = 0
+    prompt_preview: str = ""
+    # 检索为空且人格配置了兜底话术时，跳过 LLM 直接以此文案回复（防幻觉）
+    short_circuit: str | None = None
+
+
+async def build_ask_context(
     session: AsyncSession,
     *,
     soul: Soul,
-    thread: SoulThread,
     query: str,
     engine_manager: EngineManager,
-    author: str | None = None,
-) -> tuple[list[dict[str, str]], list[dict]]:
-    """落库用户消息、跨绑定上下文 fan-out 检索、组装带人格的提示词。"""
-    user_msg = SoulMessage(
-        thread_id=thread.id, role=MessageRole.USER, content=query, author=author, citations=[]
-    )
-    session.add(user_msg)
-    if thread.title in _DEFAULT_TITLES:
-        thread.title = query[:40]
-    await session.commit()
-    await session.refresh(user_msg)
-
+    history: list[dict[str, str]] | None = None,
+) -> AskPlan:
+    """跨绑定上下文 fan-out 检索并组装带人格的提示词（不落库，可被对话与 OpenAI 端点复用）。"""
     persona = soul.persona or {}
     sources = await resolve_sources(session, soul)
     source_refs = {s.sag_source_config_id: {"id": s.id, "name": s.name} for s in sources}
@@ -356,11 +418,42 @@ async def prepare_ask(
         sections = []
 
     citations = build_citations(sections, source_refs)
-    history = await _history(session, thread.id, exclude_id=user_msg.id)
     messages = build_soul_messages(
         soul.name, persona, query, sections, history=history, language=settings.sag_language
     )
-    return messages, citations
+    empty_response = (persona.get("empty_response") or "").strip()
+    return AskPlan(
+        messages=messages,
+        citations=citations,
+        section_count=len(sections),
+        prompt_preview=build_prompt_preview(messages),
+        short_circuit=empty_response if (not sections and empty_response) else None,
+    )
+
+
+async def prepare_ask(
+    session: AsyncSession,
+    *,
+    soul: Soul,
+    thread: SoulThread,
+    query: str,
+    engine_manager: EngineManager,
+    author: str | None = None,
+) -> AskPlan:
+    """落库用户消息、解析历史，再委托 build_ask_context 组装计划。"""
+    user_msg = SoulMessage(
+        thread_id=thread.id, role=MessageRole.USER, content=query, author=author, citations=[]
+    )
+    session.add(user_msg)
+    if thread.title in _DEFAULT_TITLES:
+        thread.title = query[:40]
+    await session.commit()
+    await session.refresh(user_msg)
+
+    history = await _history(session, thread.id, exclude_id=user_msg.id)
+    return await build_ask_context(
+        session, soul=soul, query=query, engine_manager=engine_manager, history=history
+    )
 
 
 async def persist_answer(

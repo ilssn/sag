@@ -3,7 +3,7 @@ import { getToken } from "./auth";
 import type { Citation } from "./types";
 
 export interface AskHandlers {
-  onMeta?: (citations: Citation[]) => void;
+  onMeta?: (citations: Citation[], promptPreview?: string) => void;
   onToken?: (text: string) => void;
   onError?: (message: string) => void;
   onDone?: (messageId: string) => void;
@@ -60,7 +60,8 @@ async function streamPost(
     } catch {
       return;
     }
-    if (event === "meta") handlers.onMeta?.((payload.citations as Citation[]) || []);
+    if (event === "meta")
+      handlers.onMeta?.((payload.citations as Citation[]) || [], payload.prompt_preview as string);
     else if (event === "token") handlers.onToken?.((payload.text as string) || "");
     else if (event === "error") handlers.onError?.((payload.message as string) || "生成失败");
     else if (event === "done") handlers.onDone?.((payload.message_id as string) || "");

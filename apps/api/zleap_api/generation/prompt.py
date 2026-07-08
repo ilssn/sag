@@ -87,6 +87,19 @@ def build_soul_messages(
     return messages
 
 
+def build_prompt_preview(messages: list[dict[str, str]], *, limit: int = 1600) -> str:
+    """把发给模型的消息拼成可读预览（用于「查看本轮 prompt」透明化）。"""
+    lines: list[str] = []
+    role_label = {"system": "系统", "user": "用户", "assistant": "助手"}
+    for m in messages:
+        label = role_label.get(m.get("role", ""), m.get("role", ""))
+        lines.append(f"【{label}】\n{m.get('content', '')}")
+    text = "\n\n".join(lines)
+    if len(text) > limit:
+        text = text[:limit].rstrip() + "\n\n…（已截断）"
+    return text
+
+
 def build_citations(
     sections: list[RetrievedSection],
     source_refs: dict[str, dict[str, str]] | None = None,

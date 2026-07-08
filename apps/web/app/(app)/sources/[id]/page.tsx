@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, FileText, Search, TriangleAlert, Trash2 } from "lucide-react";
+import { ArrowLeft, FileText, FlaskConical, Search, TriangleAlert, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
@@ -12,6 +12,7 @@ import { useApp } from "@/components/features/app-shell";
 import { useSearch } from "@/components/features/search-overlay";
 import { DocumentList } from "@/components/features/document-list";
 import { EmptyState } from "@/components/features/empty-state";
+import { RetrievalTestDialog } from "@/components/features/retrieval-test-dialog";
 import { SyncPanel } from "@/components/features/sync-panel";
 import { UploadZone } from "@/components/features/upload-zone";
 import { Button } from "@/components/ui/button";
@@ -57,6 +58,7 @@ export default function SourceDetailPage() {
   }, [active, refresh]);
 
   const [confirmDelete, setConfirmDelete] = React.useState(false);
+  const [retrievalOpen, setRetrievalOpen] = React.useState(false);
 
   async function deleteSource() {
     try {
@@ -94,6 +96,15 @@ export default function SourceDetailPage() {
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setRetrievalOpen(true)}
+            disabled={!source}
+            title="用真实查询验证召回效果"
+          >
+            <FlaskConical className="size-4" />
+            检索测试
+          </Button>
           <Button
             variant="gold"
             onClick={() => source && openSearch({ id: source.id, name: source.name })}
@@ -180,6 +191,15 @@ export default function SourceDetailPage() {
         </div>
 
       </div>
+
+      {source && (
+        <RetrievalTestDialog
+          sourceId={source.id}
+          sourceName={source.name}
+          open={retrievalOpen}
+          onOpenChange={setRetrievalOpen}
+        />
+      )}
     </>
   );
 }

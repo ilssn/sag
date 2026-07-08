@@ -160,6 +160,46 @@ async def delete_(
     return Ok(detail="助手已删除")
 
 
+# ── 记忆 ────────────────────────────────────────────────────────────
+@router.get("/{soul_id}/memory")
+async def memory(
+    soul_id: str,
+    ws: str = Depends(get_workspace_id),
+    role: WorkspaceRole = Depends(get_workspace_role),
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    soul = await svc.get_soul(session, ws, soul_id, user_id=user.id, role=role)
+    return await svc.memory_stats(session, soul)
+
+
+@router.delete("/{soul_id}/memory", response_model=Ok)
+async def clear_memory(
+    soul_id: str,
+    request: Request,
+    ws: str = Depends(get_workspace_id),
+    role: WorkspaceRole = Depends(get_workspace_role),
+    user: User = Depends(get_current_user),
+    _editor=Depends(require_editor),
+    session: AsyncSession = Depends(get_session),
+    engine_manager: EngineManager = Depends(get_engine_manager),
+) -> Ok:
+    soul = await svc.get_soul(session, ws, soul_id, user_id=user.id, role=role)
+    svc.ensure_manageable(soul, user.id, role)
+    n = await svc.clear_memory(
+        session, soul, engine_manager=engine_manager, upload_dir=settings.upload_dir
+    )
+    await audit_service.record_request(
+        request,
+        AuditAction.SOUL_DELETE,
+        target_type="memory",
+        target_id=soul_id,
+        target_label=soul.name,
+        meta={"cleared_sources": n},
+    )
+    return Ok(detail="记忆已清空" if n else "暂无记忆可清空")
+
+
 # ── 绑定 ────────────────────────────────────────────────────────────
 @router.get("/{soul_id}/bindings", response_model=list[BindingOut])
 async def list_bindings(
@@ -276,10 +316,8 @@ async def ask(
 ) -> EventSourceResponse:
     soul = await svc.get_soul(session, ws, soul_id, user_id=user.id, role=role)
     thread = await svc.get_thread(session, soul.id, thread_id, user_id=user.id)
-    if not llm.configured:
-        raise ConfigurationError("尚未配置 LLM，无法生成回答")
 
-    messages, citations = await svc.prepare_ask(
+    plan = await svc.prepare_ask(
         session,
         soul=soul,
         thread=thread,
@@ -287,21 +325,35 @@ async def ask(
         engine_manager=engine_manager,
         author=body.author or user.name,
     )
+    # 防幻觉短路：检索为空且配置了兜底话术时无需 LLM
+    if plan.short_circuit is None and not llm.configured:
+        raise ConfigurationError("尚未配置 LLM，无法生成回答")
+
     thread_id_val = thread.id
     question = body.query
 
     async def event_gen():
-        yield _sse("meta", {"citations": citations})
+        yield _sse("meta", {"citations": plan.citations, "prompt_preview": plan.prompt_preview})
+
+        if plan.short_circuit is not None:
+            # 直接回兜底话术，不调用 LLM，不沉淀记忆
+            yield _sse("token", {"text": plan.short_circuit})
+            message_id = await svc.persist_answer(
+                SessionLocal, thread_id_val, plan.short_circuit, plan.citations
+            )
+            yield _sse("done", {"message_id": message_id})
+            return
+
         acc: list[str] = []
         try:
-            async for token in llm.stream(messages):
+            async for token in llm.stream(plan.messages):
                 acc.append(token)
                 yield _sse("token", {"text": token})
         except MuseError as e:
             yield _sse("error", {"code": e.code, "message": e.message})
             return
         answer = "".join(acc)
-        message_id = await svc.persist_answer(SessionLocal, thread_id_val, answer, citations)
+        message_id = await svc.persist_answer(SessionLocal, thread_id_val, answer, plan.citations)
         # 记忆闭环：共享助手 = 团队共享记忆；私有助手 = 个人记忆
         await svc.remember_exchange(
             SessionLocal,

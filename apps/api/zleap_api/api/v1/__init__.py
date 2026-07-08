@@ -7,6 +7,7 @@ from zleap_api.api.v1 import (
     insights,
     jobs,
     namespaces,
+    openai,
     search,
     souls,
     sources,
@@ -26,6 +27,7 @@ for _module in (
     jobs,
     search,
     souls,
+    openai,
     system,
 ):
     api_router.include_router(_module.router)

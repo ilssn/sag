@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Link2, Plus, SlidersHorizontal, Trash2, TriangleAlert, Users } from "lucide-react";
+import { ArrowLeft, Brain, Link2, Plus, SlidersHorizontal, Trash2, TriangleAlert, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
@@ -12,6 +12,7 @@ import { relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/components/features/app-shell";
 import { BindingDialog } from "@/components/features/soul/binding-dialog";
+import { MemoryDialog } from "@/components/features/soul/memory-dialog";
 import { PersonaDialog } from "@/components/features/soul/persona-dialog";
 import { SoulChat } from "@/components/features/soul/soul-chat";
 import { Button } from "@/components/ui/button";
@@ -71,6 +72,7 @@ export default function SoulWorkbench() {
   };
 
   const [confirmDelete, setConfirmDelete] = React.useState(false);
+  const [memoryOpen, setMemoryOpen] = React.useState(false);
 
   const deleteSoul = async () => {
     try {
@@ -152,6 +154,15 @@ export default function SoulWorkbench() {
               />
             </div>
           )}
+          {soul && (
+            <button
+              onClick={() => setMemoryOpen(true)}
+              className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md py-1.5 text-xs text-ink-muted transition-colors hover:bg-ink/[0.04] hover:text-ink"
+            >
+              <Brain className="size-3.5" />
+              查看记忆
+            </button>
+          )}
         </div>
 
         <div className="p-3">
@@ -227,6 +238,13 @@ export default function SoulWorkbench() {
           )}
         </div>
       </div>
+
+      <MemoryDialog
+        soulId={id}
+        canManage={canManage}
+        open={memoryOpen}
+        onOpenChange={setMemoryOpen}
+      />
     </div>
   );
 }

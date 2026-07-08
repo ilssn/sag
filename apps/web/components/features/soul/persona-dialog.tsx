@@ -37,6 +37,7 @@ export function PersonaDialog({
   const [greeting, setGreeting] = React.useState(soul.persona?.greeting ?? "");
   const [guardrails, setGuardrails] = React.useState((soul.persona?.guardrails ?? []).join("\n"));
   const [topK, setTopK] = React.useState(String(soul.persona?.top_k ?? ""));
+  const [emptyResponse, setEmptyResponse] = React.useState(soul.persona?.empty_response ?? "");
   const [visibility, setVisibility] = React.useState<SoulVisibility>(soul.visibility);
   const [isTeam, setIsTeam] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
@@ -49,6 +50,7 @@ export function PersonaDialog({
     setGreeting(soul.persona?.greeting ?? "");
     setGuardrails((soul.persona?.guardrails ?? []).join("\n"));
     setTopK(String(soul.persona?.top_k ?? ""));
+    setEmptyResponse(soul.persona?.empty_response ?? "");
     setVisibility(soul.visibility);
     api
       .listMembers()
@@ -70,6 +72,7 @@ export function PersonaDialog({
           greeting,
           guardrails: guardrails.split("\n").map((s) => s.trim()).filter(Boolean),
           top_k: topK ? Number(topK) : null,
+          empty_response: emptyResponse.trim(),
         },
       });
       toast.success("已保存");
@@ -122,6 +125,18 @@ export function PersonaDialog({
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="p-topk">检索条数 top_k（可选）</Label>
             <Input id="p-topk" type="number" min={1} max={50} value={topK} onChange={(e) => setTopK(e.target.value)} className="w-24" />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="p-empty">无资料时的回复（防幻觉，可选）</Label>
+            <Input
+              id="p-empty"
+              value={emptyResponse}
+              onChange={(e) => setEmptyResponse(e.target.value)}
+              placeholder="抱歉，我暂时没有查到相关资料。"
+            />
+            <p className="text-xs text-ink-faint">
+              填写后，当检索不到任何资料时将直接回复此话术，不再交给模型自由发挥。
+            </p>
           </div>
           {isTeam && (
             <div className="flex flex-col gap-1.5">

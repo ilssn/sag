@@ -8,6 +8,7 @@ import type {
   BindingTargetType,
   Capabilities,
   Doc,
+  MemoryStats,
   Persona,
   SearchResponse,
   Soul,
@@ -125,6 +126,11 @@ export const api = {
   ) =>
     request<Soul>(`/api/v1/souls/${id}`, { method: "PATCH", body: JSON.stringify(b) }),
   deleteSoul: (id: string) => request<{ ok: boolean }>(`/api/v1/souls/${id}`, { method: "DELETE" }),
+
+  // 记忆面板
+  getMemory: (id: string) => request<MemoryStats>(`/api/v1/souls/${id}/memory`),
+  clearMemory: (id: string) =>
+    request<{ ok: boolean; detail: string }>(`/api/v1/souls/${id}/memory`, { method: "DELETE" }),
 
   listBindings: (id: string) => request<Binding[]>(`/api/v1/souls/${id}/bindings`),
   addBinding: (id: string, b: { target_type: BindingTargetType; target_id: string }) =>

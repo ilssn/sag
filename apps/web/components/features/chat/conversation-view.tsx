@@ -9,6 +9,7 @@ import type { AskHandlers } from "@/lib/sse";
 import type { Citation } from "@/lib/types";
 import { useApp } from "@/components/features/app-shell";
 import { CitationBlock } from "@/components/features/chat/citation-block";
+import { PromptPreview } from "@/components/features/chat/prompt-preview";
 import { Button } from "@/components/ui/button";
 
 const MarkdownContent = dynamic(
@@ -22,6 +23,7 @@ export interface ConvMessage {
   content: string;
   citations: Citation[];
   author?: string | null;
+  promptPreview?: string;
 }
 
 type Streamer = (
@@ -69,6 +71,7 @@ const MessageItem = React.memo(
             <MarkdownContent content={message.content} />
           )}
           {!streaming && <CitationBlock citations={message.citations} />}
+          {!streaming && message.promptPreview && <PromptPreview preview={message.promptPreview} />}
         </div>
       </div>
     );
@@ -222,7 +225,8 @@ export function ConversationView({
         tid,
         q,
         {
-          onMeta: (citations) => patch((x) => ({ ...x, citations })),
+          onMeta: (citations, promptPreview) =>
+            patch((x) => ({ ...x, citations, promptPreview })),
           onToken: (t) => {
             pendingTokens.current += t;
             scheduleTokenFlush(botId);

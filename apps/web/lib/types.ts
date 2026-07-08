@@ -121,6 +121,14 @@ export interface Persona {
   search_strategy?: string | null;
   top_k?: number | null;
   temperature?: number | null;
+  empty_response?: string;
+}
+
+export interface MemoryStats {
+  document_count: number;
+  chunk_count: number;
+  event_count: number;
+  recent: { id: string; status: string; created_at: string }[];
 }
 
 export interface Soul {
