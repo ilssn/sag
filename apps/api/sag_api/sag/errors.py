@@ -24,7 +24,7 @@ from sag_api.core.errors import (
 
 @contextmanager
 def map_sag_errors():
-    """在此上下文内发生的 SagError 会被翻译成对应的 MuseError。"""
+    """在此上下文内发生的 SagError 会被翻译成对应的 ApiError。"""
     try:
         yield
     except ConfigError as e:

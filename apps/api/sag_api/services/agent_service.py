@@ -13,7 +13,7 @@ from collections.abc import AsyncIterator
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from sag_api.core.errors import MuseError
+from sag_api.core.errors import ApiError
 from sag_api.core.logging import get_logger
 from sag_api.generation import LLMClient, build_prompt_preview
 from sag_api.sag import EngineManager
@@ -150,7 +150,7 @@ async def generate_stream(
         async for token in llm.stream(messages):
             acc.append(token)
             yield ("token", {"text": token})
-    except MuseError as e:
+    except ApiError as e:
         yield ("error", {"code": e.code, "message": e.message})
         return
 
