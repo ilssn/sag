@@ -223,6 +223,40 @@ class EngineManager:
                     snippets.append(str(text)[:500])
         return snippets
 
+    async def get_chunk(
+        self,
+        source_config_id: str,
+        chunk_id: str,
+        *,
+        source: Source | None = None,
+    ):
+        """读取某分块的完整原文（引用/搜索溯源）。不存在返回 None。"""
+        from muse_api.sag.dto import ChunkInfo
+
+        await self._slot(source_config_id, source)
+        from sqlalchemy import select
+        from zleap.sag.db import get_session_factory
+        from zleap.sag.db.models import SourceChunk
+
+        sf = get_session_factory()
+        async with sf() as s:
+            row = (
+                await s.execute(
+                    select(SourceChunk).where(
+                        SourceChunk.id == chunk_id,
+                        SourceChunk.source_config_id == source_config_id,
+                    )
+                )
+            ).scalar_one_or_none()
+        if row is None:
+            return None
+        return ChunkInfo(
+            chunk_id=row.id,
+            heading=(row.heading or "").strip(),
+            content=(row.content or row.raw_content or "").strip(),
+            rank=int(row.rank or 0),
+        )
+
     async def release(self, source_config_id: str) -> None:
         """关闭并移除某源的引擎槽（信源删除时调用；幂等）。"""
         slot = self._slots.pop(source_config_id, None)

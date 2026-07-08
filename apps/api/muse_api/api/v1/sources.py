@@ -88,6 +88,24 @@ async def delete_(
     return Ok(detail="信源已删除")
 
 
+@router.get("/{source_id}/chunks/{chunk_id}")
+async def get_chunk(
+    source_id: str,
+    chunk_id: str,
+    workspace_id: str = Depends(get_workspace_id),
+    session: AsyncSession = Depends(get_session),
+    engine_manager: EngineManager = Depends(get_engine_manager),
+) -> dict:
+    """引用溯源：读取某分块的完整原文。"""
+    from muse_api.core.errors import NotFoundError
+
+    source = await get_source(session, workspace_id, source_id)
+    chunk = await engine_manager.get_chunk(source.sag_source_config_id, chunk_id, source=source)
+    if chunk is None:
+        raise NotFoundError("原文分块不存在")
+    return {**chunk.model_dump(), "source_id": source.id, "source_name": source.name}
+
+
 @router.post("/{source_id}/sync", response_model=JobOut)
 async def sync(
     source_id: str,

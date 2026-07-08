@@ -29,9 +29,13 @@ async def search(
         strategy=body.strategy,
         top_k=body.top_k,
     )
+    # 对外 source_id = muse 信源 id（可路由 / 取原文），不泄漏引擎内部 id
     return SearchResponse(
         query=outcome.query,
-        sections=[SectionOut(**s.model_dump(), source_name=source.name) for s in outcome.sections],
+        sections=[
+            SectionOut(**{**s.model_dump(), "source_id": source.id}, source_name=source.name)
+            for s in outcome.sections
+        ],
         stats=outcome.stats,
     )
 
@@ -51,14 +55,19 @@ async def global_search(
     if not sources:
         return SearchResponse(query=body.query, sections=[], stats={"sources": 0})
 
-    names = {s.sag_source_config_id: s.name for s in sources}
+    refs = {s.sag_source_config_id: s for s in sources}
     targets = [(s.sag_source_config_id, s) for s in sources]
     outcome = await engine_manager.search_many(targets, body.query, top_k=body.top_k)
+
+    def out(s):
+        src = refs.get(s.source_config_id or "")
+        return SectionOut(
+            **{**s.model_dump(), "source_id": src.id if src else None},
+            source_name=src.name if src else None,
+        )
+
     return SearchResponse(
         query=outcome.query,
-        sections=[
-            SectionOut(**s.model_dump(), source_name=names.get(s.source_config_id or ""))
-            for s in outcome.sections
-        ],
+        sections=[out(s) for s in outcome.sections],
         stats=outcome.stats,
     )

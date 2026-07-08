@@ -51,6 +51,15 @@ class SearchOutcome(BaseModel):
         )
 
 
+class ChunkInfo(BaseModel):
+    """一个分块的原文（引用溯源用）。"""
+
+    chunk_id: str
+    heading: str = ""
+    content: str = ""
+    rank: int = 0
+
+
 class EntityInfo(BaseModel):
     """从事件—实体图谱聚合出的一个实体（用于洞察 / 书→人物）。"""
 

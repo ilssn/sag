@@ -4,7 +4,14 @@
 未来替换 / 升级引擎时改动收敛在此目录。
 """
 
-from muse_api.sag.dto import EntityInfo, ProcessOutcome, RetrievedSection, SearchOutcome
+from muse_api.sag.dto import ChunkInfo, EntityInfo, ProcessOutcome, RetrievedSection, SearchOutcome
 from muse_api.sag.engine_manager import EngineManager
 
-__all__ = ["EngineManager", "EntityInfo", "ProcessOutcome", "RetrievedSection", "SearchOutcome"]
+__all__ = [
+    "ChunkInfo",
+    "EngineManager",
+    "EntityInfo",
+    "ProcessOutcome",
+    "RetrievedSection",
+    "SearchOutcome",
+]

@@ -124,4 +124,10 @@ export const api = {
   // 搜索
   globalSearch: (b: { query: string; source_ids?: string[]; top_k?: number }) =>
     request<SearchResponse>("/api/v1/search", { method: "POST", body: JSON.stringify(b) }),
+
+  // 引用溯源：分块原文
+  getChunk: (sourceId: string, chunkId: string) =>
+    request<{ chunk_id: string; heading: string; content: string; source_id: string; source_name: string }>(
+      `/api/v1/sources/${sourceId}/chunks/${chunkId}`,
+    ),
 };

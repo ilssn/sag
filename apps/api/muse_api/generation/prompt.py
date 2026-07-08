@@ -88,17 +88,20 @@ def build_soul_messages(
 
 
 def build_citations(
-    sections: list[RetrievedSection], source_names: dict[str, str] | None = None
+    sections: list[RetrievedSection],
+    source_refs: dict[str, dict[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     """由检索段落确定性地构造引用列表（编号与 prompt 中一致）。
 
-    `source_names`：{sag_source_config_id: 信源名}，用于在引用上标注来源信源（fan-out 时尤其有用）。
+    `source_refs`：{sag_source_config_id: {"id": muse 信源 id, "name": 信源名}}。
+    对外的 `source_id` 一律指 **muse 信源 id**（可直接路由 / 取原文），不泄漏引擎内部 id。
     """
     citations = []
     for i, s in enumerate(sections, start=1):
         snippet = s.content.strip().replace("\n", " ")
         if len(snippet) > 240:
             snippet = snippet[:240].rstrip() + "…"
+        ref = (source_refs or {}).get(s.source_config_id or "") or {}
         citations.append(
             {
                 "n": i,
@@ -106,8 +109,8 @@ def build_citations(
                 "heading": s.heading,
                 "snippet": snippet,
                 "score": round(s.score, 4),
-                "source_id": s.source_id,
-                "source_name": (source_names or {}).get(s.source_config_id or ""),
+                "source_id": ref.get("id"),
+                "source_name": ref.get("name"),
             }
         )
     return citations

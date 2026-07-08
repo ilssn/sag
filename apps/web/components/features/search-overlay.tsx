@@ -2,12 +2,13 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { CornerDownLeft, FileText, Loader2, Search, X } from "lucide-react";
+import { BookOpenText, CornerDownLeft, FileText, Loader2, Search, X } from "lucide-react";
 
 import { api } from "@/lib/api";
 import type { Section } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { ChunkDialog, type ChunkRef } from "@/components/features/chat/chunk-dialog";
 
 /** 搜索范围：不传 = 全部信源；传入则锁定单一信源（可在浮层内移除）。 */
 export interface SearchScope {
@@ -31,6 +32,7 @@ export function SearchProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = React.useState(false);
   const [active, setActive] = React.useState(0);
   const inputRef = React.useRef<HTMLInputElement>(null);
+  const [chunk, setChunk] = React.useState<ChunkRef | null>(null);
   const listRef = React.useRef<HTMLDivElement>(null);
 
   const openSearch = React.useCallback((s?: SearchScope) => {
@@ -196,8 +198,32 @@ export function SearchProvider({ children }: { children: React.ReactNode }) {
                       {r.content}
                     </span>
                   </span>
-                  <span className="mt-1 shrink-0 font-mono text-[10px] tabular-nums text-ink-faint">
-                    {r.score.toFixed(2)}
+                  <span className="mt-0.5 flex shrink-0 items-center gap-1.5">
+                    {r.chunk_id && r.source_id && (
+                      <span
+                        role="button"
+                        tabIndex={-1}
+                        title="查看原文"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setChunk({
+                            sourceId: r.source_id!,
+                            chunkId: r.chunk_id!,
+                            heading: r.heading,
+                            sourceName: r.source_name,
+                          });
+                        }}
+                        className={cn(
+                          "rounded p-1 text-ink-faint transition-opacity hover:text-gold-strong",
+                          i === active ? "opacity-100" : "opacity-0",
+                        )}
+                      >
+                        <BookOpenText className="size-3.5" />
+                      </span>
+                    )}
+                    <span className="font-mono text-[10px] tabular-nums text-ink-faint">
+                      {r.score.toFixed(2)}
+                    </span>
                   </span>
                 </button>
               ))
@@ -213,6 +239,7 @@ export function SearchProvider({ children }: { children: React.ReactNode }) {
           )}
         </DialogContent>
       </Dialog>
+      <ChunkDialog chunk={chunk} onOpenChange={(o) => !o && setChunk(null)} />
     </Ctx.Provider>
   );
 }

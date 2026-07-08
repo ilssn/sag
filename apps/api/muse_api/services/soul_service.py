@@ -290,7 +290,7 @@ async def prepare_ask(
 
     persona = soul.persona or {}
     sources = await resolve_sources(session, soul)
-    source_names = {s.sag_source_config_id: s.name for s in sources}
+    source_refs = {s.sag_source_config_id: {"id": s.id, "name": s.name} for s in sources}
     if sources:
         targets = [(s.sag_source_config_id, s) for s in sources]
         outcome = await engine_manager.search_many(
@@ -303,7 +303,7 @@ async def prepare_ask(
     else:
         sections = []
 
-    citations = build_citations(sections, source_names)
+    citations = build_citations(sections, source_refs)
     history = await _history(session, thread.id, exclude_id=user_msg.id)
     messages = build_soul_messages(
         soul.name, persona, query, sections, history=history, language=settings.sag_language
