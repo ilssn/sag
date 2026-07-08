@@ -57,8 +57,9 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 
 # 已存在的表需要补的新列（dev 轻量增量迁移；生产用 Alembic）。
 # create_all 只建新表、不改旧表，故对演进列做幂等 ADD COLUMN。
-# 当前为干净单用户 schema，create_all 即建全表，无需增量迁移。
-_COLUMN_UPGRADES: dict[str, dict[str, str]] = {}
+_COLUMN_UPGRADES: dict[str, dict[str, str]] = {
+    "agents": {"is_default": "BOOLEAN NOT NULL DEFAULT 0"},
+}
 
 
 async def _ensure_columns() -> None:

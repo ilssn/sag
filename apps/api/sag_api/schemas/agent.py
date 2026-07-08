@@ -27,6 +27,7 @@ class AgentOut(BaseModel):
     name: str
     avatar: str
     persona: dict[str, Any]
+    is_default: bool = False
     created_at: datetime
     updated_at: datetime
 

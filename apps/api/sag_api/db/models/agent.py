@@ -15,6 +15,8 @@ class Agent(IDMixin, TimestampMixin, Base):
 
     name: Mapped[str] = mapped_column(String(120))
     avatar: Mapped[str] = mapped_column(String(64), default="")  # emoji / 首字母
+    # 默认 agent：开箱即用的主对话入口，知识库=全部信源（resolve_sources 特判）
+    is_default: Mapped[bool] = mapped_column(default=False, index=True)
     # 配置：{ system_prompt, greeting, tools[] }（tools 为额外启用的工具/MCP 名）
     persona: Mapped[dict] = mapped_column("persona_json", JSON, default=dict)
 

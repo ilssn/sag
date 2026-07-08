@@ -58,6 +58,15 @@ async def create(
     return AgentOut.model_validate(agent)
 
 
+@router.get("/default", response_model=AgentOut)
+async def get_default(
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """默认 agent（get-or-create）：客户端主对话入口，知识库=全部信源。"""
+    return AgentOut.model_validate(await svc.get_default_agent(session))
+
+
 @router.get("/{agent_id}", response_model=AgentOut)
 async def get_(
     agent_id: str,
