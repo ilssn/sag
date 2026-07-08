@@ -2,7 +2,11 @@
 
 > 指导文档。分析旧版产品 **[Zleap-AI/SAG](https://github.com/Zleap-AI/SAG)** 里值得保留的三条策略，
 > 给出它们在**新版 zleap**（Python FastAPI + Next.js + zleap-sag 引擎）里的目标架构与分阶段落地。
-> 第一阶段（Agent 解耦）已实现，本文其余为路线图。
+>
+> **落地状态**：**(A) Agent 解耦（工具层）已实现** · **(B) MCP —— 信源即 MCP + Agent 作 MCP 客户端已实现**
+> （见 [../architecture.md](../architecture.md) 的「Agent 工具循环」「信源即 MCP」，及后端 `tools/`、`mcp/`）· **(C) 图谱展示 待做**。
+> 与旧版差异：Agent 循环用**原生 function-calling**（非 JSON-planner ReAct）；MCP 传输为 **Streamable-HTTP + stdio**；
+> 检索工具直连**暖引擎**（进程内），对外则以 MCP server 暴露同一能力。
 
 ## 为什么
 

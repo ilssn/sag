@@ -10,6 +10,8 @@ zleap 的后端服务：FastAPI + `zleap-sag`。
 | 连接器 | `zleap_api/connectors/` | 采集抽象 + 注册表（文件上传 → 动态同步） |
 | 任务队列 | `zleap_api/jobs/` | 后台处理编排（ingest → extract 状态机） |
 | 生成层 | `zleap_api/generation/` | 检索结果 → LLM 流式答案 + 引用 |
+| 工具层 | `zleap_api/tools/` | Agent 工具：内置检索/实体 + 远端 MCP 适配（统一 `Tool` 接口） |
+| MCP | `zleap_api/mcp/` | 信源即 MCP：FastMCP server + Streamable-HTTP 挂载（`/mcp/`）+ stdio 入口 |
 | 领域服务 | `zleap_api/services/` | 纯业务逻辑，不依赖 FastAPI |
 | 接口 | `zleap_api/api/v1/` | HTTP 路由，仅做 IO / 校验 / 序列化 |
 

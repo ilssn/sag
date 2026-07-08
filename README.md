@@ -1,52 +1,23 @@
 # zleap
 
-> **生产级开源知识库 · 团队的上下文基座**
-> 上传信息 → 自动记忆 → 带引用对话，个人与公司同一套模型。
+> **一个干净、清晰、好用的 SAG 开源示范项目。**
+> 创建信源 → 上传文档 → 搜索看结果、查原文 → 建 Agent 绑定信源、带引用对话。信源即 MCP。
 
-`zleap` 以 [`zleap-sag`](https://pypi.org/project/zleap-sag/)（本地优先的记忆 / 知识引擎）为数据基座，把「上下文管理」做成可直接部署的产品：文档、对话、记忆持续汇入一个**记忆体**，结构化为分块—事件—实体，再经**搜索、助手、OpenAI 兼容端点**对外提供。
+`zleap` 以 [`zleap-sag`](https://pypi.org/project/zleap-sag/)（本地优先的知识引擎：解析 · 分块 · 向量 · 事件—实体图谱 · 检索）为数据基座，用最短的链路把 SAG 的能力示范清楚。**个人向、单用户、零基础设施**——没有多租户、没有团队权限、没有一堆待接线的组件，只留下一条主干：
 
-不是又一个「文档问答 demo」。zleap 面向**个人与企业的长期可用**：四个概念、轻量依赖、记忆即本能、一步溯源、开箱审计、团队权限——对标并在这些维度上超越 RAGFlow。
+**信息进来（信源 + 文档）→ 检索得到有据的结果（搜索 + 原文溯源）→ Agent 依据信源带引用作答，并可经 MCP 扩展工具。**
 
-- 🧭 **产品形态定稿** → [docs/product/product-form.md](docs/product/product-form.md)
-- 🏛 **as-built 架构** → [docs/architecture.md](docs/architecture.md)
-- 🔬 **竞品调研**（RAGFlow / mem0）→ [ragflow-deep-dive](docs/product/ragflow-deep-dive.md) · [mem0-insights](docs/product/mem0-insights.md)
+- 🧩 **MCP 一等公民**：每个信源都是一个 MCP 端点，可挂进 Claude Desktop / Cursor；Agent 也作为 MCP 客户端，挂载自己的信源与更多外部 MCP 工具。
+- 🔎 **一步溯源**：回答里的引用 `[n]` 可点开看原文分块。
+- 🤖 **Agent 即模型**：任意 Agent 暴露一个 OpenAI 兼容端点，可当作「带检索与引用的模型」调用。
 
-## 为什么选 zleap（对比 RAGFlow）
+## 核心概念（三个）
 
-| 维度 | RAGFlow | **zleap** |
-| --- | --- | --- |
-| 基础设施 | ES + Redis + MySQL + MinIO 多组件 | **单机零依赖**（SQLite + LanceDB）→ 生产**单 Postgres**（pgvector 一库统一） |
-| 核心概念 | 7+ 实体（数据集/助手/Chunk/Memory/Agent…） | **4 个**：信源 · 助手 · 记忆 · 搜索 |
-| 记忆 | 独立 Memory 组件，需在画布手动接线（≤5MB） | **本能**：每轮对话自动沉淀—抽取—回灌，越聊越懂你 |
-| 溯源 | 引用与原文割裂 | **一步溯源**：引用 → 原文对话框，chunk 级可核查 |
-| 检索调参 | 调试面板参数不回填 | **检索测试 → 一键应用到助手**（所见即所得） |
-| 防幻觉 | empty response 需配置 | 人格级 `empty_response`，检索为空直接兜底、不外溢 |
-| Prompt | 黑盒 | **查看本轮 prompt**：实际提示词摊开可核查 |
-| 审计 | 需自建 | **开箱**：关键操作留痕 + CSV 导出 + 请求追踪 |
-| 团队 | 组织/项目较重 | 空间=记忆体，个人=1 人、公司=N 人**同一模型**；三档角色 |
-| 对外调用 | 专有 API | **OpenAI 兼容端点**：任意助手当作「带记忆与引用的模型」调用 |
+- **信源（Source）** — 装内容的容器。上传文档，zleap 自动解析、分块、向量化、抽取事件与实体。每个信源同时是一个可对外挂载的 **MCP 端点**。
+- **Agent** — 绑定若干信源、带设定（system prompt / 开场白），依据信源带引用作答；可挂载外部 MCP server 扩展工具。
+- **搜索（Search）** — ⌘K 全局唤出，可锁定信源范围，命中即可跳到原文。
 
-> 我们不打 OCR / 模板 / 工作流画布 / 渠道矩阵的军备竞赛——把**知识库该有的骨架做到极致稳、极致清晰**。
-
-## 核心概念（只有四个）
-
-- **信源（Source）** — 装内容的容器。上传文档，zleap 自动解析、分块、向量化、抽取事件与实体。
-- **助手（Assistant）** — 绑定若干信源，带人格与边界，带引用地回答；每轮对话沉淀为它的记忆。
-- **记忆（Memory）** — 助手的本能，不是要你接线的组件。对话自动入库，参与后续检索。
-- **搜索（Search）** — ⌘K 全局唤出，可 `@信源` 锁定范围，命中即可跳原文。
-
-## 团队（个人 ↔ 公司，同一模型）
-
-**空间（Workspace）= 一个共享的记忆体。** 个人就是 1 人空间，公司是 N 人空间，机制完全一致。
-
-- 角色三档：**所有者**（管理成员/空间）· **编辑者**（读写信源、助手、记忆）· **只读**（仅检索与对话）。
-- 助手可见性：**私有**（仅创建者）/ **团队**（空间共享，对话沉淀为团队记忆）。
-- 共享助手的**会话按人隔离**——团队共享记忆，但各人的对话互不可见。
-- 顶栏一键切换空间；设置页管理成员与角色；所有者可查审计并导出。
-
-## 快速开始
-
-### 本地开发（零依赖）
+## 快速开始（零依赖，单用户）
 
 ```bash
 # 后端
@@ -54,7 +25,7 @@ cd apps/api
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env          # 填入 OpenAI 兼容的 LLM / embedding 配置
-uvicorn zleap_api.main:app --reload
+uvicorn zleap_api.main:app --reload      # http://localhost:8000
 
 # 前端
 cd apps/web
@@ -62,47 +33,86 @@ npm install
 npm run dev                   # http://localhost:3000
 ```
 
-首个注册用户即成为其空间的所有者。未配置 LLM 也能启动并上传文档，仅抽取/问答需要模型。
+- **首个注册用户即你的账号。** 引导完成后可在 `.env` 设 `ZLEAP_ALLOW_REGISTRATION=false`，此后不再开放注册。
+- 未配置 LLM 也能启动、建信源、上传文档；仅**事件抽取**与**问答**需要模型。
+- 默认零基础设施：元数据 SQLite（`./.data/zleap.db`）+ SAG 存储 LanceDB（`./.data/engine`）。**升级后若旧库结构不兼容，删除 `apps/api/.data/` 后重启即重建。**
 
-### 一键部署（Docker Compose · 单 Postgres）
+### 三步走完主干
+
+1. **建信源，上传文档** —— 自动解析、分块、向量化、抽取事件与实体。
+2. **搜索看结果，点引用查原文** —— 验证召回，chunk 级可核查。
+3. **建 Agent，绑定信源，开始对话** —— 回答带引用；点引用回到原文。
+
+## 信源即 MCP
+
+每个信源都暴露一个标准 MCP 端点，提供三个工具：`search`（检索证据）· `get_entity`（查实体上下文）· `get_chunk`（读原文分块）。
+
+**拿到某个信源的挂载信息：**
 
 ```bash
-cd deploy
-cp .env.example .env          # 至少设置 ZLEAP_SECRET_KEY（openssl rand -hex 32）与 LLM 配置
-docker compose up -d          # api 就绪探针通过后 web 才启动
+curl -s http://localhost:8000/api/v1/sources/<SOURCE_ID>/mcp \
+  -H "Authorization: Bearer <ZLEAP_JWT>"
 ```
 
-生产环境若沿用默认密钥会**拒绝启动**——这是有意的防呆。
+返回 HTTP（Streamable-HTTP）URL 与 stdio 配置片段两种接法。前端「信源详情 → 作为 MCP 挂载」也能直接复制。
 
-### 三步上手
+**挂进 Claude Desktop / Cursor（stdio）：**
 
-1. **建信源**，上传文档 —— 自动解析、分块、抽取。
-2. **建助手**，勾选要绑定的信源 —— 立刻可带引用对话。
-3. **问它** —— 答案带引用，点引用看原文；对话自动沉淀为记忆。
+```jsonc
+{
+  "mcpServers": {
+    "zleap-<信源名>": {
+      "command": "python",
+      "args": ["-m", "zleap_api.mcp.server"],
+      "env": { "ZLEAP_MCP_SOURCE_ID": "<SOURCE_ID>" }
+    }
+  }
+}
+```
 
-## 作为「模型」被调用（OpenAI 兼容）
+**HTTP 接法**：宿主填 `http://<host>/mcp/?source_id=<SOURCE_ID>`，并在 `Authorization` 头携带 `Bearer <token>`。
 
-任意助手都暴露一个 OpenAI Chat Completions 端点，检索、人格、防幻觉与站内一致：
+### Agent 挂载 MCP 扩展工具
+
+Agent 除了绑定信源作答，还能挂载**外部 MCP server**（本地 filesystem、检索、你自建的工具……）。在「Agent → 连接 → MCP server」里填 HTTP url 或本地命令（如 `npx -y @modelcontextprotocol/server-filesystem /data`）即可；对话中模型可直接调用这些工具，与内置检索一视同仁。
+
+> 设计取舍：Agent 自身对绑定信源的检索走**进程内暖引擎**（快、无多余往返）；同一套能力经 MCP server 对**外部宿主**开放。“信源即 MCP” 是对外契约，内部则直连引擎——同源同解。
+
+## Agent 作为模型被调用（OpenAI 兼容）
+
+任意 Agent 暴露一个 OpenAI Chat Completions 端点，检索与引用与站内一致：
 
 ```bash
-curl -s http://localhost:8000/api/v1/openai/<SOUL_ID>/chat/completions \
+curl -s http://localhost:8000/api/v1/openai/<AGENT_ID>/chat/completions \
   -H "Authorization: Bearer <ZLEAP_JWT>" \
   -H "Content-Type: application/json" \
-  -d '{"messages":[{"role":"user","content":"报销流程是怎样的？"}]}'
+  -d '{"messages":[{"role":"user","content":"这份资料讲了什么？"}]}'
 ```
 
-返回标准 `chat.completion` 结构，额外带 `zleap.citations` 引用字段（标准客户端会忽略未知字段）。`"stream": true` 时以 SSE 分块返回。
+返回标准 `chat.completion`，额外带 `zleap.citations` 引用字段（标准客户端忽略未知字段）。`"stream": true` 时以 SSE 分块返回。
 
 ## 架构一览
 
 ```
-apps/web   Next.js + shadcn/ui（纸墨 + 淡金，亮暗双主题，⌘K 全局搜索）
+apps/web   Next.js 15 + shadcn/ui（中性主题，亮暗双色，⌘K 全局搜索）
 apps/api   FastAPI · services 纯领域 · sag/ 唯一引擎适配层 · jobs 进程内队列（退避重试）
-           团队与角色 · 审计留痕 · 引擎槽 LRU · 就绪/存活探针 · OpenAI 端点
+           tools/ Agent 工具层（内置检索/实体 + MCP 适配）· mcp/ 信源 MCP server + HTTP 挂载
+           · 引擎槽 LRU · 就绪/存活探针 · OpenAI 兼容端点
 zleap-sag  解析 · 分块 · 向量 · 事件—实体图谱 · 检索（只做检索，不做生成）
 ```
 
-详见 [docs/architecture.md](docs/architecture.md)。
+数据模型（单用户、极简）：
+
+```
+User    { email, password_hash, name, is_active }
+Source  { name, description, connector_kind, config, sag_source_config_id, 计数… }   # 同时是 MCP 端点
+Document{ … }
+Agent   { name, avatar, persona{ system_prompt, greeting, tools[] } }
+Binding { agent_id, target_type(source|mcp_server), target_id, config }             # 绑信源 / 挂 MCP
+Thread / Message { … 带 citations }
+```
+
+深入阅读 → [docs/architecture.md](docs/architecture.md) · [Agent · MCP · 图谱](docs/architecture/agent-mcp-graph.md)
 
 ## 许可
 
