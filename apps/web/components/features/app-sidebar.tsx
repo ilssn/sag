@@ -111,9 +111,22 @@ const NAV = [
 ];
 
 export function AppSidebar() {
-  const pathname = usePathname();
+  const routePath = usePathname();
   const router = useRouter();
   const { agent, threads, refreshThreads } = useApp();
+
+  // replaceState（新会话接管 URL 不打断流式）不会触发 usePathname —— 监听自定义事件补齐
+  const [pathname, setPathname] = React.useState(routePath);
+  React.useEffect(() => setPathname(routePath), [routePath]);
+  React.useEffect(() => {
+    const sync = () => setPathname(window.location.pathname);
+    window.addEventListener("sag:pathchange", sync);
+    window.addEventListener("popstate", sync);
+    return () => {
+      window.removeEventListener("sag:pathchange", sync);
+      window.removeEventListener("popstate", sync);
+    };
+  }, []);
 
   const activeThreadId = pathname.startsWith("/chat/") ? pathname.split("/")[2] : null;
 

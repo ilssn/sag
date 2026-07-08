@@ -113,6 +113,28 @@ export const api = {
 
   // 文档
   listDocuments: (sid: string) => request<Doc[]>(`/api/v1/sources/${sid}/documents`),
+  uploadDocumentWithProgress: (sid: string, file: File, onProgress: (pct: number) => void) =>
+    new Promise<Doc>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${API_BASE}/api/v1/sources/${sid}/documents`);
+      xhr.setRequestHeader("Authorization", `Bearer ${getToken() ?? ""}`);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) resolve(JSON.parse(xhr.responseText));
+        else {
+          let msg = "上传失败";
+          try { msg = JSON.parse(xhr.responseText)?.error?.message ?? msg; } catch { /* noop */ }
+          reject(new ApiError(xhr.status, "upload_failed", msg));
+        }
+      };
+      xhr.onerror = () => reject(new ApiError(0, "network_error", "网络错误，上传中断"));
+      const fd = new FormData();
+      fd.append("file", file);
+      xhr.send(fd);
+    }),
+
   uploadDocument: (sid: string, file: File) => {
     const fd = new FormData();
     fd.append("file", file);
