@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { Progress } from "@/components/ui/progress";
 import { Spinner } from "@/components/ui/spinner";
 
 export function UploadZone({
@@ -22,6 +23,7 @@ export function UploadZone({
   const inputRef = React.useRef<HTMLInputElement>(null);
   const [drag, setDrag] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  const [progress, setProgress] = React.useState<{ name: string; pct: number; idx: number; total: number } | null>(null);
 
   const extOf = (name: string) => {
     const i = name.lastIndexOf(".");
@@ -40,13 +42,18 @@ export function UploadZone({
         continue;
       }
       try {
-        await api.uploadDocument(sourceId, file);
+        const idx = ok + 1;
+        setProgress({ name: file.name, pct: 0, idx, total: files.length });
+        await api.uploadDocumentWithProgress(sourceId, file, (pct) =>
+          setProgress((p) => (p ? { ...p, pct } : p)),
+        );
         ok += 1;
       } catch (err) {
         toast.error(`${file.name}：${err instanceof ApiError ? err.message : "上传失败"}`);
       }
     }
     setBusy(false);
+    setProgress(null);
     if (ok > 0) {
       toast.success(`已上传 ${ok} 个文件，正在后台处理`);
       onUploaded();
@@ -88,9 +95,22 @@ export function UploadZone({
       <div className="text-sm font-medium text-foreground">
         {busy ? "上传中…" : "拖拽文件到此处，或点击选择"}
       </div>
-      <div className="text-xs text-muted-foreground">
-        支持 Markdown / 文本 / PDF 等 · 单文件 ≤ {maxMb}MB
-      </div>
+      {busy && progress ? (
+        <div className="flex w-full max-w-xs flex-col gap-1.5">
+          <Progress value={progress.pct} className="h-1.5" />
+          <div className="flex items-center justify-between text-xs tabular-nums text-muted-foreground">
+            <span className="min-w-0 flex-1 truncate">{progress.name}</span>
+            <span className="shrink-0 pl-2">
+              {progress.total > 1 ? `${progress.idx}/${progress.total} · ` : ""}
+              {progress.pct}%
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div className="text-xs text-muted-foreground">
+          支持 Markdown / 文本 / PDF 等 · 单文件 ≤ {maxMb}MB
+        </div>
+      )}
     </div>
   );
 }

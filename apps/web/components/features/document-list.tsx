@@ -91,6 +91,11 @@ export function DocumentList({
                 </>
               )}
             </div>
+            {(d.status === "loading" || d.status === "extracting") && (
+              <div className="mt-1.5 h-1 w-full max-w-56 overflow-hidden rounded-full bg-muted">
+                <div className="h-full w-2/5 -translate-x-full animate-shimmer rounded-full bg-primary/50" />
+              </div>
+            )}
           </button>
 
           <DocStatusBadge status={d.status} />

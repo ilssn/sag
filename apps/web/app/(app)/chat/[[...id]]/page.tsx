@@ -43,6 +43,7 @@ export default function ChatPage() {
     const t = await api.createThread(agent.id);
     // 无刷新接管路由（保持组件状态），并让侧栏出现新会话
     window.history.replaceState(null, "", `/chat/${t.id}`);
+    window.dispatchEvent(new Event("sag:pathchange"));
     refreshThreads();
     return t.id;
   }, [agent, threadId, refreshThreads]);
