@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import * as React from "react";
-import { ArrowUp, Square } from "lucide-react";
+import { ArrowUp, Check, Copy, Square } from "lucide-react";
 import { toast } from "sonner";
 
 import type { AskHandlers } from "@/lib/sse";
@@ -33,6 +33,31 @@ type Streamer = (
   signal: AbortSignal,
 ) => Promise<void>;
 
+function MessageActions({ content }: { content: string }) {
+    const [done, setDone] = React.useState(false);
+    return (
+      <div className="mt-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover/msg:opacity-100">
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(content);
+              setDone(true);
+              setTimeout(() => setDone(false), 1500);
+            } catch {
+              toast.error("复制失败");
+            }
+          }}
+          className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          aria-label="复制回答"
+        >
+          {done ? <Check className="size-3" /> : <Copy className="size-3" />}
+          {done ? "已复制" : "复制"}
+        </button>
+      </div>
+    );
+  }
+
 const MessageItem = React.memo(
   function MessageItem({
     message,
@@ -54,7 +79,7 @@ const MessageItem = React.memo(
     }
     const thinking = streaming && !message.content;
     return (
-      <div className="flex gap-3">
+      <div className="group/msg flex gap-3">
         {avatar}
         <div className="min-w-0 flex-1">
           {thinking ? (
@@ -70,6 +95,7 @@ const MessageItem = React.memo(
           ) : (
             <MarkdownContent content={message.content} />
           )}
+          {!streaming && message.content && <MessageActions content={message.content} />}
           {!streaming && <CitationBlock citations={message.citations} />}
           {!streaming && message.promptPreview && <PromptPreview preview={message.promptPreview} />}
         </div>

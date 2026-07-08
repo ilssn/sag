@@ -48,7 +48,26 @@ async def test_source_mcp_lists_and_calls_tools_over_engine():
                     await client.initialize()
                     listed = await client.list_tools()
                     names = {t.name for t in listed.tools}
-                    assert {"search", "get_entity", "get_chunk"} <= names
+                    assert {
+                        "search", "get_entity", "get_chunk",
+                        "list_documents", "outline", "grep", "read",
+                    } <= names
+
+                    # 探索原语（离线）：先上传一个 md
+                    up = await c.post(
+                        f"/api/v1/sources/{src['id']}/documents",
+                        headers=A,
+                        files={"file": ("probe.md", b"# Title\n\nhello mcp world", "text/markdown")},
+                    )
+                    doc = up.json()
+                    r_ls = await client.call_tool("list_documents", {})
+                    assert "probe.md" in r_ls.content[0].text
+                    r_read = await client.call_tool("read", {"document_id": doc["id"]})
+                    assert "hello mcp world" in r_read.content[0].text
+                    r_out = await client.call_tool("outline", {"document_id": doc["id"]})
+                    assert isinstance(r_out.content[0].text, str)  # 处理中→占位文案亦可
+                    r_grep = await client.call_tool("grep", {"pattern": "不存在的串xyz"})
+                    assert "未匹配" in r_grep.content[0].text or "chunk_id" in r_grep.content[0].text
 
                     r_chunk = await client.call_tool("get_chunk", {"chunk_id": "does-not-exist"})
                     assert not r_chunk.isError
