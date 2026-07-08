@@ -9,7 +9,6 @@ import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import type { Doc, Source } from "@/lib/types";
 import { useApp } from "@/components/features/app-shell";
-import { useSearch } from "@/components/features/search-overlay";
 import { DocumentList } from "@/components/features/document-list";
 import { EmptyState } from "@/components/features/empty-state";
 import { RetrievalTestDialog } from "@/components/features/retrieval-test-dialog";
@@ -27,7 +26,6 @@ export default function SourceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { capabilities } = useApp();
-  const { openSearch } = useSearch();
   const [source, setSource] = React.useState<Source | null>(null);
   const [documents, setDocuments] = React.useState<Doc[] | null>(null);
 
@@ -37,7 +35,7 @@ export default function SourceDetailPage() {
       setSource(s);
       setDocuments(d);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 404) router.replace("/sources");
+      if (err instanceof ApiError && err.status === 404) router.replace("/knowledge");
     }
   }, [id, router]);
 
@@ -66,7 +64,7 @@ export default function SourceDetailPage() {
     try {
       await api.deleteSource(id);
       toast.success("信源已删除");
-      router.push("/sources");
+      router.push("/knowledge");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "删除失败");
     }
@@ -77,7 +75,7 @@ export default function SourceDetailPage() {
       <div className="flex flex-wrap items-start justify-between gap-4 border-b px-6 py-6 md:px-8">
         <div className="min-w-0">
           <Link
-            href="/sources"
+            href="/knowledge"
             className="mb-2 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-muted-foreground"
           >
             <ArrowLeft className="size-3.5" />
@@ -107,13 +105,11 @@ export default function SourceDetailPage() {
             <FlaskConical className="size-4" />
             检索测试
           </Button>
-          <Button
-           
-            onClick={() => source && openSearch({ id: source.id, name: source.name })}
-            disabled={!source}
-          >
-            <Search className="size-4" />
-            搜索此信源
+          <Button asChild>
+            <Link href={source ? `/search?source=${source.id}` : "/search"}>
+              <Search className="size-4" />
+              搜索此信源
+            </Link>
           </Button>
           <Button
             variant="ghost"

@@ -1,0 +1,88 @@
+"use client";
+
+import * as React from "react";
+import { useParams, useRouter } from "next/navigation";
+
+import { api } from "@/lib/api";
+import { streamAgentAsk } from "@/lib/sse";
+import { useApp } from "@/components/features/app-shell";
+import {
+  ConversationView,
+  type ConvMessage,
+} from "@/components/features/chat/conversation-view";
+
+/** 对话 —— 产品主入口：默认 agent + 会话（/chat 新会话，/chat/[id] 续聊）。 */
+export default function ChatPage() {
+  const { id } = useParams<{ id?: string[] }>();
+  const router = useRouter();
+  const { agent, refreshThreads } = useApp();
+  const threadId = id?.[0] ?? null;
+
+  const listMessages = React.useCallback(
+    (tid: string): Promise<ConvMessage[]> =>
+      agent ? api.listMessages(agent.id, tid) : Promise.resolve([]),
+    [agent],
+  );
+
+  const stream = React.useCallback(
+    (
+      tid: string,
+      query: string,
+      handlers: Parameters<typeof streamAgentAsk>[3],
+      signal: AbortSignal,
+    ) => {
+      if (!agent) return Promise.resolve();
+      return streamAgentAsk(agent.id, tid, { query }, handlers, signal);
+    },
+    [agent],
+  );
+
+  const ensureThread = React.useCallback(async () => {
+    if (!agent) throw new Error("agent 未就绪");
+    if (threadId) return threadId;
+    const t = await api.createThread(agent.id);
+    // 无刷新接管路由（保持组件状态），并让侧栏出现新会话
+    window.history.replaceState(null, "", `/chat/${t.id}`);
+    refreshThreads();
+    return t.id;
+  }, [agent, threadId, refreshThreads]);
+
+  const glyph = agent?.avatar || "s";
+  const avatarNode = React.useMemo(
+    () => (
+      <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-full bg-muted text-[11px] font-semibold text-foreground">
+        {glyph}
+      </span>
+    ),
+    [glyph],
+  );
+  const heroNode = React.useMemo(
+    () => (
+      <span className="grid size-12 place-items-center rounded-full bg-primary font-display text-xl font-semibold text-primary-foreground">
+        {glyph}
+      </span>
+    ),
+    [glyph],
+  );
+
+  if (!agent) return null;
+
+  return (
+    <div className="h-full min-h-0">
+      <ConversationView
+        key={threadId ?? "new"}
+        conversationKey={agent.id}
+        threadId={threadId}
+        listMessages={listMessages}
+        stream={stream}
+        ensureThread={ensureThread}
+        onActivity={refreshThreads}
+        avatarNode={avatarNode}
+        heroNode={heroNode}
+        emptyTitle={agent.name}
+        emptyHint={agent.persona?.greeting || "我在。上传资料到知识库，或直接问我任何问题。"}
+        placeholder={`问点什么…  Enter 发送 · Shift+Enter 换行`}
+      />
+    </div>
+  );
+}

@@ -5,7 +5,7 @@ import { BookOpenText, Quote } from "lucide-react";
 
 import type { Citation } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { ChunkDialog, type ChunkRef } from "@/components/features/chat/chunk-dialog";
+import { useDetailPanel } from "@/components/features/detail-panel";
 
 export const CitationBlock = React.memo(function CitationBlock({
   citations,
@@ -13,7 +13,7 @@ export const CitationBlock = React.memo(function CitationBlock({
   citations: Citation[];
 }) {
   const [open, setOpen] = React.useState(false);
-  const [chunk, setChunk] = React.useState<ChunkRef | null>(null);
+  const panel = useDetailPanel();
   if (!citations?.length) return null;
 
   return (
@@ -37,11 +37,12 @@ export const CitationBlock = React.memo(function CitationBlock({
                   ? {
                       type: "button",
                       onClick: () =>
-                        setChunk({
+                        panel.open({
+                          kind: "chunk",
                           sourceId: c.source_id!,
                           chunkId: c.chunk_id!,
-                          heading: c.heading,
-                          sourceName: c.source_name,
+                          heading: c.heading ?? undefined,
+                          sourceName: c.source_name ?? undefined,
                         }),
                       title: "查看原文",
                     }
@@ -73,7 +74,6 @@ export const CitationBlock = React.memo(function CitationBlock({
           })}
         </div>
       )}
-      <ChunkDialog chunk={chunk} onOpenChange={(o) => !o && setChunk(null)} />
     </div>
   );
 });

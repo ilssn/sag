@@ -3,6 +3,16 @@ const nextConfig = {
   reactStrictMode: true,
   output: "standalone",
   eslint: { ignoreDuringBuilds: true },
+  async redirects() {
+    // v0.3 客户端形态：旧路由 → 新 IA
+    return [
+      { source: "/overview", destination: "/chat", permanent: false },
+      { source: "/assistants", destination: "/chat", permanent: false },
+      { source: "/assistants/:id", destination: "/chat", permanent: false },
+      { source: "/sources", destination: "/knowledge", permanent: false },
+      { source: "/sources/:id", destination: "/knowledge/:id", permanent: false },
+    ];
+  },
 };
 
 export default nextConfig;

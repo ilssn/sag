@@ -1,5 +1,6 @@
 import { clearToken, getToken } from "./auth";
 import type {
+  ActivityItem,
   Agent,
   Binding,
   BindingTargetType,
@@ -124,6 +125,7 @@ export const api = {
 
   // Agent
   listAgents: () => request<Agent[]>("/api/v1/agents"),
+  getDefaultAgent: () => request<Agent>("/api/v1/agents/default"),
   getAgent: (id: string) => request<Agent>(`/api/v1/agents/${id}`),
   createAgent: (b: { name: string; avatar?: string; persona?: Persona }) =>
     request<Agent>("/api/v1/agents", { method: "POST", body: JSON.stringify(b) }),
@@ -156,6 +158,14 @@ export const api = {
     request<{ chunk_id: string; heading: string; content: string; source_id: string; source_name: string }>(
       `/api/v1/sources/${sourceId}/chunks/${chunkId}`,
     ),
+
+  // 近期动态（搜索页时间线）
+  getActivity: () => request<ActivityItem[]>("/api/v1/activity"),
+
+  // 单文档元数据 + 原始文件（预览用 blob 拉取，需带 Bearer）
+  getDocument: (sid: string, did: string) => request<Doc>(`/api/v1/sources/${sid}/documents/${did}`),
+  documentFileUrl: (sid: string, did: string) =>
+    `${API_BASE}/api/v1/sources/${sid}/documents/${did}/file`,
 
   // 信源即 MCP：外部宿主（Claude Desktop / Cursor）挂载信息
   sourceMcp: (sourceId: string) =>
