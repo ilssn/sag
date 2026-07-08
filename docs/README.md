@@ -3,6 +3,10 @@
 > **sag** —— 一个干净、清晰、好用的 **SAG 开源示范项目**（单用户）。
 > 以 `zleap-sag` 为引擎：创建信源 → 上传文档 → 搜索/溯源 → Agent 绑定信源、带引用对话。**信源即 MCP。**
 
+## 工程规范（最佳实践正典）
+
+- [**standards/**](standards/README.md) —— 价值理念与门禁 · [架构规范](standards/architecture.md) · [前端规范](standards/frontend.md) · [产品设计规范](standards/product.md)。**代码与规范不一致视为 bug。**
+
 ## 当前文档（as-built）
 
 - [**架构（as-built）**](architecture.md) —— 当前已实现的系统：分层、数据模型、Agent 工具循环、信源 MCP。**先读这篇。**

@@ -59,7 +59,11 @@ export default function ChatPage() {
   );
   const heroNode = React.useMemo(
     () => (
-      <span className="grid size-12 place-items-center rounded-full bg-primary font-display text-xl font-semibold text-primary-foreground">
+      <span className="relative grid size-12 place-items-center rounded-full bg-gradient-to-br from-primary to-primary/85 font-display text-xl font-semibold text-primary-foreground shadow-lift">
+        <span
+          aria-hidden
+          className="absolute -inset-3 -z-10 rounded-full bg-primary/10 blur-xl"
+        />
         {glyph}
       </span>
     ),

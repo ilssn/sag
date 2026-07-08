@@ -51,7 +51,7 @@ function FullLoader() {
   return (
     <div className="grid h-screen place-items-center bg-background">
       <div className="flex flex-col items-center gap-3">
-        <span className="grid size-9 animate-pulse place-items-center rounded-[9px] bg-primary text-base font-bold text-primary-foreground">
+        <span className="grid size-9 animate-pulse place-items-center rounded-[9px] bg-gradient-to-br from-primary to-primary/85 text-base font-bold text-primary-foreground">
           s
         </span>
         <span className="text-sm text-muted-foreground">载入中…</span>
@@ -169,7 +169,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <DetailPanelProvider>
         <div
           className={cn(
-            windowed && "grid min-h-svh place-items-center bg-muted/40 p-4 md:p-8",
+            windowed &&
+              "relative grid min-h-svh place-items-center bg-muted/40 bg-dot-grid p-4 md:p-8",
           )}
         >
           <div

@@ -127,6 +127,22 @@
   background-clip: content-box;
 }
 
+@layer utilities {
+  /* 点阵网格底纹 —— 亮暗随 --foreground 自适应，用于登录页与窗口形态背景 */
+  .bg-dot-grid {
+    background-image: radial-gradient(hsl(var(--foreground) / 0.08) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+  /* 顶部环境光晕 —— 极淡的 primary 渐晕，给大面留白增加纵深 */
+  .bg-halo {
+    background-image: radial-gradient(
+      ellipse 70% 45% at 50% -5%,
+      hsl(var(--primary) / 0.07),
+      transparent 70%
+    );
+  }
+}
+
 @layer components {
   /* 搜索图谱（React Flow）主题化：边/控件走语义 token，亮暗两态一致 */
   .sag-graph .react-flow__edge-path {
