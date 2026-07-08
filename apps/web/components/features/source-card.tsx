@@ -7,7 +7,7 @@ import { relativeTime } from "@/lib/format";
 export function SourceCard({ source }: { source: Source }) {
   return (
     <Link
-      href={`/sources/${source.id}`}
+      href={`/knowledge/${source.id}`}
       className="group flex flex-col rounded-lg border bg-card p-5 shadow-soft transition-all duration-150 ease-smooth hover:border-foreground/15 hover:shadow-lift"
     >
       <div className="flex items-start justify-between gap-3">

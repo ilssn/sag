@@ -64,6 +64,26 @@ async def update_agent(
     return agent
 
 
+_DEFAULT_GREETING = "我在。上传资料到知识库，或直接问我任何问题。"
+
+
+async def get_default_agent(session: AsyncSession) -> Agent:
+    """默认 agent（开箱即用的主对话入口）：get-or-create，幂等。"""
+    agent = await session.scalar(select(Agent).where(Agent.is_default.is_(True)))
+    if agent is not None:
+        return agent
+    agent = Agent(
+        name="sag",
+        avatar="s",
+        is_default=True,
+        persona={"greeting": _DEFAULT_GREETING, "system_prompt": ""},
+    )
+    session.add(agent)
+    await session.commit()
+    await session.refresh(agent)
+    return agent
+
+
 async def delete_agent(session: AsyncSession, agent_id: str) -> None:
     agent = await get_agent(session, agent_id)
     await session.delete(agent)
@@ -119,7 +139,10 @@ async def remove_binding(session: AsyncSession, agent: Agent, binding_id: str) -
 
 
 async def resolve_sources(session: AsyncSession, agent: Agent) -> list[Source]:
-    """展开信源绑定 → 去重后的信源列表。"""
+    """展开信源绑定 → 去重后的信源列表。默认 agent 的知识库 = 全部信源。"""
+    if agent.is_default:
+        rows = await session.execute(select(Source).order_by(Source.created_at))
+        return list(rows.scalars().all())
     bindings = await list_bindings(session, agent)
     src_ids = [b.target_id for b in bindings if b.target_type == BindingTargetType.SOURCE]
     if not src_ids:

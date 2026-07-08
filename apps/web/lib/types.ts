@@ -74,11 +74,22 @@ export interface Persona {
   tools?: string[];
 }
 
+export interface ActivityItem {
+  type: "document" | "thread";
+  id: string;
+  source_id?: string;
+  title: string;
+  subtitle: string | null;
+  status: DocumentStatus | null;
+  at: string;
+}
+
 export interface Agent {
   id: string;
   name: string;
   avatar: string;
   persona: Persona;
+  is_default?: boolean;
   created_at: string;
   updated_at: string;
 }

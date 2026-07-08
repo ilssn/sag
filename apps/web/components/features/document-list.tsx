@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import type { Doc } from "@/lib/types";
 import { formatBytes, relativeTime } from "@/lib/format";
+import { useDetailPanel } from "@/components/features/detail-panel";
 import { DocStatusBadge } from "@/components/features/status-badge";
 import { Button } from "@/components/ui/button";
 
@@ -20,6 +21,7 @@ export function DocumentList({
   onChange: () => void;
 }) {
   const [pending, setPending] = React.useState<string | null>(null);
+  const { open } = useDetailPanel();
 
   async function reprocess(d: Doc) {
     setPending(d.id);
@@ -61,7 +63,12 @@ export function DocumentList({
             <FileText className="size-4" />
           </div>
 
-          <div className="min-w-0 flex-1">
+          <button
+            type="button"
+            onClick={() => open({ kind: "document", sourceId, documentId: d.id })}
+            className="min-w-0 flex-1 text-left outline-none focus-visible:underline"
+            title="查看详情与原文预览"
+          >
             <div className="truncate text-sm font-medium text-foreground">{d.filename}</div>
             <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
               <span>{formatBytes(d.size_bytes)}</span>
@@ -84,7 +91,7 @@ export function DocumentList({
                 </>
               )}
             </div>
-          </div>
+          </button>
 
           <DocStatusBadge status={d.status} />
 

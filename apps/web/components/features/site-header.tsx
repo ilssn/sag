@@ -2,10 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Search, TriangleAlert } from "lucide-react";
+import { AppWindowMac, Maximize2, Search, TriangleAlert } from "lucide-react";
 
 import { useApp } from "@/components/features/app-shell";
-import { useSearch } from "@/components/features/search-overlay";
 import { ThemeToggle } from "@/components/features/theme-toggle";
 import {
   Breadcrumb,
@@ -15,13 +14,15 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const SECTION: Record<string, string> = {
-  "/overview": "总览",
-  "/assistants": "助手",
-  "/sources": "信源",
+  "/chat": "对话",
+  "/search": "搜索",
+  "/knowledge": "知识",
   "/settings": "设置",
 };
 
@@ -32,9 +33,9 @@ function sectionLabel(pathname: string): string {
 
 export function SiteHeader() {
   const pathname = usePathname();
-  const { capabilities } = useApp();
-  const { openSearch } = useSearch();
+  const { capabilities, windowMode, toggleWindowMode } = useApp();
   const label = sectionLabel(pathname);
+  const windowed = windowMode === "window";
 
   return (
     <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -44,7 +45,7 @@ export function SiteHeader() {
         <BreadcrumbList>
           <BreadcrumbItem className="hidden sm:block">
             <BreadcrumbLink asChild>
-              <Link href="/overview">sag</Link>
+              <Link href="/chat">sag</Link>
             </BreadcrumbLink>
           </BreadcrumbItem>
           <BreadcrumbSeparator className="hidden sm:block" />
@@ -55,8 +56,8 @@ export function SiteHeader() {
       </Breadcrumb>
 
       <div className="ml-auto flex items-center gap-1.5">
-        <button
-          onClick={() => openSearch()}
+        <Link
+          href="/search"
           className="inline-flex h-8 items-center gap-2 rounded-md border bg-muted/40 px-2.5 text-sm text-muted-foreground transition-colors hover:bg-muted"
         >
           <Search className="size-3.5" />
@@ -64,7 +65,7 @@ export function SiteHeader() {
           <kbd className="pointer-events-none hidden h-5 select-none items-center gap-0.5 rounded border bg-background px-1 font-mono text-[10px] font-medium text-muted-foreground md:inline-flex">
             ⌘K
           </kbd>
-        </button>
+        </Link>
 
         {capabilities && !capabilities.llm_configured && (
           <Link
@@ -75,6 +76,21 @@ export function SiteHeader() {
             未配置模型
           </Link>
         )}
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="hidden size-8 md:inline-flex"
+              onClick={toggleWindowMode}
+              aria-label={windowed ? "切换为满屏" : "切换为窗口"}
+            >
+              {windowed ? <Maximize2 /> : <AppWindowMac />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{windowed ? "满屏显示" : "窗口显示"}</TooltipContent>
+        </Tooltip>
         <ThemeToggle />
       </div>
     </header>

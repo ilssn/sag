@@ -106,6 +106,32 @@ async def get_(
     return DocumentOut.model_validate(await get_document(session, source, document_id))
 
 
+@router.get("/{document_id}/file")
+async def get_file(
+    source_id: str,
+    document_id: str,
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """原始文件（预览/下载）。文件已被清理时返回 404。"""
+    import os
+
+    from fastapi.responses import FileResponse
+
+    from sag_api.core.errors import NotFoundError
+
+    source = await get_source(session, source_id)
+    document = await get_document(session, source, document_id)
+    if not document.storage_path or not os.path.isfile(document.storage_path):
+        raise NotFoundError("原始文件不存在或已被清理")
+    return FileResponse(
+        document.storage_path,
+        media_type=document.content_type or "application/octet-stream",
+        filename=document.filename,
+        content_disposition_type="inline",
+    )
+
+
 @router.post("/{document_id}/reprocess", response_model=JobOut)
 async def reprocess(
     source_id: str,

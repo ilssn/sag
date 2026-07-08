@@ -49,6 +49,12 @@ async def lifespan(app: FastAPI):
 
     await apply_startup_overrides(SessionLocal)
 
+    # 播种默认 agent（开箱即用的主对话入口；幂等）
+    from sag_api.services.agent_domain import get_default_agent
+
+    async with SessionLocal() as _session:
+        await get_default_agent(_session)
+
     app.state.engine_manager = EngineManager(settings)
     app.state.llm = LLMClient(settings)
     app.state.job_queue = InProcessAsyncQueue(
