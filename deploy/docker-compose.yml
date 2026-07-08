@@ -1,17 +1,17 @@
-name: zleap
+name: sag
 
 services:
   db:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-zleap}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-zleap}
-      POSTGRES_DB: ${POSTGRES_DB:-zleap}
+      POSTGRES_USER: ${POSTGRES_USER:-sag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sag}
+      POSTGRES_DB: ${POSTGRES_DB:-sag}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./init-db:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-zleap} -d ${POSTGRES_DB:-zleap}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sag} -d ${POSTGRES_DB:-sag}"]
       interval: 5s
       timeout: 5s
       retries: 12
@@ -25,31 +25,31 @@ services:
       db:
         condition: service_healthy
     environment:
-      ZLEAP_ENVIRONMENT: prod
-      ZLEAP_DEBUG: "false"
-      ZLEAP_SECRET_KEY: ${ZLEAP_SECRET_KEY:-please-change-this-in-production-0123456789}
-      ZLEAP_CORS_ORIGINS: ${ZLEAP_CORS_ORIGINS:-http://localhost:3000}
-      ZLEAP_ALLOW_REGISTRATION: ${ZLEAP_ALLOW_REGISTRATION:-true}
-      # zleap 元数据 → Postgres
-      ZLEAP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-zleap}:${POSTGRES_PASSWORD:-zleap}@db:5432/${POSTGRES_DB:-zleap}
-      ZLEAP_DATA_DIR: /data/zleap
-      ZLEAP_UPLOAD_DIR: /data/uploads
+      SAG_ENVIRONMENT: prod
+      SAG_DEBUG: "false"
+      SAG_SECRET_KEY: ${SAG_SECRET_KEY:-please-change-this-in-production-0123456789}
+      SAG_CORS_ORIGINS: ${SAG_CORS_ORIGINS:-http://localhost:3000}
+      SAG_ALLOW_REGISTRATION: ${SAG_ALLOW_REGISTRATION:-true}
+      # sag 元数据 → Postgres
+      SAG_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-sag}:${POSTGRES_PASSWORD:-sag}@db:5432/${POSTGRES_DB:-sag}
+      SAG_DATA_DIR: /data/sag
+      SAG_UPLOAD_DIR: /data/uploads
       # zleap-sag → pgvector 单库统一
-      ZLEAP_SAG_VECTOR_PROVIDER: pgvector
-      ZLEAP_SAG_RELATIONAL_PROVIDER: postgres
-      ZLEAP_SAG_PG_HOST: db
-      ZLEAP_SAG_PG_PORT: "5432"
-      ZLEAP_SAG_PG_USER: ${POSTGRES_USER:-zleap}
-      ZLEAP_SAG_PG_PASSWORD: ${POSTGRES_PASSWORD:-zleap}
-      ZLEAP_SAG_PG_DATABASE: ${POSTGRES_DB:-zleap}
-      ZLEAP_SAG_LANGUAGE: ${ZLEAP_SAG_LANGUAGE:-zh}
+      SAG_SAG_VECTOR_PROVIDER: pgvector
+      SAG_SAG_RELATIONAL_PROVIDER: postgres
+      SAG_SAG_PG_HOST: db
+      SAG_SAG_PG_PORT: "5432"
+      SAG_SAG_PG_USER: ${POSTGRES_USER:-sag}
+      SAG_SAG_PG_PASSWORD: ${POSTGRES_PASSWORD:-sag}
+      SAG_SAG_PG_DATABASE: ${POSTGRES_DB:-sag}
+      SAG_SAG_LANGUAGE: ${SAG_SAG_LANGUAGE:-zh}
       # LLM / Embedding（OpenAI 兼容）
-      ZLEAP_LLM_BASE_URL: ${ZLEAP_LLM_BASE_URL:-}
-      ZLEAP_LLM_API_KEY: ${ZLEAP_LLM_API_KEY:-}
-      ZLEAP_LLM_MODEL: ${ZLEAP_LLM_MODEL:-qwen3.6-flash}
-      ZLEAP_EMBEDDING_MODEL: ${ZLEAP_EMBEDDING_MODEL:-bge-large-en-v1.5}
-      ZLEAP_EMBEDDING_BASE_URL: ${ZLEAP_EMBEDDING_BASE_URL:-}
-      ZLEAP_EMBEDDING_API_KEY: ${ZLEAP_EMBEDDING_API_KEY:-}
+      SAG_LLM_BASE_URL: ${SAG_LLM_BASE_URL:-}
+      SAG_LLM_API_KEY: ${SAG_LLM_API_KEY:-}
+      SAG_LLM_MODEL: ${SAG_LLM_MODEL:-qwen3.6-flash}
+      SAG_EMBEDDING_MODEL: ${SAG_EMBEDDING_MODEL:-bge-large-en-v1.5}
+      SAG_EMBEDDING_BASE_URL: ${SAG_EMBEDDING_BASE_URL:-}
+      SAG_EMBEDDING_API_KEY: ${SAG_EMBEDDING_API_KEY:-}
     volumes:
       - musedata:/data
     ports:

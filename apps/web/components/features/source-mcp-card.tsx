@@ -56,7 +56,7 @@ export function SourceMcpCard({ sourceId }: { sourceId: string }) {
   const stdioSnippet = JSON.stringify(
     {
       mcpServers: {
-        [desc.stdio.env.ZLEAP_MCP_SOURCE_ID ? desc.source_name || "zleap" : "zleap"]: {
+        [desc.stdio.env.SAG_MCP_SOURCE_ID ? desc.source_name || "sag" : "sag"]: {
           command: desc.stdio.command,
           args: desc.stdio.args,
           env: desc.stdio.env,

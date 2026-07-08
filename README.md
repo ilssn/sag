@@ -1,9 +1,9 @@
-# zleap
+# sag
 
 > **一个干净、清晰、好用的 SAG 开源示范项目。**
 > 创建信源 → 上传文档 → 搜索看结果、查原文 → 建 Agent 绑定信源、带引用对话。信源即 MCP。
 
-`zleap` 以 [`zleap-sag`](https://pypi.org/project/zleap-sag/)（本地优先的知识引擎：解析 · 分块 · 向量 · 事件—实体图谱 · 检索）为数据基座，用最短的链路把 SAG 的能力示范清楚。**个人向、单用户、零基础设施**——没有多租户、没有团队权限、没有一堆待接线的组件，只留下一条主干：
+`sag` 以 [`zleap-sag`](https://pypi.org/project/zleap-sag/)（本地优先的知识引擎：解析 · 分块 · 向量 · 事件—实体图谱 · 检索）为数据基座，用最短的链路把 SAG 的能力示范清楚。**个人向、单用户、零基础设施**——没有多租户、没有团队权限、没有一堆待接线的组件，只留下一条主干：
 
 **信息进来（信源 + 文档）→ 检索得到有据的结果（搜索 + 原文溯源）→ Agent 依据信源带引用作答，并可经 MCP 扩展工具。**
 
@@ -13,7 +13,7 @@
 
 ## 核心概念（三个）
 
-- **信源（Source）** — 装内容的容器。上传文档，zleap 自动解析、分块、向量化、抽取事件与实体。每个信源同时是一个可对外挂载的 **MCP 端点**。
+- **信源（Source）** — 装内容的容器。上传文档，sag 自动解析、分块、向量化、抽取事件与实体。每个信源同时是一个可对外挂载的 **MCP 端点**。
 - **Agent** — 绑定若干信源、带设定（system prompt / 开场白），依据信源带引用作答；可挂载外部 MCP server 扩展工具。
 - **搜索（Search）** — ⌘K 全局唤出，可锁定信源范围，命中即可跳到原文。
 
@@ -25,7 +25,7 @@ cd apps/api
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env          # 填入 OpenAI 兼容的 LLM / embedding 配置
-uvicorn zleap_api.main:app --reload      # http://localhost:8000
+uvicorn sag_api.main:app --reload      # http://localhost:8000
 
 # 前端
 cd apps/web
@@ -33,9 +33,9 @@ npm install
 npm run dev                   # http://localhost:3000
 ```
 
-- **首个注册用户即你的账号。** 引导完成后可在 `.env` 设 `ZLEAP_ALLOW_REGISTRATION=false`，此后不再开放注册。
+- **首个注册用户即你的账号。** 引导完成后可在 `.env` 设 `SAG_ALLOW_REGISTRATION=false`，此后不再开放注册。
 - 未配置 LLM 也能启动、建信源、上传文档；仅**事件抽取**与**问答**需要模型。
-- 默认零基础设施：元数据 SQLite（`./.data/zleap.db`）+ SAG 存储 LanceDB（`./.data/engine`）。**升级后若旧库结构不兼容，删除 `apps/api/.data/` 后重启即重建。**
+- 默认零基础设施：元数据 SQLite（`./.data/sag.db`）+ SAG 存储 LanceDB（`./.data/engine`）。**升级后若旧库结构不兼容，删除 `apps/api/.data/` 后重启即重建。**
 
 ### 三步走完主干
 
@@ -51,7 +51,7 @@ npm run dev                   # http://localhost:3000
 
 ```bash
 curl -s http://localhost:8000/api/v1/sources/<SOURCE_ID>/mcp \
-  -H "Authorization: Bearer <ZLEAP_JWT>"
+  -H "Authorization: Bearer <SAG_JWT>"
 ```
 
 返回 HTTP（Streamable-HTTP）URL 与 stdio 配置片段两种接法。前端「信源详情 → 作为 MCP 挂载」也能直接复制。
@@ -61,10 +61,10 @@ curl -s http://localhost:8000/api/v1/sources/<SOURCE_ID>/mcp \
 ```jsonc
 {
   "mcpServers": {
-    "zleap-<信源名>": {
+    "sag-<信源名>": {
       "command": "python",
-      "args": ["-m", "zleap_api.mcp.server"],
-      "env": { "ZLEAP_MCP_SOURCE_ID": "<SOURCE_ID>" }
+      "args": ["-m", "sag_api.mcp.server"],
+      "env": { "SAG_MCP_SOURCE_ID": "<SOURCE_ID>" }
     }
   }
 }
@@ -84,12 +84,12 @@ Agent 除了绑定信源作答，还能挂载**外部 MCP server**（本地 file
 
 ```bash
 curl -s http://localhost:8000/api/v1/openai/<AGENT_ID>/chat/completions \
-  -H "Authorization: Bearer <ZLEAP_JWT>" \
+  -H "Authorization: Bearer <SAG_JWT>" \
   -H "Content-Type: application/json" \
   -d '{"messages":[{"role":"user","content":"这份资料讲了什么？"}]}'
 ```
 
-返回标准 `chat.completion`，额外带 `zleap.citations` 引用字段（标准客户端忽略未知字段）。`"stream": true` 时以 SSE 分块返回。
+返回标准 `chat.completion`，额外带 `sag.citations` 引用字段（标准客户端忽略未知字段）。`"stream": true` 时以 SSE 分块返回。
 
 ## 架构一览
 

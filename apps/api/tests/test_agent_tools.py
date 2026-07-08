@@ -8,9 +8,9 @@
 import httpx
 import pytest
 
-from zleap_api.generation.llm import ChatTurn, ToolCall
-from zleap_api.tools import registry
-from zleap_api.tools.base import Tool, ToolMeta, ToolResult
+from sag_api.generation.llm import ChatTurn, ToolCall
+from sag_api.tools import registry
+from sag_api.tools.base import Tool, ToolMeta, ToolResult
 
 ECHO_CITATION = {
     "n": 1,
@@ -69,7 +69,7 @@ async def _register(c, email):
 
 @pytest.mark.asyncio
 async def test_agent_tool_loop_dispatch_and_citations():
-    from zleap_api.main import app
+    from sag_api.main import app
 
     transport = httpx.ASGITransport(app=app)
     async with app.router.lifespan_context(app):
@@ -94,8 +94,8 @@ async def test_agent_tool_loop_dispatch_and_citations():
             body = r.json()
             # 工具循环跑完 → 最终答案
             assert body["choices"][0]["message"]["content"] == "最终答案"
-            # 工具被派发（echo 执行）→ 其引用汇总进 zleap.citations
-            assert any(c.get("source_name") == "回声源" for c in body["zleap"]["citations"])
+            # 工具被派发（echo 执行）→ 其引用汇总进 sag.citations
+            assert any(c.get("source_name") == "回声源" for c in body["sag"]["citations"])
             # chat 被调用两轮（工具决策 + 收尾），stream 产出最终答案
             assert app.state.llm.calls == 2
 
@@ -103,7 +103,7 @@ async def test_agent_tool_loop_dispatch_and_citations():
 @pytest.mark.asyncio
 async def test_no_tools_soul_skips_loop():
     """未开启工具的助手：不进循环（chat 从不调用），行为等价旧版单发。"""
-    from zleap_api.main import app
+    from sag_api.main import app
 
     transport = httpx.ASGITransport(app=app)
     async with app.router.lifespan_context(app):

@@ -2,10 +2,10 @@
 
 import pytest
 
-from zleap_api.connectors import registry
-from zleap_api.connectors.web import WebConnector, _filename_for, _parse_urls
-from zleap_api.core.errors import ValidationError
-from zleap_api.enums import ConnectorKind
+from sag_api.connectors import registry
+from sag_api.connectors.web import WebConnector, _filename_for, _parse_urls
+from sag_api.core.errors import ValidationError
+from sag_api.enums import ConnectorKind
 
 
 def test_registry_has_web_and_file():

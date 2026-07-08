@@ -14,7 +14,7 @@ async def _register(c, email="hard@t.com"):
 
 @pytest.mark.asyncio
 async def test_health_ready_and_upload_whitelist():
-    from zleap_api.main import app
+    from sag_api.main import app
 
     transport = httpx.ASGITransport(app=app)
     async with app.router.lifespan_context(app):
@@ -52,12 +52,12 @@ async def test_job_retry_backoff(monkeypatch):
     """可重试失败退避重排至成功；不可重试失败立即 FAILED。"""
     from sqlalchemy import delete
 
-    from zleap_api.core.db import SessionLocal, init_db
-    from zleap_api.core.errors import ServiceUnavailableError, ValidationError
-    from zleap_api.db.models import Job
-    from zleap_api.enums import JobStatus, JobType
-    from zleap_api.jobs import inproc
-    from zleap_api.jobs.tasks import TASK_HANDLERS
+    from sag_api.core.db import SessionLocal, init_db
+    from sag_api.core.errors import ServiceUnavailableError, ValidationError
+    from sag_api.db.models import Job
+    from sag_api.enums import JobStatus, JobType
+    from sag_api.jobs import inproc
+    from sag_api.jobs.tasks import TASK_HANDLERS
 
     monkeypatch.setattr(inproc, "_BACKOFF_BASE_SECONDS", 0.01)
     await init_db()
@@ -129,8 +129,8 @@ async def test_job_retry_backoff(monkeypatch):
 @pytest.mark.asyncio
 async def test_engine_lru_eviction():
     """超出缓存上限逐出最久未用；持锁的槽不被逐出。"""
-    from zleap_api.core.config import settings
-    from zleap_api.sag.engine_manager import EngineManager, _Slot
+    from sag_api.core.config import settings
+    from sag_api.sag.engine_manager import EngineManager, _Slot
 
     class FakeEngine:
         def __init__(self):

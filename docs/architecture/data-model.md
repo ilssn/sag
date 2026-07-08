@@ -1,6 +1,6 @@
 # 数据模型（演进）
 
-> 现有表见 [as-built](../architecture.md)。本篇给出**目标 schema**，标注「现有 / 新增 / 变更」，可直接据此建模与写迁移。全部 zleap 侧元数据；引擎侧（chunks/向量/事件图谱）由 SAG 自管，zleap 只存 `sag_source_config_id` 关联。
+> 现有表见 [as-built](../architecture.md)。本篇给出**目标 schema**，标注「现有 / 新增 / 变更」，可直接据此建模与写迁移。全部 sag 侧元数据；引擎侧（chunks/向量/事件图谱）由 SAG 自管，sag 只存 `sag_source_config_id` 关联。
 
 ## ER 概览
 

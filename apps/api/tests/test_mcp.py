@@ -1,7 +1,7 @@
 """MCP 三件事，全程离线：
 
 1. 信源即 MCP —— 经进程内内存客户端列出并调用 search/get_entity/get_chunk（空库 → 结构化结果）。
-2. 远端 MCP 工具适配成 zleap 的 `Tool`（命名空间前缀 + call_tool 往返）。
+2. 远端 MCP 工具适配成 sag 的 `Tool`（命名空间前缀 + call_tool 往返）。
 3. 绑定与描述端点 —— agent 挂载外部 MCP 的校验、信源的 MCP 连接描述。
 """
 
@@ -10,10 +10,10 @@ import pytest
 from mcp.server.fastmcp import FastMCP
 from mcp.shared.memory import create_connected_server_and_client_session as connect
 
-from zleap_api.mcp.server import build_source_mcp, use_scope
-from zleap_api.tools import registry
-from zleap_api.tools.base import Tool, ToolContext, ToolMeta, ToolResult
-from zleap_api.tools.mcp import tools_from_session
+from sag_api.mcp.server import build_source_mcp, use_scope
+from sag_api.tools import registry
+from sag_api.tools.base import Tool, ToolContext, ToolMeta, ToolResult
+from sag_api.tools.mcp import tools_from_session
 
 
 async def _register(c, email):
@@ -27,9 +27,9 @@ async def test_source_mcp_lists_and_calls_tools_over_engine():
     """信源 MCP server：真实（空）引擎 + 作用域注入，三个工具可列出可调用。"""
     from sqlalchemy import select
 
-    from zleap_api.core.db import SessionLocal
-    from zleap_api.db.models import Source
-    from zleap_api.main import app
+    from sag_api.core.db import SessionLocal
+    from sag_api.db.models import Source
+    from sag_api.main import app
 
     transport = httpx.ASGITransport(app=app)
     async with app.router.lifespan_context(app):
@@ -65,7 +65,7 @@ async def test_source_mcp_lists_and_calls_tools_over_engine():
 
 
 @pytest.mark.asyncio
-async def test_remote_mcp_tool_adapted_as_zleap_tool():
+async def test_remote_mcp_tool_adapted_as_sag_tool():
     """远端 MCP 工具 → MCPTool：命名空间前缀 + invoke 往返回文本。"""
     stub = FastMCP("stub")
 
@@ -106,7 +106,7 @@ def test_registry_overlay_does_not_pollute_global():
 @pytest.mark.asyncio
 async def test_mcp_binding_validation_and_source_descriptor():
     """agent 挂载外部 MCP 的校验 + 信源 MCP 连接描述端点。"""
-    from zleap_api.main import app
+    from sag_api.main import app
 
     transport = httpx.ASGITransport(app=app)
     async with app.router.lifespan_context(app):
@@ -118,7 +118,7 @@ async def test_mcp_binding_validation_and_source_descriptor():
             assert desc.status_code == 200, desc.text
             body = desc.json()
             assert src["id"] in body["http"]["url"]
-            assert body["stdio"]["env"]["ZLEAP_MCP_SOURCE_ID"] == src["id"]
+            assert body["stdio"]["env"]["SAG_MCP_SOURCE_ID"] == src["id"]
             assert set(body["tools"]) == {"search", "get_entity", "get_chunk"}
 
             agent = (await c.post("/api/v1/agents", headers=A, json={"name": "挂载助手"})).json()

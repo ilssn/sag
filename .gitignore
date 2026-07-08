@@ -8,10 +8,10 @@ venv/
 .mypy_cache/
 .ruff_cache/
 
-# zleap / zleap-sag local data
+# sag / zleap-sag local data
 .data/
-.zleap/
-.zleap_*/
+.sag/
+.sag_*/
 .muse/
 *.db
 *.sqlite3

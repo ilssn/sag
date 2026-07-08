@@ -127,10 +127,10 @@ export default function SettingsPage() {
           </Card>
           <p className="rounded-lg border bg-muted/40 p-4 text-xs leading-relaxed text-muted-foreground">
             当前版本模型配置通过后端环境变量设置：
-            <span className="font-mono"> ZLEAP_LLM_BASE_URL</span>、
-            <span className="font-mono"> ZLEAP_LLM_API_KEY</span>、
-            <span className="font-mono"> ZLEAP_LLM_MODEL</span>、
-            <span className="font-mono"> ZLEAP_EMBEDDING_MODEL</span>。 修改{" "}
+            <span className="font-mono"> SAG_LLM_BASE_URL</span>、
+            <span className="font-mono"> SAG_LLM_API_KEY</span>、
+            <span className="font-mono"> SAG_LLM_MODEL</span>、
+            <span className="font-mono"> SAG_EMBEDDING_MODEL</span>。 修改{" "}
             <span className="font-mono">apps/api/.env</span> 后重启后端即可生效。可视化配置将在后续版本提供。
           </p>
         </TabsContent>

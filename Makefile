@@ -17,7 +17,7 @@ dev: ## 提示：分别在两个终端运行 make api / make web
 	@echo "在另一个终端运行: make web"
 
 api: ## 启动后端（本地零依赖 SQLite+LanceDB，热重载）
-	cd apps/api && . .venv/bin/activate && uvicorn zleap_api.main:app --reload --port 8000
+	cd apps/api && . .venv/bin/activate && uvicorn sag_api.main:app --reload --port 8000
 
 web: ## 启动前端（Next dev）
 	cd apps/web && npm run dev

@@ -40,10 +40,10 @@ function Brand() {
         <SidebarMenuButton size="lg" asChild>
           <Link href="/overview">
             <div className="flex aspect-square size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-              <span className="text-sm font-semibold">z</span>
+              <span className="text-sm font-semibold">s</span>
             </div>
             <div className="grid flex-1 text-left text-sm leading-tight">
-              <span className="truncate font-semibold">zleap</span>
+              <span className="truncate font-semibold">sag</span>
               <span className="truncate text-xs text-muted-foreground">SAG 知识助手</span>
             </div>
           </Link>

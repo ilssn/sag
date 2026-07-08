@@ -8,9 +8,9 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_entity_read_path():
-    from zleap_api.core.db import SessionLocal
-    from zleap_api.db.models import Source
-    from zleap_api.main import app
+    from sag_api.core.db import SessionLocal
+    from sag_api.db.models import Source
+    from sag_api.main import app
 
     transport = httpx.ASGITransport(app=app)
     async with app.router.lifespan_context(app):
