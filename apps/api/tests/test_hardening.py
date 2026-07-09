@@ -159,3 +159,65 @@ async def test_engine_lru_eviction():
     assert "s1" not in mgr._slots and engines["s1"].closed is True
     assert "s0" in mgr._slots  # 持锁被跳过
     assert "s_new" in mgr._slots and "s2" in mgr._slots
+
+
+@pytest.mark.asyncio
+async def test_search_falls_back_to_vector():
+    """multi 失败或空结果时自动回退 vector；vector 自身失败不再回退。"""
+    from sag_api.core.config import settings
+    from sag_api.sag.engine_manager import EngineManager, _Slot
+
+    class FakeEngine:
+        def __init__(self, fail_multi: bool, empty_multi: bool = False):
+            self.fail_multi = fail_multi
+            self.empty_multi = empty_multi
+            self.calls: list[str] = []
+
+        async def search(self, query, strategy=None, top_k=None):
+            self.calls.append(strategy)
+            if strategy == "multi":
+                if self.fail_multi:
+                    raise RuntimeError("boom")
+                if self.empty_multi:
+                    return type("R", (), {"query": query, "sections": [], "stats": {}})()
+            return type(
+                "R",
+                (),
+                {
+                    "query": query,
+                    "sections": [
+                        {"chunk_id": "c1", "source_id": "s", "source_config_id": "scid",
+                         "heading": "h", "content": "x", "rank": 1, "score": 0.9, "weight": 1}
+                    ],
+                    "stats": {},
+                },
+            )()
+
+        async def aclose(self):
+            pass
+
+    async def run_case(engine):
+        em = EngineManager(settings)
+        em._slots["scid"] = _Slot(engine=engine)
+        return await em.search("scid", "q", strategy="multi")
+
+    # 失败回退
+    eng = FakeEngine(fail_multi=True)
+    out = await run_case(eng)
+    assert eng.calls == ["multi", "vector"] and len(out.sections) == 1
+    # 空结果回退
+    eng2 = FakeEngine(fail_multi=False, empty_multi=True)
+    out2 = await run_case(eng2)
+    assert eng2.calls == ["multi", "vector"] and len(out2.sections) == 1
+    # vector 直查失败不回退
+    class FailVector(FakeEngine):
+        async def search(self, query, strategy=None, top_k=None):
+            self.calls.append(strategy)
+            raise RuntimeError("vector down")
+
+    em = EngineManager(settings)
+    fv = FailVector(fail_multi=False)
+    em._slots["scid"] = _Slot(engine=fv)
+    with pytest.raises(RuntimeError, match="vector down"):
+        await em.search("scid", "q", strategy="vector")
+    assert fv.calls == ["vector"]

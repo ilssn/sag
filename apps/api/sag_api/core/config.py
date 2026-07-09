@@ -85,6 +85,9 @@ class Settings(BaseSettings):
     # ── 检索默认 ────────────────────────────────────────────────────────
     search_strategy: Literal["multi", "vector", "atomic"] = "multi"
     search_top_k: int = 8
+    # multi（图谱增强）含查询侧 LLM 往返：给每个信源设时限，超时/失败/空结果自动回退 vector
+    search_source_timeout: float = 12.0
+    search_fallback_vector: bool = True
 
     @field_validator("cors_origins", mode="before")
     @classmethod

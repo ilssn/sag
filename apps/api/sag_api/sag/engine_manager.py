@@ -119,6 +119,24 @@ class EngineManager:
                 extract = await engine.extract()
         return ProcessOutcome.from_results(ingest, extract)
 
+    async def _search_raw(
+        self,
+        source_config_id: str,
+        query: str,
+        *,
+        source: Source | None,
+        strategy: str,
+        top_k: int,
+    ) -> SearchOutcome:
+        """单次检索（带每源时限）。超时抛 asyncio.TimeoutError。"""
+        timeout = max(1.0, self._settings.search_source_timeout)
+        with map_sag_errors():
+            async with self.use(source_config_id, source) as engine:
+                result = await asyncio.wait_for(
+                    engine.search(query, strategy=strategy, top_k=top_k), timeout
+                )
+        return SearchOutcome.from_result(result)
+
     async def search(
         self,
         source_config_id: str,
@@ -128,12 +146,37 @@ class EngineManager:
         strategy: str | None = None,
         top_k: int | None = None,
     ) -> SearchOutcome:
+        """检索（韧性版）：multi 超时/失败/空结果时自动回退 vector，保证「有数据必有结果」。
+
+        multi 的查询侧含 LLM 实体抽取（慢且可能失败重试）；事件向量层缺失的源也会空转。
+        回退把这类退化收敛为一次快速向量检索，可经 `search_fallback_vector=false` 关闭。
+        """
         strategy = strategy or self._settings.search_strategy
         top_k = top_k or self._settings.search_top_k
-        with map_sag_errors():
-            async with self.use(source_config_id, source) as engine:
-                result = await engine.search(query, strategy=strategy, top_k=top_k)
-        return SearchOutcome.from_result(result)
+        try:
+            outcome = await self._search_raw(
+                source_config_id, query, source=source, strategy=strategy, top_k=top_k
+            )
+            if outcome.sections or strategy == "vector" or not self._settings.search_fallback_vector:
+                return outcome
+            log.info("multi 空结果，回退 vector source_config_id=%s", source_config_id)
+        except TimeoutError:
+            if strategy == "vector" or not self._settings.search_fallback_vector:
+                raise
+            log.warning(
+                "检索超时(%.0fs) 回退 vector source_config_id=%s strategy=%s",
+                self._settings.search_source_timeout, source_config_id, strategy,
+            )
+        except Exception as e:  # noqa: BLE001
+            if strategy == "vector" or not self._settings.search_fallback_vector:
+                raise
+            log.warning(
+                "检索失败回退 vector source_config_id=%s strategy=%s err=%s",
+                source_config_id, strategy, getattr(e, "message", None) or e,
+            )
+        return await self._search_raw(
+            source_config_id, query, source=source, strategy="vector", top_k=top_k
+        )
 
     async def search_many(
         self,
@@ -150,34 +193,32 @@ class EngineManager:
 
         async def _one(scid: str, source: Source | None):
             try:
-                with map_sag_errors():
-                    async with self.use(scid, source) as engine:
-                        return await engine.search(query, strategy=strategy, top_k=per_source_k)
+                outcome = await self.search(
+                    scid, query, source=source, strategy=strategy, top_k=per_source_k
+                )
+                return outcome
             except Exception as e:  # noqa: BLE001
                 log.warning("fan-out 检索失败 %s：%s", scid, getattr(e, "message", None) or e)
                 return None
 
         results = await asyncio.gather(*(_one(scid, src) for scid, src in targets))
 
-        best: dict[str, dict] = {}
-        loose: list[dict] = []
+        best: dict[str, RetrievedSection] = {}
+        loose: list[RetrievedSection] = []
         for res in results:
             if res is None:
                 continue
-            for s in getattr(res, "sections", None) or []:
-                cid = s.get("chunk_id")
-                score = float(s.get("score") or 0.0)
-                if cid:
-                    if cid not in best or score > float(best[cid].get("score") or 0.0):
-                        best[cid] = s
+            for sec in res.sections:
+                if sec.chunk_id:
+                    prev = best.get(sec.chunk_id)
+                    if prev is None or sec.score > prev.score:
+                        best[sec.chunk_id] = sec
                 else:
-                    loose.append(s)
-        merged = sorted(
-            [*best.values(), *loose], key=lambda x: float(x.get("score") or 0.0), reverse=True
-        )[:top_k]
+                    loose.append(sec)
+        merged = sorted([*best.values(), *loose], key=lambda x: x.score, reverse=True)[:top_k]
         return SearchOutcome(
             query=query,
-            sections=[RetrievedSection.from_section(s) for s in merged],
+            sections=merged,
             stats={"sources": len(targets), "candidates": len(best) + len(loose)},
         )
 
