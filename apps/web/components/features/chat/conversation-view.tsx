@@ -2,18 +2,27 @@
 
 import dynamic from "next/dynamic";
 import * as React from "react";
-import { ArrowUp, Check, Copy, ImagePlus, Square, X } from "lucide-react";
+import { ArrowUp, AtSign, Check, Copy, FileUp, ImagePlus, Paperclip, RotateCcw, Square, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import type { AskHandlers } from "@/lib/sse";
 import type { Citation } from "@/lib/types";
 import { api } from "@/lib/api";
+import type { Source } from "@/lib/types";
+import { relativeTime } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { chatLive } from "@/lib/chat-live";
 import { useApp } from "@/components/features/app-shell";
 import { CitationBlock } from "@/components/features/chat/citation-block";
 import { PromptPreview } from "@/components/features/chat/prompt-preview";
 import { AuthImage } from "@/components/features/auth-image";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const MarkdownContent = dynamic(
   () => import("@/components/features/markdown-content").then((m) => m.MarkdownContent),
@@ -26,6 +35,7 @@ export interface ConvMessage {
   content: string;
   citations: Citation[];
   attachments?: { id?: string; url?: string }[];
+  created_at?: string;
   author?: string | null;
   promptPreview?: string;
 }
@@ -36,11 +46,24 @@ type Streamer = (
   handlers: AskHandlers,
   signal: AbortSignal,
   attachments?: string[],
+  sourceIds?: string[],
 ) => Promise<void>;
 
-function MessageActions({ content }: { content: string }) {
-    const [done, setDone] = React.useState(false);
-    return (
+function MessageActions({
+  content,
+  createdAt,
+  onRetry,
+  onDelete,
+}: {
+  content: string;
+  createdAt?: string;
+  onRetry?: () => void;
+  onDelete?: () => void;
+}) {
+  const [done, setDone] = React.useState(false);
+  const btn =
+    "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground";
+  return (
       <div className="mt-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover/msg:opacity-100">
         <button
           type="button"
@@ -59,19 +82,47 @@ function MessageActions({ content }: { content: string }) {
           {done ? <Check className="size-3" /> : <Copy className="size-3" />}
           {done ? "已复制" : "复制"}
         </button>
+        {onRetry && (
+          <button type="button" onClick={onRetry} className={btn} aria-label="重新回答">
+            <RotateCcw className="size-3" />
+            重试
+          </button>
+        )}
+        {onDelete && (
+          <button
+            type="button"
+            onClick={onDelete}
+            className={btn + " hover:text-destructive"}
+            aria-label="删除消息"
+          >
+            <Trash2 className="size-3" />
+            删除
+          </button>
+        )}
+        {createdAt && (
+          <span className="px-1.5 text-[11px] tabular-nums text-muted-foreground/70">
+            {relativeTime(createdAt)}
+          </span>
+        )}
       </div>
     );
-  }
+}
 
 const MessageItem = React.memo(
   function MessageItem({
     message,
     streaming,
+    toolNote,
     avatar,
+    onRetry,
+    onDelete,
   }: {
     message: ConvMessage;
     streaming?: boolean;
+    toolNote?: string | null;
     avatar: React.ReactNode;
+    onRetry?: () => void;
+    onDelete?: () => void;
   }) {
     if (message.role === "user") {
       return (
@@ -102,9 +153,11 @@ const MessageItem = React.memo(
         {avatar}
         <div className="min-w-0 flex-1">
           {thinking ? (
-            <div className="flex items-center gap-1.5 py-1 text-sm text-muted-foreground">
+            <div className="flex items-center gap-1.5 py-1 text-sm">
               <span className="size-1.5 animate-blink rounded-full bg-primary" />
-              检索并生成中…
+              <span className="text-shimmer">
+                {toolNote ? `正在调用 ${toolNote}…` : "检索并生成中…"}
+              </span>
             </div>
           ) : streaming ? (
             <div className="answer-prose whitespace-pre-wrap text-foreground">
@@ -114,7 +167,14 @@ const MessageItem = React.memo(
           ) : (
             <MarkdownContent content={message.content} />
           )}
-          {!streaming && message.content && <MessageActions content={message.content} />}
+          {!streaming && message.content && (
+            <MessageActions
+              content={message.content}
+              createdAt={message.created_at}
+              onRetry={onRetry}
+              onDelete={onDelete}
+            />
+          )}
           {!streaming && <CitationBlock citations={message.citations} />}
           {!streaming && message.promptPreview && <PromptPreview preview={message.promptPreview} />}
         </div>
@@ -134,6 +194,7 @@ export function ConversationView({
   conversationKey,
   threadId,
   listMessages,
+  deleteMessage,
   stream,
   ensureThread,
   onActivity,
@@ -147,6 +208,7 @@ export function ConversationView({
   conversationKey: string;
   threadId: string | null;
   listMessages: (threadId: string) => Promise<ConvMessage[]>;
+  deleteMessage?: (threadId: string, messageId: string) => Promise<unknown>;
   stream: Streamer;
   ensureThread: () => Promise<string>;
   onActivity?: () => void;
@@ -162,8 +224,14 @@ export function ConversationView({
   const [messages, setMessages] = React.useState<ConvMessage[]>([]);
   const [input, setInput] = React.useState("");
   const [images, setImages] = React.useState<{ file: File; url: string }[]>([]);
+  const [scoped, setScoped] = React.useState<{ id: string; name: string }[]>([]);
+  const [sources, setSources] = React.useState<Source[]>([]);
+  const [mentionOpen, setMentionOpen] = React.useState(false);
+  const docRef = React.useRef<HTMLInputElement>(null);
+  const { capabilities: caps } = useApp();
   const fileRef = React.useRef<HTMLInputElement>(null);
   const [streaming, setStreaming] = React.useState(false);
+  const [toolNote, setToolNote] = React.useState<string | null>(null);
   const abortRef = React.useRef<AbortController | null>(null);
   const bottomRef = React.useRef<HTMLDivElement>(null);
   const streamingId = React.useRef<string | null>(null);
@@ -283,6 +351,34 @@ export function ConversationView({
     [flushTokens],
   );
 
+  React.useEffect(() => {
+    api.listSources().then(setSources).catch(() => {});
+  }, []);
+
+  // 上下文用量估算（历史+输入，≈4 字符/词元）
+  const ctxTokens = React.useMemo(() => {
+    const chars =
+      messages.reduce((a, m) => a + (m.content?.length ?? 0), 0) + input.length;
+    return Math.round(chars / 4);
+  }, [messages, input]);
+
+  async function addDocToKnowledge(files: FileList | null) {
+    const f = files?.[0];
+    if (!f) return;
+    try {
+      let src = sources.find((s) => s.name === "对话上传");
+      if (!src) {
+        src = await api.createSource({ name: "对话上传", description: "对话输入框上传的文档" });
+        setSources((p) => [...p, src!]);
+      }
+      await api.uploadDocument(src.id, f);
+      setScoped((p) => (p.some((x) => x.id === src!.id) ? p : [...p, { id: src!.id, name: src!.name }]));
+      toast.success(`已入知识库「对话上传」，处理完成后可针对提问`);
+    } catch {
+      toast.error("文档上传失败");
+    }
+  }
+
   const MAX_IMAGES = 4;
   function addImages(files: FileList | File[] | null) {
     if (!files) return;
@@ -381,7 +477,9 @@ export function ConversationView({
             chatLive.meta(citations);
             patch((x) => ({ ...x, citations, promptPreview }));
           },
+          onTool: (name) => setToolNote(name),
           onToken: (t) => {
+            setToolNote(null);
             chatLive.token(t);
             pendingTokens.current += t;
             scheduleTokenFlush(botId);
@@ -395,6 +493,7 @@ export function ConversationView({
         },
         ctrl.signal,
         attachmentIds.length ? attachmentIds : undefined,
+        scoped.length ? scoped.map((s) => s.id) : undefined,
       );
     } catch {
       /* aborted or network */
@@ -406,6 +505,7 @@ export function ConversationView({
       }
       chatLive.end();
       setStreaming(false);
+      setToolNote(null);
       abortRef.current = null;
       streamingId.current = null;
       streamingRef.current = false;
@@ -453,12 +553,38 @@ export function ConversationView({
               )}
             </div>
           ) : (
-            messages.map((m) => (
+            messages.map((m, idx) => (
               <MessageItem
                 key={m.id}
                 message={m}
                 avatar={avatarNode}
                 streaming={streaming && m.id === streamingId.current}
+                toolNote={m.id === streamingId.current ? toolNote : null}
+                onRetry={
+                  m.role === "assistant" && !streaming
+                    ? () => {
+                        const prev = [...messages.slice(0, idx)].reverse().find((x) => x.role === "user");
+                        if (prev?.content) send(prev.content);
+                      }
+                    : undefined
+                }
+                onDelete={
+                  m.role === "assistant" &&
+                  !streaming &&
+                  deleteMessage &&
+                  threadId &&
+                  !m.id.startsWith("local-")
+                    ? async () => {
+                        try {
+                          await deleteMessage(threadId, m.id);
+                          loadGeneration.current++;
+                          await loadMessages(threadId, { force: true });
+                        } catch {
+                          toast.error("删除失败");
+                        }
+                      }
+                    : undefined
+                }
               />
             ))
           )}
@@ -490,7 +616,57 @@ export function ConversationView({
               ))}
             </div>
           )}
-          <div className="flex items-end gap-2">
+          {scoped.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 px-1">
+              {scoped.map((sc) => (
+                <span
+                  key={sc.id}
+                  className="inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-0.5 text-[11px]"
+                >
+                  <AtSign className="size-3" />
+                  {sc.name}
+                  <button
+                    type="button"
+                    aria-label="移除范围"
+                    onClick={() => setScoped((p) => p.filter((x) => x.id !== sc.id))}
+                    className="hover:text-destructive"
+                  >
+                    <X className="size-2.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="relative flex items-end gap-2">
+          {mentionOpen && (
+            <div className="absolute bottom-full left-0 z-20 mb-2 max-h-56 w-64 overflow-y-auto rounded-lg border bg-card p-1 shadow-lift">
+              <p className="px-2 py-1 text-[11px] text-muted-foreground">@ 知识库范围（可多选）</p>
+              {sources.length === 0 && (
+                <p className="px-2 py-1.5 text-xs text-muted-foreground">还没有信源</p>
+              )}
+              {sources.map((src) => {
+                const on = scoped.some((x) => x.id === src.id);
+                return (
+                  <button
+                    key={src.id}
+                    type="button"
+                    onClick={() => {
+                      setScoped((p) =>
+                        on ? p.filter((x) => x.id !== src.id) : [...p, { id: src.id, name: src.name }],
+                      );
+                    }}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted",
+                      on && "bg-muted",
+                    )}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{src.name}</span>
+                    {on && <Check className="size-3.5 shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <input
             ref={fileRef}
             type="file"
@@ -502,21 +678,56 @@ export function ConversationView({
               e.target.value = "";
             }}
           />
+          <input
+            ref={docRef}
+            type="file"
+            accept=".pdf,.md,.markdown,.txt,.docx,.html,.epub"
+            className="hidden"
+            onChange={(e) => {
+              addDocToKnowledge(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" disabled={streaming} aria-label="添加附件" title="添加附件">
+                <Paperclip className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="start">
+              <DropdownMenuItem
+                disabled={images.length >= MAX_IMAGES}
+                onClick={() => fileRef.current?.click()}
+              >
+                <ImagePlus className="size-4" />
+                图片（可直接粘贴）
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => docRef.current?.click()}>
+                <FileUp className="size-4" />
+                文档 → 入知识库
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => fileRef.current?.click()}
-            disabled={streaming || images.length >= MAX_IMAGES}
-            title="添加图片（可直接粘贴）"
-            aria-label="添加图片"
+            onClick={() => setMentionOpen((v) => !v)}
+            disabled={streaming}
+            aria-label="限定知识库范围"
+            title="@ 知识库范围"
+            className={cn(scoped.length > 0 && "text-primary")}
           >
-            <ImagePlus className="size-4" />
+            <AtSign className="size-4" />
           </Button>
           <textarea
             autoFocus
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={onKeyDown}
+            onKeyDown={(e) => {
+              if (e.key === "@" ) setMentionOpen(true);
+              if (e.key === "Escape") setMentionOpen(false);
+              onKeyDown(e);
+            }}
             onPaste={(e) => {
               if (e.clipboardData?.files?.length) {
                 e.preventDefault();
@@ -527,6 +738,16 @@ export function ConversationView({
             placeholder={placeholder}
             className="max-h-40 min-h-[36px] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
           />
+          <span className="mb-1 hidden items-center gap-2 pr-1 text-[11px] tabular-nums text-muted-foreground sm:flex">
+            <span title="上下文用量估算">≈{ctxTokens >= 1000 ? (ctxTokens / 1000).toFixed(1) + "k" : ctxTokens} tok</span>
+            <a
+              href="/settings"
+              className="max-w-32 truncate rounded-full border bg-muted/50 px-2 py-0.5 font-mono transition-colors hover:bg-muted"
+              title="当前模型（点击去设置）"
+            >
+              {caps?.llm_model ?? "未配置"}
+            </a>
+          </span>
           {streaming ? (
             <Button variant="outline" size="icon" onClick={stop} title="停止">
               <Square className="size-4" />

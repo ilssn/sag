@@ -172,6 +172,10 @@ export const api = {
     }),
   createThread: (id: string, title = "新会话") =>
     request<Thread>(`/api/v1/agents/${id}/threads`, { method: "POST", body: JSON.stringify({ title }) }),
+  deleteMessage: (id: string, tid: string, mid: string) =>
+    request<{ ok: boolean }>(`/api/v1/agents/${id}/threads/${tid}/messages/${mid}`, {
+      method: "DELETE",
+    }),
   listMessages: (id: string, tid: string) =>
     request<Message[]>(`/api/v1/agents/${id}/threads/${tid}/messages`),
   deleteThread: (id: string, tid: string) =>

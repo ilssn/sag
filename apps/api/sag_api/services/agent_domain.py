@@ -251,10 +251,14 @@ async def build_ask_context(
     engine_manager: EngineManager,
     history: list[dict[str, str]] | None = None,
     attachments: list[dict] | None = None,
+    source_ids: list[str] | None = None,
 ) -> AskPlan:
     """跨绑定信源 fan-out 检索并组装带系统提示的消息（不落库，对话与 OpenAI 端点复用）。"""
     persona = agent.persona or {}
     sources = await resolve_sources(session, agent)
+    if source_ids:
+        wanted = set(source_ids)
+        sources = [s for s in sources if s.id in wanted]
     source_refs = {s.sag_source_config_id: {"id": s.id, "name": s.name} for s in sources}
     if sources:
         targets = [(s.sag_source_config_id, s) for s in sources]
@@ -293,6 +297,7 @@ async def prepare_ask(
     query: str,
     engine_manager: EngineManager,
     attachments: list[str] | None = None,
+    source_ids: list[str] | None = None,
 ) -> AskPlan:
     """落库用户消息（含图片附件 meta）、解析历史，再委托 build_ask_context 组装计划。"""
     from sag_api.api.v1.attachments import attachment_path
@@ -328,7 +333,17 @@ async def prepare_ask(
         engine_manager=engine_manager,
         history=history,
         attachments=resolved or None,
+        source_ids=source_ids,
     )
+
+
+async def delete_message(session: AsyncSession, agent_id: str, thread_id: str, message_id: str) -> None:
+    thread = await get_thread(session, agent_id, thread_id)
+    message = await session.get(Message, message_id)
+    if message is None or message.thread_id != thread.id:
+        raise NotFoundError("消息不存在")
+    await session.delete(message)
+    await session.commit()
 
 
 async def persist_answer(

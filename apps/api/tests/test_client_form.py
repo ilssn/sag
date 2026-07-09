@@ -110,6 +110,23 @@ async def test_default_agent_activity_and_document_file():
             mine = [m for m in msgs if m["role"] == "user" and m["content"] == "这张图是什么？"]
             assert mine and mine[0]["attachments"][0]["id"] == aid
 
+            # 范围问答参数被接受（离线仍 400=未配 LLM，而非 422）；消息删除端点
+            scoped = await c.post(
+                f"/api/v1/agents/{a1['id']}/threads/{t['id']}/ask",
+                headers=A,
+                json={"query": "只查这个源", "source_ids": [src["id"]]},
+            )
+            assert scoped.status_code == 400
+            gone_id = mine[0]["id"]
+            rd = await c.delete(
+                f"/api/v1/agents/{a1['id']}/threads/{t['id']}/messages/{gone_id}", headers=A
+            )
+            assert rd.status_code == 200
+            after = (
+                await c.get(f"/api/v1/agents/{a1['id']}/threads/{t['id']}/messages", headers=A)
+            ).json()
+            assert all(m["id"] != gone_id for m in after)
+
             # 原文端点：200 + 内容与上传一致；不存在的 id → 404
             f = await c.get(
                 f"/api/v1/sources/{src['id']}/documents/{doc['id']}/file", headers=A

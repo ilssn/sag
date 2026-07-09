@@ -31,9 +31,16 @@ export default function ChatPage() {
       handlers: Parameters<typeof streamAgentAsk>[3],
       signal: AbortSignal,
       attachments?: string[],
+      sourceIds?: string[],
     ) => {
       if (!agent) return Promise.resolve();
-      return streamAgentAsk(agent.id, tid, { query, attachments }, handlers, signal);
+      return streamAgentAsk(
+        agent.id,
+        tid,
+        { query, attachments, source_ids: sourceIds },
+        handlers,
+        signal,
+      );
     },
     [agent],
   );
@@ -80,6 +87,7 @@ export default function ChatPage() {
         conversationKey={agent.id}
         threadId={threadId}
         listMessages={listMessages}
+        deleteMessage={(tid, mid) => (agent ? api.deleteMessage(agent.id, tid, mid) : Promise.resolve())}
         stream={stream}
         ensureThread={ensureThread}
         onActivity={refreshThreads}
