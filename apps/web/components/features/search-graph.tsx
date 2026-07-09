@@ -180,7 +180,7 @@ function edgeOf(
     target,
     sourceHandle: `source-${side}`,
     targetHandle: `target-${oppositeSide(side)}`,
-    type: "smoothstep",
+    type: "straight",
     label: labels[kind],
     labelStyle: { fontSize: 10, fill: "hsl(var(--muted-foreground))", fontWeight: 500 },
     labelBgStyle: { fill: "hsl(var(--card))", fillOpacity: 0.92 },
