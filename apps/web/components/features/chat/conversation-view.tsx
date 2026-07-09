@@ -703,6 +703,7 @@ export function ConversationView({
       { id: botId, role: "assistant", content: "", citations: [] },
     ]);
 
+    let streamOk = false;
     setStreaming(true);
     const liveSession = chatLive.start(tid);
     const ctrl = new AbortController();
@@ -778,8 +779,15 @@ export function ConversationView({
         scoped.length ? scoped.map((s) => s.id) : undefined,
         chatMode,
       );
+      streamOk = true;
     } catch {
-      /* aborted or network */
+      // 传输层中断（网络/代理/服务崩溃）——可见化，绝不留白
+      flushTokens(botId);
+      patch((x) => ({
+        ...x,
+        content: x.content || "⚠︎ 连接中断，回答未完成。请检查网络或稍后重试。",
+      }));
+      toast.error("连接中断，回答未完成");
     } finally {
       flushTokens(botId);
       if (rafId.current !== null) {
@@ -793,7 +801,7 @@ export function ConversationView({
       streamingId.current = null;
       streamingRef.current = false;
       loadGeneration.current++;
-      await loadMessages(tid, { force: true });
+      if (streamOk) await loadMessages(tid, { force: true });
     }
   }
 

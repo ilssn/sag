@@ -86,7 +86,19 @@ async def _run_tool_loop(
     for _step in range(max_steps):
         yield ("status", {"phase": "thinking", "step": _step + 1})
         think_start = time.perf_counter()
-        turn = await llm.chat(messages, tools=schemas)
+        try:
+            turn = await llm.chat(messages, tools=schemas)
+        except Exception as e:  # noqa: BLE001
+            # 工具决策失败（网关不支持 tools / 上游抖动）→ 降级为直答，绝不击穿流
+            log.warning("工具决策调用失败，降级直答：%s", getattr(e, "message", None) or e)
+            trace.append(
+                {
+                    "kind": "thinking",
+                    "step": _step + 1,
+                    "ms": int((time.perf_counter() - think_start) * 1000),
+                }
+            )
+            break
         trace.append(
             {"kind": "thinking", "step": _step + 1, "ms": int((time.perf_counter() - think_start) * 1000)}
         )
