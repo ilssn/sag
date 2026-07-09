@@ -144,6 +144,23 @@
 }
 
 @layer components {
+  /* 桌面宠物：眨眼 + 嘴 */
+  .sag-pet { position: relative; }
+  .sag-pet-eye {
+    width: 5px; height: 8px; border-radius: 99px;
+    background: hsl(var(--primary-foreground));
+    animation: sag-blink 4.2s infinite;
+  }
+  .sag-pet-mouth {
+    position: absolute; bottom: 13px; left: 50%; transform: translateX(-50%);
+    width: 10px; height: 4px; border-radius: 0 0 99px 99px;
+    background: hsl(var(--primary-foreground) / 0.85);
+  }
+  @keyframes sag-blink {
+    0%, 92%, 100% { transform: scaleY(1); }
+    95% { transform: scaleY(0.12); }
+  }
+
   /* 搜索图谱（React Flow）主题化：边/控件走语义 token，亮暗两态一致 */
   .sag-graph .react-flow__edge-path {
     stroke: hsl(var(--border));

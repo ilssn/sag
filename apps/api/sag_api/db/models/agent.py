@@ -43,6 +43,7 @@ class Thread(IDMixin, TimestampMixin, Base):
 
     agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"), index=True)
     title: Mapped[str] = mapped_column(String(300), default="新会话")
+    archived: Mapped[bool] = mapped_column(default=False, index=True)
 
 
 class Message(IDMixin, TimestampMixin, Base):

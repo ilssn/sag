@@ -27,6 +27,7 @@ from sag_api.schemas.agent import (
     MessageOut,
     ThreadCreate,
     ThreadOut,
+    ThreadUpdate,
 )
 from sag_api.schemas.common import Ok
 from sag_api.services import agent_domain as svc
@@ -140,11 +141,15 @@ async def remove_binding(
 @router.get("/{agent_id}/threads", response_model=list[ThreadOut])
 async def list_threads(
     agent_id: str,
+    archived: bool = False,
     _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     agent = await svc.get_agent(session, agent_id)
-    return [ThreadOut.model_validate(t) for t in await svc.list_threads(session, agent.id)]
+    return [
+        ThreadOut.model_validate(t)
+        for t in await svc.list_threads(session, agent.id, archived=archived)
+    ]
 
 
 @router.post("/{agent_id}/threads", response_model=ThreadOut, status_code=201)
@@ -157,6 +162,21 @@ async def create_thread(
     agent = await svc.get_agent(session, agent_id)
     thread = await svc.create_thread(session, agent, body.title)
     return ThreadOut.model_validate(thread)
+
+
+@router.patch("/{agent_id}/threads/{thread_id}", response_model=ThreadOut)
+async def update_thread(
+    agent_id: str,
+    thread_id: str,
+    body: ThreadUpdate,
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    agent = await svc.get_agent(session, agent_id)
+    t = await svc.update_thread(
+        session, agent.id, thread_id, title=body.title, archived=body.archived
+    )
+    return ThreadOut.model_validate(t)
 
 
 @router.get("/{agent_id}/threads/{thread_id}/messages", response_model=list[MessageOut])

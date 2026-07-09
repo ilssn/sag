@@ -142,6 +142,7 @@ export interface SourceMcpDescriptor {
 export interface Thread {
   id: string;
   agent_id: string;
+  archived?: boolean;
   title: string;
   created_at: string;
   updated_at: string;

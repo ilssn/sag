@@ -4,10 +4,13 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  Archive,
+  ChevronDown,
   ChevronsUpDown,
   Library,
   LogOut,
   MessageSquarePlus,
+  MoreHorizontal,
   Search,
   Settings,
   Trash2,
@@ -15,6 +18,7 @@ import {
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
+import { useChatLive } from "@/lib/chat-live";
 import { relativeTime } from "@/lib/format";
 import { useApp } from "@/components/features/app-shell";
 import {
@@ -114,6 +118,8 @@ export function AppSidebar() {
   const routePath = usePathname();
   const router = useRouter();
   const { agent, threads, refreshThreads } = useApp();
+  const live = useChatLive();
+  const [expanded, setExpanded] = React.useState(false);
 
   // replaceState（新会话接管 URL 不打断流式）不会触发 usePathname —— 监听自定义事件补齐
   const [pathname, setPathname] = React.useState(routePath);
@@ -140,6 +146,21 @@ export function AppSidebar() {
       toast.error(e instanceof ApiError ? e.message : "删除失败");
     }
   }
+
+  async function archiveThread(tid: string) {
+    if (!agent) return;
+    try {
+      await api.updateThread(agent.id, tid, { archived: true });
+      await refreshThreads();
+      if (activeThreadId === tid) router.push("/chat");
+      toast.success("已归档（设置 → 会话 可恢复）");
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "归档失败");
+    }
+  }
+
+  const RECENT = 8;
+  const visibleThreads = expanded ? threads : threads.slice(0, RECENT);
 
   return (
     <Sidebar collapsible="icon">
@@ -186,26 +207,60 @@ export function AppSidebar() {
                 还没有会话，从「新对话」开始。
               </p>
             )}
-            {threads.map((t) => (
-              <SidebarMenuItem key={t.id}>
-                <SidebarMenuButton asChild isActive={t.id === activeThreadId}>
-                  <Link href={`/chat/${t.id}`} title={t.title}>
-                    <span className="min-w-0 flex-1 truncate">{t.title}</span>
-                    <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-                      {relativeTime(t.updated_at)}
-                    </span>
-                  </Link>
-                </SidebarMenuButton>
-                <SidebarMenuAction
-                  showOnHover
-                  onClick={() => deleteThread(t.id)}
-                  aria-label="删除会话"
-                  className="hover:text-destructive"
+            {visibleThreads.map((t) => {
+              const isLive = live.streaming && live.threadId === t.id;
+              return (
+                <SidebarMenuItem key={t.id}>
+                  <SidebarMenuButton asChild isActive={t.id === activeThreadId}>
+                    <Link href={`/chat/${t.id}`} title={t.title}>
+                      {isLive && (
+                        <span
+                          aria-label="生成中"
+                          className="size-1.5 shrink-0 animate-blink rounded-full bg-primary"
+                        />
+                      )}
+                      <span className="min-w-0 flex-1 truncate">{t.title}</span>
+                      <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                        {isLive ? "生成中" : relativeTime(t.updated_at)}
+                      </span>
+                    </Link>
+                  </SidebarMenuButton>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <SidebarMenuAction showOnHover aria-label="会话操作">
+                        <MoreHorizontal />
+                      </SidebarMenuAction>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent side="right" align="start" className="min-w-36">
+                      <DropdownMenuItem onClick={() => archiveThread(t.id)}>
+                        <Archive className="size-4" />
+                        归档
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => deleteThread(t.id)}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        <Trash2 className="size-4" />
+                        删除
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </SidebarMenuItem>
+              );
+            })}
+            {threads.length > RECENT && (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  onClick={() => setExpanded((v) => !v)}
+                  className="text-muted-foreground"
                 >
-                  <Trash2 />
-                </SidebarMenuAction>
+                  <ChevronDown
+                    className={expanded ? "rotate-180 transition-transform" : "transition-transform"}
+                  />
+                  <span>{expanded ? "收起" : `展开全部（${threads.length}）`}</span>
+                </SidebarMenuButton>
               </SidebarMenuItem>
-            ))}
+            )}
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>

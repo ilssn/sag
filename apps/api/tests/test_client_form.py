@@ -59,6 +59,26 @@ async def test_default_agent_activity_and_document_file():
             assert ("document", doc["id"]) in kinds and ("thread", t["id"]) in kinds
             assert acts == sorted(acts, key=lambda x: x["at"], reverse=True)
 
+            # 归档：PATCH → 默认列表消失、archived=true 列表出现、恢复回来
+            arch = await c.patch(
+                f"/api/v1/agents/{a1['id']}/threads/{t['id']}",
+                headers=A,
+                json={"archived": True},
+            )
+            assert arch.status_code == 200 and arch.json()["archived"] is True
+            live = (await c.get(f"/api/v1/agents/{a1['id']}/threads", headers=A)).json()
+            assert all(x["id"] != t["id"] for x in live)
+            gone = (
+                await c.get(f"/api/v1/agents/{a1['id']}/threads?archived=true", headers=A)
+            ).json()
+            assert any(x["id"] == t["id"] for x in gone)
+            back = await c.patch(
+                f"/api/v1/agents/{a1['id']}/threads/{t['id']}",
+                headers=A,
+                json={"archived": False, "title": "改名后的会话"},
+            )
+            assert back.json()["archived"] is False and back.json()["title"] == "改名后的会话"
+
             # 原文端点：200 + 内容与上传一致；不存在的 id → 404
             f = await c.get(
                 f"/api/v1/sources/{src['id']}/documents/{doc['id']}/file", headers=A
