@@ -87,7 +87,7 @@ async function streamPost(
 export function streamAgentAsk(
   agentId: string,
   threadId: string,
-  body: { query: string; attachments?: string[]; source_ids?: string[] },
+  body: { query: string; attachments?: string[]; source_ids?: string[]; mode?: "agentic" | "fast" },
   handlers: AskHandlers,
   signal?: AbortSignal,
 ): Promise<void> {

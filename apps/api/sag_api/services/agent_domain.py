@@ -16,7 +16,6 @@ from sag_api.generation.prompt import estimate_tokens
 from sag_api.sag import EngineManager
 
 _DEFAULT_TITLES = {"新会话", "New chat"}
-_HISTORY_LIMIT = 6
 
 
 # ── CRUD ────────────────────────────────────────────────────────────

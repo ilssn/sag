@@ -139,8 +139,11 @@ async def generate_stream(
     engine_manager: EngineManager,
     llm: LLMClient,
     tool_registry: ToolRegistry,
+    agentic: bool = True,
 ) -> AsyncIterator[AgentEvent]:
-    """驱动一次问答，产出事件流：meta → (tool)* → token* → done / error。
+    """驱动一次问答，产出事件流：meta → (status/tool/tool_result)* → token* → done / error。
+
+    `agentic=False`（快速模式）跳过工具循环：仅用首轮检索种子直答，低延迟。
 
     `thread_id` 为 None 时（如 OpenAI 无状态端点）跳过落库。
     """
@@ -158,9 +161,11 @@ async def generate_stream(
     citations = list(plan.citations)
     preview = plan.prompt_preview
 
-    tool_names = _enabled_tool_names(agent)
-    async with session_factory() as s:
-        mcp_specs = await resolve_mcp_specs(s, agent)
+    tool_names = _enabled_tool_names(agent) if agentic else []
+    mcp_specs: list = []
+    if agentic:
+        async with session_factory() as s:
+            mcp_specs = await resolve_mcp_specs(s, agent)
     if (tool_names or mcp_specs) and llm.configured:
         # 外部 MCP 连接在整个工具循环期间保持打开，循环结束即断开
         async with open_agent_mcp_tools(mcp_specs) as mcp_tools:
