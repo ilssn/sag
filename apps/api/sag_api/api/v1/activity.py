@@ -1,4 +1,4 @@
-"""近期动态 —— 搜索页时间线：最近文档 + 最近会话，合并按时间倒序。"""
+"""近期动态 —— 知识库时间线：最近文档（会话不属于知识库动态）。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sag_api.core.db import get_session
 from sag_api.core.deps import get_current_user
-from sag_api.db.models import Document, Source, Thread, User
+from sag_api.db.models import Document, Source, User
 
 router = APIRouter(prefix="/activity", tags=["activity"])
 
@@ -27,19 +27,6 @@ async def list_activity(
             .limit(limit)
         )
     ).all()
-    threads = (
-        (
-            await session.execute(
-                select(Thread)
-                .where(Thread.archived.is_(False))
-                .order_by(Thread.updated_at.desc())
-                .limit(limit)
-            )
-        )
-        .scalars()
-        .all()
-    )
-
     items: list[dict] = [
         {
             "type": "document",
@@ -51,16 +38,6 @@ async def list_activity(
             "at": d.created_at.isoformat(),
         }
         for d, source_name in docs
-    ] + [
-        {
-            "type": "thread",
-            "id": t.id,
-            "title": t.title,
-            "subtitle": None,
-            "status": None,
-            "at": t.updated_at.isoformat(),
-        }
-        for t in threads
     ]
     items.sort(key=lambda x: x["at"], reverse=True)
     return items[:limit]

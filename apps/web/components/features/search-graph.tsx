@@ -16,11 +16,21 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Library, Maximize2, Minimize2, Search, Sparkles, Waypoints } from "lucide-react";
+import { Library, ListTree, Maximize2, Minimize2, Orbit, Search, Share2, Sparkles } from "lucide-react";
+import {
+  forceCenter,
+  forceCollide,
+  forceLink,
+  forceManyBody,
+  forceSimulation,
+  type SimulationLinkDatum,
+  type SimulationNodeDatum,
+} from "d3-force";
 
 import { api } from "@/lib/api";
 import type { Entity, Section } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useDetailPanel } from "@/components/features/detail-panel";
 
 /**
@@ -191,23 +201,11 @@ function edgeOf(
   };
 }
 
-function buildNetwork(
-  query: string,
-  results: Section[],
-  entitiesBySource: Map<string, Entity[]>,
-): { nodes: Node[]; edges: Edge[] } {
-  const queryPosition = { x: 0, y: 0 };
-  const nodes: Node[] = [
-    {
-      id: "q",
-      type: "sag",
-      position: queryPosition,
-      data: { label: query, kind: "query" },
-    },
-  ];
-  const edges: Edge[] = [];
-  let edgeIdx = 0;
+type LayoutKind = "radial" | "tree" | "force";
 
+type Grouped = { sid: string; name: string; chunks: Section[]; ents: Entity[] };
+
+function groupResults(results: Section[], entitiesBySource: Map<string, Entity[]>): Grouped[] {
   const bySource = new Map<string, { name: string; sections: Section[] }>();
   for (const s of results) {
     const key = s.source_id ?? "unknown";
@@ -215,112 +213,180 @@ function buildNetwork(
     g.sections.push(s);
     bySource.set(key, g);
   }
+  return [...bySource.entries()].map(([sid, g]) => ({
+    sid,
+    name: g.name,
+    chunks: [...g.sections].sort((a, b) => b.score - a.score).slice(0, 8),
+    ents: entitiesBySource.get(sid) ?? [],
+  }));
+}
 
-  const sources = [...bySource.entries()];
-  const tau = Math.PI * 2;
-  const totalChunks = sources.reduce((a, [, g]) => a + Math.min(g.sections.length, 8), 0) || 1;
-  const singleSource = sources.length === 1;
+function chunkNode(sec: Section, id: string, position: Point): Node {
+  return {
+    id,
+    type: "sag",
+    position,
+    data: {
+      label: sec.heading || sec.content.slice(0, 48) || "片段",
+      kind: "chunk",
+      score: sec.score,
+      section: sec,
+    },
+  };
+}
 
-  // 多源：扇区宽度 = 最小保障 + 按命中数比例分配剩余
-  const reserved = LAYOUT.minSector * sources.length;
-  const free = Math.max(0, tau - reserved);
-  let cursor = -Math.PI / 2;
-
-  sources.forEach(([sid, g]) => {
-    const chunks = [...g.sections].sort((a, b) => b.score - a.score).slice(0, 8);
-    const ents = entitiesBySource.get(sid) ?? [];
-    const sourceId = `s:${sid}`;
-
-    if (singleSource) {
-      // 单源：查询(中心) → 信源(正下) → 片段沿下半环发散 → 实体再向外
-      const sourcePosition = { x: 0, y: LAYOUT.single.sourceY };
-      nodes.push({ id: sourceId, type: "sag", position: sourcePosition, data: { label: g.name, kind: "source" } });
-      edges.push(edgeOf("q", sourceId, "qs", edgeIdx++, queryPosition, sourcePosition));
-
-      chunks.forEach((sec, ci) => {
-        const t = chunks.length === 1 ? 0.5 : ci / (chunks.length - 1);
-        const angle = Math.PI * (LAYOUT.single.arcFrom + t * (LAYOUT.single.arcTo - LAYOUT.single.arcFrom));
-        const chunkPosition = {
-          x: sourcePosition.x + Math.cos(angle) * LAYOUT.single.chunkR,
-          y: sourcePosition.y + Math.sin(angle) * LAYOUT.single.chunkR,
-        };
-        const cid = `c:${sec.chunk_id ?? `${sid}-${ci}`}`;
-        nodes.push({
-          id: cid,
-          type: "sag",
-          position: chunkPosition,
-          data: { label: sec.heading || sec.content.slice(0, 48) || "片段", kind: "chunk", score: sec.score, section: sec },
-        });
-        edges.push(edgeOf(sourceId, cid, "sc", edgeIdx++, sourcePosition, chunkPosition));
-
-        let linked = 0;
-        for (const e of ents) {
-          if (linked >= 3) break;
-          const name = (e.name || "").trim();
-          if (name.length < 2 || !sec.content.includes(name)) continue;
-          const eid = `e:${sid}:${name}`;
-          const existing = nodes.find((n) => n.id === eid);
-          if (!existing) {
-            const entityPosition = {
-              x: chunkPosition.x + (linked - 1) * 96,
-              y: chunkPosition.y + LAYOUT.single.entityGap,
-            };
-            nodes.push({ id: eid, type: "sag", position: entityPosition, data: { label: name, kind: "entity" } });
-            edges.push(edgeOf(cid, eid, "ce", edgeIdx++, chunkPosition, entityPosition));
-          } else {
-            edges.push(edgeOf(cid, eid, "ce", edgeIdx++, chunkPosition, existing.position));
-          }
-          linked++;
-        }
-      });
-      return;
+/** 片段→实体连边（各布局共用；positionOf 决定新实体落点）。 */
+function linkEntities(
+  group: Grouped,
+  sec: Section,
+  cid: string,
+  chunkPos: Point,
+  nodes: Node[],
+  edges: Edge[],
+  nextIdx: () => number,
+  positionOf: (linked: number) => Point,
+) {
+  let linked = 0;
+  for (const e of group.ents) {
+    if (linked >= 3) break;
+    const name = (e.name || "").trim();
+    if (name.length < 2 || !sec.content.includes(name)) continue;
+    const eid = `e:${group.sid}:${name}`;
+    const existing = nodes.find((n) => n.id === eid);
+    if (existing) {
+      edges.push(edgeOf(cid, eid, "ce", nextIdx(), chunkPos, existing.position));
+    } else {
+      const pos = positionOf(linked);
+      nodes.push({ id: eid, type: "sag", position: pos, data: { label: name, kind: "entity" } });
+      edges.push(edgeOf(cid, eid, "ce", nextIdx(), chunkPos, pos));
     }
+    linked++;
+  }
+}
 
-    const sector = LAYOUT.minSector + (free * Math.min(chunks.length, 8)) / totalChunks;
-    const sectorStart = cursor;
-    cursor += sector;
-    const sectorMid = sectorStart + sector / 2;
+/** 辐射：信源等分角环形发散；单源=中心簇 + 片段全周环。 */
+function buildRadial(query: string, groups: Grouped[]): { nodes: Node[]; edges: Edge[] } {
+  const q = { x: 0, y: 0 };
+  const nodes: Node[] = [{ id: "q", type: "sag", position: q, data: { label: query, kind: "query" } }];
+  const edges: Edge[] = [];
+  let idx = 0;
+  const nextIdx = () => idx++;
+  const tau = Math.PI * 2;
+  const single = groups.length === 1;
 
-    const sourcePosition = { x: Math.cos(sectorMid) * LAYOUT.sourceR, y: Math.sin(sectorMid) * LAYOUT.sourceR };
-    nodes.push({ id: sourceId, type: "sag", position: sourcePosition, data: { label: g.name, kind: "source" } });
-    edges.push(edgeOf("q", sourceId, "qs", edgeIdx++, queryPosition, sourcePosition));
+  groups.forEach((g, gi) => {
+    const sector = single ? tau : tau / groups.length;
+    const mid = single ? Math.PI / 2 : -Math.PI / 2 + (gi + 0.5) * sector;
+    const sPos = single
+      ? { x: 0, y: LAYOUT.single.sourceY }
+      : { x: Math.cos(mid) * LAYOUT.sourceR, y: Math.sin(mid) * LAYOUT.sourceR };
+    const sid = `s:${g.sid}`;
+    nodes.push({ id: sid, type: "sag", position: sPos, data: { label: g.name, kind: "source" } });
+    edges.push(edgeOf("q", sid, "qs", nextIdx(), q, sPos));
 
-    const innerPad = sector * 0.12;
-    const usable = sector * 0.76;
-    chunks.forEach((sec, ci) => {
-      const t = chunks.length === 1 ? 0.5 : ci / (chunks.length - 1);
-      const angle = sectorStart + innerPad + t * usable;
-      const cid = `c:${sec.chunk_id ?? `${sid}-${ci}`}`;
-      const chunkPosition = { x: Math.cos(angle) * LAYOUT.chunkR, y: Math.sin(angle) * LAYOUT.chunkR };
-      nodes.push({
-        id: cid,
-        type: "sag",
-        position: chunkPosition,
-        data: { label: sec.heading || sec.content.slice(0, 48) || "片段", kind: "chunk", score: sec.score, section: sec },
+    const n = g.chunks.length;
+    // 片段绕各自信源方向的局部扇（多源），或绕中心全周（单源）
+    const spread = single ? tau : Math.min(sector * 0.78, 0.18 * Math.max(n - 1, 1));
+    g.chunks.forEach((sec, ci) => {
+      const t = n === 1 ? 0.5 : ci / (n - 1);
+      const angle = single ? -Math.PI / 2 + (ci / n) * tau : mid + (t - 0.5) * spread;
+      const cPos = { x: Math.cos(angle) * LAYOUT.chunkR, y: Math.sin(angle) * LAYOUT.chunkR };
+      const cid = `c:${sec.chunk_id ?? `${g.sid}-${ci}`}`;
+      nodes.push(chunkNode(sec, cid, cPos));
+      edges.push(edgeOf(sid, cid, "sc", nextIdx(), sPos, cPos));
+      linkEntities(g, sec, cid, cPos, nodes, edges, nextIdx, (k) => {
+        const ea = angle + (k - 1) * 0.09;
+        return { x: Math.cos(ea) * LAYOUT.entityR, y: Math.sin(ea) * LAYOUT.entityR };
       });
-      edges.push(edgeOf(sourceId, cid, "sc", edgeIdx++, sourcePosition, chunkPosition));
-
-      let linked = 0;
-      for (const e of ents) {
-        if (linked >= 3) break;
-        const name = (e.name || "").trim();
-        if (name.length < 2 || !sec.content.includes(name)) continue;
-        const eid = `e:${sid}:${name}`;
-        const existing = nodes.find((n) => n.id === eid);
-        if (!existing) {
-          const eAngle = angle + (linked - 1) * 0.09;
-          const entityPosition = { x: Math.cos(eAngle) * LAYOUT.entityR, y: Math.sin(eAngle) * LAYOUT.entityR };
-          nodes.push({ id: eid, type: "sag", position: entityPosition, data: { label: name, kind: "entity" } });
-          edges.push(edgeOf(cid, eid, "ce", edgeIdx++, chunkPosition, entityPosition));
-        } else {
-          edges.push(edgeOf(cid, eid, "ce", edgeIdx++, chunkPosition, existing.position));
-        }
-        linked++;
-      }
     });
   });
+  return { nodes, edges };
+}
 
-    return { nodes, edges };
+/** 层级：自上而下四层树（查询/信源/片段/实体），信源横坐标取其片段簇心。 */
+function buildTree(query: string, groups: Grouped[]): { nodes: Node[]; edges: Edge[] } {
+  const nodes: Node[] = [{ id: "q", type: "sag", position: { x: 0, y: 0 }, data: { label: query, kind: "query" } }];
+  const edges: Edge[] = [];
+  let idx = 0;
+  const nextIdx = () => idx++;
+  const CHUNK_W = 224;
+  const GROUP_GAP = 56;
+  const totalW = groups.reduce((a, g) => a + g.chunks.length * CHUNK_W, 0) + GROUP_GAP * (groups.length - 1);
+  let cursor = -totalW / 2;
+
+  groups.forEach((g) => {
+    const startX = cursor;
+    const xs: number[] = [];
+    g.chunks.forEach((_, ci) => xs.push(startX + ci * CHUNK_W + CHUNK_W / 2));
+    cursor += g.chunks.length * CHUNK_W + GROUP_GAP;
+
+    const sPos = { x: xs.reduce((a, b) => a + b, 0) / xs.length, y: 190 };
+    const sid = `s:${g.sid}`;
+    nodes.push({ id: sid, type: "sag", position: sPos, data: { label: g.name, kind: "source" } });
+    edges.push(edgeOf("q", sid, "qs", nextIdx(), { x: 0, y: 0 }, sPos));
+
+    g.chunks.forEach((sec, ci) => {
+      const cPos = { x: xs[ci], y: 380 };
+      const cid = `c:${sec.chunk_id ?? `${g.sid}-${ci}`}`;
+      nodes.push(chunkNode(sec, cid, cPos));
+      edges.push(edgeOf(sid, cid, "sc", nextIdx(), sPos, cPos));
+      linkEntities(g, sec, cid, cPos, nodes, edges, nextIdx, (k) => ({
+        x: cPos.x + (k - 1) * 104,
+        y: 545 + (k % 2) * 44,
+      }));
+    });
+  });
+  return { nodes, edges };
+}
+
+/** 力导：以辐射为种子跑固定迭代（查询锚定中心），网状有机分布。 */
+function buildForce(query: string, groups: Grouped[]): { nodes: Node[]; edges: Edge[] } {
+  const seed = buildRadial(query, groups);
+  type SimNode = SimulationNodeDatum & { id: string };
+  const simNodes: SimNode[] = seed.nodes.map((n) => ({
+    id: n.id,
+    x: n.position.x,
+    y: n.position.y,
+    ...(n.id === "q" ? { fx: 0, fy: 0 } : {}),
+  }));
+  const simLinks: (SimulationLinkDatum<SimNode> & { kind: string })[] = seed.edges.map((e) => ({
+    source: e.source,
+    target: e.target,
+    kind: e.id.split("-")[1] ?? "sc",
+  }));
+  const sim = forceSimulation<SimNode>(simNodes)
+    .force(
+      "link",
+      forceLink<SimNode, SimulationLinkDatum<SimNode>>(simLinks)
+        .id((d) => d.id)
+        .distance((l) => {
+          const k = (l as { kind?: string }).kind;
+          return k === "qs" ? 190 : k === "sc" ? 150 : 110;
+        })
+        .strength(0.6),
+    )
+    .force("charge", forceManyBody().strength(-460))
+    .force("collide", forceCollide(96))
+    .force("center", forceCenter(0, 0))
+    .stop();
+  for (let i = 0; i < 220; i++) sim.tick();
+  const posOf = new Map(simNodes.map((n) => [n.id, { x: n.x ?? 0, y: n.y ?? 0 }]));
+  return {
+    nodes: seed.nodes.map((n) => ({ ...n, position: posOf.get(n.id) ?? n.position })),
+    edges: seed.edges,
+  };
+}
+
+function buildNetwork(
+  query: string,
+  results: Section[],
+  entitiesBySource: Map<string, Entity[]>,
+  layout: LayoutKind,
+): { nodes: Node[]; edges: Edge[] } {
+  const groups = groupResults(results, entitiesBySource);
+  if (layout === "tree") return buildTree(query, groups);
+  if (layout === "force") return buildForce(query, groups);
+  return buildRadial(query, groups);
 }
 
 function GraphLegend() {
@@ -377,6 +443,16 @@ export default function SearchGraph({ query, results }: { query: string; results
   const { open } = useDetailPanel();
   const [entities, setEntities] = React.useState<Map<string, Entity[]>>(new Map());
   const [expanded, setExpanded] = React.useState(false);
+  const [layout, setLayout] = React.useState<LayoutKind>("radial");
+
+  React.useEffect(() => {
+    const saved = window.localStorage.getItem("sag:graph-layout");
+    if (saved === "tree" || saved === "force") setLayout(saved);
+  }, []);
+  const changeLayout = (v: LayoutKind) => {
+    setLayout(v);
+    window.localStorage.setItem("sag:graph-layout", v);
+  };
 
   React.useEffect(() => {
     let alive = true;
@@ -406,8 +482,8 @@ export default function SearchGraph({ query, results }: { query: string; results
   }, [expanded]);
 
   const { nodes, edges } = React.useMemo(
-    () => buildNetwork(query, results, entities),
-    [query, results, entities],
+    () => buildNetwork(query, results, entities, layout),
+    [query, results, entities, layout],
   );
 
   return (
@@ -420,14 +496,35 @@ export default function SearchGraph({ query, results }: { query: string; results
       )}
     >
       <GraphLegend />
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        aria-label={expanded ? "退出图谱全屏" : "放大图谱"}
-        className="absolute right-3 top-3 z-20 grid size-8 place-items-center rounded-md border bg-card/95 text-muted-foreground shadow-soft outline-none backdrop-blur-sm transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-      </button>
+      <div className="absolute right-3 top-3 z-20 flex items-center gap-1.5">
+        <ToggleGroup
+          type="single"
+          variant="outline"
+          size="sm"
+          value={layout}
+          onValueChange={(v) => v && changeLayout(v as LayoutKind)}
+          aria-label="图谱布局"
+          className="rounded-md bg-card/95 shadow-soft backdrop-blur-sm"
+        >
+          <ToggleGroupItem value="radial" aria-label="辐射布局" title="辐射">
+            <Orbit />
+          </ToggleGroupItem>
+          <ToggleGroupItem value="tree" aria-label="层级布局" title="层级">
+            <ListTree />
+          </ToggleGroupItem>
+          <ToggleGroupItem value="force" aria-label="力导布局" title="力导网状">
+            <Share2 />
+          </ToggleGroupItem>
+        </ToggleGroup>
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-label={expanded ? "退出图谱全屏" : "放大图谱"}
+          className="grid size-8 place-items-center rounded-md border bg-card/95 text-muted-foreground shadow-soft outline-none backdrop-blur-sm transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+        </button>
+      </div>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -455,13 +552,13 @@ export default function SearchGraph({ query, results }: { query: string; results
         }}
         className="sag-graph"
       >
-        <FitViewOnChange nodes={nodes} edges={edges} refreshKey={expanded} />
+        <FitViewOnChange nodes={nodes} edges={edges} refreshKey={`${expanded}-${layout}`} />
         <Background variant={BackgroundVariant.Dots} gap={22} size={1} className="!bg-transparent" />
         <Controls showInteractive={false} className="!shadow-soft" />
       </ReactFlow>
       <div className="pointer-events-none absolute bottom-3 right-3 z-10 flex items-center gap-1 rounded-md border bg-card/90 px-2 py-1 text-[10px] text-muted-foreground shadow-soft backdrop-blur-sm">
-        <Waypoints className="size-3" />
-        辐射布局
+        {layout === "radial" ? <Orbit className="size-3" /> : layout === "tree" ? <ListTree className="size-3" /> : <Share2 className="size-3" />}
+        {layout === "radial" ? "辐射布局" : layout === "tree" ? "层级布局" : "力导网状"}
       </div>
     </div>
   );

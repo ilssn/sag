@@ -106,8 +106,7 @@ const ROW_CARD =
 
 function ActivityCard({ item }: { item: ActivityItem }) {
   const { open } = useDetailPanel();
-  const isThread = item.type === "thread";
-  const Icon = isThread ? MessageSquare : FileText;
+  const Icon = FileText;
   const cardClass = ROW_CARD;
   const body = (
     <>
@@ -119,10 +118,10 @@ function ActivityCard({ item }: { item: ActivityItem }) {
           <span className="min-w-0 max-w-full truncate text-sm font-medium text-foreground">
             {item.title}
           </span>
-          {!isThread && item.status && <DocStatusBadge status={item.status} />}
+          {item.status && <DocStatusBadge status={item.status} />}
         </span>
         <span className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-          {isThread ? "会话" : item.subtitle || "文档"}
+          {item.subtitle || "文档"}
         </span>
       </span>
       <span className="mt-0.5 flex shrink-0 flex-col items-end gap-0.5 text-[11px] tabular-nums text-muted-foreground">
@@ -134,14 +133,6 @@ function ActivityCard({ item }: { item: ActivityItem }) {
       </span>
     </>
   );
-
-  if (isThread) {
-    return (
-      <Link href={`/chat/${item.id}`} className={cardClass}>
-        {body}
-      </Link>
-    );
-  }
 
   return (
     <button
@@ -290,7 +281,7 @@ function SearchPageInner() {
         }
       })
       .catch(() => {});
-    api.getActivity().then(setActivity).catch(() => setActivity([]));
+    api.getActivity().then((a) => setActivity(a.filter((x) => x.type === "document"))).catch(() => setActivity([]));
     inputRef.current?.focus();
   }, [preset]);
 
