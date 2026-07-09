@@ -14,6 +14,7 @@ from sag_api.core.deps import (
     get_tool_registry,
 )
 from sag_api.core.errors import ApiError
+from sag_api.core.logging import get_logger
 from sag_api.db.models import User
 from sag_api.generation import LLMClient
 from sag_api.sag import EngineManager
@@ -35,6 +36,7 @@ from sag_api.services import agent_service
 from sag_api.tools import ToolRegistry
 
 router = APIRouter(prefix="/agents", tags=["agents"])
+log = get_logger("agents")
 
 
 def _sse(event: str, payload: dict) -> dict:
@@ -270,17 +272,25 @@ async def ask(
             "count": plan.section_count,
         }
 
-        async for name, payload in agent_service.generate_stream(
-            SessionLocal,
-            plan=plan,
-            agentic=body.mode != "fast",
-            preface_trace=[seed_step],
-            agent=agent,
-            thread_id=thread.id,
-            engine_manager=engine_manager,
-            llm=llm,
-            tool_registry=tool_registry,
-        ):
-            yield _sse(name, payload)
+        try:
+            async for name, payload in agent_service.generate_stream(
+                SessionLocal,
+                plan=plan,
+                agentic=body.mode != "fast",
+                preface_trace=[seed_step],
+                agent=agent,
+                thread_id=thread.id,
+                engine_manager=engine_manager,
+                llm=llm,
+                tool_registry=tool_registry,
+            ):
+                yield _sse(name, payload)
+        except Exception as e:  # noqa: BLE001
+            # 最后防线：任何未及之处都以可见的 error 事件收尾，绝不让流无声死亡
+            log.exception("ask 流异常终止：%s", e)
+            yield _sse(
+                "error",
+                {"code": "stream_error", "message": f"生成中断：{getattr(e, 'message', None) or e}"},
+            )
 
     return EventSourceResponse(event_gen())

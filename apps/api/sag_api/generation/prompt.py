@@ -123,7 +123,7 @@ def build_prompt_preview(messages: list[dict[str, Any]], *, limit: int = 1600) -
     多模态消息（content 为 parts 列表）：文本部分原样、图片以占位符呈现（不吐 base64）。
     """
     lines: list[str] = []
-    role_label = {"system": "系统", "user": "用户", "assistant": "助手"}
+    role_label = {"system": "系统", "user": "用户", "assistant": "助手", "tool": "工具"}
     for m in messages:
         label = role_label.get(m.get("role", ""), m.get("role", ""))
         content = m.get("content", "")
