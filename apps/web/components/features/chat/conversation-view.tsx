@@ -2,15 +2,17 @@
 
 import dynamic from "next/dynamic";
 import * as React from "react";
-import { ArrowUp, Check, Copy, Square } from "lucide-react";
+import { ArrowUp, Check, Copy, ImagePlus, Square, X } from "lucide-react";
 import { toast } from "sonner";
 
 import type { AskHandlers } from "@/lib/sse";
 import type { Citation } from "@/lib/types";
+import { api } from "@/lib/api";
 import { chatLive } from "@/lib/chat-live";
 import { useApp } from "@/components/features/app-shell";
 import { CitationBlock } from "@/components/features/chat/citation-block";
 import { PromptPreview } from "@/components/features/chat/prompt-preview";
+import { AuthImage } from "@/components/features/auth-image";
 import { Button } from "@/components/ui/button";
 
 const MarkdownContent = dynamic(
@@ -23,6 +25,7 @@ export interface ConvMessage {
   role: "user" | "assistant" | "system";
   content: string;
   citations: Citation[];
+  attachments?: { id?: string; url?: string }[];
   author?: string | null;
   promptPreview?: string;
 }
@@ -32,6 +35,7 @@ type Streamer = (
   query: string,
   handlers: AskHandlers,
   signal: AbortSignal,
+  attachments?: string[],
 ) => Promise<void>;
 
 function MessageActions({ content }: { content: string }) {
@@ -71,10 +75,24 @@ const MessageItem = React.memo(
   }) {
     if (message.role === "user") {
       return (
-        <div className="flex justify-end">
-          <div className="max-w-[85%] whitespace-pre-wrap rounded-lg rounded-tr-sm bg-primary px-4 py-2.5 text-sm text-primary-foreground">
-            {message.content}
-          </div>
+        <div className="flex flex-col items-end gap-1.5">
+          {message.attachments && message.attachments.length > 0 && (
+            <div className="flex max-w-[85%] flex-wrap justify-end gap-1.5">
+              {message.attachments.map((a, i) => (
+                <AuthImage
+                  key={a.id ?? a.url ?? i}
+                  id={a.id}
+                  url={a.url}
+                  className="max-h-40 max-w-56 rounded-lg border object-cover shadow-soft"
+                />
+              ))}
+            </div>
+          )}
+          {message.content && (
+            <div className="max-w-[85%] whitespace-pre-wrap rounded-lg rounded-tr-sm bg-primary px-4 py-2.5 text-sm text-primary-foreground">
+              {message.content}
+            </div>
+          )}
         </div>
       );
     }
@@ -143,6 +161,8 @@ export function ConversationView({
   const { capabilities } = useApp();
   const [messages, setMessages] = React.useState<ConvMessage[]>([]);
   const [input, setInput] = React.useState("");
+  const [images, setImages] = React.useState<{ file: File; url: string }[]>([]);
+  const fileRef = React.useRef<HTMLInputElement>(null);
   const [streaming, setStreaming] = React.useState(false);
   const abortRef = React.useRef<AbortController | null>(null);
   const bottomRef = React.useRef<HTMLDivElement>(null);
@@ -263,14 +283,42 @@ export function ConversationView({
     [flushTokens],
   );
 
+  const MAX_IMAGES = 4;
+  function addImages(files: FileList | File[] | null) {
+    if (!files) return;
+    const incoming = Array.from(files).filter((f) => f.type.startsWith("image/"));
+    if (!incoming.length) return;
+    setImages((prev) => {
+      const room = MAX_IMAGES - prev.length;
+      const accepted = incoming.slice(0, Math.max(0, room));
+      if (incoming.length > room) toast.error(`最多 ${MAX_IMAGES} 张图片`);
+      const oversize = accepted.filter((f) => f.size > 10 * 1024 * 1024);
+      if (oversize.length) toast.error("图片过大（上限 10MB）");
+      return [
+        ...prev,
+        ...accepted
+          .filter((f) => f.size <= 10 * 1024 * 1024)
+          .map((f) => ({ file: f, url: URL.createObjectURL(f) })),
+      ];
+    });
+  }
+  function removeImage(url: string) {
+    setImages((prev) => {
+      URL.revokeObjectURL(url);
+      return prev.filter((i) => i.url !== url);
+    });
+  }
+
   async function send(text?: string) {
     const q = (text ?? input).trim();
-    if (!q || streaming) return;
+    const pending = images;
+    if ((!q && pending.length === 0) || streaming) return;
     if (!capabilities?.llm_configured) {
       toast.error("尚未配置模型，无法问答。请前往设置。");
       return;
     }
     setInput("");
+    setImages([]);
 
     let tid = threadId;
     if (!tid) {
@@ -285,6 +333,20 @@ export function ConversationView({
       }
     }
 
+    // 先上传附件（失败即中止本次发送，恢复输入与图片）
+    let attachmentIds: string[] = [];
+    if (pending.length) {
+      try {
+        const uploaded = await Promise.all(pending.map((i) => api.uploadAttachment(i.file)));
+        attachmentIds = uploaded.map((u) => u.id);
+      } catch {
+        toast.error("图片上传失败，请重试");
+        setImages(pending);
+        setInput(q);
+        return;
+      }
+    }
+
     const now = Date.now();
     const botId = `local-a-${now}`;
     streamingId.current = botId;
@@ -293,7 +355,13 @@ export function ConversationView({
 
     setMessages((m) => [
       ...m,
-      { id: `local-u-${now}`, role: "user", content: q, citations: [] },
+      {
+        id: `local-u-${now}`,
+        role: "user",
+        content: q,
+        citations: [],
+        attachments: pending.map((i) => ({ url: i.url })),
+      },
       { id: botId, role: "assistant", content: "", citations: [] },
     ]);
 
@@ -326,6 +394,7 @@ export function ConversationView({
           onDone: () => onActivity?.(),
         },
         ctrl.signal,
+        attachmentIds.length ? attachmentIds : undefined,
       );
     } catch {
       /* aborted or network */
@@ -398,12 +467,62 @@ export function ConversationView({
       </div>
 
       <div className="border-t bg-background px-4 py-3">
-        <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-xl border bg-card p-2 shadow-soft transition-shadow focus-within:border-foreground/20 focus-within:shadow-lift">
+        <div className="mx-auto flex max-w-3xl flex-col gap-2 rounded-xl border bg-card p-2 shadow-soft transition-shadow focus-within:border-foreground/20 focus-within:shadow-lift">
+          {images.length > 0 && (
+            <div className="flex flex-wrap gap-2 px-1 pt-1">
+              {images.map((img) => (
+                <div key={img.url} className="group/thumb relative">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={img.url}
+                    alt={img.file.name}
+                    className="size-14 rounded-md border object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeImage(img.url)}
+                    aria-label="移除图片"
+                    className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full border bg-background text-muted-foreground opacity-0 shadow-soft transition-opacity hover:text-destructive group-hover/thumb:opacity-100"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex items-end gap-2">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              addImages(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => fileRef.current?.click()}
+            disabled={streaming || images.length >= MAX_IMAGES}
+            title="添加图片（可直接粘贴）"
+            aria-label="添加图片"
+          >
+            <ImagePlus className="size-4" />
+          </Button>
           <textarea
             autoFocus
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKeyDown}
+            onPaste={(e) => {
+              if (e.clipboardData?.files?.length) {
+                e.preventDefault();
+                addImages(e.clipboardData.files);
+              }
+            }}
             rows={1}
             placeholder={placeholder}
             className="max-h-40 min-h-[36px] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
@@ -413,10 +532,16 @@ export function ConversationView({
               <Square className="size-4" />
             </Button>
           ) : (
-            <Button size="icon" onClick={() => send()} disabled={!input.trim()} title="发送">
+            <Button
+              size="icon"
+              onClick={() => send()}
+              disabled={!input.trim() && images.length === 0}
+              title="发送"
+            >
               <ArrowUp className="size-4" />
             </Button>
           )}
+          </div>
         </div>
       </div>
     </div>

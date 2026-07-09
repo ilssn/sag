@@ -75,8 +75,11 @@ class MessageOut(BaseModel):
     role: MessageRole
     content: str
     citations: list[dict[str, Any]]
+    attachments: list[dict[str, Any]] = []
     created_at: datetime
 
 
 class AskRequest(BaseModel):
     query: str = Field(min_length=1, max_length=4000)
+    # 图片附件 id 列表（≤4，经 POST /attachments 上传）
+    attachments: list[str] = Field(default_factory=list, max_length=4)

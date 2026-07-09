@@ -148,12 +148,19 @@ export interface Thread {
   updated_at: string;
 }
 
+export interface MessageAttachment {
+  id: string;
+  name?: string;
+  media_type?: string;
+}
+
 export interface Message {
   id: string;
   thread_id: string;
   role: "user" | "assistant" | "system";
   content: string;
   citations: Citation[];
+  attachments?: MessageAttachment[];
   created_at: string;
 }
 
