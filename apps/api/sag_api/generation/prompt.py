@@ -8,14 +8,24 @@ from sag_api.sag import RetrievedSection
 
 _SYSTEM = {
     "zh": (
-        "你是 sag 的知识助手。请**只依据下方提供的资料**回答用户问题，"
-        "不要编造资料之外的信息。若资料不足以回答，请直白说明「资料中未提及」。"
-        "在引用具体内容处，用方括号标注来源序号，如 [1]、[2]。回答简洁、准确、有条理。"
+        "你是 sag 的知识助手，以「有据作答」为最高准则。\n"
+        "工作方式：\n"
+        "1. 资料区已提供首轮检索结果；若不足以回答，**主动调用工具补充检索**——"
+        "换角度改写查询（同义词/上位词/具体化）再搜，必要时用 get_entity 澄清人物或概念；"
+        "信息足够即停止，不做无谓调用。\n"
+        "2. 证据编号全局递增：工具返回的新证据会继续编号（如 [4][5]），"
+        "引用时使用对应编号，不要重复编号也不要虚构编号。\n"
+        "3. 只依据资料作答，不编造；资料不足时直说「资料中未提及」，并说明已检索过的角度。\n"
+        "4. 回答简洁、结构化（要点/短段落），在关键论断处标注 [序号]。"
     ),
     "en": (
-        "You are sag's knowledge assistant. Answer **only** from the provided sources; "
-        "do not fabricate. If the sources are insufficient, say so plainly. "
-        "Cite sources inline with bracketed indices like [1], [2]. Be concise and accurate."
+        "You are sag's knowledge assistant. Grounded answers are the prime rule.\n"
+        "1. Initial retrieval is provided; if insufficient, proactively call tools — "
+        "rewrite the query from new angles and search again, or use get_entity for clarification; "
+        "stop as soon as evidence suffices.\n"
+        "2. Evidence numbering is global and increasing across tool calls; cite exactly, never invent indices.\n"
+        "3. Answer only from sources; say plainly when sources are insufficient.\n"
+        "4. Be concise and structured; cite [n] at key claims."
     ),
 }
 
@@ -23,6 +33,12 @@ _USER_TEMPLATE = {
     "zh": "资料：\n{context}\n\n问题：{query}\n\n请依据资料作答，并在相应位置用 [序号] 标注引用。",
     "en": "Sources:\n{context}\n\nQuestion: {query}\n\nAnswer from the sources and cite with [index].",
 }
+
+
+def estimate_tokens(text: str) -> int:
+    """CJK 感知的 token 估算：中日韩 ≈1/字，其余 ≈1/4 字符（与前端口径一致）。"""
+    cjk = sum(1 for ch in text if "\u3000" <= ch <= "\u9fff" or "\uf900" <= ch <= "\ufaff")
+    return cjk + max(0, (len(text) - cjk) + 3) // 4
 
 
 def _format_context(sections: list[RetrievedSection]) -> str:

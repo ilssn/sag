@@ -89,6 +89,10 @@ class Settings(BaseSettings):
     search_source_timeout: float = 12.0
     search_fallback_vector: bool = True
 
+    # ── Agent 循环 ──────────────────────────────────────────────────────
+    agent_max_steps: int = 6              # 工具调用最大轮数（多轮检索的上界）
+    history_keep_recent: int = 8          # 历史压缩时原文保留的最近消息数
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, v: object) -> object:

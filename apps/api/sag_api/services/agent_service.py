@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import AsyncIterator
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -28,17 +29,34 @@ from sag_api.tools.mcp import open_agent_mcp_tools
 
 log = get_logger("agent")
 
-# 工具循环最大步数（防跑飞）；测试可 monkeypatch 缩短
+# 兜底步数（正常取 settings.agent_max_steps）；测试可 monkeypatch
 AGENT_MAX_STEPS = 4
 
 AgentEvent = tuple[str, dict]
 
 
+def _args_preview(arguments: dict, limit: int = 60) -> str:
+    """工具参数的单行预览（前端状态展示用）。"""
+    try:
+        text = "; ".join(f"{k}={v}" for k, v in arguments.items() if v is not None)
+    except Exception:  # noqa: BLE001
+        text = str(arguments)
+    return text[:limit] + ("…" if len(text) > limit else "")
+
+
+_DEFAULT_TOOLS = ["search_context", "get_entity"]
+
+
 def _enabled_tool_names(agent) -> list[str]:
-    """Agent 显式开启的额外工具名（persona.tools）。默认空 → 不进循环。"""
+    """启用的工具：persona.tools 显式配置优先；默认 agent 缺省即开启内置检索/实体
+    ——agentic 多轮检索是主对话的基础能力，无需用户配置。"""
     persona = agent.persona or {}
     names = persona.get("tools")
-    return [n for n in names if isinstance(n, str)] if isinstance(names, list) else []
+    if isinstance(names, list):
+        return [n for n in names if isinstance(n, str)]
+    if getattr(agent, "is_default", False):
+        return list(_DEFAULT_TOOLS)
+    return []
 
 
 async def _run_tool_loop(
@@ -61,7 +79,11 @@ async def _run_tool_loop(
     schemas = tool_registry.schemas(tool_names)
     if not schemas:
         return
-    for _step in range(AGENT_MAX_STEPS):
+    from sag_api.core.config import settings as _settings
+
+    max_steps = max(1, getattr(_settings, "agent_max_steps", AGENT_MAX_STEPS))
+    for _step in range(max_steps):
+        yield ("status", {"phase": "thinking", "step": _step + 1})
         turn = await llm.chat(messages, tools=schemas)
         if not turn.tool_calls:
             break
@@ -80,17 +102,31 @@ async def _run_tool_loop(
             }
         )
         for call in turn.tool_calls:
-            yield ("tool", {"name": call.name})
+            args_preview = _args_preview(call.arguments)
+            yield ("tool", {"name": call.name, "step": _step + 1, "args": args_preview})
+            started = time.perf_counter()
+            count = 0
             if not tool_registry.has(call.name):
                 content = f"未知工具：{call.name}"
             else:
                 try:
+                    ctx.citation_offset = len(citations)
                     result = await tool_registry.get(call.name).invoke(call.arguments, ctx)
                     content = result.content
                     citations.extend(result.citations)
+                    count = int(result.data.get("section_count") or len(result.citations) or 0)
                 except Exception as e:  # noqa: BLE001
                     log.warning("工具执行失败 %s: %s", call.name, e)
                     content = f"工具执行失败：{e}"
+            yield (
+                "tool_result",
+                {
+                    "name": call.name,
+                    "step": _step + 1,
+                    "ms": int((time.perf_counter() - started) * 1000),
+                    "count": count,
+                },
+            )
             messages.append({"role": "tool", "tool_call_id": call.id, "content": content})
 
 

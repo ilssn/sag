@@ -12,6 +12,7 @@ from sag_api.core.errors import ConflictError, NotFoundError, ValidationError
 from sag_api.db.models import Agent, AgentBinding, Message, Source, Thread
 from sag_api.enums import BindingTargetType, MessageRole
 from sag_api.generation import build_agent_messages, build_citations, build_prompt_preview
+from sag_api.generation.prompt import estimate_tokens
 from sag_api.sag import EngineManager
 
 _DEFAULT_TITLES = {"新会话", "New chat"}
@@ -223,12 +224,67 @@ async def list_messages(session: AsyncSession, thread_id: str) -> list[Message]:
 
 async def _history(session: AsyncSession, thread_id: str, exclude_id: str) -> list[dict[str, str]]:
     messages = await list_messages(session, thread_id)
-    history = [
+    return [
         {"role": m.role.value, "content": m.content}
         for m in messages
         if m.id != exclude_id and m.role in (MessageRole.USER, MessageRole.ASSISTANT)
     ]
-    return history[-_HISTORY_LIMIT:]
+
+
+def _history_tokens(history: list[dict[str, str]]) -> int:
+    return sum(estimate_tokens(m["content"]) for m in history)
+
+
+async def compress_history(
+    history: list[dict[str, str]], *, llm=None, budget_tokens: int
+) -> list[dict[str, str]]:
+    """上下文阈值压缩：超预算时把较早消息压成一段摘要，仅保留最近 N 条原文。
+
+    有 LLM → 摘要旧段（保留事实/结论/称呼/待办）；无 LLM/失败 → 按预算从尾部裁剪。
+    """
+    if _history_tokens(history) <= budget_tokens:
+        return history
+
+    keep = max(2, settings.history_keep_recent)
+    recent = history[-keep:]
+    older = history[:-keep]
+    if not older:
+        return recent
+
+    if llm is not None and getattr(llm, "configured", False):
+        transcript = "\n".join(
+            f"{'用户' if m['role'] == 'user' else '助手'}：{m['content']}" for m in older
+        )[:12000]
+        try:
+            summary = await llm.complete(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "把以下对话压缩为要点摘要（≤400字）："
+                            "保留事实、结论、数字、人物称呼与未决事项；不要评论。"
+                        ),
+                    },
+                    {"role": "user", "content": transcript},
+                ]
+            )
+            return [
+                {"role": "user", "content": f"（此前对话摘要，供参考）\n{summary.strip()}"},
+                *recent,
+            ]
+        except Exception:  # noqa: BLE001
+            pass
+
+    # 兜底：从最近往前装，装满预算为止
+    trimmed: list[dict[str, str]] = []
+    used = 0
+    for m in reversed(history):
+        t = estimate_tokens(m["content"])
+        if used + t > budget_tokens and trimmed:
+            break
+        trimmed.append(m)
+        used += t
+    return list(reversed(trimmed))
 
 
 # ── 问答计划 ─────────────────────────────────────────────────────────
@@ -298,8 +354,9 @@ async def prepare_ask(
     engine_manager: EngineManager,
     attachments: list[str] | None = None,
     source_ids: list[str] | None = None,
+    llm=None,
 ) -> AskPlan:
-    """落库用户消息（含图片附件 meta）、解析历史，再委托 build_ask_context 组装计划。"""
+    """落库用户消息（含图片附件 meta）、解析历史（超上下文阈值时主动压缩），组装计划。"""
     from sag_api.api.v1.attachments import attachment_path
 
     resolved: list[dict] = []
@@ -326,6 +383,10 @@ async def prepare_ask(
     await session.refresh(user_msg)
 
     history = await _history(session, thread.id, exclude_id=user_msg.id)
+    # 历史预算 = 上下文窗口的 40%（其余留给资料区/工具轮/回答）
+    history = await compress_history(
+        history, llm=llm, budget_tokens=int(settings.llm_context_window * 0.4)
+    )
     return await build_ask_context(
         session,
         agent=agent,
