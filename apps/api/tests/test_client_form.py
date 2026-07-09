@@ -55,8 +55,8 @@ async def test_default_agent_activity_and_document_file():
             # 近期动态：包含该文档；thread 建一个后也出现
             t = (await c.post(f"/api/v1/agents/{a1['id']}/threads", headers=A, json={})).json()
             acts = (await c.get("/api/v1/activity", headers=A)).json()
-            kinds = {(x["type"], x["id"]) for x in acts}
-            assert ("document", doc["id"]) in kinds and ("thread", t["id"]) in kinds
+            assert all(x["type"] == "document" for x in acts)  # 动态=知识库事件，不含会话
+            assert any(x["id"] == doc["id"] for x in acts)
             assert acts == sorted(acts, key=lambda x: x["at"], reverse=True)
 
             # 归档：PATCH → 默认列表消失、archived=true 列表出现、恢复回来
@@ -66,8 +66,6 @@ async def test_default_agent_activity_and_document_file():
                 json={"archived": True},
             )
             assert arch.status_code == 200 and arch.json()["archived"] is True
-            acts_arch = (await c.get("/api/v1/activity", headers=A)).json()
-            assert all(not (x["type"] == "thread" and x["id"] == t["id"]) for x in acts_arch)
             live = (await c.get(f"/api/v1/agents/{a1['id']}/threads", headers=A)).json()
             assert all(x["id"] != t["id"] for x in live)
             gone = (
