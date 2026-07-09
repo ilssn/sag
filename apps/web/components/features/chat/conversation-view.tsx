@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import * as React from "react";
-import { ArrowUp, Check, ChevronDown, Copy, FileUp, ImagePlus, Library, Loader2, Plus, RotateCcw, Square, Trash2, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, Copy, FileUp, ImagePlus, Library, Loader2, Plus, RotateCcw, Square, Telescope, Trash2, X, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 import type { AskHandlers } from "@/lib/sse";
@@ -18,6 +18,7 @@ import { CitationBlock } from "@/components/features/chat/citation-block";
 import { PromptPreview } from "@/components/features/chat/prompt-preview";
 import { AuthImage } from "@/components/features/auth-image";
 import { Button } from "@/components/ui/button";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   Command,
   CommandEmpty,
@@ -58,6 +59,7 @@ type Streamer = (
   signal: AbortSignal,
   attachments?: string[],
   sourceIds?: string[],
+  mode?: "agentic" | "fast",
 ) => Promise<void>;
 
 function fmtMs(ms: number): string {
@@ -381,6 +383,14 @@ export function ConversationView({
   const [scoped, setScoped] = React.useState<{ id: string; name: string }[]>([]);
   const [sources, setSources] = React.useState<Source[]>([]);
   const [mentionOpen, setMentionOpen] = React.useState(false);
+  const [chatMode, setChatMode] = React.useState<"agentic" | "fast">("agentic");
+  React.useEffect(() => {
+    if (window.localStorage.getItem("sag:chat-mode") === "fast") setChatMode("fast");
+  }, []);
+  const changeChatMode = (v: "agentic" | "fast") => {
+    setChatMode(v);
+    window.localStorage.setItem("sag:chat-mode", v);
+  };
   const docRef = React.useRef<HTMLInputElement>(null);
   const { capabilities: caps } = useApp();
   const fileRef = React.useRef<HTMLInputElement>(null);
@@ -725,6 +735,7 @@ export function ConversationView({
         ctrl.signal,
         attachmentIds.length ? attachmentIds : undefined,
         scoped.length ? scoped.map((s) => s.id) : undefined,
+        chatMode,
       );
     } catch {
       /* aborted or network */
@@ -956,6 +967,24 @@ export function ConversationView({
 
           <div className="flex min-w-0 items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-1.5">
+              <ToggleGroup
+                type="single"
+                variant="outline"
+                size="sm"
+                value={chatMode}
+                onValueChange={(v) => v && changeChatMode(v as "agentic" | "fast")}
+                aria-label="对话模式"
+                className="shrink-0"
+              >
+                <ToggleGroupItem value="agentic" aria-label="深度模式" title="深度：多轮工具推理，更全面">
+                  <Telescope />
+                  <span className="hidden sm:inline">深度</span>
+                </ToggleGroupItem>
+                <ToggleGroupItem value="fast" aria-label="快速模式" title="快速：单轮检索直答，低延迟">
+                  <Zap />
+                  <span className="hidden sm:inline">快速</span>
+                </ToggleGroupItem>
+              </ToggleGroup>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button

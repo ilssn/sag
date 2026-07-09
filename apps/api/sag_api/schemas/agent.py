@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -85,3 +85,5 @@ class AskRequest(BaseModel):
     attachments: list[str] = Field(default_factory=list, max_length=4)
     # @知识库 范围限定：仅在这些信源内检索（空=默认全部）
     source_ids: list[str] = Field(default_factory=list, max_length=8)
+    # 对话模式：agentic=多轮工具推理（默认）；fast=单轮检索直答（低延迟）
+    mode: Literal["agentic", "fast"] = "agentic"

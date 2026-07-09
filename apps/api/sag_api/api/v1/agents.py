@@ -247,6 +247,7 @@ async def ask(
         async for name, payload in agent_service.generate_stream(
             SessionLocal,
             plan=plan,
+            agentic=body.mode != "fast",
             agent=agent,
             thread_id=thread.id,
             engine_manager=engine_manager,
