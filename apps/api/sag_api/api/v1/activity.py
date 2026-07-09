@@ -30,7 +30,10 @@ async def list_activity(
     threads = (
         (
             await session.execute(
-                select(Thread).order_by(Thread.updated_at.desc()).limit(limit)
+                select(Thread)
+                .where(Thread.archived.is_(False))
+                .order_by(Thread.updated_at.desc())
+                .limit(limit)
             )
         )
         .scalars()

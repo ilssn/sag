@@ -201,6 +201,7 @@ export function ConversationView({
           ]);
         })
         .catch(() => {});
+      let disposed = false;
       const unsub = chatLive.subscribe(() => {
         const cur = chatLive.get();
         if (cur.session !== live.session) return;
@@ -217,6 +218,7 @@ export function ConversationView({
         );
         if (!cur.streaming) {
           unsub();
+          if (disposed) return;
           streamingRef.current = false;
           streamingId.current = null;
           setStreaming(false);
@@ -224,7 +226,12 @@ export function ConversationView({
           loadMessages(threadId, { force: true });
         }
       });
-      return;
+      // 中途再次离开：解除订阅并复位流式标记，避免泄漏与陈旧闭包
+      return () => {
+        disposed = true;
+        unsub();
+        streamingRef.current = false;
+      };
     }
     loadMessages(threadId);
   }, [conversationKey, threadId, loadMessages, listMessages]);
@@ -393,6 +400,7 @@ export function ConversationView({
       <div className="border-t bg-background px-4 py-3">
         <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-xl border bg-card p-2 shadow-soft transition-shadow focus-within:border-foreground/20 focus-within:shadow-lift">
           <textarea
+            autoFocus
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKeyDown}
