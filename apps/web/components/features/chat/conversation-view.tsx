@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import * as React from "react";
-import { ArrowUp, AtSign, Check, Copy, FileUp, ImagePlus, Loader2, Plus, RotateCcw, Square, Trash2, X } from "lucide-react";
+import { ArrowUp, Check, Copy, FileUp, ImagePlus, Library, Loader2, Plus, RotateCcw, Square, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import type { AskHandlers } from "@/lib/sse";
@@ -418,7 +418,7 @@ export function ConversationView({
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 144)}px`;
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
   }, [input]);
 
   async function addDocToKnowledge(files: FileList | null) {
@@ -653,7 +653,7 @@ export function ConversationView({
 
       <div className="shrink-0 border-t bg-background/95 px-3 py-3 sm:px-4">
         <div className="mx-auto max-w-3xl">
-          <div className="relative flex flex-col gap-2 rounded-2xl border bg-card px-3 py-2.5 shadow-soft transition-[border-color,box-shadow] focus-within:border-foreground/20 focus-within:shadow-lift">
+          <div className="relative flex flex-col gap-1.5 rounded-2xl border bg-card px-3 py-2 shadow-soft transition-[border-color,box-shadow] focus-within:border-foreground/20 focus-within:shadow-lift">
           {images.length > 0 && (
             <div className="flex flex-wrap gap-2 px-1">
               {images.map((img) => (
@@ -676,27 +676,6 @@ export function ConversationView({
               ))}
             </div>
           )}
-          {scoped.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 px-1">
-              {scoped.map((sc) => (
-                <span
-                  key={sc.id}
-                  className="inline-flex items-center gap-1 rounded-full border bg-muted px-2 py-0.5 text-[11px]"
-                >
-                  <AtSign className="size-3" />
-                  {sc.name}
-                  <button
-                    type="button"
-                    aria-label="移除范围"
-                    onClick={() => setScoped((p) => p.filter((x) => x.id !== sc.id))}
-                    className="hover:text-destructive"
-                  >
-                    <X className="size-2.5" />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
           {mentionOpen && (
             <div className="absolute bottom-full left-3 z-20 mb-2 max-h-56 w-64 overflow-y-auto rounded-lg border bg-card p-1 shadow-lift">
               <p className="px-2 py-1 text-[11px] text-muted-foreground">@ 知识库范围（可多选）</p>
@@ -713,7 +692,9 @@ export function ConversationView({
                       setScoped((p) =>
                         on ? p.filter((x) => x.id !== src.id) : [...p, { id: src.id, name: src.name }],
                       );
+                      setInput((v) => (v.endsWith("@") ? v.slice(0, -1) : v));
                       setMentionOpen(false);
+                      textareaRef.current?.focus();
                     }}
                     className={cn(
                       "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted",
@@ -748,26 +729,49 @@ export function ConversationView({
               e.target.value = "";
             }}
           />
-          <textarea
-            ref={textareaRef}
-            autoFocus
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "@") setMentionOpen(true);
-              if (e.key === "Escape") setMentionOpen(false);
-              onKeyDown(e);
-            }}
-            onPaste={(e) => {
-              if (e.clipboardData?.files?.length) {
-                e.preventDefault();
-                addImages(e.clipboardData.files);
-              }
-            }}
-            rows={1}
-            placeholder={placeholder}
-            className="max-h-36 min-h-11 w-full resize-none overflow-y-auto bg-transparent px-1 pt-1 text-[15px] leading-6 text-foreground outline-none placeholder:text-muted-foreground"
-          />
+          <div className="flex flex-wrap items-end gap-1 px-0.5">
+            {scoped.map((sc) => (
+              <span
+                key={sc.id}
+                className="inline-flex max-w-[min(100%,12rem)] items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary"
+              >
+                <Library className="size-3 shrink-0" />
+                <span className="truncate">{sc.name}</span>
+                <button
+                  type="button"
+                  aria-label={`移除 ${sc.name}`}
+                  onClick={() => setScoped((p) => p.filter((x) => x.id !== sc.id))}
+                  className="rounded-sm text-primary/70 hover:bg-primary/15 hover:text-primary"
+                >
+                  <X className="size-2.5" />
+                </button>
+              </span>
+            ))}
+            <textarea
+              ref={textareaRef}
+              autoFocus
+              value={input}
+              onChange={(e) => {
+                const v = e.target.value;
+                setInput(v);
+                if (v.endsWith("@")) setMentionOpen(true);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "@") setMentionOpen(true);
+                if (e.key === "Escape") setMentionOpen(false);
+                onKeyDown(e);
+              }}
+              onPaste={(e) => {
+                if (e.clipboardData?.files?.length) {
+                  e.preventDefault();
+                  addImages(e.clipboardData.files);
+                }
+              }}
+              rows={1}
+              placeholder={scoped.length ? "继续输入…" : placeholder}
+              className="max-h-28 min-h-8 min-w-[12ch] flex-1 resize-none overflow-y-auto bg-transparent py-0.5 text-sm leading-5 text-foreground outline-none placeholder:text-muted-foreground"
+            />
+          </div>
 
           <div className="flex min-w-0 items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-1.5">

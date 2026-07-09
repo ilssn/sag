@@ -126,7 +126,7 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
       await api.updateThread(agent.id, tid, { archived: true });
       await refreshThreads();
       if (activeThreadId === tid) router.push("/chat");
-      toast.success("已归档，可在 设置 → 助手 恢复");
+      toast.success("已归档");
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "归档失败");
     }
@@ -155,6 +155,14 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
+              <SidebarMenuButton asChild isActive={knowledgeActive} tooltip="知识库">
+                <Link href="/knowledge">
+                  <Library />
+                  <span>知识库</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
               <SidebarMenuButton asChild tooltip="新对话">
                 <Link
                   href="/chat"
@@ -162,14 +170,6 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
                 >
                   <MessageSquarePlus />
                   <span>新对话</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild isActive={knowledgeActive} tooltip="知识库">
-                <Link href="/knowledge">
-                  <Library />
-                  <span>知识库</span>
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>

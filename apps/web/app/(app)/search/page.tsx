@@ -4,7 +4,7 @@ import * as React from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AtSign, Clock, FileText, History, List, MessageSquare, Search as SearchIcon, Waypoints, X } from "lucide-react";
+import { Clock, FileText, History, Library, List, MessageSquare, Search as SearchIcon, Waypoints, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
@@ -14,7 +14,6 @@ import { relativeTime } from "@/lib/format";
 import { useDetailPanel } from "@/components/features/detail-panel";
 import { DocStatusBadge } from "@/components/features/status-badge";
 import { EmptyState } from "@/components/features/empty-state";
-import { Input } from "@/components/ui/input";
 import {
   Command,
   CommandEmpty,
@@ -281,32 +280,58 @@ function SearchPageInner() {
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4 md:p-6">
       <form onSubmit={run} className="flex items-center gap-2">
         <div className="relative flex-1">
-          <SearchIcon className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            ref={inputRef}
-            value={query}
-            onChange={(e) => {
-              const v = e.target.value;
-              setQuery(v);
-              if (!v.trim()) setResults(null);
-              if (v.endsWith("@")) setMentionOpen(true);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") setMentionOpen(false);
-            }}
-            placeholder="搜索知识库 · 输入 @ 限定范围"
-            className="h-12 rounded-lg pl-10 pr-10 shadow-soft placeholder:text-sm"
-          />
+          <div
+            className={cn(
+              "flex min-h-9 flex-wrap items-center gap-1 rounded-lg border border-input bg-card py-1 pl-10 pr-9 shadow-soft transition-[border-color,box-shadow]",
+              "focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/25",
+            )}
+          >
+            <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            {scoped.map((sc) => (
+              <span
+                key={sc.id}
+                className="inline-flex max-w-[min(100%,12rem)] items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary"
+              >
+                <Library className="size-3 shrink-0" />
+                <span className="truncate">{sc.name}</span>
+                <button
+                  type="button"
+                  aria-label={`移除 ${sc.name}`}
+                  onClick={() => setScoped((p) => p.filter((x) => x.id !== sc.id))}
+                  className="rounded-sm text-primary/70 hover:bg-primary/15 hover:text-primary"
+                >
+                  <X className="size-2.5" />
+                </button>
+              </span>
+            ))}
+            <input
+              ref={inputRef}
+              type="text"
+              value={query}
+              onChange={(e) => {
+                const v = e.target.value;
+                setQuery(v);
+                if (!v.trim() && scoped.length === 0) setResults(null);
+                if (v.endsWith("@")) setMentionOpen(true);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "@") setMentionOpen(true);
+                if (e.key === "Escape") setMentionOpen(false);
+              }}
+              placeholder={scoped.length ? "继续输入关键词…" : "搜索知识库 · 输入 @ 限定范围"}
+              className="min-w-[8ch] flex-1 bg-transparent py-0.5 text-sm outline-none placeholder:text-muted-foreground"
+            />
+          </div>
           {query && (
             <button
               type="button"
               onClick={() => {
                 setQuery("");
-                setResults(null);
+                if (scoped.length === 0) setResults(null);
                 inputRef.current?.focus();
               }}
               aria-label="清空"
-              className="absolute right-3 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              className="absolute right-2.5 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
             >
               <X className="size-3.5" />
             </button>

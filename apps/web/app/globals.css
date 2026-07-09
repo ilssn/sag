@@ -146,8 +146,14 @@
 @layer components {
   /* 搜索图谱（React Flow）主题化：边/控件走语义 token，亮暗两态一致 */
   .sag-graph .react-flow__edge-path {
-    stroke: hsl(var(--border));
-    stroke-width: 1.25;
+    stroke-linecap: round;
+  }
+  .sag-graph .react-flow__edge-text {
+    font-family: inherit;
+  }
+  .sag-graph .react-flow__edge-textbg {
+    stroke: hsl(var(--border) / 0.5);
+    stroke-width: 0.5;
   }
   .sag-graph .react-flow__controls {
     border: 1px solid hsl(var(--border));
