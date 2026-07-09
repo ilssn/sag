@@ -121,6 +121,7 @@ export type ModelConfigPatch = Partial<{
   llm_base_url: string;
   llm_api_key: string;
   llm_model: string;
+  llm_context_window: number;
   llm_temperature: number;
   llm_max_tokens: number;
   embedding_model: string;
