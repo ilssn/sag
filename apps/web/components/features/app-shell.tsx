@@ -166,11 +166,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     router.replace("/login");
   }, [router]);
 
+  const [petOn] = usePetEnabled();
+
   if (loading) return <FullLoader />;
   if (!user) return null;
 
   const windowed = windowMode === "window" && isDesktop;
-  const [petOn] = usePetEnabled();
 
   return (
     <AppContext.Provider
