@@ -18,11 +18,12 @@ import {
 import "@xyflow/react/dist/style.css";
 import { Library, ListTree, Maximize2, Minimize2, Orbit, Search, Share2, Sparkles } from "lucide-react";
 import {
-  forceCenter,
   forceCollide,
   forceLink,
   forceManyBody,
   forceSimulation,
+  forceX,
+  forceY,
   type SimulationLinkDatum,
   type SimulationNodeDatum,
 } from "d3-force";
@@ -376,15 +377,25 @@ function buildTree(query: string, groups: Grouped[]): { nodes: Node[]; edges: Ed
   return { nodes, edges };
 }
 
-/** 力导：以辐射为种子跑固定迭代（查询锚定中心），网状有机分布。 */
+function collisionRadius(kind: Kind): number {
+  if (kind === "query") return 150;
+  if (kind === "source") return 124;
+  if (kind === "chunk") return 148;
+  return 64;
+}
+
+/** 力导：以辐射为种子跑固定迭代，保留层次锚点，避免无约束坍缩成团。 */
 function buildForce(query: string, groups: Grouped[]): { nodes: Node[]; edges: Edge[] } {
   const seed = buildRadial(query, groups);
-  type SimNode = SimulationNodeDatum & { id: string };
+  type SimNode = SimulationNodeDatum & { id: string; kind: Kind; anchorX: number; anchorY: number };
   const simNodes: SimNode[] = seed.nodes.map((n) => ({
     id: n.id,
+    kind: (n.data as GraphNodeData).kind,
     x: n.position.x,
     y: n.position.y,
-    ...(n.id === "q" ? { fx: 0, fy: 0 } : {}),
+    anchorX: n.position.x,
+    anchorY: n.position.y,
+    ...(n.id === "q" ? { fx: n.position.x, fy: n.position.y } : {}),
   }));
   const simLinks: (SimulationLinkDatum<SimNode> & { kind: string })[] = seed.edges.map((e) => ({
     source: e.source,
@@ -398,19 +409,37 @@ function buildForce(query: string, groups: Grouped[]): { nodes: Node[]; edges: E
         .id((d) => d.id)
         .distance((l) => {
           const k = (l as { kind?: string }).kind;
-          return k === "qs" ? 190 : k === "sc" ? 150 : 110;
+          return k === "qs" ? 260 : k === "sc" ? 245 : 145;
         })
-        .strength(0.6),
+        .strength((l) => {
+          const k = (l as { kind?: string }).kind;
+          return k === "qs" ? 0.52 : k === "sc" ? 0.38 : 0.18;
+        }),
     )
-    .force("charge", forceManyBody().strength(-460))
-    .force("collide", forceCollide(96))
-    .force("center", forceCenter(0, 0))
+    .force("charge", forceManyBody().strength(-760))
+    .force("collide", forceCollide<SimNode>((d) => collisionRadius(d.kind)).strength(0.9).iterations(3))
+    .force("x", forceX<SimNode>((d) => d.anchorX).strength((d) => (d.kind === "entity" ? 0.04 : 0.09)))
+    .force("y", forceY<SimNode>((d) => d.anchorY).strength((d) => (d.kind === "entity" ? 0.04 : 0.09)))
     .stop();
-  for (let i = 0; i < 220; i++) sim.tick();
+  for (let i = 0; i < 300; i++) sim.tick();
   const posOf = new Map(simNodes.map((n) => [n.id, { x: n.x ?? 0, y: n.y ?? 0 }]));
+  let edgeIdx = 0;
   return {
     nodes: seed.nodes.map((n) => ({ ...n, position: posOf.get(n.id) ?? n.position })),
-    edges: seed.edges,
+    edges: seed.edges.map((e) => {
+      const kind = (e.id.split("-")[1] as "qs" | "sc" | "ce") ?? "sc";
+      const source = String(e.source);
+      const target = String(e.target);
+      return edgeOf(
+        source,
+        target,
+        kind,
+        edgeIdx++,
+        posOf.get(source) ?? { x: 0, y: 0 },
+        posOf.get(target) ?? { x: 0, y: 0 },
+        EDGE_TYPE.force,
+      );
+    }),
   };
 }
 

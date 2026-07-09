@@ -18,7 +18,6 @@ import { toast } from "sonner";
 import { api, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { ActivityItem, Section, Source } from "@/lib/types";
-import { relativeTime } from "@/lib/format";
 import { useDetailPanel } from "@/components/features/detail-panel";
 import { DocStatusBadge } from "@/components/features/status-badge";
 import { EmptyState } from "@/components/features/empty-state";
@@ -77,39 +76,18 @@ function SearchScanning() {
   );
 }
 
-function dayGroup(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "近期";
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const that = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const diff = Math.round((today.getTime() - that.getTime()) / 86_400_000);
-  if (diff <= 0) return "今天";
-  if (diff === 1) return "昨天";
-  return "更早";
-}
-
-function clockStamp(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-}
-
 const ROW_CARD =
   "group flex w-full items-start gap-3 rounded-lg border bg-card px-4 py-3 text-left shadow-soft outline-none transition-all hover:bg-muted/35 hover:shadow-lift focus-visible:ring-2 focus-visible:ring-ring";
 
 function ActivityCard({ item }: { item: ActivityItem }) {
   const { open } = useDetailPanel();
   const Icon = FileText;
-  const cardClass = ROW_CARD;
+  const cardClass =
+    "group flex w-full items-center gap-3 px-4 py-3 text-left outline-none transition-colors hover:bg-muted/35 focus-visible:bg-muted/45";
   const body = (
     <>
-      <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
-        <Icon className="size-4" />
+      <span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted/70 text-muted-foreground">
+        <Icon className="size-3.5" />
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 flex-wrap items-center gap-2">
@@ -122,12 +100,9 @@ function ActivityCard({ item }: { item: ActivityItem }) {
           {item.subtitle || "文档"}
         </span>
       </span>
-      <span className="mt-0.5 flex shrink-0 flex-col items-end gap-0.5 text-[11px] tabular-nums text-muted-foreground">
-        <time dateTime={item.at}>{clockStamp(item.at)}</time>
-        <span className="inline-flex items-center gap-1 transition-colors group-hover:text-foreground">
-          {relativeTime(item.at)}
-          <ArrowUpRight className="size-3 opacity-0 transition-opacity group-hover:opacity-100" />
-        </span>
+      <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground transition-colors group-hover:text-foreground">
+        查看原文
+        <ArrowUpRight className="size-3" />
       </span>
     </>
   );
@@ -167,27 +142,12 @@ function ActivityTimeline({ items }: { items: ActivityItem[] | null }) {
     );
   }
 
-  const groups: Array<{ label: string; rows: ActivityItem[] }> = [];
-  for (const item of [...items].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())) {
-    const label = dayGroup(item.at);
-    const tail = groups[groups.length - 1];
-    if (tail?.label === label) tail.rows.push(item);
-    else groups.push({ label, rows: [item] });
-  }
-
   return (
-    <div className="flex flex-col gap-5">
-      {groups.map((group) => (
-        <section key={group.label} className="flex flex-col gap-1.5">
-          <h3 className="px-1 text-xs font-medium text-muted-foreground">
-            {group.label}
-          </h3>
-          <div className="flex flex-col gap-2">
-            {group.rows.map((item) => (
-              <ActivityCard key={`${item.type}-${item.id}`} item={item} />
-            ))}
-          </div>
-        </section>
+    <div className="overflow-hidden rounded-lg border border-border/70 bg-card/45">
+      {[...items].map((item, index) => (
+        <div key={`${item.type}-${item.id}`} className={cn(index > 0 && "border-t border-border/60")}>
+          <ActivityCard item={item} />
+        </div>
       ))}
     </div>
   );
@@ -541,9 +501,6 @@ function SearchPageInner() {
           <div className="flex items-center justify-between gap-3 px-1">
             <h2 className="flex items-center gap-2 text-sm font-medium">
               最近动态
-              <span className="rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground">
-                时间排序
-              </span>
             </h2>
             <span className="hidden text-xs text-muted-foreground sm:inline">点击查看原文</span>
           </div>
