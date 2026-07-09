@@ -170,7 +170,7 @@ function ResultList({ results }: { results: Section[] }) {
   );
 }
 
-export default function SearchPage() {
+function SearchPageInner() {
   const params = useSearchParams();
   const [query, setQuery] = React.useState("");
   const [scope, setScope] = React.useState<string>(params.get("source") ?? ALL);
@@ -286,5 +286,13 @@ export default function SearchPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function SearchPage() {
+  return (
+    <React.Suspense fallback={<div className="p-6"><Skeleton className="h-12 rounded-lg" /></div>}>
+      <SearchPageInner />
+    </React.Suspense>
   );
 }

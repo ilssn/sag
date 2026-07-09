@@ -67,7 +67,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [agent, setAgent] = React.useState<Agent | null>(null);
   const [threads, setThreads] = React.useState<Thread[]>([]);
   const [windowMode, setWindowMode] = React.useState<WindowMode>("full");
+  const [isDesktop, setIsDesktop] = React.useState(true);
   const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const update = () => setIsDesktop(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
 
   // 窗口形态：持久化（默认满屏）
   React.useEffect(() => {
@@ -150,7 +159,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   if (loading) return <FullLoader />;
   if (!user) return null;
 
-  const windowed = windowMode === "window";
+  const windowed = windowMode === "window" && isDesktop;
 
   return (
     <AppContext.Provider
@@ -181,7 +190,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 : "min-h-svh",
             )}
           >
-            <SidebarProvider className={cn(windowed && "h-full min-h-full")}>
+            <SidebarProvider className={cn(windowed ? "h-full min-h-full" : "h-svh min-h-svh")}>
               <AppSidebar />
               <SidebarInset className="min-w-0">
                 <SiteHeader />
