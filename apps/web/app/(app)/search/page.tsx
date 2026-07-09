@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowUpRight,
@@ -10,7 +9,6 @@ import {
   FileText,
   Library,
   List,
-  MessageSquare,
   Search as SearchIcon,
   Waypoints,
   X,
