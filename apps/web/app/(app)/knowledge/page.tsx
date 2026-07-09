@@ -115,7 +115,7 @@ export default function KnowledgePage() {
         ) : view === "grid" ? (
           <div className="grid animate-fade-in gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {sources.map((s) => (
-              <SourceCard key={s.id} source={s} />
+              <SourceCard key={s.id} source={s} onChanged={load} />
             ))}
           </div>
         ) : (

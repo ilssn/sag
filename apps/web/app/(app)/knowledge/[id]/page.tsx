@@ -3,8 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, FileText, FlaskConical, Plug, Search, TriangleAlert, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { ArrowLeft, FileText, FlaskConical, Plug, Search, TriangleAlert } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
 import type { Doc, Source } from "@/lib/types";
@@ -24,7 +23,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const ACTIVE = ["pending", "loading", "extracting"];
@@ -64,19 +62,8 @@ export default function SourceDetailPage() {
     };
   }, [active, refresh]);
 
-  const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [mcpOpen, setMcpOpen] = React.useState(false);
   const [retrievalOpen, setRetrievalOpen] = React.useState(false);
-
-  async function deleteSource() {
-    try {
-      await api.deleteSource(id);
-      toast.success("信源已删除");
-      router.push("/knowledge");
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "删除失败");
-    }
-  }
 
   return (
     <>
@@ -104,38 +91,36 @@ export default function SourceDetailPage() {
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Button
-            variant="outline"
-            onClick={() => setRetrievalOpen(true)}
-            disabled={!source}
-            title="用真实查询验证召回效果"
-          >
-            <FlaskConical className="size-4" />
-            检索测试
-          </Button>
-          <Button asChild>
-            <Link href={source ? `/search?source=${source.id}` : "/search"}>
-              <Search className="size-4" />
-              搜索此信源
-            </Link>
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            title="删除信源"
-            onClick={() => setConfirmDelete(true)}
-            className="text-muted-foreground hover:text-destructive"
-          >
-            <Trash2 className="size-4" />
-          </Button>
-          <ConfirmDialog
-            open={confirmDelete}
-            onOpenChange={setConfirmDelete}
-            title="删除信源"
-            description={`「${source?.name ?? ""}」及其文档、会话将被删除，检索数据不可再访问。此操作无法撤销。`}
-            confirmLabel="删除信源"
-            onConfirm={deleteSource}
-          />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => setRetrievalOpen(true)}
+                disabled={!source}
+                aria-label="检索测试"
+                title="检索测试"
+              >
+                <FlaskConical className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">检索测试</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                asChild
+                size="icon"
+                aria-label="搜索此信息源"
+                title="搜索此信息源"
+              >
+                <Link href={source ? `/search?source=${source.id}` : "/search"}>
+                  <Search className="size-4" />
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">搜索此信息源</TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
