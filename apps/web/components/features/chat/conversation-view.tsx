@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import * as React from "react";
-import { ArrowUp, Check, Copy, FileUp, ImagePlus, Library, Loader2, Plus, RotateCcw, Square, Trash2, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, Copy, FileUp, ImagePlus, Library, Loader2, Plus, RotateCcw, Square, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import type { AskHandlers } from "@/lib/sse";
@@ -11,13 +11,22 @@ import { api } from "@/lib/api";
 import type { Source } from "@/lib/types";
 import { relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { chatLive } from "@/lib/chat-live";
+import { chatLive, type LiveStep } from "@/lib/chat-live";
 import { useApp } from "@/components/features/app-shell";
 import { useDetailPanel } from "@/components/features/detail-panel";
 import { CitationBlock } from "@/components/features/chat/citation-block";
 import { PromptPreview } from "@/components/features/chat/prompt-preview";
 import { AuthImage } from "@/components/features/auth-image";
 import { Button } from "@/components/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
@@ -50,6 +59,98 @@ type Streamer = (
   attachments?: string[],
   sourceIds?: string[],
 ) => Promise<void>;
+
+function fmtMs(ms: number): string {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.max(ms, 1)}ms`;
+}
+
+const TOOL_LABEL: Record<string, string> = {
+  search_context: "检索知识库",
+  get_entity: "查询实体",
+};
+
+/** Agentic 执行时间线：思考/工具调用逐步呈现（活动项流光+计时），完成后可收起为摘要。 */
+function StepsTimeline({
+  steps,
+  collapsed,
+  onToggle,
+}: {
+  steps: LiveStep[];
+  collapsed: boolean;
+  onToggle?: () => void;
+}) {
+  const toolRuns = steps.filter((x) => x.kind === "tool");
+  const active = steps.some((x) => x.status === "active");
+  const totalMs = steps.reduce(
+    (a, x) => a + (x.ms ?? (x.status === "active" ? Date.now() - x.startedAt : 0)),
+    0,
+  );
+
+  if (collapsed && !active) {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        className="mb-2 inline-flex items-center gap-1.5 rounded-full border bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <Check className="size-3" />
+        已完成 {toolRuns.length} 次工具调用 · {fmtMs(totalMs)}
+        <ChevronDown className="size-3" />
+      </button>
+    );
+  }
+
+  return (
+    <div className="mb-2 flex flex-col gap-1 rounded-lg border bg-muted/30 px-3 py-2">
+      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+        <span className="font-medium">执行过程</span>
+        <span className="flex items-center gap-2 tabular-nums">
+          {fmtMs(totalMs)}
+          {!active && onToggle && (
+            <button
+              type="button"
+              onClick={onToggle}
+              aria-label="收起执行过程"
+              className="rounded p-0.5 outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <ChevronDown className="size-3 rotate-180" />
+            </button>
+          )}
+        </span>
+      </div>
+      {steps.map((x, i) => {
+        const isActive = x.status === "active";
+        const elapsed = x.ms ?? (isActive ? Date.now() - x.startedAt : 0);
+        return (
+          <div key={`${x.kind}-${x.step}-${i}`} className="flex items-center gap-2 text-xs">
+            {isActive ? (
+              <Spinner className="size-3 shrink-0 text-muted-foreground" />
+            ) : (
+              <Check className="size-3 shrink-0 text-success" />
+            )}
+            {x.kind === "thinking" ? (
+              <span className={isActive ? "text-shimmer" : "text-muted-foreground"}>
+                思考中 · 第 {x.step} 轮 · {fmtMs(elapsed)}
+              </span>
+            ) : (
+              <span className={cn("min-w-0 flex-1 truncate", isActive ? "text-shimmer" : "text-muted-foreground")}>
+                {TOOL_LABEL[x.name ?? ""] ?? x.name}
+                {x.args ? `「${x.args}」` : ""}
+                {!isActive && (
+                  <>
+                    {" · "}
+                    {typeof x.count === "number" && x.count > 0 ? `命中 ${x.count} 条 · ` : ""}
+                    {fmtMs(elapsed)}
+                  </>
+                )}
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function MessageActions({
   content,
@@ -126,14 +227,18 @@ const MessageItem = React.memo(
   function MessageItem({
     message,
     streaming,
-    toolNote,
+    steps,
+    stepsCollapsed,
+    onToggleSteps,
     avatar,
     onRetry,
     onDelete,
   }: {
     message: ConvMessage;
     streaming?: boolean;
-    toolNote?: string | null;
+    steps?: LiveStep[];
+    stepsCollapsed?: boolean;
+    onToggleSteps?: () => void;
     avatar: React.ReactNode;
     onRetry?: () => void;
     onDelete?: () => void;
@@ -181,12 +286,15 @@ const MessageItem = React.memo(
       <div className="group/msg flex gap-3">
         {avatar}
         <div className="min-w-0 flex-1">
-          {thinking ? (
-            <div className="inline-flex items-center gap-2 rounded-full border bg-card px-2.5 py-1.5 text-xs text-muted-foreground shadow-soft">
-              <Loader2 className="size-3.5 animate-spin text-foreground" />
-              <span>{toolNote ? `调用 ${toolNote}` : "检索并生成"}</span>
+          {steps && steps.length > 0 && (
+            <StepsTimeline steps={steps} collapsed={!!stepsCollapsed} onToggle={onToggleSteps} />
+          )}
+          {thinking && (!steps || steps.length === 0) ? (
+            <div className="flex items-center gap-1.5 py-1 text-sm">
+              <span className="size-1.5 animate-blink rounded-full bg-primary" />
+              <span className="text-shimmer">检索并生成中…</span>
             </div>
-          ) : streaming ? (
+          ) : thinking ? null : streaming ? (
             <div className="answer-prose whitespace-pre-wrap text-foreground">
               {message.content}
               <span className="ml-0.5 inline-block h-4 w-[2px] animate-blink bg-primary align-middle" />
@@ -215,7 +323,8 @@ const MessageItem = React.memo(
   (prev, next) =>
     prev.message === next.message &&
     prev.streaming === next.streaming &&
-    prev.toolNote === next.toolNote &&
+    prev.steps === next.steps &&
+    prev.stepsCollapsed === next.stepsCollapsed &&
     prev.avatar === next.avatar,
 );
 
@@ -277,7 +386,16 @@ export function ConversationView({
   const fileRef = React.useRef<HTMLInputElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const [streaming, setStreaming] = React.useState(false);
-  const [toolNote, setToolNote] = React.useState<string | null>(null);
+  const [steps, setSteps] = React.useState<LiveStep[]>([]);
+  const [stepsCollapsed, setStepsCollapsed] = React.useState(true);
+  const [, forceTick] = React.useState(0);
+  const stepsRef = React.useRef<LiveStep[]>([]);
+  const liveSessionRef = React.useRef(0);
+  const setStepsBoth = React.useCallback((updater: (prev: LiveStep[]) => LiveStep[]) => {
+    stepsRef.current = updater(stepsRef.current);
+    setSteps(stepsRef.current);
+    chatLive.setSteps(stepsRef.current, liveSessionRef.current);
+  }, []);
   const abortRef = React.useRef<AbortController | null>(null);
   const bottomRef = React.useRef<HTMLDivElement>(null);
   const streamingId = React.useRef<string | null>(null);
@@ -311,8 +429,12 @@ export function ConversationView({
     activeThreadRef.current = threadId;
     if (!threadId) {
       setMessages([]);
+      stepsRef.current = [];
+      setSteps([]);
       return;
     }
+    stepsRef.current = [];
+    setSteps([]);
     if (streamingRef.current) return;
     const live = chatLive.get();
     if (live.streaming && live.threadId === threadId) {
@@ -336,9 +458,15 @@ export function ConversationView({
         })
         .catch(() => {});
       let disposed = false;
+      liveSessionRef.current = live.session;
+      stepsRef.current = live.steps;
+      setSteps(live.steps);
+      setStepsCollapsed(false);
       const unsub = chatLive.subscribe(() => {
         const cur = chatLive.get();
         if (cur.session !== live.session) return;
+        stepsRef.current = cur.steps;
+        setSteps(cur.steps);
         setMessages((list) =>
           list.map((x) =>
             x.id === botId
@@ -369,6 +497,12 @@ export function ConversationView({
     }
     loadMessages(threadId);
   }, [conversationKey, threadId, loadMessages, listMessages]);
+
+  React.useEffect(() => {
+    if (!streaming) return;
+    const t = window.setInterval(() => forceTick((v) => v + 1), 300);
+    return () => window.clearInterval(t);
+  }, [streaming]);
 
   React.useEffect(() => {
     const el = bottomRef.current;
@@ -536,9 +670,47 @@ export function ConversationView({
             chatLive.meta(citations, liveSession);
             patch((x) => ({ ...x, citations, promptPreview }));
           },
-          onTool: (name) => setToolNote(name),
+          onStatus: (step) =>
+            setStepsBoth((prev) => [
+              ...prev.map((x) =>
+                x.status === "active"
+                  ? { ...x, status: "done" as const, ms: x.ms ?? Date.now() - x.startedAt }
+                  : x,
+              ),
+              { kind: "thinking", step, status: "active", startedAt: Date.now() },
+            ]),
+          onTool: (name, step, args) =>
+            setStepsBoth((prev) => [
+              ...prev.map((x) =>
+                x.status === "active"
+                  ? { ...x, status: "done" as const, ms: x.ms ?? Date.now() - x.startedAt }
+                  : x,
+              ),
+              {
+                kind: "tool",
+                name,
+                args,
+                step: step ?? 0,
+                status: "active",
+                startedAt: Date.now(),
+              },
+            ]),
+          onToolResult: ({ name, ms, count }) =>
+            setStepsBoth((prev) =>
+              prev.map((x) =>
+                x.kind === "tool" && x.name === name && x.status === "active"
+                  ? { ...x, status: "done", ms, count }
+                  : x,
+              ),
+            ),
           onToken: (t) => {
-            setToolNote(null);
+            setStepsBoth((prev) =>
+              prev.map((x) =>
+                x.status === "active"
+                  ? { ...x, status: "done", ms: x.ms ?? Date.now() - x.startedAt }
+                  : x,
+              ),
+            );
             chatLive.token(t, liveSession);
             pendingTokens.current += t;
             scheduleTokenFlush(botId);
@@ -564,7 +736,7 @@ export function ConversationView({
       }
       chatLive.end(liveSession);
       setStreaming(false);
-      setToolNote(null);
+      setStepsCollapsed(true);
       abortRef.current = null;
       streamingId.current = null;
       streamingRef.current = false;
@@ -618,7 +790,14 @@ export function ConversationView({
                 message={m}
                 avatar={avatarNode}
                 streaming={streaming && m.id === streamingId.current}
-                toolNote={m.id === streamingId.current ? toolNote : null}
+                steps={
+                  m.id === streamingId.current ||
+                  (!streaming && m.role === "assistant" && idx === messages.length - 1)
+                    ? steps
+                    : undefined
+                }
+                stepsCollapsed={stepsCollapsed}
+                onToggleSteps={() => setStepsCollapsed((v) => !v)}
                 onRetry={
                   m.role === "assistant" && !streaming
                     ? () => {
@@ -677,35 +856,37 @@ export function ConversationView({
             </div>
           )}
           {mentionOpen && (
-            <div className="absolute bottom-full left-3 z-20 mb-2 max-h-56 w-64 overflow-y-auto rounded-lg border bg-card p-1 shadow-lift">
-              <p className="px-2 py-1 text-[11px] text-muted-foreground">@ 知识库范围（可多选）</p>
-              {sources.length === 0 && (
-                <p className="px-2 py-1.5 text-xs text-muted-foreground">还没有信源</p>
-              )}
-              {sources.map((src) => {
-                const on = scoped.some((x) => x.id === src.id);
-                return (
-                  <button
-                    key={src.id}
-                    type="button"
-                    onClick={() => {
-                      setScoped((p) =>
-                        on ? p.filter((x) => x.id !== src.id) : [...p, { id: src.id, name: src.name }],
+            <div className="absolute bottom-full left-3 z-20 mb-2 w-72">
+              <Command className="rounded-lg border shadow-lift">
+                <CommandInput placeholder="匹配知识库…" autoFocus />
+                <CommandList>
+                  <CommandEmpty>没有匹配的信源</CommandEmpty>
+                  <CommandGroup heading="@ 知识库范围（可多选）">
+                    {sources.map((src) => {
+                      const on = scoped.some((x) => x.id === src.id);
+                      return (
+                        <CommandItem
+                          key={src.id}
+                          value={src.name}
+                          onSelect={() => {
+                            setScoped((p) =>
+                              on
+                                ? p.filter((x) => x.id !== src.id)
+                                : [...p, { id: src.id, name: src.name }],
+                            );
+                            setInput((v) => (v.endsWith("@") ? v.slice(0, -1) : v));
+                            setMentionOpen(false);
+                            textareaRef.current?.focus();
+                          }}
+                        >
+                          <span className="min-w-0 flex-1 truncate">{src.name}</span>
+                          {on && <Check className="size-3.5 shrink-0" />}
+                        </CommandItem>
                       );
-                      setInput((v) => (v.endsWith("@") ? v.slice(0, -1) : v));
-                      setMentionOpen(false);
-                      textareaRef.current?.focus();
-                    }}
-                    className={cn(
-                      "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted",
-                      on && "bg-muted",
-                    )}
-                  >
-                    <span className="min-w-0 flex-1 truncate">{src.name}</span>
-                    {on && <Check className="size-3.5 shrink-0" />}
-                  </button>
-                );
-              })}
+                    })}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
             </div>
           )}
           <input
