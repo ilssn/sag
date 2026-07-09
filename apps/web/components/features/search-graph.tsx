@@ -55,7 +55,7 @@ const LAYOUT = {
   chunkR: 380,
   entityR: 500,
   minSector: 0.55, // rad，命中很少的源也保有的最小扇区
-  single: { sourceY: 170, chunkR: 260, entityGap: 145, arcFrom: 0.16, arcTo: 0.84 },
+  single: { queryGap: 210, chunkR: 320, entityGap: 150 },
 } as const;
 type Side = "top" | "right" | "bottom" | "left";
 
@@ -213,12 +213,19 @@ function groupResults(results: Section[], entitiesBySource: Map<string, Entity[]
     g.sections.push(s);
     bySource.set(key, g);
   }
-  return [...bySource.entries()].map(([sid, g]) => ({
-    sid,
-    name: g.name,
-    chunks: [...g.sections].sort((a, b) => b.score - a.score).slice(0, 8),
-    ents: entitiesBySource.get(sid) ?? [],
-  }));
+  return [...bySource.entries()].map(([sid, g]) => {
+    const seen = new Set<string>();
+    const chunks = [...g.sections]
+      .sort((a, b) => b.score - a.score)
+      .filter((sec) => {
+        const key = sec.chunk_id ?? `fp:${sec.content.slice(0, 80)}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 8);
+    return { sid, name: g.name, chunks, ents: entitiesBySource.get(sid) ?? [] };
+  });
 }
 
 function chunkNode(sec: Section, id: string, position: Point): Node {
@@ -266,37 +273,53 @@ function linkEntities(
 
 /** 辐射：信源等分角环形发散；单源=中心簇 + 片段全周环。 */
 function buildRadial(query: string, groups: Grouped[]): { nodes: Node[]; edges: Edge[] } {
-  const q = { x: 0, y: 0 };
+  const single = groups.length === 1;
+  const tau = Math.PI * 2;
+  // 单源：信源即圆心（查询悬于其上方）；多源：查询为圆心
+  const q = single ? { x: 0, y: -LAYOUT.single.queryGap } : { x: 0, y: 0 };
   const nodes: Node[] = [{ id: "q", type: "sag", position: q, data: { label: query, kind: "query" } }];
   const edges: Edge[] = [];
   let idx = 0;
   const nextIdx = () => idx++;
-  const tau = Math.PI * 2;
-  const single = groups.length === 1;
 
   groups.forEach((g, gi) => {
-    const sector = single ? tau : tau / groups.length;
-    const mid = single ? Math.PI / 2 : -Math.PI / 2 + (gi + 0.5) * sector;
     const sPos = single
-      ? { x: 0, y: LAYOUT.single.sourceY }
-      : { x: Math.cos(mid) * LAYOUT.sourceR, y: Math.sin(mid) * LAYOUT.sourceR };
+      ? { x: 0, y: 0 }
+      : (() => {
+          const mid = -Math.PI / 2 + (gi + 0.5) * (tau / groups.length);
+          return { x: Math.cos(mid) * LAYOUT.sourceR, y: Math.sin(mid) * LAYOUT.sourceR };
+        })();
     const sid = `s:${g.sid}`;
     nodes.push({ id: sid, type: "sag", position: sPos, data: { label: g.name, kind: "source" } });
     edges.push(edgeOf("q", sid, "qs", nextIdx(), q, sPos));
 
     const n = g.chunks.length;
-    // 片段绕各自信源方向的局部扇（多源），或绕中心全周（单源）
-    const spread = single ? tau : Math.min(sector * 0.78, 0.18 * Math.max(n - 1, 1));
     g.chunks.forEach((sec, ci) => {
       const t = n === 1 ? 0.5 : ci / (n - 1);
-      const angle = single ? -Math.PI / 2 + (ci / n) * tau : mid + (t - 0.5) * spread;
-      const cPos = { x: Math.cos(angle) * LAYOUT.chunkR, y: Math.sin(angle) * LAYOUT.chunkR };
+      let angle: number;
+      let center: Point;
+      let radius: number;
+      if (single) {
+        // 开口朝上的弧环（-60°→240°）：全部边自信源纯放射，绝不穿过上方查询
+        angle = (Math.PI / 180) * (-60 + t * 300);
+        center = sPos;
+        radius = LAYOUT.single.chunkR;
+      } else {
+        const sector = tau / groups.length;
+        const mid = -Math.PI / 2 + (gi + 0.5) * sector;
+        const spread = Math.min(sector * 0.78, 0.18 * Math.max(n - 1, 1));
+        angle = mid + (t - 0.5) * spread;
+        center = { x: 0, y: 0 };
+        radius = LAYOUT.chunkR;
+      }
+      const cPos = { x: center.x + Math.cos(angle) * radius, y: center.y + Math.sin(angle) * radius };
       const cid = `c:${sec.chunk_id ?? `${g.sid}-${ci}`}`;
       nodes.push(chunkNode(sec, cid, cPos));
       edges.push(edgeOf(sid, cid, "sc", nextIdx(), sPos, cPos));
       linkEntities(g, sec, cid, cPos, nodes, edges, nextIdx, (k) => {
         const ea = angle + (k - 1) * 0.09;
-        return { x: Math.cos(ea) * LAYOUT.entityR, y: Math.sin(ea) * LAYOUT.entityR };
+        const er = radius + LAYOUT.single.entityGap;
+        return { x: center.x + Math.cos(ea) * er, y: center.y + Math.sin(ea) * er };
       });
     });
   });
