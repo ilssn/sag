@@ -12,6 +12,13 @@ import { formatBytes, relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { DocStatusBadge } from "@/components/features/status-badge";
 import { Button } from "@/components/ui/button";
+import type { ImperativePanelHandle } from "react-resizable-panels";
+
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -28,6 +35,8 @@ interface PanelCtx {
   open: (target: DetailTarget) => void;
   close: () => void;
   toggleMaximize: () => void;
+  /** 详情 ResizablePanel 的命令句柄（放大/还原经官方 resize API） */
+  panelRef: React.RefObject<ImperativePanelHandle | null>;
 }
 
 const Ctx = React.createContext<PanelCtx>({
@@ -36,6 +45,7 @@ const Ctx = React.createContext<PanelCtx>({
   open: () => {},
   close: () => {},
   toggleMaximize: () => {},
+  panelRef: { current: null },
 });
 
 export function useDetailPanel() {
@@ -54,7 +64,23 @@ export function DetailPanelProvider({ children }: { children: React.ReactNode })
     setTarget(null);
     setMaximized(false);
   }, []);
-  const toggleMaximize = React.useCallback(() => setMaximized((m) => !m), []);
+  const panelRef = React.useRef<ImperativePanelHandle | null>(null);
+  const lastSize = React.useRef(34);
+  const toggleMaximize = React.useCallback(() => {
+    setMaximized((m) => {
+      const next = !m;
+      const panel = panelRef.current;
+      if (panel) {
+        if (next) {
+          lastSize.current = panel.getSize();
+          panel.resize(100);
+        } else {
+          panel.resize(lastSize.current || 34);
+        }
+      }
+      return next;
+    });
+  }, []);
 
   // 切换主导航（/chat ↔ /search ↔ /knowledge…）时收起面板
   const section = pathname.split("/")[1];
@@ -67,7 +93,7 @@ export function DetailPanelProvider({ children }: { children: React.ReactNode })
   }, [section, close]);
 
   return (
-    <Ctx.Provider value={{ target, maximized, open, close, toggleMaximize }}>
+    <Ctx.Provider value={{ target, maximized, open, close, toggleMaximize, panelRef }}>
       {children}
     </Ctx.Provider>
   );
@@ -75,17 +101,7 @@ export function DetailPanelProvider({ children }: { children: React.ReactNode })
 
 /** 主内容区：面板放大时隐藏（只留左侧菜单 + 面板）。 */
 export function DetailPanelMain({ children }: { children: React.ReactNode }) {
-  const { target, maximized } = useDetailPanel();
-  return (
-    <div
-      className={cn(
-        "min-w-0 flex-1 overflow-y-auto overscroll-contain",
-        target && maximized && "hidden",
-      )}
-    >
-      {children}
-    </div>
-  );
+  return <div className="h-full min-w-0 overflow-y-auto overscroll-contain">{children}</div>;
 }
 
 // ── 内容视图 ─────────────────────────────────────────────────────────
@@ -321,41 +337,42 @@ function panelTitle(target: DetailTarget): string {
   return target.kind === "chunk" ? "原文溯源" : "文档详情";
 }
 
-/** 右侧详情栏：lg 及以上为内嵌第三栏（可放大占满主区），小屏退化为 Sheet。 */
-export function DetailPanelOutlet() {
-  const { target, maximized, close, toggleMaximize } = useDetailPanel();
-  const [isDesktop, setIsDesktop] = React.useState(true);
-
+/** lg 断点（详情栏 内嵌/Sheet 的分界）。 */
+export function useIsLgUp(): boolean {
+  const [isLg, setIsLg] = React.useState(true);
   React.useEffect(() => {
     const mq = window.matchMedia("(min-width: 1024px)");
-    const update = () => setIsDesktop(mq.matches);
+    const update = () => setIsLg(mq.matches);
     update();
     mq.addEventListener("change", update);
     return () => mq.removeEventListener("change", update);
   }, []);
+  return isLg;
+}
 
+/** 小屏详情：Sheet 覆盖层。 */
+export function DetailPanelSheet() {
+  const { target, close } = useDetailPanel();
+  if (!target) return null;
+  return (
+    <Sheet open onOpenChange={(o) => !o && close()}>
+      <SheetContent side="right" className="flex w-full flex-col gap-4 sm:max-w-lg">
+        <SheetTitle className="text-sm font-medium">{panelTitle(target)}</SheetTitle>
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+          <PanelBody target={target} />
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+/** 桌面详情：Resizable 面板内的内容（宽度由外层官方组件管理）。 */
+export function DetailPanelOutlet() {
+  const { target, maximized, close, toggleMaximize } = useDetailPanel();
   if (!target) return null;
 
-  if (!isDesktop) {
-    return (
-      <Sheet open onOpenChange={(o) => !o && close()}>
-        <SheetContent side="right" className="flex w-full flex-col gap-4 sm:max-w-lg">
-          <SheetTitle className="text-sm font-medium">{panelTitle(target)}</SheetTitle>
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-            <PanelBody target={target} />
-          </div>
-        </SheetContent>
-      </Sheet>
-    );
-  }
-
   return (
-    <aside
-      className={cn(
-        "flex min-h-0 flex-col border-l bg-background",
-        maximized ? "flex-1" : "w-[440px] shrink-0 xl:w-[520px]",
-      )}
-    >
+    <aside className="flex h-full min-h-0 flex-col bg-background">
       <div className="flex h-12 shrink-0 items-center gap-1 border-b px-3">
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{panelTitle(target)}</span>
         <Tooltip>

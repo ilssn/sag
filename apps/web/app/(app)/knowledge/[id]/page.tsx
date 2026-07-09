@@ -83,7 +83,7 @@ export default function SourceDetailPage() {
           </Link>
           {source ? (
             <>
-              <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground">
+              <h1 className="font-display text-xl font-semibold tracking-tight text-foreground">
                 {source.name}
               </h1>
               <p className="mt-1.5 text-sm text-muted-foreground">

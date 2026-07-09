@@ -3,7 +3,7 @@
 import * as React from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Clock, FileText, List, MessageSquare, Search as SearchIcon, Waypoints } from "lucide-react";
 import { toast } from "sonner";
 
@@ -172,6 +172,7 @@ function ResultList({ results }: { results: Section[] }) {
 
 function SearchPageInner() {
   const params = useSearchParams();
+  const router = useRouter();
   const [query, setQuery] = React.useState("");
   const [scope, setScope] = React.useState<string>(params.get("source") ?? ALL);
   const [sources, setSources] = React.useState<Source[]>([]);
@@ -216,8 +217,8 @@ function SearchPageInner() {
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4 md:p-6">
-      <form onSubmit={run} className="flex flex-col gap-2">
-        <div className="relative">
+      <form onSubmit={run} className="flex items-center gap-2">
+        <div className="relative flex-1">
           {busy ? (
             <Spinner className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           ) : (
@@ -249,6 +250,13 @@ function SearchPageInner() {
             </Select>
           </div>
         </div>
+        <button
+          type="button"
+          onClick={() => (window.history.length > 1 ? router.back() : router.push("/chat"))}
+          className="shrink-0 rounded-md px-2 py-1.5 text-sm text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          取消
+        </button>
       </form>
 
       {results !== null ? (
