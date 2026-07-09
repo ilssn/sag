@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import * as React from "react";
-import { ArrowUp, Check, ChevronDown, Copy, FileUp, ImagePlus, Library, Loader2, Plus, RotateCcw, Square, Telescope, Trash2, X, Zap } from "lucide-react";
+import { ArrowUp, Brain, Check, ChevronDown, Copy, FileUp, ImagePlus, Library, Loader2, Plus, RotateCcw, Square, Trash2, X, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 import type { AskHandlers } from "@/lib/sse";
@@ -19,14 +19,6 @@ import { PromptPreview } from "@/components/features/chat/prompt-preview";
 import { AuthImage } from "@/components/features/auth-image";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -397,6 +389,39 @@ export function ConversationView({
   const [scoped, setScoped] = React.useState<{ id: string; name: string }[]>([]);
   const [sources, setSources] = React.useState<Source[]>([]);
   const [mentionOpen, setMentionOpen] = React.useState(false);
+  const [mentionIdx, setMentionIdx] = React.useState(0);
+  const mentionListRef = React.useRef<HTMLDivElement>(null);
+
+  const mentionQuery = React.useMemo(() => {
+    if (!mentionOpen) return "";
+    const at = input.lastIndexOf("@");
+    return at >= 0 ? input.slice(at + 1) : "";
+  }, [mentionOpen, input]);
+  const mentionMatches = React.useMemo(() => {
+    const q = mentionQuery.trim().toLowerCase();
+    return q ? sources.filter((s) => s.name.toLowerCase().includes(q)) : sources;
+  }, [sources, mentionQuery]);
+  React.useEffect(() => setMentionIdx(0), [mentionQuery]);
+  React.useEffect(() => {
+    mentionListRef.current
+      ?.querySelector(`[data-idx="${mentionIdx}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [mentionIdx]);
+
+  const selectMention = React.useCallback(
+    (src: { id: string; name: string }) => {
+      setScoped((p) =>
+        p.some((x) => x.id === src.id) ? p : [...p, { id: src.id, name: src.name }],
+      );
+      setInput((v) => {
+        const at = v.lastIndexOf("@");
+        return at >= 0 ? v.slice(0, at) : v;
+      });
+      setMentionOpen(false);
+      textareaRef.current?.focus();
+    },
+    [],
+  );
   const [chatMode, setChatMode] = React.useState<"agentic" | "fast">("agentic");
   React.useEffect(() => {
     if (window.localStorage.getItem("sag:chat-mode") === "fast") setChatMode("fast");
@@ -694,7 +719,8 @@ export function ConversationView({
             chatLive.meta(citations, liveSession);
             patch((x) => ({ ...x, citations, promptPreview }));
           },
-          onStatus: (step) =>
+          onStatus: (phase, step) => {
+            if (phase !== "thinking") return;
             setStepsBoth((prev) => [
               ...prev.map((x) =>
                 x.status === "active"
@@ -702,7 +728,8 @@ export function ConversationView({
                   : x,
               ),
               { kind: "thinking", step, status: "active", startedAt: Date.now() },
-            ]),
+            ]);
+          },
           onTool: (name, step, args) =>
             setStepsBoth((prev) => [
               ...prev.map((x) =>
@@ -881,37 +908,35 @@ export function ConversationView({
             </div>
           )}
           {mentionOpen && (
-            <div className="absolute bottom-full left-3 z-20 mb-2 w-72">
-              <Command className="rounded-lg border shadow-lift">
-                <CommandInput placeholder="匹配知识库…" autoFocus />
-                <CommandList>
-                  <CommandEmpty>没有匹配的信源</CommandEmpty>
-                  <CommandGroup heading="@ 知识库范围（可多选）">
-                    {sources.map((src) => {
-                      const on = scoped.some((x) => x.id === src.id);
-                      return (
-                        <CommandItem
-                          key={src.id}
-                          value={src.name}
-                          onSelect={() => {
-                            setScoped((p) =>
-                              on
-                                ? p.filter((x) => x.id !== src.id)
-                                : [...p, { id: src.id, name: src.name }],
-                            );
-                            setInput((v) => (v.endsWith("@") ? v.slice(0, -1) : v));
-                            setMentionOpen(false);
-                            textareaRef.current?.focus();
-                          }}
-                        >
-                          <span className="min-w-0 flex-1 truncate">{src.name}</span>
-                          {on && <Check className="size-3.5 shrink-0" />}
-                        </CommandItem>
-                      );
-                    })}
-                  </CommandGroup>
-                </CommandList>
-              </Command>
+            <div
+              ref={mentionListRef}
+              className="absolute bottom-full left-3 z-20 mb-2 max-h-56 w-72 overflow-y-auto rounded-lg border bg-card p-1 shadow-lift"
+            >
+              <p className="px-2 py-1 text-[11px] text-muted-foreground">
+                @ 知识库范围{mentionQuery ? `：${mentionQuery}` : ""}（↑↓ 选择 · Enter 确认）
+              </p>
+              {mentionMatches.length === 0 && (
+                <p className="px-2 py-1.5 text-xs text-muted-foreground">没有匹配的信源</p>
+              )}
+              {mentionMatches.map((src, i) => {
+                const on = scoped.some((x) => x.id === src.id);
+                return (
+                  <button
+                    key={src.id}
+                    type="button"
+                    data-idx={i}
+                    onMouseEnter={() => setMentionIdx(i)}
+                    onClick={() => selectMention(src)}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none transition-colors",
+                      i === mentionIdx ? "bg-muted" : "hover:bg-muted/60",
+                    )}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{src.name}</span>
+                    {on && <Check className="size-3.5 shrink-0 text-muted-foreground" />}
+                  </button>
+                );
+              })}
             </div>
           )}
           <input
@@ -935,7 +960,7 @@ export function ConversationView({
               e.target.value = "";
             }}
           />
-          <div className="flex flex-wrap items-end gap-1 px-0.5">
+          <div className="flex flex-wrap items-center gap-1 px-0.5">
             {scoped.map((sc) => (
               <span
                 key={sc.id}
@@ -960,11 +985,36 @@ export function ConversationView({
               onChange={(e) => {
                 const v = e.target.value;
                 setInput(v);
-                if (v.endsWith("@")) setMentionOpen(true);
+                if (v.endsWith("@")) {
+                  setMentionOpen(true);
+                } else if (mentionOpen) {
+                  const at = v.lastIndexOf("@");
+                  if (at < 0 || /\s/.test(v.slice(at + 1))) setMentionOpen(false);
+                }
               }}
               onKeyDown={(e) => {
-                if (e.key === "@") setMentionOpen(true);
-                if (e.key === "Escape") setMentionOpen(false);
+                if (mentionOpen) {
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setMentionIdx((i) => Math.min(i + 1, Math.max(mentionMatches.length - 1, 0)));
+                    return;
+                  }
+                  if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setMentionIdx((i) => Math.max(i - 1, 0));
+                    return;
+                  }
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    const pick = mentionMatches[mentionIdx];
+                    if (pick) selectMention(pick);
+                    return;
+                  }
+                  if (e.key === "Escape") {
+                    setMentionOpen(false);
+                    return;
+                  }
+                }
                 onKeyDown(e);
               }}
               onPaste={(e) => {
@@ -1017,12 +1067,12 @@ export function ConversationView({
                     aria-label={chatMode === "agentic" ? "深度模式（点击切换）" : "快速模式（点击切换）"}
                     title={chatMode === "agentic" ? "深度：多轮工具推理" : "快速：单轮直答"}
                   >
-                    {chatMode === "agentic" ? <Telescope className="size-4" /> : <Zap className="size-4" />}
+                    {chatMode === "agentic" ? <Brain className="size-4" /> : <Zap className="size-4" />}
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent side="top" align="start" className="min-w-44">
                   <DropdownMenuItem onClick={() => changeChatMode("agentic")}>
-                    <Telescope className="size-4" />
+                    <Brain className="size-4" />
                     <span className="flex-1">深度 · 多轮推理</span>
                     {chatMode === "agentic" && <Check className="size-3.5" />}
                   </DropdownMenuItem>

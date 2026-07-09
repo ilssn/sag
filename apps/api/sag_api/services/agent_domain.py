@@ -318,7 +318,11 @@ async def build_ask_context(
     if sources:
         targets = [(s.sag_source_config_id, s) for s in sources]
         outcome = await engine_manager.search_many(
-            targets, query, strategy=persona.get("search_strategy"), top_k=persona.get("top_k")
+            targets,
+            query,
+            # 种子检索用 vector（毫秒级）；图谱增强的价值经 agentic 多轮循环兑现
+            strategy=persona.get("search_strategy") or "vector",
+            top_k=persona.get("top_k"),
         )
         sections = outcome.sections
     else:
