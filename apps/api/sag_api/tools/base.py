@@ -44,6 +44,8 @@ class ToolContext:
     sources: list[Source] = field(default_factory=list)
     persona: dict[str, Any] = field(default_factory=dict)
     agent: Agent | None = None
+    # 全局证据编号偏移：循环在每次派发前设置，保证 [n] 跨轮递增不重号
+    citation_offset: int = 0
 
 
 @dataclass

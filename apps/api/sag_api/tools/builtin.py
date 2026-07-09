@@ -13,11 +13,11 @@ from sag_api.generation import build_citations
 from sag_api.tools.base import Tool, ToolContext, ToolMeta, ToolResult
 
 
-def _format_sections(sections: list) -> str:
+def _format_sections(sections: list, offset: int = 0) -> str:
     if not sections:
         return "（无相关资料）"
     blocks = []
-    for i, s in enumerate(sections, start=1):
+    for i, s in enumerate(sections, start=1 + offset):
         heading = getattr(s, "heading", None) or "片段"
         blocks.append(f"[{i}] {heading}\n{getattr(s, 'content', '')}")
     return "\n\n".join(blocks)
@@ -26,7 +26,10 @@ def _format_sections(sections: list) -> str:
 class SearchContextTool(Tool):
     meta = ToolMeta(
         name="search_context",
-        description="在助手绑定的信源中检索与问题相关的资料片段，返回带编号的证据，用于有据回答并引用 [n]。",
+        description=(
+            "在知识库中检索资料片段，返回带全局编号的证据（引用时用 [n]）。"
+            "可多轮调用：每次用不同角度/更具体的查询改写，直到证据足够。"
+        ),
         parameters={
             "type": "object",
             "properties": {
@@ -49,9 +52,12 @@ class SearchContextTool(Tool):
         )
         sections = outcome.sections
         source_refs = {s.sag_source_config_id: {"id": s.id, "name": s.name} for s in ctx.sources}
+        offset = max(0, ctx.citation_offset)
         citations = build_citations(sections, source_refs)
+        for c in citations:
+            c["n"] = c["n"] + offset
         return ToolResult(
-            content=_format_sections(sections),
+            content=_format_sections(sections, offset),
             citations=citations,
             data={"sections": sections, "section_count": len(sections)},
         )

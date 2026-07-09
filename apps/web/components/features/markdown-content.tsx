@@ -112,7 +112,7 @@ export function MarkdownContent({
                   className={cn(
                     "mx-0.5 inline-grid size-4 -translate-y-[1px] place-items-center rounded-full text-[10px] font-medium leading-none align-baseline transition-colors",
                     citation
-                      ? "bg-muted text-muted-foreground hover:bg-foreground/12 hover:text-foreground"
+                      ? "bg-primary/12 text-primary hover:bg-primary/22"
                       : "cursor-default bg-muted/60 text-muted-foreground/70",
                   )}
                   aria-label={citation ? `打开来源 ${n}` : `来源 ${n}`}

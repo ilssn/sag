@@ -238,6 +238,7 @@ async def ask(
         engine_manager=engine_manager,
         attachments=body.attachments,
         source_ids=body.source_ids,
+        llm=llm,
     )
     if plan.short_circuit is None and not llm.configured:
         raise ConfigurationError("尚未配置 LLM，无法生成回答")

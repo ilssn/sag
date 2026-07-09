@@ -10,12 +10,24 @@ import * as React from "react";
  * 2) 侧栏会话项能显示生成中角标。
  */
 
+export interface LiveStep {
+  kind: "thinking" | "tool";
+  step: number;
+  name?: string;
+  args?: string;
+  status: "active" | "done";
+  ms?: number;
+  count?: number;
+  startedAt: number;
+}
+
 export interface ChatLiveState {
   threadId: string | null;
   streaming: boolean;
   /** 已累计的助手文本（adopt 时作为初始内容） */
   content: string;
   citations: unknown[];
+  steps: LiveStep[];
   /** 每次开始自增，供 adopt 去重 */
   session: number;
 }
@@ -25,6 +37,7 @@ let state: ChatLiveState = {
   streaming: false,
   content: "",
   citations: [],
+  steps: [],
   session: 0,
 };
 
@@ -40,9 +53,21 @@ export const chatLive = {
     return () => subs.delete(fn);
   },
   start(threadId: string) {
-    state = { threadId, streaming: true, content: "", citations: [], session: state.session + 1 };
+    state = {
+      threadId,
+      streaming: true,
+      content: "",
+      citations: [],
+      steps: [],
+      session: state.session + 1,
+    };
     emit();
     return state.session;
+  },
+  setSteps(steps: LiveStep[], session = state.session) {
+    if (session !== state.session) return;
+    state = { ...state, steps };
+    emit();
   },
   token(text: string, session = state.session) {
     if (session !== state.session) return;
