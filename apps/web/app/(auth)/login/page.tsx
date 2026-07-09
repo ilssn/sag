@@ -47,7 +47,7 @@ export default function LoginPage() {
           s
         </span>
         <div>
-          <h1 className="font-display text-3xl font-medium tracking-tight">sag</h1>
+          <h1 className="font-display text-3xl font-semibold tracking-tight">sag</h1>
           <p className="mt-1 text-sm text-muted-foreground">从信息源到知识问答</p>
         </div>
       </div>

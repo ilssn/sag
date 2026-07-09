@@ -20,7 +20,7 @@ function SourceRow({ source, first }: { source: Source; first: boolean }) {
   return (
     <Link
       href={`/knowledge/${source.id}`}
-      className={`flex items-center gap-3 px-4 py-3 text-sm transition-colors hover:bg-muted/50 ${first ? "" : "border-t"}`}
+      className={`flex items-center gap-3 px-4 py-3 text-sm outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted/60 ${first ? "" : "border-t"}`}
     >
       <div className="grid size-9 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
         <Layers className="size-4" />

@@ -58,7 +58,7 @@ export function SiteHeader() {
       <div className="ml-auto flex items-center gap-1.5">
         <Link
           href="/search"
-          className="inline-flex h-8 items-center gap-2 rounded-md border bg-muted/40 px-2.5 text-sm text-muted-foreground transition-colors hover:bg-muted"
+          className="inline-flex h-8 items-center gap-2 rounded-md border bg-muted/40 px-2.5 text-sm text-muted-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
         >
           <Search className="size-3.5" />
           <span className="hidden md:inline">搜索…</span>

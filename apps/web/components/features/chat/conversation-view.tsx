@@ -368,7 +368,7 @@ export function ConversationView({
                       key={q}
                       type="button"
                       onClick={() => send(q)}
-                      className="rounded-full border bg-card px-3 py-1.5 text-xs text-muted-foreground shadow-soft transition-colors hover:bg-muted hover:text-foreground"
+                      className="rounded-full border bg-card px-3 py-1.5 text-xs text-muted-foreground shadow-soft outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       {q}
                     </button>
@@ -391,7 +391,7 @@ export function ConversationView({
       </div>
 
       <div className="border-t bg-background px-4 py-3">
-        <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-lg border bg-card p-2 shadow-soft focus-within:border-border">
+        <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-xl border bg-card p-2 shadow-soft transition-shadow focus-within:border-foreground/20 focus-within:shadow-lift">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
