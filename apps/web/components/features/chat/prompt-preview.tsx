@@ -11,17 +11,26 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 /** 「查看本轮 prompt」——把实际发给模型的提示词摊开，回答从何而来一目了然。 */
 export function PromptPreview({ preview }: { preview: string }) {
   return (
     <Dialog>
-      <DialogTrigger asChild>
-        <button className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground">
-          <Lightbulb className="size-3" />
-          查看本轮 prompt
-        </button>
-      </DialogTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DialogTrigger asChild>
+            <button
+              type="button"
+              className="mt-1.5 grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              aria-label="查看本轮 prompt"
+            >
+              <Lightbulb className="size-3.5" />
+            </button>
+          </DialogTrigger>
+        </TooltipTrigger>
+        <TooltipContent>查看本轮 prompt</TooltipContent>
+      </Tooltip>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>本轮 prompt</DialogTitle>

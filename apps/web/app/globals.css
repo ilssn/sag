@@ -175,11 +175,12 @@
 
   /* 答案正文排版 */
   .answer-prose {
-    line-height: 1.75;
-    font-size: 0.9375rem;
+    line-height: 1.68;
+    font-size: 0.875rem;
+    overflow-wrap: anywhere;
   }
   .answer-prose p {
-    margin: 0.5rem 0;
+    margin: 0.375rem 0;
   }
   .answer-prose strong {
     color: hsl(var(--foreground));
@@ -187,7 +188,7 @@
   }
   .answer-prose ul,
   .answer-prose ol {
-    margin: 0.5rem 0;
+    margin: 0.375rem 0;
     padding-left: 1.25rem;
   }
   .answer-prose li {
@@ -243,6 +244,7 @@
     text-decoration: underline;
     text-underline-offset: 2px;
     text-decoration-thickness: 1px;
+    word-break: break-word;
   }
   .answer-prose hr {
     margin: 1rem 0;

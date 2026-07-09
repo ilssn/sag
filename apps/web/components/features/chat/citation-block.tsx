@@ -6,6 +6,7 @@ import { BookOpenText, Quote } from "lucide-react";
 import type { Citation } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useDetailPanel } from "@/components/features/detail-panel";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 export const CitationBlock = React.memo(function CitationBlock({
   citations,
@@ -18,13 +19,19 @@ export const CitationBlock = React.memo(function CitationBlock({
 
   return (
     <div className="mt-3 border-t pt-2.5">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <Quote className="size-3.5" />
-        来源 · {citations.length}
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label={`来源 ${citations.length} 条`}
+          >
+            <Quote className="size-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>来源 · {citations.length}</TooltipContent>
+      </Tooltip>
       {open && (
         <div className="mt-2 flex flex-col gap-1.5">
           {citations.map((c) => {

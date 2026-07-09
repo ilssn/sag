@@ -82,6 +82,15 @@ curl -s http://localhost:8000/api/v1/sources/<SOURCE_ID>/mcp \
 
 **HTTP 接法**：宿主填 `http://<host>/mcp/?source_id=<SOURCE_ID>`，并在 `Authorization` 头携带 `Bearer <token>`。
 
+### 作为 Agent Skill（Claude Code / Codex 等）
+
+sag 提供官方 Skill（[`skills/sag/`](skills/sag/)）：教 Agent 用 7 个 MCP 工具走
+「list_documents → outline → search/grep → get_chunk/read」的探索漏斗。
+复制该目录到你的 skills 目录（如 `~/.claude/skills/sag-knowledge/`）即可启用。
+
+> **双形态**：sag 既是**客户端**（自己聊，带引用问答），也是**上下文供给方**
+> （被任意 Agent 经 MCP/Skill/OpenAI 端点挂载）——同一知识库，两个出口。
+
 ### Agent 挂载 MCP 扩展工具
 
 Agent 除了绑定信源作答，还能挂载**外部 MCP server**（本地 filesystem、检索、你自建的工具……）。在「Agent → 连接 → MCP server」里填 HTTP url 或本地命令（如 `npx -y @modelcontextprotocol/server-filesystem /data`）即可；对话中模型可直接调用这些工具，与内置检索一视同仁。

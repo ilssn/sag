@@ -50,6 +50,8 @@ const Ctx = React.createContext<PanelCtx>({
   panelRef: { current: null },
 });
 
+const DEFAULT_PANEL_SIZE = 34;
+
 export function useDetailPanel() {
   return React.useContext(Ctx);
 }
@@ -62,22 +64,24 @@ export function DetailPanelProvider({ children }: { children: React.ReactNode })
   const open = React.useCallback((t: DetailTarget) => {
     setTarget(t);
   }, []);
+  const panelRef = React.useRef<ImperativePanelHandle | null>(null);
+  const resetPanelSize = React.useCallback(() => {
+    panelRef.current?.resize(DEFAULT_PANEL_SIZE);
+  }, []);
   const close = React.useCallback(() => {
+    resetPanelSize();
     setTarget(null);
     setMaximized(false);
-  }, []);
-  const panelRef = React.useRef<ImperativePanelHandle | null>(null);
-  const lastSize = React.useRef(34);
+  }, [resetPanelSize]);
   const toggleMaximize = React.useCallback(() => {
     setMaximized((m) => {
       const next = !m;
       const panel = panelRef.current;
       if (panel) {
         if (next) {
-          lastSize.current = panel.getSize();
           panel.resize(100);
         } else {
-          panel.resize(lastSize.current || 34);
+          panel.resize(DEFAULT_PANEL_SIZE);
         }
       }
       return next;
@@ -138,13 +142,13 @@ function RenderModeToggle({
 function TextBody({ text, mode }: { text: string; mode: "md" | "raw" }) {
   if (mode === "md") {
     return (
-      <div className="rounded-md border bg-muted/30 p-4">
+      <div className="min-w-0 overflow-hidden rounded-md border bg-muted/30 p-4">
         <MarkdownContent content={text} />
       </div>
     );
   }
   return (
-    <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-4 font-mono text-xs leading-relaxed">
+    <pre className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden whitespace-pre-wrap break-words rounded-md border bg-muted/30 p-4 font-mono text-xs leading-relaxed">
       {text}
     </pre>
   );
@@ -189,7 +193,7 @@ function ChunkView({
     );
   }
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex min-w-0 flex-col gap-3">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <h3 className="font-display text-base font-medium">{meta?.heading}</h3>
@@ -450,7 +454,7 @@ export function DetailPanelOutlet() {
       </div>
       <div
         className={cn(
-          "flex min-h-0 flex-1 flex-col overflow-y-auto p-4",
+          "flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden p-4",
           maximized && "mx-auto w-full max-w-4xl",
         )}
       >

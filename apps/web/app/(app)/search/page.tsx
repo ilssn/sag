@@ -4,7 +4,7 @@ import * as React from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Clock, FileText, List, MessageSquare, Search as SearchIcon, Waypoints } from "lucide-react";
+import { Clock, FileText, List, Loader2, MessageSquare, Search as SearchIcon, Waypoints } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
@@ -22,7 +22,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Spinner } from "@/components/ui/spinner";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 // 图谱视图较重，按需加载（列表为默认视图）
@@ -220,7 +219,7 @@ function SearchPageInner() {
       <form onSubmit={run} className="flex items-center gap-2">
         <div className="relative flex-1">
           {busy ? (
-            <Spinner className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Loader2 className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 animate-spin text-muted-foreground" />
           ) : (
             <SearchIcon className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           )}
@@ -259,7 +258,23 @@ function SearchPageInner() {
         </button>
       </form>
 
-      {results !== null ? (
+      {busy && results === null ? (
+        <div className="flex flex-col gap-2" aria-live="polite" aria-busy="true">
+          <div className="flex items-center gap-2 px-1 text-sm text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" />
+            正在检索
+          </div>
+          <div className="overflow-hidden rounded-lg border">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className={i > 0 ? "border-t p-4" : "p-4"}>
+                <Skeleton className="h-4 w-2/5" />
+                <Skeleton className="mt-2 h-3 w-full" />
+                <Skeleton className="mt-1.5 h-3 w-4/5" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : results !== null ? (
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between gap-3 px-1">
             <h2 className="text-sm font-medium">检索结果</h2>
