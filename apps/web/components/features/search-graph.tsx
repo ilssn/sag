@@ -55,7 +55,7 @@ const LAYOUT = {
   chunkR: 380,
   entityR: 500,
   minSector: 0.55, // rad，命中很少的源也保有的最小扇区
-  single: { queryGap: 210, chunkR: 320, entityGap: 150 },
+  single: { queryGap: 230, chunkR: 320, entityGap: 150, arcStartDeg: -15, arcEndDeg: 195 },
 } as const;
 type Side = "top" | "right" | "bottom" | "left";
 
@@ -214,13 +214,17 @@ function groupResults(results: Section[], entitiesBySource: Map<string, Entity[]
     bySource.set(key, g);
   }
   return [...bySource.entries()].map(([sid, g]) => {
-    const seen = new Set<string>();
+    const seenIds = new Set<string>();
+    const seenFps = new Set<string>();
     const chunks = [...g.sections]
       .sort((a, b) => b.score - a.score)
       .filter((sec) => {
-        const key = sec.chunk_id ?? `fp:${sec.content.slice(0, 80)}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
+        // 双保险：不同 chunk_id 但内容相同的重复段也拦下（引擎相邻段可能重复返回）
+        const fp = `${sec.heading ?? ""}|${sec.content.slice(0, 100)}`;
+        if (sec.chunk_id && seenIds.has(sec.chunk_id)) return false;
+        if (seenFps.has(fp)) return false;
+        if (sec.chunk_id) seenIds.add(sec.chunk_id);
+        seenFps.add(fp);
         return true;
       })
       .slice(0, 8);
@@ -300,8 +304,9 @@ function buildRadial(query: string, groups: Grouped[]): { nodes: Node[]; edges: 
       let center: Point;
       let radius: number;
       if (single) {
-        // 开口朝上的弧环（-60°→240°）：全部边自信源纯放射，绝不穿过上方查询
-        angle = (Math.PI / 180) * (-60 + t * 300);
+        // 开口朝上的弧环：片段仅分布于信源两侧与下方（扇贝形），上方空档留给查询
+        const { arcStartDeg, arcEndDeg } = LAYOUT.single;
+        angle = (Math.PI / 180) * (arcStartDeg + t * (arcEndDeg - arcStartDeg));
         center = sPos;
         radius = LAYOUT.single.chunkR;
       } else {
