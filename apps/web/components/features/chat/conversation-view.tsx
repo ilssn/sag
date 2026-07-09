@@ -17,6 +17,7 @@ import { CitationBlock } from "@/components/features/chat/citation-block";
 import { PromptPreview } from "@/components/features/chat/prompt-preview";
 import { AuthImage } from "@/components/features/auth-image";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -355,12 +356,17 @@ export function ConversationView({
     api.listSources().then(setSources).catch(() => {});
   }, []);
 
-  // 上下文用量估算（历史+输入，≈4 字符/词元）
+  // 上下文用量估算：CJK ≈1 token/字，其余 ≈1 token/4 字符（无 tokenizer 的专业近似）
   const ctxTokens = React.useMemo(() => {
-    const chars =
-      messages.reduce((a, m) => a + (m.content?.length ?? 0), 0) + input.length;
-    return Math.round(chars / 4);
+    const est = (t: string) => {
+      let cjk = 0;
+      for (const ch of t) if (/[\u3000-\u9fff\uf900-\ufaff]/.test(ch)) cjk++;
+      return cjk + Math.ceil((t.length - cjk) / 4);
+    };
+    return messages.reduce((a, m) => a + est(m.content ?? ""), 0) + est(input);
   }, [messages, input]);
+  const ctxWindow = caps?.context_window ?? 128000;
+  const ctxPct = Math.min(100, Math.round((ctxTokens / ctxWindow) * 100));
 
   async function addDocToKnowledge(files: FileList | null) {
     const f = files?.[0];
@@ -708,17 +714,6 @@ export function ConversationView({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setMentionOpen((v) => !v)}
-            disabled={streaming}
-            aria-label="限定知识库范围"
-            title="@ 知识库范围"
-            className={cn(scoped.length > 0 && "text-primary")}
-          >
-            <AtSign className="size-4" />
-          </Button>
           <textarea
             autoFocus
             value={input}
@@ -734,20 +729,27 @@ export function ConversationView({
                 addImages(e.clipboardData.files);
               }
             }}
-            rows={1}
+            rows={2}
             placeholder={placeholder}
-            className="max-h-40 min-h-[36px] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
+            className="max-h-40 min-h-[56px] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
           />
-          <span className="mb-1 hidden items-center gap-2 pr-1 text-[11px] tabular-nums text-muted-foreground sm:flex">
-            <span title="上下文用量估算">≈{ctxTokens >= 1000 ? (ctxTokens / 1000).toFixed(1) + "k" : ctxTokens} tok</span>
-            <a
-              href="/settings"
-              className="max-w-32 truncate rounded-full border bg-muted/50 px-2 py-0.5 font-mono transition-colors hover:bg-muted"
-              title="当前模型（点击去设置）"
-            >
-              {caps?.llm_model ?? "未配置"}
-            </a>
-          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                aria-label="上下文占用"
+                className="mb-1.5 mr-1 hidden size-5 shrink-0 cursor-default rounded-full sm:block"
+                style={{
+                  background: `conic-gradient(hsl(var(--primary)) ${ctxPct * 3.6}deg, hsl(var(--muted)) 0deg)`,
+                  WebkitMask: "radial-gradient(farthest-side, transparent 58%, black 60%)",
+                  mask: "radial-gradient(farthest-side, transparent 58%, black 60%)",
+                }}
+              />
+            </TooltipTrigger>
+            <TooltipContent side="top" className="tabular-nums">
+              上下文 ≈{ctxTokens >= 1000 ? (ctxTokens / 1000).toFixed(1) + "k" : ctxTokens} /
+              {" "}{Math.round(ctxWindow / 1000)}k tok（{ctxPct}%）· {caps?.llm_model ?? "未配置"}
+            </TooltipContent>
+          </Tooltip>
           {streaming ? (
             <Button variant="outline" size="icon" onClick={stop} title="停止">
               <Square className="size-4" />

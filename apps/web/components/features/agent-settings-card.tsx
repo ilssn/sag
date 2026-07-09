@@ -58,8 +58,8 @@ export function AgentSettingsCard() {
       </CardHeader>
       <CardContent>
         <form onSubmit={save} className="flex flex-col gap-4">
-          <div className="flex gap-3">
-            <Field>
+          <div className="flex items-end gap-3">
+            <Field className="w-20 shrink-0">
               <FieldLabel htmlFor="a-avatar">头像</FieldLabel>
               <Input
                 id="a-avatar"
@@ -68,7 +68,7 @@ export function AgentSettingsCard() {
                 className="w-16 text-center"
               />
             </Field>
-            <Field className="flex-1">
+            <Field className="min-w-0 flex-1">
               <FieldLabel htmlFor="a-name">名字</FieldLabel>
               <Input id="a-name" value={name} onChange={(e) => setName(e.target.value)} required />
             </Field>

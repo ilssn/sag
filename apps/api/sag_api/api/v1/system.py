@@ -23,6 +23,7 @@ def _capabilities() -> dict:
     return {
         "llm_configured": settings.llm_configured,
         "llm_model": settings.llm_model,
+        "context_window": settings.llm_context_window,
         "embedding_model": settings.embedding_model,
         "vector_provider": settings.sag_vector_provider,
         "language": settings.sag_language,

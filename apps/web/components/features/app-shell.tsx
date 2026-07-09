@@ -194,12 +194,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           )}
         >
           <motion.div
-            layout
-            transition={{ type: "spring", stiffness: 300, damping: 32 }}
+            key={windowed ? "window" : "full"}
+            initial={{ opacity: 0.6, scale: 0.985 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ type: "spring", stiffness: 340, damping: 30 }}
             className={cn(
               windowed
                 ? // transform 使内部 fixed 的 Sidebar 以本窗体为 containing block（Mac 窗口形态）
-                  "relative h-[calc(100svh-2rem)] w-full max-w-[1200px] transform-gpu overflow-hidden rounded-xl border bg-background shadow-lift md:h-[min(860px,calc(100svh-4rem))]"
+                  "relative h-[calc(100svh-2rem)] w-full max-w-[1360px] transform-gpu overflow-hidden rounded-xl border bg-background shadow-lift md:h-[min(920px,calc(100svh-4rem))]"
                 : "min-h-svh",
             )}
           >

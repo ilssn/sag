@@ -20,7 +20,13 @@ import { Input } from "@/components/ui/input";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 
-export function CreateSourceDialog({ onCreated }: { onCreated: (s: Source) => void }) {
+export function CreateSourceDialog({
+  onCreated,
+  trigger,
+}: {
+  onCreated: (s: Source) => void;
+  trigger?: React.ReactNode;
+}) {
   const [open, setOpen] = React.useState(false);
   const [name, setName] = React.useState("");
   const [description, setDescription] = React.useState("");
@@ -46,10 +52,12 @@ export function CreateSourceDialog({ onCreated }: { onCreated: (s: Source) => vo
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button>
-          <Plus className="size-4" />
-          新建信源
-        </Button>
+        {trigger ?? (
+          <Button>
+            <Plus className="size-4" />
+            新建信源
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="max-w-sm">
         <DialogHeader>

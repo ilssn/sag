@@ -46,6 +46,7 @@ export function ModelConfigForm() {
   const [llmModel, setLlmModel] = React.useState("");
   const [temperature, setTemperature] = React.useState(0.3);
   const [maxTokens, setMaxTokens] = React.useState(2048);
+  const [ctxWindow, setCtxWindow] = React.useState(128000);
   const [embModel, setEmbModel] = React.useState("");
   const [embBaseUrl, setEmbBaseUrl] = React.useState("");
   const [embKey, setEmbKey] = React.useState("");
@@ -60,6 +61,7 @@ export function ModelConfigForm() {
     setLlmModel(c.llm_model);
     setTemperature(c.llm_temperature);
     setMaxTokens(c.llm_max_tokens);
+    setCtxWindow(c.llm_context_window ?? 128000);
     setEmbModel(c.embedding_model);
     setEmbBaseUrl(c.embedding_base_url ?? "");
     setEmbDims(c.embedding_dimensions != null ? String(c.embedding_dimensions) : "");
@@ -83,6 +85,7 @@ export function ModelConfigForm() {
         llm_model: llmModel.trim(),
         llm_temperature: temperature,
         llm_max_tokens: maxTokens,
+        llm_context_window: ctxWindow,
         embedding_model: embModel.trim(),
         embedding_base_url: embBaseUrl.trim(),
         embedding_dimensions: embDims.trim() ? Number(embDims) : null,
@@ -166,6 +169,18 @@ export function ModelConfigForm() {
               onChange={(e) => setLlmModel(e.target.value)}
               placeholder="gpt-4o-mini"
             />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="llm-ctxwin">上下文窗口</FieldLabel>
+            <Input
+              id="llm-ctxwin"
+              type="number"
+              min={1024}
+              max={2000000}
+              value={ctxWindow}
+              onChange={(e) => setCtxWindow(Math.max(1024, Number(e.target.value) || 1024))}
+            />
+            <FieldDescription>模型总上下文（tokens），供输入框用量圆环计算。</FieldDescription>
           </Field>
           <Field>
             <FieldLabel htmlFor="llm-maxtok">最大 tokens</FieldLabel>

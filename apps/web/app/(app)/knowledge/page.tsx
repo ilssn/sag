@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ChevronRight, Layers, LayoutGrid, List } from "lucide-react";
+import { ChevronRight, Layers, LayoutGrid, List, Plus } from "lucide-react";
 
 import { api } from "@/lib/api";
 import type { Source } from "@/lib/types";
@@ -11,6 +11,7 @@ import { CreateSourceDialog } from "@/components/features/create-source-dialog";
 import { EmptyState } from "@/components/features/empty-state";
 import { PageHeader } from "@/components/features/page-header";
 import { SourceCard } from "@/components/features/source-card";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
@@ -85,7 +86,14 @@ export default function KnowledgePage() {
                 <List />
               </ToggleGroupItem>
             </ToggleGroup>
-            <CreateSourceDialog onCreated={load} />
+            <CreateSourceDialog
+              onCreated={load}
+              trigger={
+                <Button size="icon" aria-label="新建信源" title="新建信源">
+                  <Plus />
+                </Button>
+              }
+            />
           </>
         }
       />
