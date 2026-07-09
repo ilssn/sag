@@ -119,7 +119,8 @@ async def chat_completions(
             yield chunk({}, finish="stop")
             yield "data: [DONE]\n\n"
 
-        return StreamingResponse(gen(), media_type="text/event-stream")
+        return StreamingResponse(gen(), media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     # 非流式：消费同一事件流，聚合为最终答案
     parts: list[str] = []
