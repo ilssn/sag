@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import type { AskHandlers } from "@/lib/sse";
 import type { Citation } from "@/lib/types";
+import { chatLive } from "@/lib/chat-live";
 import { useApp } from "@/components/features/app-shell";
 import { CitationBlock } from "@/components/features/chat/citation-block";
 import { PromptPreview } from "@/components/features/chat/prompt-preview";
@@ -179,8 +180,54 @@ export function ConversationView({
       return;
     }
     if (streamingRef.current) return;
+    const live = chatLive.get();
+    if (live.streaming && live.threadId === threadId) {
+      // 采纳进行中的流：种入已缓冲内容，订阅后续 token 直至结束
+      const botId = `live-${live.session}`;
+      streamingId.current = botId;
+      streamingRef.current = true;
+      setStreaming(true);
+      loadGeneration.current++;
+      listMessages(threadId)
+        .then((msgs) => {
+          setMessages([
+            ...msgs,
+            {
+              id: botId,
+              role: "assistant",
+              content: chatLive.get().content,
+              citations: (chatLive.get().citations as ConvMessage["citations"]) ?? [],
+            },
+          ]);
+        })
+        .catch(() => {});
+      const unsub = chatLive.subscribe(() => {
+        const cur = chatLive.get();
+        if (cur.session !== live.session) return;
+        setMessages((list) =>
+          list.map((x) =>
+            x.id === botId
+              ? {
+                  ...x,
+                  content: cur.content,
+                  citations: (cur.citations as ConvMessage["citations"]) ?? x.citations,
+                }
+              : x,
+          ),
+        );
+        if (!cur.streaming) {
+          unsub();
+          streamingRef.current = false;
+          streamingId.current = null;
+          setStreaming(false);
+          loadGeneration.current++;
+          loadMessages(threadId, { force: true });
+        }
+      });
+      return;
+    }
     loadMessages(threadId);
-  }, [conversationKey, threadId, loadMessages]);
+  }, [conversationKey, threadId, loadMessages, listMessages]);
 
   React.useEffect(() => {
     const el = bottomRef.current;
@@ -244,6 +291,7 @@ export function ConversationView({
     ]);
 
     setStreaming(true);
+    chatLive.start(tid);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     const patch = (fn: (m: ConvMessage) => ConvMessage) =>
@@ -254,9 +302,12 @@ export function ConversationView({
         tid,
         q,
         {
-          onMeta: (citations, promptPreview) =>
-            patch((x) => ({ ...x, citations, promptPreview })),
+          onMeta: (citations, promptPreview) => {
+            chatLive.meta(citations);
+            patch((x) => ({ ...x, citations, promptPreview }));
+          },
           onToken: (t) => {
+            chatLive.token(t);
             pendingTokens.current += t;
             scheduleTokenFlush(botId);
           },
@@ -277,6 +328,7 @@ export function ConversationView({
         cancelAnimationFrame(rafId.current);
         rafId.current = null;
       }
+      chatLive.end();
       setStreaming(false);
       abortRef.current = null;
       streamingId.current = null;
@@ -287,6 +339,7 @@ export function ConversationView({
   }
 
   function stop() {
+    chatLive.end();
     abortRef.current?.abort();
     setStreaming(false);
     streamingRef.current = false;

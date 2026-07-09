@@ -6,6 +6,9 @@ import { useTheme } from "next-themes";
 
 import { useApp } from "@/components/features/app-shell";
 import { AgentSettingsCard } from "@/components/features/agent-settings-card";
+import { ArchivedThreadsCard } from "@/components/features/archived-threads-card";
+import { usePetEnabled } from "@/components/features/pet";
+import { Switch } from "@/components/ui/switch";
 import { McpSettingsCard } from "@/components/features/mcp-settings-card";
 import { ModelConfigForm } from "@/components/features/model-config-form";
 import { PageHeader } from "@/components/features/page-header";
@@ -86,8 +89,9 @@ export default function SettingsPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="agent">
+        <TabsContent value="agent" className="flex flex-col gap-4">
           <AgentSettingsCard />
+          <ArchivedThreadsCard />
         </TabsContent>
 
         <TabsContent value="model">
@@ -104,12 +108,26 @@ export default function SettingsPage() {
               <CardTitle>外观</CardTitle>
               <CardDescription>浅色、深色或跟随系统。</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="flex flex-col gap-5">
               <ThemeSegment />
+              <PetToggleRow />
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+function PetToggleRow() {
+  const [on, setOn] = usePetEnabled();
+  return (
+    <div className="flex items-center justify-between gap-4 border-t pt-4">
+      <div>
+        <div className="text-sm font-medium">桌面宠物</div>
+        <p className="text-xs text-muted-foreground">右下角的品牌小形象：可拖动，点击弹快捷入口。</p>
+      </div>
+      <Switch checked={on} onCheckedChange={setOn} aria-label="桌面宠物开关" />
     </div>
   );
 }

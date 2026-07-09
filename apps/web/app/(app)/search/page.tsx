@@ -180,6 +180,7 @@ function SearchPageInner() {
   const [activity, setActivity] = React.useState<ActivityItem[] | null>(null);
   const [view, setView] = React.useState<"list" | "graph">("list");
   const [lastQuery, setLastQuery] = React.useState("");
+  const [topK, setTopK] = React.useState(12);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
@@ -188,19 +189,21 @@ function SearchPageInner() {
     inputRef.current?.focus();
   }, []);
 
-  async function run(e?: React.FormEvent) {
+  async function run(e?: React.FormEvent, k?: number) {
     e?.preventDefault();
     const q = query.trim();
     if (!q) {
       setResults(null);
       return;
     }
+    const limit = k ?? 12;
+    setTopK(limit);
     setBusy(true);
     try {
       const r = await api.globalSearch({
         query: q,
         source_ids: scope === ALL ? undefined : [scope],
-        top_k: 12,
+        top_k: limit,
       });
       setResults(r.sections);
       setLastQuery(q);
@@ -276,7 +279,20 @@ function SearchPageInner() {
           {view === "graph" && results.length > 0 ? (
             <SearchGraph query={lastQuery} results={results} />
           ) : (
-            <ResultList results={results} />
+            <>
+              <ResultList results={results} />
+              {results.length >= topK && topK < 48 && (
+                <div className="flex justify-center pt-1">
+                  <button
+                    onClick={() => run(undefined, topK + 12)}
+                    disabled={busy}
+                    className="rounded-full border bg-card px-4 py-1.5 text-xs text-muted-foreground shadow-soft transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+                  >
+                    {busy ? "加载中…" : "显示更多结果"}
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       ) : (

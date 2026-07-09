@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { DocStatusBadge } from "@/components/features/status-badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 
@@ -357,18 +358,28 @@ export function DetailPanelOutlet() {
     >
       <div className="flex h-12 shrink-0 items-center gap-1 border-b px-3">
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{panelTitle(target)}</span>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-7"
-          onClick={toggleMaximize}
-          title={maximized ? "还原" : "放大"}
-        >
-          {maximized ? <Minimize2 /> : <Maximize2 />}
-        </Button>
-        <Button variant="ghost" size="icon" className="size-7" onClick={close} title="关闭">
-          <X />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              onClick={toggleMaximize}
+              aria-label={maximized ? "还原" : "放大"}
+            >
+              {maximized ? <Minimize2 /> : <Maximize2 />}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{maximized ? "还原" : "放大占满"}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" className="size-7" onClick={close} aria-label="关闭">
+              <X />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">关闭</TooltipContent>
+        </Tooltip>
       </div>
       <div
         className={cn(

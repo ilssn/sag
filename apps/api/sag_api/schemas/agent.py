@@ -51,12 +51,18 @@ class ThreadCreate(BaseModel):
     title: str = "新会话"
 
 
+class ThreadUpdate(BaseModel):
+    title: str | None = Field(default=None, max_length=200)
+    archived: bool | None = None
+
+
 class ThreadOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
     agent_id: str
     title: str
+    archived: bool = False
     created_at: datetime
     updated_at: datetime
 

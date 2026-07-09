@@ -163,7 +163,13 @@ export const api = {
   removeBinding: (id: string, bindingId: string) =>
     request<{ ok: boolean }>(`/api/v1/agents/${id}/bindings/${bindingId}`, { method: "DELETE" }),
 
-  listThreads: (id: string) => request<Thread[]>(`/api/v1/agents/${id}/threads`),
+  listThreads: (id: string, opts?: { archived?: boolean }) =>
+    request<Thread[]>(`/api/v1/agents/${id}/threads${opts?.archived ? "?archived=true" : ""}`),
+  updateThread: (id: string, tid: string, b: { title?: string; archived?: boolean }) =>
+    request<Thread>(`/api/v1/agents/${id}/threads/${tid}`, {
+      method: "PATCH",
+      body: JSON.stringify(b),
+    }),
   createThread: (id: string, title = "新会话") =>
     request<Thread>(`/api/v1/agents/${id}/threads`, { method: "POST", body: JSON.stringify({ title }) }),
   listMessages: (id: string, tid: string) =>

@@ -59,6 +59,7 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 # create_all 只建新表、不改旧表，故对演进列做幂等 ADD COLUMN。
 _COLUMN_UPGRADES: dict[str, dict[str, str]] = {
     "agents": {"is_default": "BOOLEAN NOT NULL DEFAULT 0"},
+    "threads": {"archived": "BOOLEAN NOT NULL DEFAULT 0"},
 }
 
 

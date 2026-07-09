@@ -164,11 +164,33 @@ async def resolve_mcp_specs(session: AsyncSession, agent: Agent) -> list[tuple[s
 
 
 # ── 会话 ────────────────────────────────────────────────────────────
-async def list_threads(session: AsyncSession, agent_id: str) -> list[Thread]:
+async def list_threads(
+    session: AsyncSession, agent_id: str, *, archived: bool = False
+) -> list[Thread]:
     rows = await session.execute(
-        select(Thread).where(Thread.agent_id == agent_id).order_by(Thread.updated_at.desc())
+        select(Thread)
+        .where(Thread.agent_id == agent_id, Thread.archived.is_(archived))
+        .order_by(Thread.updated_at.desc())
     )
     return list(rows.scalars().all())
+
+
+async def update_thread(
+    session: AsyncSession,
+    agent_id: str,
+    thread_id: str,
+    *,
+    title: str | None = None,
+    archived: bool | None = None,
+) -> Thread:
+    thread = await get_thread(session, agent_id, thread_id)
+    if title is not None and title.strip():
+        thread.title = title.strip()[:200]
+    if archived is not None:
+        thread.archived = archived
+    await session.commit()
+    await session.refresh(thread)
+    return thread
 
 
 async def create_thread(session: AsyncSession, agent: Agent, title: str = "新会话") -> Thread:

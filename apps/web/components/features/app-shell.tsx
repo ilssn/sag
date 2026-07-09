@@ -13,6 +13,7 @@ import {
   DetailPanelOutlet,
   DetailPanelProvider,
 } from "@/components/features/detail-panel";
+import { Pet, usePetEnabled } from "@/components/features/pet";
 import { SiteHeader } from "@/components/features/site-header";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 
@@ -160,6 +161,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   if (!user) return null;
 
   const windowed = windowMode === "window" && isDesktop;
+  const [petOn] = usePetEnabled();
 
   return (
     <AppContext.Provider
@@ -197,6 +199,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <div className="flex min-h-0 flex-1">
                   <DetailPanelMain>{children}</DetailPanelMain>
                   <DetailPanelOutlet />
+                  {petOn && <Pet />}
                 </div>
               </SidebarInset>
             </SidebarProvider>
