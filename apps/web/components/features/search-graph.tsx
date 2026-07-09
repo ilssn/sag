@@ -171,6 +171,7 @@ function edgeOf(
   i: number,
   from: Point,
   to: Point,
+  edgeType: "straight" | "smoothstep" = "straight",
 ): Edge {
   const labels = { qs: "检索", sc: "命中", ce: "提及" };
   const side = sideFromVector(from, to);
@@ -180,7 +181,7 @@ function edgeOf(
     target,
     sourceHandle: `source-${side}`,
     targetHandle: `target-${oppositeSide(side)}`,
-    type: "straight",
+    type: edgeType,
     label: labels[kind],
     labelStyle: { fontSize: 10, fill: "hsl(var(--muted-foreground))", fontWeight: 500 },
     labelBgStyle: { fill: "hsl(var(--card))", fillOpacity: 0.92 },
@@ -202,6 +203,13 @@ function edgeOf(
 }
 
 type LayoutKind = "radial" | "tree" | "force";
+
+/** 边型规范：辐射/力导=直线（放射与网状几何），层级=正交折线（树形惯例）。 */
+const EDGE_TYPE: Record<LayoutKind, "straight" | "smoothstep"> = {
+  radial: "straight",
+  tree: "smoothstep",
+  force: "straight",
+};
 
 type Grouped = { sid: string; name: string; chunks: Section[]; ents: Entity[] };
 
@@ -256,6 +264,7 @@ function linkEntities(
   edges: Edge[],
   nextIdx: () => number,
   positionOf: (linked: number) => Point,
+  edgeType: "straight" | "smoothstep" = "straight",
 ) {
   let linked = 0;
   for (const e of group.ents) {
@@ -265,11 +274,11 @@ function linkEntities(
     const eid = `e:${group.sid}:${name}`;
     const existing = nodes.find((n) => n.id === eid);
     if (existing) {
-      edges.push(edgeOf(cid, eid, "ce", nextIdx(), chunkPos, existing.position));
+      edges.push(edgeOf(cid, eid, "ce", nextIdx(), chunkPos, existing.position, edgeType));
     } else {
       const pos = positionOf(linked);
       nodes.push({ id: eid, type: "sag", position: pos, data: { label: name, kind: "entity" } });
-      edges.push(edgeOf(cid, eid, "ce", nextIdx(), chunkPos, pos));
+      edges.push(edgeOf(cid, eid, "ce", nextIdx(), chunkPos, pos, edgeType));
     }
     linked++;
   }
@@ -351,17 +360,17 @@ function buildTree(query: string, groups: Grouped[]): { nodes: Node[]; edges: Ed
     const sPos = { x: xs.reduce((a, b) => a + b, 0) / xs.length, y: 190 };
     const sid = `s:${g.sid}`;
     nodes.push({ id: sid, type: "sag", position: sPos, data: { label: g.name, kind: "source" } });
-    edges.push(edgeOf("q", sid, "qs", nextIdx(), { x: 0, y: 0 }, sPos));
+    edges.push(edgeOf("q", sid, "qs", nextIdx(), { x: 0, y: 0 }, sPos, EDGE_TYPE.tree));
 
     g.chunks.forEach((sec, ci) => {
       const cPos = { x: xs[ci], y: 380 };
       const cid = `c:${sec.chunk_id ?? `${g.sid}-${ci}`}`;
       nodes.push(chunkNode(sec, cid, cPos));
-      edges.push(edgeOf(sid, cid, "sc", nextIdx(), sPos, cPos));
+      edges.push(edgeOf(sid, cid, "sc", nextIdx(), sPos, cPos, EDGE_TYPE.tree));
       linkEntities(g, sec, cid, cPos, nodes, edges, nextIdx, (k) => ({
         x: cPos.x + (k - 1) * 104,
         y: 545 + (k % 2) * 44,
-      }));
+      }), EDGE_TYPE.tree);
     });
   });
   return { nodes, edges };
@@ -520,7 +529,7 @@ export default function SearchGraph({ query, results }: { query: string; results
         "relative overflow-hidden rounded-lg border bg-card/40",
         expanded
           ? "fixed inset-4 z-50 min-h-0 bg-card shadow-lift"
-          : "h-[calc(100vh-14rem)] min-h-[620px] max-h-[860px]",
+          : "h-[clamp(460px,calc(100svh-16rem),820px)]",
       )}
     >
       <GraphLegend />
