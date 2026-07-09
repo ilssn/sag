@@ -39,7 +39,7 @@ export interface ConvMessage {
   content: string;
   citations: Citation[];
   attachments?: { id?: string; url?: string }[];
-  steps?: { kind: "thinking" | "tool"; step: number; name?: string; args?: string; ms?: number; count?: number }[];
+  steps?: { kind: "thinking" | "tool" | "answer"; step: number; name?: string; args?: string; ms?: number; count?: number }[];
   created_at?: string;
   author?: string | null;
   promptPreview?: string;
@@ -137,6 +137,10 @@ function StepsTimeline({
             {x.kind === "thinking" ? (
               <span className={isActive ? "text-shimmer" : "text-muted-foreground"}>
                 思考中 · 第 {x.step} 轮 · {fmtMs(elapsed)}
+              </span>
+            ) : x.kind === "answer" ? (
+              <span className={isActive ? "text-shimmer" : "text-muted-foreground"}>
+                生成回答 · {fmtMs(elapsed)}
               </span>
             ) : (
               <span className={cn("min-w-0 flex-1 truncate", isActive ? "text-shimmer" : "text-muted-foreground")}>
@@ -721,14 +725,19 @@ export function ConversationView({
             patch((x) => ({ ...x, citations, promptPreview }));
           },
           onStatus: (phase, step) => {
-            if (phase !== "thinking") return;
+            if (phase !== "thinking" && phase !== "answering") return;
             setStepsBoth((prev) => [
               ...prev.map((x) =>
                 x.status === "active"
                   ? { ...x, status: "done" as const, ms: x.ms ?? Date.now() - x.startedAt }
                   : x,
               ),
-              { kind: "thinking", step, status: "active", startedAt: Date.now() },
+              {
+                kind: phase === "thinking" ? "thinking" : "answer",
+                step,
+                status: "active",
+                startedAt: Date.now(),
+              },
             ]);
           },
           onTool: (name, step, args) =>

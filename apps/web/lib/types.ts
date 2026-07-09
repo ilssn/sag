@@ -151,7 +151,7 @@ export interface Thread {
 }
 
 export interface MessageStep {
-  kind: "thinking" | "tool";
+  kind: "thinking" | "tool" | "answer";
   step: number;
   name?: string;
   args?: string;

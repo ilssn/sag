@@ -11,7 +11,7 @@ import * as React from "react";
  */
 
 export interface LiveStep {
-  kind: "thinking" | "tool";
+  kind: "thinking" | "tool" | "answer";
   step: number;
   name?: string;
   args?: string;
