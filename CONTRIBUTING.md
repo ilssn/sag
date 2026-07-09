@@ -8,7 +8,10 @@ sag 以「可执行的最佳实践」为标准——请先读 [docs/standards/](
 - 后端：Python ≥ 3.11（`apps/api`，`pip install -e ".[dev]"`）
 - 前端：Node ≥ 20（`apps/web`，`npm install`；shadcn CLI 需要 Node 20+）
 
-## 门禁（不绿不提）
+## 门禁（不绿不提 · CI 强制）
+
+推 `dev`/`main` 与所有 PR 都会触发 GitHub Actions（后端 ruff+pytest、前端 tsc+build）——
+以 CI 结果为准。本地预检：
 
 ```bash
 cd apps/api && ruff check sag_api/ tests/ && python -m pytest -q
