@@ -30,9 +30,10 @@ export default function ChatPage() {
       query: string,
       handlers: Parameters<typeof streamAgentAsk>[3],
       signal: AbortSignal,
+      attachments?: string[],
     ) => {
       if (!agent) return Promise.resolve();
-      return streamAgentAsk(agent.id, tid, { query }, handlers, signal);
+      return streamAgentAsk(agent.id, tid, { query, attachments }, handlers, signal);
     },
     [agent],
   );

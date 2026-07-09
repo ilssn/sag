@@ -65,7 +65,8 @@ def build_agent_messages(
     *,
     history: list[dict[str, str]] | None = None,
     language: str = "zh",
-) -> list[dict[str, str]]:
+    attachments: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     """注入灵魂人格的问答提示词。"""
     lang = language if language in _SYSTEM else "zh"
     persona = persona or {}
@@ -76,24 +77,45 @@ def build_agent_messages(
     messages: list[dict[str, str]] = [{"role": "system", "content": "\n\n".join(parts)}]
     if history:
         messages.extend(history)
-    messages.append(
-        {
-            "role": "user",
-            "content": _USER_TEMPLATE[lang].format(
-                context=_format_context(sections), query=query
-            ),
-        }
-    )
+    user_text = _USER_TEMPLATE[lang].format(context=_format_context(sections), query=query)
+    if attachments:
+        # 视觉输入：OpenAI 兼容 content parts（图片读盘转 data URL；历史轮仅保留文本）
+        import base64
+
+        content: list[dict[str, Any]] = [{"type": "text", "text": user_text}]
+        for att in attachments:
+            path, media_type = att.get("path"), att.get("media_type", "image/png")
+            if not path:
+                continue
+            try:
+                with open(path, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode()
+            except OSError:
+                continue
+            content.append(
+                {"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{b64}"}}
+            )
+        messages.append({"role": "user", "content": content})
+    else:
+        messages.append({"role": "user", "content": user_text})
     return messages
 
 
-def build_prompt_preview(messages: list[dict[str, str]], *, limit: int = 1600) -> str:
-    """把发给模型的消息拼成可读预览（用于「查看本轮 prompt」透明化）。"""
+def build_prompt_preview(messages: list[dict[str, Any]], *, limit: int = 1600) -> str:
+    """把发给模型的消息拼成可读预览（用于「查看本轮 prompt」透明化）。
+
+    多模态消息（content 为 parts 列表）：文本部分原样、图片以占位符呈现（不吐 base64）。
+    """
     lines: list[str] = []
     role_label = {"system": "系统", "user": "用户", "assistant": "助手"}
     for m in messages:
         label = role_label.get(m.get("role", ""), m.get("role", ""))
-        lines.append(f"【{label}】\n{m.get('content', '')}")
+        content = m.get("content", "")
+        if isinstance(content, list):
+            texts = [p.get("text", "") for p in content if p.get("type") == "text"]
+            images = sum(1 for p in content if p.get("type") == "image_url")
+            content = "\n".join(texts) + (f"\n〔附图 ×{images}〕" if images else "")
+        lines.append(f"【{label}】\n{content}")
     text = "\n\n".join(lines)
     if len(text) > limit:
         text = text[:limit].rstrip() + "\n\n…（已截断）"

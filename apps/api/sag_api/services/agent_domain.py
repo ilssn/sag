@@ -250,6 +250,7 @@ async def build_ask_context(
     query: str,
     engine_manager: EngineManager,
     history: list[dict[str, str]] | None = None,
+    attachments: list[dict] | None = None,
 ) -> AskPlan:
     """跨绑定信源 fan-out 检索并组装带系统提示的消息（不落库，对话与 OpenAI 端点复用）。"""
     persona = agent.persona or {}
@@ -266,7 +267,13 @@ async def build_ask_context(
 
     citations = build_citations(sections, source_refs)
     messages = build_agent_messages(
-        agent.name, persona, query, sections, history=history, language=settings.sag_language
+        agent.name,
+        persona,
+        query,
+        sections,
+        history=history,
+        language=settings.sag_language,
+        attachments=attachments,
     )
     empty_response = (persona.get("empty_response") or "").strip()
     return AskPlan(
@@ -285,9 +292,28 @@ async def prepare_ask(
     thread: Thread,
     query: str,
     engine_manager: EngineManager,
+    attachments: list[str] | None = None,
 ) -> AskPlan:
-    """落库用户消息、解析历史，再委托 build_ask_context 组装计划。"""
-    user_msg = Message(thread_id=thread.id, role=MessageRole.USER, content=query, citations=[])
+    """落库用户消息（含图片附件 meta）、解析历史，再委托 build_ask_context 组装计划。"""
+    from sag_api.api.v1.attachments import attachment_path
+
+    resolved: list[dict] = []
+    for aid in attachments or []:
+        path = attachment_path(aid)
+        if path is None:
+            raise ValidationError(f"附件不存在或已过期：{aid}")
+        ext = aid.rsplit(".", 1)[-1].lower()
+        media_type = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                      "webp": "image/webp", "gif": "image/gif"}.get(ext, "image/png")
+        resolved.append({"id": aid, "media_type": media_type, "path": path})
+
+    user_msg = Message(
+        thread_id=thread.id,
+        role=MessageRole.USER,
+        content=query,
+        citations=[],
+        attachments=[{k: a[k] for k in ("id", "media_type")} for a in resolved],
+    )
     session.add(user_msg)
     if thread.title in _DEFAULT_TITLES:
         thread.title = query[:40]
@@ -296,7 +322,12 @@ async def prepare_ask(
 
     history = await _history(session, thread.id, exclude_id=user_msg.id)
     return await build_ask_context(
-        session, agent=agent, query=query, engine_manager=engine_manager, history=history
+        session,
+        agent=agent,
+        query=query,
+        engine_manager=engine_manager,
+        history=history,
+        attachments=resolved or None,
     )
 
 

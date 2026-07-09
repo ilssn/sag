@@ -195,6 +195,17 @@ export const api = {
   documentFileUrl: (sid: string, did: string) =>
     `${API_BASE}/api/v1/sources/${sid}/documents/${did}/file`,
 
+  // 对话图片附件（≤10MB，png/jpg/webp/gif）
+  uploadAttachment: (file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return request<{ id: string; name: string; media_type: string }>("/api/v1/attachments", {
+      method: "POST",
+      body: fd,
+    });
+  },
+  attachmentUrl: (id: string) => `${API_BASE}/api/v1/attachments/${id}`,
+
   // 信源即 MCP：外部宿主（Claude Desktop / Cursor）挂载信息
   sourceMcp: (sourceId: string) =>
     request<SourceMcpDescriptor>(`/api/v1/sources/${sourceId}/mcp`),

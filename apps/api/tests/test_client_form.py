@@ -81,6 +81,35 @@ async def test_default_agent_activity_and_document_file():
             )
             assert back.json()["archived"] is False and back.json()["title"] == "改名后的会话"
 
+            # 图片附件：上传 → 取回一致；非图片 422；ask 携带（离线 LLM 未配 → 400，
+            # 但用户消息已带附件 meta 落库）
+            png = bytes.fromhex(
+                "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+                "0000000d4944415478da63fcffff3f030005fe02fea7568c4a0000000049454e44ae426082"
+            )
+            att = await c.post(
+                "/api/v1/attachments", headers=A, files={"file": ("dot.png", png, "image/png")}
+            )
+            assert att.status_code == 201, att.text
+            aid = att.json()["id"]
+            got = await c.get(f"/api/v1/attachments/{aid}", headers=A)
+            assert got.status_code == 200 and got.content == png
+            bad = await c.post(
+                "/api/v1/attachments", headers=A, files={"file": ("x.txt", b"nope", "text/plain")}
+            )
+            assert bad.status_code == 422
+            ask = await c.post(
+                f"/api/v1/agents/{a1['id']}/threads/{t['id']}/ask",
+                headers=A,
+                json={"query": "这张图是什么？", "attachments": [aid]},
+            )
+            assert ask.status_code == 400  # 离线未配 LLM
+            msgs = (
+                await c.get(f"/api/v1/agents/{a1['id']}/threads/{t['id']}/messages", headers=A)
+            ).json()
+            mine = [m for m in msgs if m["role"] == "user" and m["content"] == "这张图是什么？"]
+            assert mine and mine[0]["attachments"][0]["id"] == aid
+
             # 原文端点：200 + 内容与上传一致；不存在的 id → 404
             f = await c.get(
                 f"/api/v1/sources/{src['id']}/documents/{doc['id']}/file", headers=A
