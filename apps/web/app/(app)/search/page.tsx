@@ -84,7 +84,7 @@ function ActivityTimeline({ items }: { items: ActivityItem[] | null }) {
                 <Link
                   key={`${item.type}-${item.id}`}
                   href={`/chat/${item.id}`}
-                  className={`flex items-center gap-3 px-4 py-3 text-sm transition-colors hover:bg-muted/50 ${i > 0 ? "border-t" : ""}`}
+                  className={`flex items-center gap-3 px-4 py-3 text-sm outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted/60 ${i > 0 ? "border-t" : ""}`}
                 >
                   <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate">{item.title}</span>
@@ -99,7 +99,7 @@ function ActivityTimeline({ items }: { items: ActivityItem[] | null }) {
                     item.source_id &&
                     open({ kind: "document", sourceId: item.source_id, documentId: item.id })
                   }
-                  className={`flex w-full items-center gap-3 px-4 py-3 text-left text-sm transition-colors hover:bg-muted/50 ${i > 0 ? "border-t" : ""}`}
+                  className={`flex w-full items-center gap-3 px-4 py-3 text-left text-sm outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted/60 ${i > 0 ? "border-t" : ""}`}
                 >
                   <FileText className="size-4 shrink-0 text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate">{item.title}</span>
@@ -149,7 +149,7 @@ function ResultList({ results }: { results: Section[] }) {
               sourceName: s.source_name ?? undefined,
             })
           }
-          className={`flex w-full flex-col gap-1 px-4 py-3 text-left transition-colors hover:bg-muted/50 ${i > 0 ? "border-t" : ""}`}
+          className={`flex w-full flex-col gap-1 px-4 py-3 text-left outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted/60 ${i > 0 ? "border-t" : ""}`}
         >
           <div className="flex items-center gap-2">
             <span className="grid size-5 shrink-0 place-items-center rounded-[6px] bg-muted text-[11px] font-semibold">
@@ -286,7 +286,7 @@ function SearchPageInner() {
                   <button
                     onClick={() => run(undefined, topK + 12)}
                     disabled={busy}
-                    className="rounded-full border bg-card px-4 py-1.5 text-xs text-muted-foreground shadow-soft transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+                    className="rounded-full border bg-card px-4 py-1.5 text-xs text-muted-foreground shadow-soft outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
                   >
                     {busy ? "加载中…" : "显示更多结果"}
                   </button>

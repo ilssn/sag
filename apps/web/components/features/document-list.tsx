@@ -66,7 +66,7 @@ export function DocumentList({
           <button
             type="button"
             onClick={() => open({ kind: "document", sourceId, documentId: d.id })}
-            className="min-w-0 flex-1 text-left outline-none focus-visible:underline"
+            className="min-w-0 flex-1 rounded-md text-left outline-none focus-visible:bg-muted/60"
             title="查看详情与原文预览"
           >
             <div className="truncate text-sm font-medium text-foreground">{d.filename}</div>

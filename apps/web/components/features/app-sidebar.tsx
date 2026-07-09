@@ -10,10 +10,8 @@ import {
   Library,
   LogOut,
   MessageSquarePlus,
-  MoreHorizontal,
   Search,
   Settings,
-  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -29,6 +27,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Spinner } from "@/components/ui/spinner";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Sidebar,
   SidebarContent,
@@ -136,24 +136,13 @@ export function AppSidebar() {
 
   const activeThreadId = pathname.startsWith("/chat/") ? pathname.split("/")[2] : null;
 
-  async function deleteThread(tid: string) {
-    if (!agent) return;
-    try {
-      await api.deleteThread(agent.id, tid);
-      await refreshThreads();
-      if (activeThreadId === tid) router.push("/chat");
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "删除失败");
-    }
-  }
-
   async function archiveThread(tid: string) {
     if (!agent) return;
     try {
       await api.updateThread(agent.id, tid, { archived: true });
       await refreshThreads();
       if (activeThreadId === tid) router.push("/chat");
-      toast.success("已归档（设置 → 会话 可恢复）");
+      toast.success("已归档，可在 设置 → 助手 恢复");
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "归档失败");
     }
@@ -213,38 +202,30 @@ export function AppSidebar() {
                 <SidebarMenuItem key={t.id}>
                   <SidebarMenuButton asChild isActive={t.id === activeThreadId}>
                     <Link href={`/chat/${t.id}`} title={t.title}>
-                      {isLive && (
-                        <span
-                          aria-label="生成中"
-                          className="size-1.5 shrink-0 animate-blink rounded-full bg-primary"
-                        />
-                      )}
                       <span className="min-w-0 flex-1 truncate">{t.title}</span>
-                      <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-                        {isLive ? "生成中" : relativeTime(t.updated_at)}
-                      </span>
+                      {isLive ? (
+                        <Spinner className="size-3 shrink-0 text-muted-foreground" aria-label="生成中" />
+                      ) : (
+                        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                          {relativeTime(t.updated_at)}
+                        </span>
+                      )}
                     </Link>
                   </SidebarMenuButton>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <SidebarMenuAction showOnHover aria-label="会话操作">
-                        <MoreHorizontal />
-                      </SidebarMenuAction>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent side="right" align="start" className="min-w-36">
-                      <DropdownMenuItem onClick={() => archiveThread(t.id)}>
-                        <Archive className="size-4" />
-                        归档
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => deleteThread(t.id)}
-                        className="text-destructive focus:text-destructive"
-                      >
-                        <Trash2 className="size-4" />
-                        删除
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  {!isLive && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <SidebarMenuAction
+                          showOnHover
+                          onClick={() => archiveThread(t.id)}
+                          aria-label="归档会话"
+                        >
+                          <Archive />
+                        </SidebarMenuAction>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">归档</TooltipContent>
+                    </Tooltip>
+                  )}
                 </SidebarMenuItem>
               );
             })}
