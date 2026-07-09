@@ -3,13 +3,14 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowUpRight, Download, Maximize2, Minimize2, X } from "lucide-react";
+import { ArrowUpRight, Code, Download, Maximize2, Minimize2, TextQuote, X } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 import type { Doc } from "@/lib/types";
 import { formatBytes, relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { MarkdownContent } from "@/components/features/markdown-content";
 import { DocStatusBadge } from "@/components/features/status-badge";
 import { Button } from "@/components/ui/button";
 import type { ImperativePanelHandle } from "react-resizable-panels";
@@ -23,6 +24,7 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 /** 详情面板目标：引用/搜索结果的原文分块，或知识库文档（含原始文件预览）。 */
 export type DetailTarget =
@@ -106,6 +108,48 @@ export function DetailPanelMain({ children }: { children: React.ReactNode }) {
 
 // ── 内容视图 ─────────────────────────────────────────────────────────
 
+/** 渲染模式切换：markdown（默认）/ 原文。icon-only + Tooltip。 */
+function RenderModeToggle({
+  mode,
+  onChange,
+}: {
+  mode: "md" | "raw";
+  onChange: (m: "md" | "raw") => void;
+}) {
+  return (
+    <ToggleGroup
+      type="single"
+      variant="outline"
+      size="sm"
+      value={mode}
+      onValueChange={(v) => v && onChange(v as "md" | "raw")}
+      aria-label="渲染模式"
+    >
+      <ToggleGroupItem value="md" aria-label="Markdown 渲染" title="Markdown 渲染">
+        <TextQuote />
+      </ToggleGroupItem>
+      <ToggleGroupItem value="raw" aria-label="原文" title="原文">
+        <Code />
+      </ToggleGroupItem>
+    </ToggleGroup>
+  );
+}
+
+function TextBody({ text, mode }: { text: string; mode: "md" | "raw" }) {
+  if (mode === "md") {
+    return (
+      <div className="rounded-md border bg-muted/30 p-4">
+        <MarkdownContent content={text} />
+      </div>
+    );
+  }
+  return (
+    <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-4 font-mono text-xs leading-relaxed">
+      {text}
+    </pre>
+  );
+}
+
 function ChunkView({
   target,
 }: {
@@ -113,6 +157,7 @@ function ChunkView({
 }) {
   const [content, setContent] = React.useState<string | null>(null);
   const [meta, setMeta] = React.useState<{ heading: string; sourceName: string } | null>(null);
+  const [mode, setMode] = React.useState<"md" | "raw">("md");
   const [error, setError] = React.useState("");
 
   React.useEffect(() => {
@@ -145,19 +190,20 @@ function ChunkView({
   }
   return (
     <div className="flex flex-col gap-3">
-      <div>
-        <h3 className="font-display text-base font-medium">{meta?.heading}</h3>
-        <Link
-          href={`/knowledge/${target.sourceId}`}
-          className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-        >
-          出自 {meta?.sourceName ?? target.sourceName ?? "信源"}
-          <ArrowUpRight className="size-3" />
-        </Link>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h3 className="font-display text-base font-medium">{meta?.heading}</h3>
+          <Link
+            href={`/knowledge/${target.sourceId}`}
+            className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+          >
+            出自 {meta?.sourceName ?? target.sourceName ?? "信源"}
+            <ArrowUpRight className="size-3" />
+          </Link>
+        </div>
+        <RenderModeToggle mode={mode} onChange={setMode} />
       </div>
-      <div className="whitespace-pre-wrap rounded-md border bg-muted/30 p-4 text-sm leading-relaxed">
-        {content}
-      </div>
+      <TextBody text={content} mode={mode} />
     </div>
   );
 }
@@ -171,6 +217,7 @@ function DocumentPreview({ doc }: { doc: Doc }) {
     | { phase: "error"; message: string }
   >({ phase: "loading" });
 
+  const [textMode, setTextMode] = React.useState<"md" | "raw">("md");
   const fileUrl = api.documentFileUrl(doc.source_id, doc.id);
 
   React.useEffect(() => {
@@ -232,10 +279,13 @@ function DocumentPreview({ doc }: { doc: Doc }) {
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-muted-foreground">原文预览</span>
-        <Button variant="ghost" size="sm" className="h-7 gap-1.5 px-2 text-xs" onClick={download}>
-          <Download />
-          下载
-        </Button>
+        <span className="flex items-center gap-1.5">
+          {state.phase === "text" && <RenderModeToggle mode={textMode} onChange={setTextMode} />}
+          <Button variant="ghost" size="sm" className="h-7 gap-1.5 px-2 text-xs" onClick={download}>
+            <Download />
+            下载
+          </Button>
+        </span>
       </div>
       {state.phase === "loading" && (
         <div className="grid flex-1 place-items-center rounded-md border">
@@ -253,9 +303,9 @@ function DocumentPreview({ doc }: { doc: Doc }) {
         </p>
       )}
       {state.phase === "text" && (
-        <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-4 font-mono text-xs leading-relaxed">
-          {state.text}
-        </pre>
+        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto">
+          <TextBody text={state.text} mode={textMode} />
+        </div>
       )}
       {state.phase === "blob" && state.kind === "pdf" && (
         <iframe title={doc.filename} src={state.url} className="min-h-0 flex-1 rounded-md border" />
