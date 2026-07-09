@@ -63,7 +63,22 @@ async function streamPost(
     } catch {
       return;
     }
-    if (event === "meta")
+    if (event === "status")
+      handlers.onStatus?.((payload.phase as string) || "", (payload.step as number) ?? 0);
+    else if (event === "tool")
+      handlers.onTool?.(
+        (payload.name as string) || "",
+        payload.step as number | undefined,
+        payload.args as string | undefined,
+      );
+    else if (event === "tool_result")
+      handlers.onToolResult?.({
+        name: (payload.name as string) || "",
+        step: payload.step as number | undefined,
+        ms: payload.ms as number | undefined,
+        count: payload.count as number | undefined,
+      });
+    else if (event === "meta")
       handlers.onMeta?.((payload.citations as Citation[]) || [], payload.prompt_preview as string);
     else if (event === "token") handlers.onToken?.((payload.text as string) || "");
     else if (event === "error") handlers.onError?.((payload.message as string) || "生成失败");
