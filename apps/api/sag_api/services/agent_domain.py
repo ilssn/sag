@@ -407,11 +407,19 @@ async def delete_message(session: AsyncSession, agent_id: str, thread_id: str, m
 
 
 async def persist_answer(
-    session_factory: async_sessionmaker, thread_id: str, answer: str, citations: list[dict]
+    session_factory: async_sessionmaker,
+    thread_id: str,
+    answer: str,
+    citations: list[dict],
+    steps: list[dict] | None = None,
 ) -> str:
     async with session_factory() as session:
         message = Message(
-            thread_id=thread_id, role=MessageRole.ASSISTANT, content=answer, citations=citations
+            thread_id=thread_id,
+            role=MessageRole.ASSISTANT,
+            content=answer,
+            citations=citations,
+            steps=steps or [],
         )
         session.add(message)
         await session.commit()

@@ -150,6 +150,15 @@ export interface Thread {
   updated_at: string;
 }
 
+export interface MessageStep {
+  kind: "thinking" | "tool";
+  step: number;
+  name?: string;
+  args?: string;
+  ms?: number;
+  count?: number;
+}
+
 export interface MessageAttachment {
   id: string;
   name?: string;
@@ -163,6 +172,7 @@ export interface Message {
   content: string;
   citations: Citation[];
   attachments?: MessageAttachment[];
+  steps?: MessageStep[];
   created_at: string;
 }
 

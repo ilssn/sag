@@ -54,6 +54,8 @@ class Message(IDMixin, TimestampMixin, Base):
     )
     # 图片附件 meta：[{id, name, media_type}]（文件在 upload_dir/attachments/）
     attachments: Mapped[list] = mapped_column("attachments_json", JSON, default=list)
+    # Agentic 执行轨迹：[{kind:thinking|tool, step, name?, args?, ms, count?}]（助手消息）
+    steps: Mapped[list] = mapped_column("steps_json", JSON, default=list)
     role: Mapped[MessageRole] = mapped_column(SAEnum(MessageRole, native_enum=False, length=16))
     content: Mapped[str] = mapped_column(Text, default="")
     citations: Mapped[list] = mapped_column("citations_json", JSON, default=list)

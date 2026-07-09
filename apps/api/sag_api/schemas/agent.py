@@ -76,6 +76,7 @@ class MessageOut(BaseModel):
     content: str
     citations: list[dict[str, Any]]
     attachments: list[dict[str, Any]] = []
+    steps: list[dict[str, Any]] = []
     created_at: datetime
 
 
