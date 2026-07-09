@@ -64,6 +64,7 @@ async def _run_tool_loop(
     agent,
     messages: list[dict],
     citations: list[dict],
+    trace: list[dict],
     tool_names: list[str],
     engine_manager: EngineManager,
     llm: LLMClient,
@@ -84,7 +85,11 @@ async def _run_tool_loop(
     max_steps = max(1, getattr(_settings, "agent_max_steps", AGENT_MAX_STEPS))
     for _step in range(max_steps):
         yield ("status", {"phase": "thinking", "step": _step + 1})
+        think_start = time.perf_counter()
         turn = await llm.chat(messages, tools=schemas)
+        trace.append(
+            {"kind": "thinking", "step": _step + 1, "ms": int((time.perf_counter() - think_start) * 1000)}
+        )
         if not turn.tool_calls:
             break
         messages.append(
@@ -118,14 +123,20 @@ async def _run_tool_loop(
                 except Exception as e:  # noqa: BLE001
                     log.warning("工具执行失败 %s: %s", call.name, e)
                     content = f"工具执行失败：{e}"
+            tool_ms = int((time.perf_counter() - started) * 1000)
+            trace.append(
+                {
+                    "kind": "tool",
+                    "step": _step + 1,
+                    "name": call.name,
+                    "args": args_preview,
+                    "ms": tool_ms,
+                    "count": count,
+                }
+            )
             yield (
                 "tool_result",
-                {
-                    "name": call.name,
-                    "step": _step + 1,
-                    "ms": int((time.perf_counter() - started) * 1000),
-                    "count": count,
-                },
+                {"name": call.name, "step": _step + 1, "ms": tool_ms, "count": count},
             )
             messages.append({"role": "tool", "tool_call_id": call.id, "content": content})
 
@@ -159,6 +170,7 @@ async def generate_stream(
 
     messages = [dict(m) for m in plan.messages]
     citations = list(plan.citations)
+    trace: list[dict] = []
     preview = plan.prompt_preview
 
     tool_names = _enabled_tool_names(agent) if agentic else []
@@ -175,6 +187,7 @@ async def generate_stream(
                 agent=agent,
                 messages=messages,
                 citations=citations,
+                trace=trace,
                 tool_names=loop_names,
                 engine_manager=engine_manager,
                 llm=llm,
@@ -198,5 +211,5 @@ async def generate_stream(
     answer = "".join(acc)
     mid = None
     if thread_id is not None:
-        mid = await persist_answer(session_factory, thread_id, answer, citations)
+        mid = await persist_answer(session_factory, thread_id, answer, citations, steps=trace)
     yield ("done", {"message_id": mid})

@@ -60,7 +60,7 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 _COLUMN_UPGRADES: dict[str, dict[str, str]] = {
     "agents": {"is_default": "BOOLEAN NOT NULL DEFAULT 0"},
     "threads": {"archived": "BOOLEAN NOT NULL DEFAULT 0"},
-    "messages": {"attachments_json": "JSON"},
+    "messages": {"attachments_json": "JSON", "steps_json": "JSON"},
 }
 
 

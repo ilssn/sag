@@ -47,6 +47,7 @@ export interface ConvMessage {
   content: string;
   citations: Citation[];
   attachments?: { id?: string; url?: string }[];
+  steps?: { kind: "thinking" | "tool"; step: number; name?: string; args?: string; ms?: number; count?: number }[];
   created_at?: string;
   author?: string | null;
   promptPreview?: string;
@@ -72,19 +73,30 @@ const TOOL_LABEL: Record<string, string> = {
 };
 
 /** Agentic 执行时间线：思考/工具调用逐步呈现（活动项流光+计时），完成后可收起为摘要。 */
+type TimelineStep = Omit<LiveStep, "status" | "startedAt"> & {
+  status?: LiveStep["status"];
+  startedAt?: number;
+};
+
 function StepsTimeline({
   steps,
-  collapsed,
-  onToggle,
+  collapsed: collapsedProp,
+  onToggle: onToggleProp,
 }: {
-  steps: LiveStep[];
-  collapsed: boolean;
+  steps: TimelineStep[];
+  collapsed?: boolean;
   onToggle?: () => void;
 }) {
+  const [innerCollapsed, setInnerCollapsed] = React.useState(true);
+  const controlled = collapsedProp !== undefined;
+  const collapsed = controlled ? collapsedProp! : innerCollapsed;
+  const onToggle = controlled ? onToggleProp : () => setInnerCollapsed((v) => !v);
   const toolRuns = steps.filter((x) => x.kind === "tool");
   const active = steps.some((x) => x.status === "active");
+  // 没有实际工具调用（纯思考）且已结束 → 不渲染，避免「已完成 0 次调用」噪音
+  if (!active && toolRuns.length === 0) return null;
   const totalMs = steps.reduce(
-    (a, x) => a + (x.ms ?? (x.status === "active" ? Date.now() - x.startedAt : 0)),
+    (a, x) => a + (x.ms ?? (x.status === "active" && x.startedAt ? Date.now() - x.startedAt : 0)),
     0,
   );
 
@@ -122,7 +134,7 @@ function StepsTimeline({
       </div>
       {steps.map((x, i) => {
         const isActive = x.status === "active";
-        const elapsed = x.ms ?? (isActive ? Date.now() - x.startedAt : 0);
+        const elapsed = x.ms ?? (isActive && x.startedAt ? Date.now() - x.startedAt : 0);
         return (
           <div key={`${x.kind}-${x.step}-${i}`} className="flex items-center gap-2 text-xs">
             {isActive ? (
@@ -288,9 +300,11 @@ const MessageItem = React.memo(
       <div className="group/msg flex gap-3">
         {avatar}
         <div className="min-w-0 flex-1">
-          {steps && steps.length > 0 && (
-            <StepsTimeline steps={steps} collapsed={!!stepsCollapsed} onToggle={onToggleSteps} />
-          )}
+          {steps && steps.length > 0 ? (
+            <StepsTimeline steps={steps} collapsed={stepsCollapsed} onToggle={onToggleSteps} />
+          ) : message.steps && message.steps.length > 0 ? (
+            <StepsTimeline steps={message.steps} />
+          ) : null}
           {thinking && (!steps || steps.length === 0) ? (
             <div className="flex items-center gap-1.5 py-1 text-sm">
               <span className="size-1.5 animate-blink rounded-full bg-primary" />
@@ -967,24 +981,6 @@ export function ConversationView({
 
           <div className="flex min-w-0 items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-1.5">
-              <ToggleGroup
-                type="single"
-                variant="outline"
-                size="sm"
-                value={chatMode}
-                onValueChange={(v) => v && changeChatMode(v as "agentic" | "fast")}
-                aria-label="对话模式"
-                className="shrink-0"
-              >
-                <ToggleGroupItem value="agentic" aria-label="深度模式" title="深度：多轮工具推理，更全面">
-                  <Telescope />
-                  <span className="hidden sm:inline">深度</span>
-                </ToggleGroupItem>
-                <ToggleGroupItem value="fast" aria-label="快速模式" title="快速：单轮检索直答，低延迟">
-                  <Zap />
-                  <span className="hidden sm:inline">快速</span>
-                </ToggleGroupItem>
-              </ToggleGroup>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -1009,6 +1005,31 @@ export function ConversationView({
                   <DropdownMenuItem onClick={() => docRef.current?.click()}>
                     <FileUp className="size-4" />
                     文档 → 入知识库
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-8 rounded-full text-muted-foreground hover:text-foreground"
+                    aria-label={chatMode === "agentic" ? "深度模式（点击切换）" : "快速模式（点击切换）"}
+                    title={chatMode === "agentic" ? "深度：多轮工具推理" : "快速：单轮直答"}
+                  >
+                    {chatMode === "agentic" ? <Telescope className="size-4" /> : <Zap className="size-4" />}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="top" align="start" className="min-w-44">
+                  <DropdownMenuItem onClick={() => changeChatMode("agentic")}>
+                    <Telescope className="size-4" />
+                    <span className="flex-1">深度 · 多轮推理</span>
+                    {chatMode === "agentic" && <Check className="size-3.5" />}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => changeChatMode("fast")}>
+                    <Zap className="size-4" />
+                    <span className="flex-1">快速 · 单轮直答</span>
+                    {chatMode === "fast" && <Check className="size-3.5" />}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
