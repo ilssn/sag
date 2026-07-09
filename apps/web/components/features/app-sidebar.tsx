@@ -10,7 +10,6 @@ import {
   Library,
   LogOut,
   MessageSquarePlus,
-  Search,
   Settings,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -109,10 +108,7 @@ function NavUser() {
   );
 }
 
-const NAV = [
-  { href: "/search", label: "搜索", icon: Search },
-  { href: "/knowledge", label: "知识", icon: Library },
-];
+const NAV = [{ href: "/knowledge", label: "知识库", icon: Library }];
 
 export function AppSidebar() {
   const routePath = usePathname();

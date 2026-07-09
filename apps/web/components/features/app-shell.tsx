@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { motion } from "motion/react";
 
 import { api, ApiError } from "@/lib/api";
 import { clearToken, getToken } from "@/lib/auth";
@@ -12,9 +13,17 @@ import {
   DetailPanelMain,
   DetailPanelOutlet,
   DetailPanelProvider,
+  DetailPanelSheet,
+  useDetailPanel,
+  useIsLgUp,
 } from "@/components/features/detail-panel";
 import { Pet, usePetEnabled } from "@/components/features/pet";
 import { SiteHeader } from "@/components/features/site-header";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 
 type WindowMode = "full" | "window";
@@ -184,11 +193,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               "relative grid min-h-svh place-items-center bg-muted/40 bg-dot-grid p-4 md:p-8",
           )}
         >
-          <div
+          <motion.div
+            layout
+            transition={{ type: "spring", stiffness: 300, damping: 32 }}
             className={cn(
               windowed
                 ? // transform 使内部 fixed 的 Sidebar 以本窗体为 containing block（Mac 窗口形态）
-                  "relative h-[calc(100svh-2rem)] w-full max-w-[1440px] transform-gpu overflow-hidden rounded-xl border bg-background shadow-lift md:h-[calc(100svh-4rem)]"
+                  "relative h-[calc(100svh-2rem)] w-full max-w-[1200px] transform-gpu overflow-hidden rounded-xl border bg-background shadow-lift md:h-[min(860px,calc(100svh-4rem))]"
                 : "min-h-svh",
             )}
           >
@@ -196,16 +207,41 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <AppSidebar />
               <SidebarInset className="min-w-0">
                 <SiteHeader />
-                <div className="flex min-h-0 flex-1">
-                  <DetailPanelMain>{children}</DetailPanelMain>
-                  <DetailPanelOutlet />
-                  {petOn && <Pet />}
-                </div>
+                <ContentArea>{children}</ContentArea>
               </SidebarInset>
             </SidebarProvider>
-          </div>
+          </motion.div>
         </div>
+        {petOn && <Pet />}
       </DetailPanelProvider>
     </AppContext.Provider>
+  );
+}
+
+/** 内容区：官方 Resizable 组合——主区 + 可拖宽详情栏（宽度经 autoSaveId 持久化）。 */
+function ContentArea({ children }: { children: React.ReactNode }) {
+  const { target, panelRef } = useDetailPanel();
+  const lg = useIsLgUp();
+  return (
+    <>
+      <ResizablePanelGroup
+        direction="horizontal"
+        className="min-h-0 flex-1"
+        autoSaveId="sag:detail"
+      >
+        <ResizablePanel defaultSize={66} minSize={0}>
+          <DetailPanelMain>{children}</DetailPanelMain>
+        </ResizablePanel>
+        {target && lg && (
+          <>
+            <ResizableHandle withHandle />
+            <ResizablePanel ref={panelRef} defaultSize={34} minSize={24} maxSize={100} className="border-l">
+              <DetailPanelOutlet />
+            </ResizablePanel>
+          </>
+        )}
+      </ResizablePanelGroup>
+      {target && !lg && <DetailPanelSheet />}
+    </>
   );
 }

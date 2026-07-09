@@ -83,3 +83,5 @@ class AskRequest(BaseModel):
     query: str = Field(min_length=1, max_length=4000)
     # 图片附件 id 列表（≤4，经 POST /attachments 上传）
     attachments: list[str] = Field(default_factory=list, max_length=4)
+    # @知识库 范围限定：仅在这些信源内检索（空=默认全部）
+    source_ids: list[str] = Field(default_factory=list, max_length=8)

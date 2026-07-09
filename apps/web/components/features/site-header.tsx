@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { AppWindowMac, Maximize2, Search, TriangleAlert } from "lucide-react";
+import { Maximize2, Minimize2, Search, TriangleAlert } from "lucide-react";
 
 import { useApp } from "@/components/features/app-shell";
 import { ThemeToggle } from "@/components/features/theme-toggle";
@@ -86,7 +86,7 @@ export function SiteHeader() {
               onClick={toggleWindowMode}
               aria-label={windowed ? "切换为满屏" : "切换为窗口"}
             >
-              {windowed ? <Maximize2 /> : <AppWindowMac />}
+              {windowed ? <Maximize2 /> : <Minimize2 />}
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">{windowed ? "满屏显示" : "窗口显示"}</TooltipContent>

@@ -203,6 +203,19 @@ async def delete_thread(
     return Ok(detail="会话已删除")
 
 
+@router.delete("/{agent_id}/threads/{thread_id}/messages/{message_id}", response_model=Ok)
+async def delete_message(
+    agent_id: str,
+    thread_id: str,
+    message_id: str,
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    agent = await svc.get_agent(session, agent_id)
+    await svc.delete_message(session, agent.id, thread_id, message_id)
+    return Ok(detail="已删除")
+
+
 @router.post("/{agent_id}/threads/{thread_id}/ask")
 async def ask(
     agent_id: str,
@@ -224,6 +237,7 @@ async def ask(
         query=body.query,
         engine_manager=engine_manager,
         attachments=body.attachments,
+        source_ids=body.source_ids,
     )
     if plan.short_circuit is None and not llm.configured:
         raise ConfigurationError("尚未配置 LLM，无法生成回答")

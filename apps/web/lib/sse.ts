@@ -3,6 +3,7 @@ import { getToken } from "./auth";
 import type { Citation } from "./types";
 
 export interface AskHandlers {
+  onTool?: (name: string) => void;
   onMeta?: (citations: Citation[], promptPreview?: string) => void;
   onToken?: (text: string) => void;
   onError?: (message: string) => void;
@@ -84,7 +85,7 @@ async function streamPost(
 export function streamAgentAsk(
   agentId: string,
   threadId: string,
-  body: { query: string; attachments?: string[] },
+  body: { query: string; attachments?: string[]; source_ids?: string[] },
   handlers: AskHandlers,
   signal?: AbortSignal,
 ): Promise<void> {

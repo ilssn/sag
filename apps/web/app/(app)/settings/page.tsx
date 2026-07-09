@@ -60,14 +60,13 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 p-4 md:p-6">
-      <PageHeader title="设置" description="账户、助手、模型、MCP 与外观。" />
+      <PageHeader title="设置" description="账户、助手（含 MCP 挂载）、模型与外观。" />
 
       <Tabs defaultValue="account" className="gap-4">
         <TabsList>
           <TabsTrigger value="account">账户</TabsTrigger>
           <TabsTrigger value="agent">助手</TabsTrigger>
           <TabsTrigger value="model">模型</TabsTrigger>
-          <TabsTrigger value="mcp">MCP</TabsTrigger>
           <TabsTrigger value="appearance">外观</TabsTrigger>
         </TabsList>
 
@@ -91,6 +90,7 @@ export default function SettingsPage() {
 
         <TabsContent value="agent" className="flex flex-col gap-4">
           <AgentSettingsCard />
+          <McpSettingsCard />
           <ArchivedThreadsCard />
         </TabsContent>
 
@@ -98,9 +98,6 @@ export default function SettingsPage() {
           <ModelConfigForm />
         </TabsContent>
 
-        <TabsContent value="mcp">
-          <McpSettingsCard />
-        </TabsContent>
 
         <TabsContent value="appearance">
           <Card>

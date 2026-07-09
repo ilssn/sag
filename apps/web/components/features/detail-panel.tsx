@@ -3,19 +3,28 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowUpRight, Download, Maximize2, Minimize2, X } from "lucide-react";
+import { ArrowUpRight, Code, Download, Maximize2, Minimize2, TextQuote, X } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 import type { Doc } from "@/lib/types";
 import { formatBytes, relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { MarkdownContent } from "@/components/features/markdown-content";
 import { DocStatusBadge } from "@/components/features/status-badge";
 import { Button } from "@/components/ui/button";
+import type { ImperativePanelHandle } from "react-resizable-panels";
+
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 /** 详情面板目标：引用/搜索结果的原文分块，或知识库文档（含原始文件预览）。 */
 export type DetailTarget =
@@ -28,6 +37,8 @@ interface PanelCtx {
   open: (target: DetailTarget) => void;
   close: () => void;
   toggleMaximize: () => void;
+  /** 详情 ResizablePanel 的命令句柄（放大/还原经官方 resize API） */
+  panelRef: React.RefObject<ImperativePanelHandle | null>;
 }
 
 const Ctx = React.createContext<PanelCtx>({
@@ -36,6 +47,7 @@ const Ctx = React.createContext<PanelCtx>({
   open: () => {},
   close: () => {},
   toggleMaximize: () => {},
+  panelRef: { current: null },
 });
 
 export function useDetailPanel() {
@@ -54,7 +66,23 @@ export function DetailPanelProvider({ children }: { children: React.ReactNode })
     setTarget(null);
     setMaximized(false);
   }, []);
-  const toggleMaximize = React.useCallback(() => setMaximized((m) => !m), []);
+  const panelRef = React.useRef<ImperativePanelHandle | null>(null);
+  const lastSize = React.useRef(34);
+  const toggleMaximize = React.useCallback(() => {
+    setMaximized((m) => {
+      const next = !m;
+      const panel = panelRef.current;
+      if (panel) {
+        if (next) {
+          lastSize.current = panel.getSize();
+          panel.resize(100);
+        } else {
+          panel.resize(lastSize.current || 34);
+        }
+      }
+      return next;
+    });
+  }, []);
 
   // 切换主导航（/chat ↔ /search ↔ /knowledge…）时收起面板
   const section = pathname.split("/")[1];
@@ -67,7 +95,7 @@ export function DetailPanelProvider({ children }: { children: React.ReactNode })
   }, [section, close]);
 
   return (
-    <Ctx.Provider value={{ target, maximized, open, close, toggleMaximize }}>
+    <Ctx.Provider value={{ target, maximized, open, close, toggleMaximize, panelRef }}>
       {children}
     </Ctx.Provider>
   );
@@ -75,20 +103,52 @@ export function DetailPanelProvider({ children }: { children: React.ReactNode })
 
 /** 主内容区：面板放大时隐藏（只留左侧菜单 + 面板）。 */
 export function DetailPanelMain({ children }: { children: React.ReactNode }) {
-  const { target, maximized } = useDetailPanel();
-  return (
-    <div
-      className={cn(
-        "min-w-0 flex-1 overflow-y-auto overscroll-contain",
-        target && maximized && "hidden",
-      )}
-    >
-      {children}
-    </div>
-  );
+  return <div className="h-full min-w-0 overflow-y-auto overscroll-contain">{children}</div>;
 }
 
 // ── 内容视图 ─────────────────────────────────────────────────────────
+
+/** 渲染模式切换：markdown（默认）/ 原文。icon-only + Tooltip。 */
+function RenderModeToggle({
+  mode,
+  onChange,
+}: {
+  mode: "md" | "raw";
+  onChange: (m: "md" | "raw") => void;
+}) {
+  return (
+    <ToggleGroup
+      type="single"
+      variant="outline"
+      size="sm"
+      value={mode}
+      onValueChange={(v) => v && onChange(v as "md" | "raw")}
+      aria-label="渲染模式"
+    >
+      <ToggleGroupItem value="md" aria-label="Markdown 渲染" title="Markdown 渲染">
+        <TextQuote />
+      </ToggleGroupItem>
+      <ToggleGroupItem value="raw" aria-label="原文" title="原文">
+        <Code />
+      </ToggleGroupItem>
+    </ToggleGroup>
+  );
+}
+
+function TextBody({ text, mode }: { text: string; mode: "md" | "raw" }) {
+  if (mode === "md") {
+    return (
+      <div className="rounded-md border bg-muted/30 p-4">
+        <MarkdownContent content={text} />
+      </div>
+    );
+  }
+  return (
+    <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-4 font-mono text-xs leading-relaxed">
+      {text}
+    </pre>
+  );
+}
 
 function ChunkView({
   target,
@@ -97,6 +157,7 @@ function ChunkView({
 }) {
   const [content, setContent] = React.useState<string | null>(null);
   const [meta, setMeta] = React.useState<{ heading: string; sourceName: string } | null>(null);
+  const [mode, setMode] = React.useState<"md" | "raw">("md");
   const [error, setError] = React.useState("");
 
   React.useEffect(() => {
@@ -129,19 +190,20 @@ function ChunkView({
   }
   return (
     <div className="flex flex-col gap-3">
-      <div>
-        <h3 className="font-display text-base font-medium">{meta?.heading}</h3>
-        <Link
-          href={`/knowledge/${target.sourceId}`}
-          className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-        >
-          出自 {meta?.sourceName ?? target.sourceName ?? "信源"}
-          <ArrowUpRight className="size-3" />
-        </Link>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <h3 className="font-display text-base font-medium">{meta?.heading}</h3>
+          <Link
+            href={`/knowledge/${target.sourceId}`}
+            className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+          >
+            出自 {meta?.sourceName ?? target.sourceName ?? "信源"}
+            <ArrowUpRight className="size-3" />
+          </Link>
+        </div>
+        <RenderModeToggle mode={mode} onChange={setMode} />
       </div>
-      <div className="whitespace-pre-wrap rounded-md border bg-muted/30 p-4 text-sm leading-relaxed">
-        {content}
-      </div>
+      <TextBody text={content} mode={mode} />
     </div>
   );
 }
@@ -155,6 +217,7 @@ function DocumentPreview({ doc }: { doc: Doc }) {
     | { phase: "error"; message: string }
   >({ phase: "loading" });
 
+  const [textMode, setTextMode] = React.useState<"md" | "raw">("md");
   const fileUrl = api.documentFileUrl(doc.source_id, doc.id);
 
   React.useEffect(() => {
@@ -216,10 +279,13 @@ function DocumentPreview({ doc }: { doc: Doc }) {
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-muted-foreground">原文预览</span>
-        <Button variant="ghost" size="sm" className="h-7 gap-1.5 px-2 text-xs" onClick={download}>
-          <Download />
-          下载
-        </Button>
+        <span className="flex items-center gap-1.5">
+          {state.phase === "text" && <RenderModeToggle mode={textMode} onChange={setTextMode} />}
+          <Button variant="ghost" size="sm" className="h-7 gap-1.5 px-2 text-xs" onClick={download}>
+            <Download />
+            下载
+          </Button>
+        </span>
       </div>
       {state.phase === "loading" && (
         <div className="grid flex-1 place-items-center rounded-md border">
@@ -237,9 +303,9 @@ function DocumentPreview({ doc }: { doc: Doc }) {
         </p>
       )}
       {state.phase === "text" && (
-        <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-4 font-mono text-xs leading-relaxed">
-          {state.text}
-        </pre>
+        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto">
+          <TextBody text={state.text} mode={textMode} />
+        </div>
       )}
       {state.phase === "blob" && state.kind === "pdf" && (
         <iframe title={doc.filename} src={state.url} className="min-h-0 flex-1 rounded-md border" />
@@ -321,41 +387,42 @@ function panelTitle(target: DetailTarget): string {
   return target.kind === "chunk" ? "原文溯源" : "文档详情";
 }
 
-/** 右侧详情栏：lg 及以上为内嵌第三栏（可放大占满主区），小屏退化为 Sheet。 */
-export function DetailPanelOutlet() {
-  const { target, maximized, close, toggleMaximize } = useDetailPanel();
-  const [isDesktop, setIsDesktop] = React.useState(true);
-
+/** lg 断点（详情栏 内嵌/Sheet 的分界）。 */
+export function useIsLgUp(): boolean {
+  const [isLg, setIsLg] = React.useState(true);
   React.useEffect(() => {
     const mq = window.matchMedia("(min-width: 1024px)");
-    const update = () => setIsDesktop(mq.matches);
+    const update = () => setIsLg(mq.matches);
     update();
     mq.addEventListener("change", update);
     return () => mq.removeEventListener("change", update);
   }, []);
+  return isLg;
+}
 
+/** 小屏详情：Sheet 覆盖层。 */
+export function DetailPanelSheet() {
+  const { target, close } = useDetailPanel();
+  if (!target) return null;
+  return (
+    <Sheet open onOpenChange={(o) => !o && close()}>
+      <SheetContent side="right" className="flex w-full flex-col gap-4 sm:max-w-lg">
+        <SheetTitle className="text-sm font-medium">{panelTitle(target)}</SheetTitle>
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+          <PanelBody target={target} />
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+/** 桌面详情：Resizable 面板内的内容（宽度由外层官方组件管理）。 */
+export function DetailPanelOutlet() {
+  const { target, maximized, close, toggleMaximize } = useDetailPanel();
   if (!target) return null;
 
-  if (!isDesktop) {
-    return (
-      <Sheet open onOpenChange={(o) => !o && close()}>
-        <SheetContent side="right" className="flex w-full flex-col gap-4 sm:max-w-lg">
-          <SheetTitle className="text-sm font-medium">{panelTitle(target)}</SheetTitle>
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-            <PanelBody target={target} />
-          </div>
-        </SheetContent>
-      </Sheet>
-    );
-  }
-
   return (
-    <aside
-      className={cn(
-        "flex min-h-0 flex-col border-l bg-background",
-        maximized ? "flex-1" : "w-[440px] shrink-0 xl:w-[520px]",
-      )}
-    >
+    <aside className="flex h-full min-h-0 flex-col bg-background">
       <div className="flex h-12 shrink-0 items-center gap-1 border-b px-3">
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{panelTitle(target)}</span>
         <Tooltip>

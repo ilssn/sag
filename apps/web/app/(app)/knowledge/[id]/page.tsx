@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, FileText, FlaskConical, Search, TriangleAlert, Trash2 } from "lucide-react";
+import { ArrowLeft, FileText, FlaskConical, Plug, Search, TriangleAlert, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
@@ -17,6 +17,13 @@ import { SyncPanel } from "@/components/features/sync-panel";
 import { UploadZone } from "@/components/features/upload-zone";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -58,6 +65,7 @@ export default function SourceDetailPage() {
   }, [active, refresh]);
 
   const [confirmDelete, setConfirmDelete] = React.useState(false);
+  const [mcpOpen, setMcpOpen] = React.useState(false);
   const [retrievalOpen, setRetrievalOpen] = React.useState(false);
 
   async function deleteSource() {
@@ -83,7 +91,7 @@ export default function SourceDetailPage() {
           </Link>
           {source ? (
             <>
-              <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground">
+              <h1 className="font-display text-xl font-semibold tracking-tight text-foreground">
                 {source.name}
               </h1>
               <p className="mt-1.5 text-sm text-muted-foreground">
@@ -179,8 +187,16 @@ export default function SourceDetailPage() {
           )}
         </div>
 
-        <SourceMcpCard sourceId={id} />
       </div>
+
+      <Dialog open={mcpOpen} onOpenChange={setMcpOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>MCP 集成</DialogTitle>
+          </DialogHeader>
+          <SourceMcpCard sourceId={id} />
+        </DialogContent>
+      </Dialog>
 
       {source && (
         <RetrievalTestDialog
