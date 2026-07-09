@@ -293,4 +293,7 @@ async def ask(
                 {"code": "stream_error", "message": f"生成中断：{getattr(e, 'message', None) or e}"},
             )
 
-    return EventSourceResponse(event_gen())
+    return EventSourceResponse(
+        event_gen(),
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
