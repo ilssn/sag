@@ -38,6 +38,15 @@ type GraphNodeData = {
 };
 
 type Point = { x: number; y: number };
+
+/** 布局配置（集中可调）：多源=按命中数比例的全周扇区；单源=自信源向下半环发散。 */
+const LAYOUT = {
+  sourceR: 210,
+  chunkR: 380,
+  entityR: 500,
+  minSector: 0.55, // rad，命中很少的源也保有的最小扇区
+  single: { sourceY: 170, chunkR: 260, entityGap: 145, arcFrom: 0.16, arcTo: 0.84 },
+} as const;
 type Side = "top" | "right" | "bottom" | "left";
 
 const KIND_META: Record<
@@ -208,61 +217,86 @@ function buildNetwork(
   }
 
   const sources = [...bySource.entries()];
-  const sourceCount = Math.max(sources.length, 1);
   const tau = Math.PI * 2;
+  const totalChunks = sources.reduce((a, [, g]) => a + Math.min(g.sections.length, 8), 0) || 1;
+  const singleSource = sources.length === 1;
 
-  sources.forEach(([sid, g], si) => {
-    const sector = tau / sourceCount;
-    const sectorStart = -Math.PI / 2 + si * sector;
-    const sectorMid = sectorStart + sector / 2;
+  // 多源：扇区宽度 = 最小保障 + 按命中数比例分配剩余
+  const reserved = LAYOUT.minSector * sources.length;
+  const free = Math.max(0, tau - reserved);
+  let cursor = -Math.PI / 2;
 
-    const sourceId = `s:${sid}`;
-    const sourceR = 210;
-    const sourcePosition =
-      sourceCount === 1
-        ? { x: 0, y: 190 }
-        : {
-            x: Math.cos(sectorMid) * sourceR,
-            y: Math.sin(sectorMid) * sourceR,
-          };
-    nodes.push({
-      id: sourceId,
-      type: "sag",
-      position: sourcePosition,
-      data: { label: g.name, kind: "source" },
-    });
-    edges.push(edgeOf("q", sourceId, "qs", edgeIdx++, queryPosition, sourcePosition));
-
+  sources.forEach(([sid, g]) => {
     const chunks = [...g.sections].sort((a, b) => b.score - a.score).slice(0, 8);
     const ents = entitiesBySource.get(sid) ?? [];
-    const chunkR = 360;
+    const sourceId = `s:${sid}`;
+
+    if (singleSource) {
+      // 单源：查询(中心) → 信源(正下) → 片段沿下半环发散 → 实体再向外
+      const sourcePosition = { x: 0, y: LAYOUT.single.sourceY };
+      nodes.push({ id: sourceId, type: "sag", position: sourcePosition, data: { label: g.name, kind: "source" } });
+      edges.push(edgeOf("q", sourceId, "qs", edgeIdx++, queryPosition, sourcePosition));
+
+      chunks.forEach((sec, ci) => {
+        const t = chunks.length === 1 ? 0.5 : ci / (chunks.length - 1);
+        const angle = Math.PI * (LAYOUT.single.arcFrom + t * (LAYOUT.single.arcTo - LAYOUT.single.arcFrom));
+        const chunkPosition = {
+          x: sourcePosition.x + Math.cos(angle) * LAYOUT.single.chunkR,
+          y: sourcePosition.y + Math.sin(angle) * LAYOUT.single.chunkR,
+        };
+        const cid = `c:${sec.chunk_id ?? `${sid}-${ci}`}`;
+        nodes.push({
+          id: cid,
+          type: "sag",
+          position: chunkPosition,
+          data: { label: sec.heading || sec.content.slice(0, 48) || "片段", kind: "chunk", score: sec.score, section: sec },
+        });
+        edges.push(edgeOf(sourceId, cid, "sc", edgeIdx++, sourcePosition, chunkPosition));
+
+        let linked = 0;
+        for (const e of ents) {
+          if (linked >= 3) break;
+          const name = (e.name || "").trim();
+          if (name.length < 2 || !sec.content.includes(name)) continue;
+          const eid = `e:${sid}:${name}`;
+          const existing = nodes.find((n) => n.id === eid);
+          if (!existing) {
+            const entityPosition = {
+              x: chunkPosition.x + (linked - 1) * 96,
+              y: chunkPosition.y + LAYOUT.single.entityGap,
+            };
+            nodes.push({ id: eid, type: "sag", position: entityPosition, data: { label: name, kind: "entity" } });
+            edges.push(edgeOf(cid, eid, "ce", edgeIdx++, chunkPosition, entityPosition));
+          } else {
+            edges.push(edgeOf(cid, eid, "ce", edgeIdx++, chunkPosition, existing.position));
+          }
+          linked++;
+        }
+      });
+      return;
+    }
+
+    const sector = LAYOUT.minSector + (free * Math.min(chunks.length, 8)) / totalChunks;
+    const sectorStart = cursor;
+    cursor += sector;
+    const sectorMid = sectorStart + sector / 2;
+
+    const sourcePosition = { x: Math.cos(sectorMid) * LAYOUT.sourceR, y: Math.sin(sectorMid) * LAYOUT.sourceR };
+    nodes.push({ id: sourceId, type: "sag", position: sourcePosition, data: { label: g.name, kind: "source" } });
+    edges.push(edgeOf("q", sourceId, "qs", edgeIdx++, queryPosition, sourcePosition));
+
     const innerPad = sector * 0.12;
     const usable = sector * 0.76;
-
     chunks.forEach((sec, ci) => {
       const t = chunks.length === 1 ? 0.5 : ci / (chunks.length - 1);
       const angle = sectorStart + innerPad + t * usable;
       const cid = `c:${sec.chunk_id ?? `${sid}-${ci}`}`;
-      const chunkPosition =
-        sourceCount === 1
-          ? {
-              x: (ci - (chunks.length - 1) / 2) * (chunks.length > 3 ? 220 : 260),
-              y: 390 + (ci % 2) * 28,
-            }
-          : {
-              x: Math.cos(angle) * chunkR,
-              y: Math.sin(angle) * chunkR,
-            };
+      const chunkPosition = { x: Math.cos(angle) * LAYOUT.chunkR, y: Math.sin(angle) * LAYOUT.chunkR };
       nodes.push({
         id: cid,
         type: "sag",
         position: chunkPosition,
-        data: {
-          label: sec.heading || sec.content.slice(0, 48) || "片段",
-          kind: "chunk",
-          score: sec.score,
-          section: sec,
-        },
+        data: { label: sec.heading || sec.content.slice(0, 48) || "片段", kind: "chunk", score: sec.score, section: sec },
       });
       edges.push(edgeOf(sourceId, cid, "sc", edgeIdx++, sourcePosition, chunkPosition));
 
@@ -272,37 +306,21 @@ function buildNetwork(
         const name = (e.name || "").trim();
         if (name.length < 2 || !sec.content.includes(name)) continue;
         const eid = `e:${sid}:${name}`;
-        if (!nodes.some((n) => n.id === eid)) {
-          const entityR = 470;
-          const spread = 0.1;
-          const eAngle = angle + (linked - 1) * spread;
-          const entityPosition =
-            sourceCount === 1
-              ? {
-                  x: chunkPosition.x + (linked - 1) * 112,
-                  y: chunkPosition.y + 132,
-                }
-              : {
-                  x: Math.cos(eAngle) * entityR,
-                  y: Math.sin(eAngle) * entityR,
-                };
-          nodes.push({
-            id: eid,
-            type: "sag",
-            position: entityPosition,
-            data: { label: name, kind: "entity" },
-          });
+        const existing = nodes.find((n) => n.id === eid);
+        if (!existing) {
+          const eAngle = angle + (linked - 1) * 0.09;
+          const entityPosition = { x: Math.cos(eAngle) * LAYOUT.entityR, y: Math.sin(eAngle) * LAYOUT.entityR };
+          nodes.push({ id: eid, type: "sag", position: entityPosition, data: { label: name, kind: "entity" } });
           edges.push(edgeOf(cid, eid, "ce", edgeIdx++, chunkPosition, entityPosition));
         } else {
-          const entityPosition = nodes.find((n) => n.id === eid)?.position ?? chunkPosition;
-          edges.push(edgeOf(cid, eid, "ce", edgeIdx++, chunkPosition, entityPosition));
+          edges.push(edgeOf(cid, eid, "ce", edgeIdx++, chunkPosition, existing.position));
         }
         linked++;
       }
     });
   });
 
-  return { nodes, edges };
+    return { nodes, edges };
 }
 
 function GraphLegend() {
@@ -415,6 +433,8 @@ export default function SearchGraph({ query, results }: { query: string; results
         edges={edges}
         nodeTypes={nodeTypes}
         nodeOrigin={[0.5, 0.5]}
+        fitView
+        fitViewOptions={{ padding: 0.2, minZoom: 0.28, maxZoom: 1.05 }}
         minZoom={0.2}
         maxZoom={1.6}
         proOptions={{ hideAttribution: true }}

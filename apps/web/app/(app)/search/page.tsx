@@ -101,16 +101,18 @@ function clockStamp(iso: string): string {
   });
 }
 
+const ROW_CARD =
+  "group flex w-full items-start gap-3 rounded-lg border bg-card px-4 py-3 text-left shadow-soft outline-none transition-all hover:bg-muted/35 hover:shadow-lift focus-visible:ring-2 focus-visible:ring-ring";
+
 function ActivityCard({ item }: { item: ActivityItem }) {
   const { open } = useDetailPanel();
   const isThread = item.type === "thread";
   const Icon = isThread ? MessageSquare : FileText;
-  const cardClass =
-    "group flex w-full items-center gap-3 px-3 py-2.5 text-left outline-none transition-colors hover:bg-muted/35 focus-visible:bg-muted/45";
+  const cardClass = ROW_CARD;
   const body = (
     <>
-      <span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted/70 text-muted-foreground">
-        <Icon className="size-3.5" />
+      <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground">
+        <Icon className="size-4" />
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 flex-wrap items-center gap-2">
@@ -123,9 +125,12 @@ function ActivityCard({ item }: { item: ActivityItem }) {
           {isThread ? "会话" : item.subtitle || "文档"}
         </span>
       </span>
-      <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground transition-colors group-hover:text-foreground">
-        查看原文
-        <ArrowUpRight className="size-3" />
+      <span className="mt-0.5 flex shrink-0 flex-col items-end gap-0.5 text-[11px] tabular-nums text-muted-foreground">
+        <time dateTime={item.at}>{clockStamp(item.at)}</time>
+        <span className="inline-flex items-center gap-1 transition-colors group-hover:text-foreground">
+          {relativeTime(item.at)}
+          <ArrowUpRight className="size-3 opacity-0 transition-opacity group-hover:opacity-100" />
+        </span>
       </span>
     </>
   );
@@ -188,21 +193,9 @@ function ActivityTimeline({ items }: { items: ActivityItem[] | null }) {
           <h3 className="px-1 text-xs font-medium text-muted-foreground">
             {group.label}
           </h3>
-          <div className="overflow-hidden rounded-lg border border-border/70 bg-card/45">
-            {group.rows.map((item, index) => (
-              <div
-                key={`${item.type}-${item.id}`}
-                className={cn(
-                  "grid grid-cols-[4.25rem_minmax(0,1fr)] items-stretch",
-                  index > 0 && "border-t border-border/60",
-                )}
-              >
-                <div className="flex flex-col justify-center px-3 text-xs tabular-nums text-muted-foreground">
-                  <time dateTime={item.at}>{clockStamp(item.at)}</time>
-                  <span className="mt-1 hidden text-[11px] sm:block">{relativeTime(item.at)}</span>
-                </div>
-                <ActivityCard item={item} />
-              </div>
+          <div className="flex flex-col gap-2">
+            {group.rows.map((item) => (
+              <ActivityCard key={`${item.type}-${item.id}`} item={item} />
             ))}
           </div>
         </section>
@@ -238,7 +231,7 @@ function ResultList({ results }: { results: Section[] }) {
               sourceName: s.source_name ?? undefined,
             })
           }
-          className="group flex w-full items-start gap-3 rounded-lg border bg-card px-4 py-3 text-left shadow-soft outline-none transition-colors hover:bg-muted/35 hover:shadow-lift focus-visible:ring-2 focus-visible:ring-ring"
+          className={ROW_CARD}
         >
           <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-md bg-muted font-mono text-[11px] font-semibold tabular-nums text-muted-foreground">
             {i + 1 < 10 ? `0${i + 1}` : i + 1}
@@ -251,7 +244,7 @@ function ResultList({ results }: { results: Section[] }) {
               <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
                 {s.source_name}
               </span>
-              <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+              <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-muted-foreground">
                 {s.score.toFixed(3)}
               </span>
             </span>

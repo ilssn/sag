@@ -142,7 +142,7 @@ function RenderModeToggle({
 function TextBody({ text, mode }: { text: string; mode: "md" | "raw" }) {
   if (mode === "md") {
     return (
-      <div className="min-w-0 overflow-hidden rounded-md border bg-muted/30 p-4">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto rounded-md border bg-muted/30 p-4">
         <MarkdownContent content={text} />
       </div>
     );
