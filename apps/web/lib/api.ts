@@ -1,6 +1,7 @@
 import { clearToken, getToken } from "./auth";
 import type {
   ActivityItem,
+  Entity,
   Agent,
   Binding,
   BindingTargetType,
@@ -182,7 +183,7 @@ export const api = {
     request(`/api/v1/agents/${id}/threads/${tid}`, { method: "DELETE" }),
 
   // 搜索
-  globalSearch: (b: { query: string; source_ids?: string[]; top_k?: number }) =>
+  globalSearch: (b: { query: string; source_ids?: string[]; top_k?: number; strategy?: string }) =>
     request<SearchResponse>("/api/v1/search", { method: "POST", body: JSON.stringify(b) }),
 
   // 引用溯源：分块原文
@@ -190,6 +191,9 @@ export const api = {
     request<{ chunk_id: string; heading: string; content: string; source_id: string; source_name: string }>(
       `/api/v1/sources/${sourceId}/chunks/${chunkId}`,
     ),
+
+  // 实体（图谱增强）
+  listEntities: (sid: string) => request<Entity[]>(`/api/v1/sources/${sid}/entities`),
 
   // 近期动态（搜索页时间线）
   getActivity: () => request<ActivityItem[]>("/api/v1/activity"),

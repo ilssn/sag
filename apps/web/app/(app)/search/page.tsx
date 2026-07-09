@@ -4,10 +4,11 @@ import * as React from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Clock, FileText, List, Loader2, MessageSquare, Search as SearchIcon, Waypoints } from "lucide-react";
+import { AtSign, Clock, FileText, History, List, MessageSquare, Search as SearchIcon, Waypoints, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import type { ActivityItem, Section, Source } from "@/lib/types";
 import { relativeTime } from "@/lib/format";
 import { useDetailPanel } from "@/components/features/detail-panel";
@@ -15,12 +16,13 @@ import { DocStatusBadge } from "@/components/features/status-badge";
 import { EmptyState } from "@/components/features/empty-state";
 import { Input } from "@/components/ui/input";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
@@ -30,7 +32,52 @@ const SearchGraph = dynamic(() => import("@/components/features/search-graph"), 
   loading: () => <Skeleton className="h-[560px] rounded-lg" />,
 });
 
-const ALL = "__all__";
+const HISTORY_KEY = "sag:search-history";
+
+function readHistory(): string[] {
+  try {
+    return JSON.parse(window.localStorage.getItem(HISTORY_KEY) ?? "[]");
+  } catch {
+    return [];
+  }
+}
+function pushHistory(q: string) {
+  const next = [q, ...readHistory().filter((x) => x !== q)].slice(0, 8);
+  window.localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+  return next;
+}
+
+/** 检索扫描动画：骨架行 1→N 铺开、随机高亮、清空、再来——「翻找数据」的具象化。 */
+function SearchScanning() {
+  const [rows, setRows] = React.useState(1);
+  const [lit, setLit] = React.useState<Set<number>>(new Set());
+  React.useEffect(() => {
+    let n = 1;
+    const grow = window.setInterval(() => {
+      n = n >= 6 ? 1 : n + 1;
+      setRows(n);
+      const picks = new Set<number>();
+      const count = n <= 2 ? 1 : 2 + (n % 2);
+      while (picks.size < Math.min(count, n)) picks.add(Math.floor(Math.random() * n));
+      setLit(picks);
+    }, 420);
+    return () => window.clearInterval(grow);
+  }, []);
+  return (
+    <div className="flex flex-col gap-1.5 overflow-hidden rounded-lg border p-3" aria-label="检索中">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div
+          key={i}
+          className={cn(
+            "h-8 animate-fade-in rounded-md transition-colors duration-300",
+            lit.has(i) ? "bg-primary/15 ring-1 ring-primary/25" : "bg-muted",
+          )}
+        />
+      ))}
+      <p className="pt-1 text-center text-xs text-muted-foreground">正在翻找知识库…</p>
+    </div>
+  );
+}
 
 function dayGroup(iso: string): string {
   const d = new Date(iso);
@@ -173,7 +220,9 @@ function SearchPageInner() {
   const params = useSearchParams();
   const router = useRouter();
   const [query, setQuery] = React.useState("");
-  const [scope, setScope] = React.useState<string>(params.get("source") ?? ALL);
+  const [scoped, setScoped] = React.useState<{ id: string; name: string }[]>([]);
+  const [mentionOpen, setMentionOpen] = React.useState(false);
+  const [history, setHistory] = React.useState<string[]>([]);
   const [sources, setSources] = React.useState<Source[]>([]);
   const [results, setResults] = React.useState<Section[] | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -183,11 +232,22 @@ function SearchPageInner() {
   const [topK, setTopK] = React.useState(12);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
+  const preset = params.get("source");
   React.useEffect(() => {
-    api.listSources().then(setSources).catch(() => {});
+    api
+      .listSources()
+      .then((list) => {
+        setSources(list);
+        if (preset) {
+          const hit = list.find((s) => s.id === preset);
+          if (hit) setScoped([{ id: hit.id, name: hit.name }]);
+        }
+      })
+      .catch(() => {});
     api.getActivity().then(setActivity).catch(() => setActivity([]));
+    setHistory(readHistory());
     inputRef.current?.focus();
-  }, []);
+  }, [preset]);
 
   async function run(e?: React.FormEvent, k?: number) {
     e?.preventDefault();
@@ -200,10 +260,13 @@ function SearchPageInner() {
     setTopK(limit);
     setBusy(true);
     try {
+      setHistory(pushHistory(q));
       const r = await api.globalSearch({
         query: q,
-        source_ids: scope === ALL ? undefined : [scope],
+        source_ids: scoped.length ? scoped.map((s) => s.id) : undefined,
         top_k: limit,
+        // 搜索页用纯向量（毫秒级）；multi=图谱增强需 LLM 抽实体（秒级），留给对话检索
+        strategy: "vector",
       });
       setResults(r.sections);
       setLastQuery(q);
@@ -218,36 +281,70 @@ function SearchPageInner() {
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4 md:p-6">
       <form onSubmit={run} className="flex items-center gap-2">
         <div className="relative flex-1">
-          {busy ? (
-            <Loader2 className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 animate-spin text-muted-foreground" />
-          ) : (
-            <SearchIcon className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          )}
+          <SearchIcon className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             ref={inputRef}
             value={query}
             onChange={(e) => {
-              setQuery(e.target.value);
-              if (!e.target.value.trim()) setResults(null);
+              const v = e.target.value;
+              setQuery(v);
+              if (!v.trim()) setResults(null);
+              if (v.endsWith("@")) setMentionOpen(true);
             }}
-            placeholder="搜索你的知识库…  Enter 检索"
-            className="h-12 rounded-lg pl-10 pr-36 text-base shadow-soft"
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setMentionOpen(false);
+            }}
+            placeholder="搜索知识库 · 输入 @ 限定范围"
+            className="h-12 rounded-lg pl-10 pr-10 shadow-soft placeholder:text-sm"
           />
-          <div className="absolute right-1.5 top-1/2 -translate-y-1/2">
-            <Select value={scope} onValueChange={setScope}>
-              <SelectTrigger className="h-9 w-32 border-0 bg-muted/50 text-xs shadow-none">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent align="end">
-                <SelectItem value={ALL}>全部信源</SelectItem>
-                {sources.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>
-                    {s.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {query && (
+            <button
+              type="button"
+              onClick={() => {
+                setQuery("");
+                setResults(null);
+                inputRef.current?.focus();
+              }}
+              aria-label="清空"
+              className="absolute right-3 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <X className="size-3.5" />
+            </button>
+          )}
+          {mentionOpen && (
+            <div className="absolute left-0 top-full z-20 mt-2 w-80">
+              <Command className="rounded-lg border shadow-lift">
+                <CommandInput placeholder="匹配知识库…" autoFocus />
+                <CommandList>
+                  <CommandEmpty>没有匹配的信源</CommandEmpty>
+                  <CommandGroup heading="知识库范围（可多选）">
+                    {sources.map((s) => {
+                      const on = scoped.some((x) => x.id === s.id);
+                      return (
+                        <CommandItem
+                          key={s.id}
+                          value={s.name}
+                          onSelect={() => {
+                            setScoped((p) =>
+                              on
+                                ? p.filter((x) => x.id !== s.id)
+                                : [...p, { id: s.id, name: s.name }],
+                            );
+                            setQuery((q) => (q.endsWith("@") ? q.slice(0, -1) : q));
+                            setMentionOpen(false);
+                            inputRef.current?.focus();
+                          }}
+                        >
+                          <span className="min-w-0 flex-1 truncate">{s.name}</span>
+                          {on && <span className="text-xs text-muted-foreground">已选</span>}
+                        </CommandItem>
+                      );
+                    })}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </div>
+          )}
         </div>
         <button
           type="button"
@@ -259,21 +356,7 @@ function SearchPageInner() {
       </form>
 
       {busy && results === null ? (
-        <div className="flex flex-col gap-2" aria-live="polite" aria-busy="true">
-          <div className="flex items-center gap-2 px-1 text-sm text-muted-foreground">
-            <Loader2 className="size-3.5 animate-spin" />
-            正在检索
-          </div>
-          <div className="overflow-hidden rounded-lg border">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className={i > 0 ? "border-t p-4" : "p-4"}>
-                <Skeleton className="h-4 w-2/5" />
-                <Skeleton className="mt-2 h-3 w-full" />
-                <Skeleton className="mt-1.5 h-3 w-4/5" />
-              </div>
-            ))}
-          </div>
-        </div>
+        <SearchScanning />
       ) : results !== null ? (
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between gap-3 px-1">

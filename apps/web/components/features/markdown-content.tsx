@@ -55,6 +55,28 @@ function remarkCitationLinks(enabled: boolean) {
   };
 }
 
+function MdImage(props: React.ImgHTMLAttributes<HTMLImageElement>) {
+  const [broken, setBroken] = React.useState(false);
+  const src = typeof props.src === "string" ? props.src : "";
+  const external = /^(https?:|data:|blob:)/.test(src);
+  if (broken || !external) {
+    return (
+      <span className="my-1 inline-flex max-w-full items-center gap-1.5 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
+        🖼 图片{props.alt ? `：${props.alt}` : ""}（见原文件）
+      </span>
+    );
+  }
+  // eslint-disable-next-line @next/next/no-img-element
+  return (
+    <img
+      {...props}
+      alt={props.alt ?? "图片"}
+      onError={() => setBroken(true)}
+      className="my-2 max-h-80 max-w-full rounded-md border"
+    />
+  );
+}
+
 export function MarkdownContent({
   content,
   citations,
@@ -77,6 +99,7 @@ export function MarkdownContent({
       <ReactMarkdown
         remarkPlugins={[remarkGfm, citationPlugin]}
         components={{
+        img: MdImage,
           a: ({ href, children, ...props }) => {
             if (href?.startsWith("citation:")) {
               const n = href.slice("citation:".length);
