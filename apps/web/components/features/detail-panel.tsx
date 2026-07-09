@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowUpRight, Code, Download, Maximize2, Minimize2, TextQuote, X } from "lucide-react";
+import { ArrowUpRight, ChevronsLeft, ChevronsRight, Code, Download, TextQuote, X } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
 import { getToken } from "@/lib/auth";
@@ -426,7 +426,7 @@ export function DetailPanelOutlet() {
   if (!target) return null;
 
   return (
-    <aside className="flex h-full min-h-0 flex-col bg-background">
+    <aside className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
       <div className="flex h-12 shrink-0 items-center gap-1 border-b px-3">
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{panelTitle(target)}</span>
         <Tooltip>
@@ -438,10 +438,10 @@ export function DetailPanelOutlet() {
               onClick={toggleMaximize}
               aria-label={maximized ? "还原" : "放大"}
             >
-              {maximized ? <Minimize2 /> : <Maximize2 />}
+              {maximized ? <ChevronsRight /> : <ChevronsLeft />}
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">{maximized ? "还原" : "放大占满"}</TooltipContent>
+          <TooltipContent side="bottom">{maximized ? "还原" : "铺开阅读"}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>

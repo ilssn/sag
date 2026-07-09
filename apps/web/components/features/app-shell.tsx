@@ -373,7 +373,7 @@ function ContentArea({ children }: { children: React.ReactNode }) {
         {target && lg && (
           <>
             <ResizableHandle withHandle />
-            <ResizablePanel ref={panelRef} defaultSize={34} minSize={24} maxSize={100} className="border-l">
+            <ResizablePanel ref={panelRef} defaultSize={34} minSize={24} maxSize={100} className="flex min-h-0 border-l">
               <DetailPanelOutlet />
             </ResizablePanel>
           </>
