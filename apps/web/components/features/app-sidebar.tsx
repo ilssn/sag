@@ -3,15 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import {
-  Archive,
-  ChevronDown,
-  ChevronsUpDown,
-  Library,
-  LogOut,
-  MessageSquarePlus,
-  Settings,
-} from "lucide-react";
+import { Archive, ChevronDown, ChevronsUpDown, Library, LogOut, MessageSquarePlus, Search, Settings } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
@@ -108,7 +100,10 @@ function NavUser() {
   );
 }
 
-const NAV = [{ href: "/knowledge", label: "知识库", icon: Library }];
+const NAV = [
+  { href: "/search", label: "搜索", icon: Search },
+  { href: "/knowledge", label: "知识库", icon: Library },
+];
 
 export function AppSidebar() {
   const routePath = usePathname();
@@ -156,11 +151,7 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton
-                asChild
-                tooltip="新对话"
-                className="bg-primary text-primary-foreground shadow-soft hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/95 active:text-primary-foreground"
-              >
+              <SidebarMenuButton asChild tooltip="新对话">
                 <Link href="/chat">
                   <MessageSquarePlus />
                   <span>新对话</span>

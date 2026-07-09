@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     llm_model: str = "qwen3.6-flash"
     llm_temperature: float = 0.3
     llm_max_tokens: int = 2048
+    llm_context_window: int = 128_000  # 模型上下文窗口（供用量圆环分母）
 
     # ── Embedding（缺省复用 LLM 的 key / base_url）─────────────────────
     embedding_model: str = "bge-large-en-v1.5"

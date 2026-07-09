@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Maximize2, Minimize2, Search, TriangleAlert } from "lucide-react";
+import { Expand, Shrink, TriangleAlert } from "lucide-react";
 
 import { useApp } from "@/components/features/app-shell";
 import { ThemeToggle } from "@/components/features/theme-toggle";
@@ -56,17 +56,6 @@ export function SiteHeader() {
       </Breadcrumb>
 
       <div className="ml-auto flex items-center gap-1.5">
-        <Link
-          href="/search"
-          className="inline-flex h-8 items-center gap-2 rounded-md border bg-muted/40 px-2.5 text-sm text-muted-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <Search className="size-3.5" />
-          <span className="hidden md:inline">搜索…</span>
-          <kbd className="pointer-events-none hidden h-5 select-none items-center gap-0.5 rounded border bg-background px-1 font-mono text-[10px] font-medium text-muted-foreground md:inline-flex">
-            ⌘K
-          </kbd>
-        </Link>
-
         {capabilities && !capabilities.llm_configured && (
           <Link
             href="/settings"
@@ -86,7 +75,7 @@ export function SiteHeader() {
               onClick={toggleWindowMode}
               aria-label={windowed ? "切换为满屏" : "切换为窗口"}
             >
-              {windowed ? <Maximize2 /> : <Minimize2 />}
+              {windowed ? <Expand /> : <Shrink />}
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">{windowed ? "满屏显示" : "窗口显示"}</TooltipContent>

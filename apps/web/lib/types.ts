@@ -104,6 +104,7 @@ export interface Binding {
 export interface ModelConfig {
   llm_base_url: string | null;
   llm_model: string;
+  llm_context_window: number;
   llm_temperature: number;
   llm_max_tokens: number;
   llm_api_key_set: boolean;
@@ -191,6 +192,7 @@ export interface SearchResponse {
 export interface Capabilities {
   llm_configured: boolean;
   llm_model: string;
+  context_window?: number;
   embedding_model: string;
   vector_provider: string;
   language: string;
