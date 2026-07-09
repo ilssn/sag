@@ -2,6 +2,9 @@
   "name": "sag-web",
   "private": true,
   "version": "1.0.1",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",

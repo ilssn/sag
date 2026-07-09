@@ -1,6 +1,7 @@
 # sag
 
 <p>
+  <a href="https://github.com/ilssn/muse/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/ilssn/muse/actions/workflows/ci.yml/badge.svg?branch=main" /></a>
   <img alt="version" src="https://img.shields.io/badge/version-v1.0.1-18181b" />
   <img alt="python" src="https://img.shields.io/badge/python-3.11+-3776ab" />
   <img alt="node" src="https://img.shields.io/badge/node-20+-339933" />

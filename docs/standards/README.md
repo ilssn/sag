@@ -34,4 +34,6 @@ ruff check sag_api/ tests/ && python -m pytest -q      # 全绿
 npx tsc --noEmit && npx next build                     # 全绿
 ```
 
-提交节奏：功能分阶段各一提交推 `dev`，全绿后 `--no-ff` 合 `main`；发布打 `vX.Y.Z` tag。
+以上门禁由 **GitHub Actions 强制执行**（`.github/workflows/ci.yml`：push dev/main 与全部 PR），
+本地跑过 ≠ 通过——以 CI 绿为准。提交节奏：功能分阶段各一提交推 `dev`，全绿后 `--no-ff`
+合 `main`；发布打 `vX.Y.Z` tag。

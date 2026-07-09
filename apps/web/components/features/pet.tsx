@@ -124,7 +124,8 @@ export function Pet() {
 
 /** 宠物开关（localStorage sag:pet，默认开）。 */
 export function usePetEnabled(): [boolean, (on: boolean) => void] {
-  const [on, setOn] = React.useState(true);
+  // 初始 false：关闭者绝不闪现；开启者迟一帧出现（正确取舍 + SSR 安全）
+  const [on, setOn] = React.useState(false);
   React.useEffect(() => {
     const sync = () => setOn(window.localStorage.getItem("sag:pet") !== "off");
     sync();
