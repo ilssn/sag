@@ -38,3 +38,6 @@ npm-debug.log*
 
 # skill installer output (npx skills add)
 .agents/
+
+# 本地历史数据目录（勿入库）
+.muse/
