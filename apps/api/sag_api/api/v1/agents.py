@@ -13,7 +13,7 @@ from sag_api.core.deps import (
     get_llm,
     get_tool_registry,
 )
-from sag_api.core.errors import ConfigurationError
+from sag_api.core.errors import ApiError
 from sag_api.db.models import User
 from sag_api.generation import LLMClient
 from sag_api.sag import EngineManager
@@ -230,24 +230,51 @@ async def ask(
     agent = await svc.get_agent(session, agent_id)
     thread = await svc.get_thread(session, agent.id, thread_id)
 
-    plan = await svc.prepare_ask(
-        session,
-        agent=agent,
-        thread=thread,
-        query=body.query,
-        engine_manager=engine_manager,
-        attachments=body.attachments,
-        source_ids=body.source_ids,
-        llm=llm,
-    )
-    if plan.short_circuit is None and not llm.configured:
-        raise ConfigurationError("尚未配置 LLM，无法生成回答")
-
     async def event_gen():
+        import time as _time
+
+        # 首轮检索作为第一个可见步骤：SSE 立刻开流，前端时间线实时呈现
+        yield _sse("status", {"phase": "retrieving", "step": 0})
+        yield _sse(
+            "tool", {"name": "search_context", "step": 0, "args": body.query[:60]}
+        )
+        _t0 = _time.perf_counter()
+        try:
+            plan = await svc.prepare_ask(
+                session,
+                agent=agent,
+                thread=thread,
+                query=body.query,
+                engine_manager=engine_manager,
+                attachments=body.attachments,
+                source_ids=body.source_ids,
+                llm=llm,
+            )
+        except ApiError as e:
+            yield _sse("error", {"code": e.code, "message": e.message})
+            return
+        seed_ms = int((_time.perf_counter() - _t0) * 1000)
+        yield _sse(
+            "tool_result",
+            {"name": "search_context", "step": 0, "ms": seed_ms, "count": plan.section_count},
+        )
+        if plan.short_circuit is None and not llm.configured:
+            yield _sse("error", {"code": "configuration_error", "message": "尚未配置 LLM，无法生成回答"})
+            return
+        seed_step = {
+            "kind": "tool",
+            "step": 0,
+            "name": "search_context",
+            "args": body.query[:60],
+            "ms": seed_ms,
+            "count": plan.section_count,
+        }
+
         async for name, payload in agent_service.generate_stream(
             SessionLocal,
             plan=plan,
             agentic=body.mode != "fast",
+            preface_trace=[seed_step],
             agent=agent,
             thread_id=thread.id,
             engine_manager=engine_manager,

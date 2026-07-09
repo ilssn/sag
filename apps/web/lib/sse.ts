@@ -3,7 +3,7 @@ import { getToken } from "./auth";
 import type { Citation } from "./types";
 
 export interface AskHandlers {
-  onStatus?: (step: number) => void;
+  onStatus?: (phase: string, step: number) => void;
   onTool?: (name: string, step?: number, args?: string) => void;
   onToolResult?: (r: { name: string; step?: number; ms?: number; count?: number }) => void;
   onMeta?: (citations: Citation[], promptPreview?: string) => void;

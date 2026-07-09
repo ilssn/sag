@@ -151,6 +151,7 @@ async def generate_stream(
     llm: LLMClient,
     tool_registry: ToolRegistry,
     agentic: bool = True,
+    preface_trace: list[dict] | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """驱动一次问答，产出事件流：meta → (status/tool/tool_result)* → token* → done / error。
 
@@ -170,7 +171,7 @@ async def generate_stream(
 
     messages = [dict(m) for m in plan.messages]
     citations = list(plan.citations)
-    trace: list[dict] = []
+    trace: list[dict] = list(preface_trace or [])
     preview = plan.prompt_preview
 
     tool_names = _enabled_tool_names(agent) if agentic else []

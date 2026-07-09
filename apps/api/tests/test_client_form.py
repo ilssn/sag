@@ -101,7 +101,8 @@ async def test_default_agent_activity_and_document_file():
                 headers=A,
                 json={"query": "这张图是什么？", "attachments": [aid]},
             )
-            assert ask.status_code == 400  # 离线未配 LLM
+            # 秒开流语义：HTTP 200，配置错误以 SSE error 事件下发
+            assert ask.status_code == 200 and "configuration_error" in ask.text
             msgs = (
                 await c.get(f"/api/v1/agents/{a1['id']}/threads/{t['id']}/messages", headers=A)
             ).json()
@@ -114,7 +115,7 @@ async def test_default_agent_activity_and_document_file():
                 headers=A,
                 json={"query": "只查这个源", "source_ids": [src["id"]]},
             )
-            assert scoped.status_code == 400
+            assert scoped.status_code == 200 and "configuration_error" in scoped.text
             gone_id = mine[0]["id"]
             rd = await c.delete(
                 f"/api/v1/agents/{a1['id']}/threads/{t['id']}/messages/{gone_id}", headers=A

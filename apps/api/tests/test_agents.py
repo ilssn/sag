@@ -57,12 +57,12 @@ async def test_agents_flow_offline():
                 resolved = await resolve_sources(s, agent_obj)
             assert [x.id for x in resolved] == [src["id"]]
 
-            # 会话 + 离线 ask → 400（未配置 LLM）
+            # 会话 + 离线 ask → 秒开流：200 + SSE error(configuration_error)
             th = (await c.post(f"/api/v1/agents/{aid}/threads", headers=H, json={})).json()
             ask = await c.post(
                 f"/api/v1/agents/{aid}/threads/{th['id']}/ask", headers=H, json={"query": "你好"}
             )
-            assert ask.status_code == 400
+            assert ask.status_code == 200 and "configuration_error" in ask.text
 
             # 列表 + 删除（共享测试库 → 用存在性断言而非精确计数）
             assert any(a["id"] == aid for a in (await c.get("/api/v1/agents", headers=H)).json())
