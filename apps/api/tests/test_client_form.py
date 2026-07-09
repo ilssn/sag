@@ -66,6 +66,8 @@ async def test_default_agent_activity_and_document_file():
                 json={"archived": True},
             )
             assert arch.status_code == 200 and arch.json()["archived"] is True
+            acts_arch = (await c.get("/api/v1/activity", headers=A)).json()
+            assert all(not (x["type"] == "thread" and x["id"] == t["id"]) for x in acts_arch)
             live = (await c.get(f"/api/v1/agents/{a1['id']}/threads", headers=A)).json()
             assert all(x["id"] != t["id"] for x in live)
             gone = (

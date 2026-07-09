@@ -38,8 +38,13 @@ export function Pet() {
     const d = dragRef.current;
     if (!d) return;
     d.moved = true;
-    const x = Math.min(Math.max(8, e.clientX - d.dx), window.innerWidth - 64);
-    const y = Math.min(Math.max(8, e.clientY - d.dy), window.innerHeight - 64);
+    // fixed 元素的 containing block 可能是窗口态的 transform 窗体——以 offsetParent 为基准
+    const parent = elRef.current?.offsetParent as HTMLElement | null;
+    const base = parent?.getBoundingClientRect() ?? ({ left: 0, top: 0 } as DOMRect);
+    const maxX = (parent?.clientWidth ?? window.innerWidth) - 64;
+    const maxY = (parent?.clientHeight ?? window.innerHeight) - 64;
+    const x = Math.min(Math.max(8, e.clientX - d.dx - base.left), maxX);
+    const y = Math.min(Math.max(8, e.clientY - d.dy - base.top), maxY);
     setPos({ x, y });
   }
   function onPointerUp() {
