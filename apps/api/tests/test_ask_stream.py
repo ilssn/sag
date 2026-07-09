@@ -41,6 +41,17 @@ class BrokenToolsLLM(AgenticLLM):
         raise UpstreamError("tools not supported")
 
 
+class GreedyLLM(AgenticLLM):
+    """每轮都要求调用工具 → 必然打满 agent_max_steps（复现「卡在第 N 轮」场景）。"""
+
+    async def chat(self, messages, tools=None):
+        self.calls += 1
+        return ChatTurn(
+            content=None,
+            tool_calls=[ToolCall(id=f"c{self.calls}", name="search_context", arguments={"query": f"第{self.calls}轮"})],
+        )
+
+
 async def _setup(c):
     r = await c.post(
         "/api/v1/auth/register", json={"email": f"stream{id(c)}@t.com", "password": "password123"}
@@ -100,3 +111,34 @@ async def test_ask_stream_degrades_when_gateway_rejects_tools():
                 await c.get(f"/api/v1/agents/{a['id']}/threads/{th['id']}/messages", headers=H)
             ).json()
             assert any(m["role"] == "assistant" and m["content"] for m in msgs)
+
+
+@pytest.mark.asyncio
+async def test_ask_stream_exhausts_max_steps_then_answers(monkeypatch):
+    """轮次耗尽（模型每轮都要工具）：强制收尾直答，绝不卡死——token/done 必达，答案落库。"""
+    from sag_api.core.config import settings
+    from sag_api.main import app
+
+    monkeypatch.setattr(settings, "agent_max_steps", 2)
+    transport = httpx.ASGITransport(app=app)
+    async with app.router.lifespan_context(app):
+        llm = GreedyLLM()
+        app.state.llm = llm
+        async with httpx.AsyncClient(transport=transport, base_url="http://t", timeout=60) as c:
+            H, a, th = await _setup(c)
+            ask = await c.post(
+                f"/api/v1/agents/{a['id']}/threads/{th['id']}/ask",
+                headers=H,
+                json={"query": "打满轮次", "mode": "agentic"},
+            )
+            body = ask.text
+            assert llm.calls == 2                                   # 决策恰好打满上限，未越界
+            assert "event: token" in body and "event: done" in body  # 收尾直答，未烂尾
+            assert '"phase": "answering"' in body or "answering" in body  # 收尾阶段可见
+            msgs = (
+                await c.get(f"/api/v1/agents/{a['id']}/threads/{th['id']}/messages", headers=H)
+            ).json()
+            asst = [m for m in msgs if m["role"] == "assistant"][-1]
+            assert asst["content"] == "答案"
+            kinds = [s["kind"] for s in asst["steps"]]
+            assert kinds.count("thinking") == 2 and "answer" in kinds  # 轨迹完整：2 轮思考 + 收尾

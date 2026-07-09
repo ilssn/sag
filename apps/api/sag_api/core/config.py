@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.3
     llm_max_tokens: int = 2048
     llm_context_window: int = 128_000  # 模型上下文窗口（供用量圆环分母）
+    llm_request_timeout: float = 120.0  # 单次 LLM 请求超时（秒）；不设则 SDK 默认 600s×重试=假死
 
     # ── Embedding（缺省复用 LLM 的 key / base_url）─────────────────────
     embedding_model: str = "bge-large-en-v1.5"

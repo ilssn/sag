@@ -151,6 +151,16 @@ async def _run_tool_loop(
                 {"name": call.name, "step": _step + 1, "ms": tool_ms, "count": count},
             )
             messages.append({"role": "tool", "tool_call_id": call.id, "content": content})
+    else:
+        # 轮次耗尽而模型仍在请求工具 → 钉住收尾：命令直答，防「我再查查」式烂尾
+        log.info("工具循环达到上限 %s 轮，强制收尾直答", max_steps)
+        messages.append(
+            {
+                "role": "system",
+                "content": "已达到工具调用轮次上限。请立即基于以上已检索到的资料直接给出最终回答，"
+                "不要再请求任何工具；若资料不足，如实说明缺口。",
+            }
+        )
 
 
 async def generate_stream(
@@ -210,9 +220,12 @@ async def generate_stream(
                 yield ev
         preview = build_prompt_preview(messages)
 
+    # 收尾阶段可见化：前端据此从「思考中」切到「生成回答」计时
+    yield ("status", {"phase": "answering", "step": 0})
     yield ("meta", {"citations": citations, "prompt_preview": preview})
 
     acc: list[str] = []
+    answer_start = time.perf_counter()
     try:
         async for token in llm.stream(messages):
             acc.append(token)
@@ -222,6 +235,7 @@ async def generate_stream(
         return
 
     answer = "".join(acc)
+    trace.append({"kind": "answer", "ms": int((time.perf_counter() - answer_start) * 1000)})
     mid = None
     if thread_id is not None:
         mid = await persist_answer(session_factory, thread_id, answer, citations, steps=trace)
