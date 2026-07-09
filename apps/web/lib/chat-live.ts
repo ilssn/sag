@@ -42,18 +42,22 @@ export const chatLive = {
   start(threadId: string) {
     state = { threadId, streaming: true, content: "", citations: [], session: state.session + 1 };
     emit();
+    return state.session;
   },
-  token(text: string) {
+  token(text: string, session = state.session) {
+    if (session !== state.session) return;
     if (!state.streaming) return;
     state = { ...state, content: state.content + text };
     emit();
   },
-  meta(citations: unknown[]) {
+  meta(citations: unknown[], session = state.session) {
+    if (session !== state.session) return;
     if (!state.streaming) return;
     state = { ...state, citations };
     emit();
   },
-  end() {
+  end(session = state.session) {
+    if (session !== state.session) return;
     if (!state.streaming && state.threadId === null) return;
     state = { ...state, streaming: false };
     emit();

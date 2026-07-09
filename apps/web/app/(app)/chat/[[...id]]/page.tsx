@@ -17,6 +17,16 @@ export default function ChatPage() {
   const router = useRouter();
   const { agent, refreshThreads } = useApp();
   const threadId = id?.[0] ?? null;
+  const [draftNonce, setDraftNonce] = React.useState(0);
+
+  React.useEffect(() => {
+    const onNewChat = () => {
+      setDraftNonce((n) => n + 1);
+      if (window.location.pathname !== "/chat") router.push("/chat");
+    };
+    window.addEventListener("sag:new-chat", onNewChat);
+    return () => window.removeEventListener("sag:new-chat", onNewChat);
+  }, [router]);
 
   const listMessages = React.useCallback(
     (tid: string): Promise<ConvMessage[]> =>
@@ -83,7 +93,7 @@ export default function ChatPage() {
   return (
     <div className="h-full min-h-0">
       <ConversationView
-        key={threadId ?? "new"}
+        key={threadId ?? `new-${draftNonce}`}
         conversationKey={agent.id}
         threadId={threadId}
         listMessages={listMessages}
@@ -100,7 +110,7 @@ export default function ChatPage() {
           "帮我梳理其中的时间线",
         ]}
         emptyHint={agent.persona?.greeting || "我在。上传资料到知识库，或直接问我任何问题。"}
-        placeholder={`问点什么…  Enter 发送 · Shift+Enter 换行`}
+        placeholder={`向 ${agent.name} 发送消息，输入 @ 指定知识库`}
       />
     </div>
   );

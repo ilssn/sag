@@ -66,6 +66,7 @@ export function SiteHeader() {
           </Link>
         )}
 
+        <ThemeToggle />
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -80,7 +81,6 @@ export function SiteHeader() {
           </TooltipTrigger>
           <TooltipContent side="bottom">{windowed ? "满屏显示" : "窗口显示"}</TooltipContent>
         </Tooltip>
-        <ThemeToggle />
       </div>
     </header>
   );

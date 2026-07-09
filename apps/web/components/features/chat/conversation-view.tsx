@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import * as React from "react";
-import { ArrowUp, AtSign, Check, Copy, FileUp, ImagePlus, Paperclip, RotateCcw, Square, Trash2, X } from "lucide-react";
+import { ArrowUp, AtSign, Check, Copy, FileUp, ImagePlus, Loader2, Plus, RotateCcw, Square, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import type { AskHandlers } from "@/lib/sse";
@@ -13,6 +13,7 @@ import { relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { chatLive } from "@/lib/chat-live";
 import { useApp } from "@/components/features/app-shell";
+import { useDetailPanel } from "@/components/features/detail-panel";
 import { CitationBlock } from "@/components/features/chat/citation-block";
 import { PromptPreview } from "@/components/features/chat/prompt-preview";
 import { AuthImage } from "@/components/features/auth-image";
@@ -63,50 +64,62 @@ function MessageActions({
 }) {
   const [done, setDone] = React.useState(false);
   const btn =
-    "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground";
+    "grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground";
   return (
-      <div className="mt-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover/msg:opacity-100">
-        <button
-          type="button"
-          onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(content);
-              setDone(true);
-              setTimeout(() => setDone(false), 1500);
-            } catch {
-              toast.error("复制失败");
-            }
-          }}
-          className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          aria-label="复制回答"
-        >
-          {done ? <Check className="size-3" /> : <Copy className="size-3" />}
-          {done ? "已复制" : "复制"}
-        </button>
-        {onRetry && (
-          <button type="button" onClick={onRetry} className={btn} aria-label="重新回答">
-            <RotateCcw className="size-3" />
-            重试
-          </button>
-        )}
-        {onDelete && (
+    <div className="mt-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover/msg:opacity-100">
+      <Tooltip>
+        <TooltipTrigger asChild>
           <button
             type="button"
-            onClick={onDelete}
-            className={btn + " hover:text-destructive"}
-            aria-label="删除消息"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(content);
+                setDone(true);
+                setTimeout(() => setDone(false), 1500);
+              } catch {
+                toast.error("复制失败");
+              }
+            }}
+            className={btn}
+            aria-label={done ? "已复制" : "复制回答"}
           >
-            <Trash2 className="size-3" />
-            删除
+            {done ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
           </button>
-        )}
-        {createdAt && (
-          <span className="px-1.5 text-[11px] tabular-nums text-muted-foreground/70">
-            {relativeTime(createdAt)}
-          </span>
-        )}
-      </div>
-    );
+        </TooltipTrigger>
+        <TooltipContent>{done ? "已复制" : "复制"}</TooltipContent>
+      </Tooltip>
+      {onRetry && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button type="button" onClick={onRetry} className={btn} aria-label="重新回答">
+              <RotateCcw className="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>重试</TooltipContent>
+        </Tooltip>
+      )}
+      {onDelete && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={onDelete}
+              className={btn + " hover:text-destructive"}
+              aria-label="删除消息"
+            >
+              <Trash2 className="size-3.5" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>删除</TooltipContent>
+        </Tooltip>
+      )}
+      {createdAt && (
+        <span className="px-1.5 text-[11px] tabular-nums text-muted-foreground/70">
+          {relativeTime(createdAt)}
+        </span>
+      )}
+    </div>
+  );
 }
 
 const MessageItem = React.memo(
@@ -125,6 +138,21 @@ const MessageItem = React.memo(
     onRetry?: () => void;
     onDelete?: () => void;
   }) {
+    const panel = useDetailPanel();
+    const openCitation = React.useCallback(
+      (citation: Citation) => {
+        if (!citation.chunk_id || !citation.source_id) return;
+        panel.open({
+          kind: "chunk",
+          sourceId: citation.source_id,
+          chunkId: citation.chunk_id,
+          heading: citation.heading ?? undefined,
+          sourceName: citation.source_name ?? undefined,
+        });
+      },
+      [panel],
+    );
+
     if (message.role === "user") {
       return (
         <div className="flex flex-col items-end gap-1.5">
@@ -154,11 +182,9 @@ const MessageItem = React.memo(
         {avatar}
         <div className="min-w-0 flex-1">
           {thinking ? (
-            <div className="flex items-center gap-1.5 py-1 text-sm">
-              <span className="size-1.5 animate-blink rounded-full bg-primary" />
-              <span className="text-shimmer">
-                {toolNote ? `正在调用 ${toolNote}…` : "检索并生成中…"}
-              </span>
+            <div className="inline-flex items-center gap-2 rounded-full border bg-card px-2.5 py-1.5 text-xs text-muted-foreground shadow-soft">
+              <Loader2 className="size-3.5 animate-spin text-foreground" />
+              <span>{toolNote ? `调用 ${toolNote}` : "检索并生成"}</span>
             </div>
           ) : streaming ? (
             <div className="answer-prose whitespace-pre-wrap text-foreground">
@@ -166,7 +192,11 @@ const MessageItem = React.memo(
               <span className="ml-0.5 inline-block h-4 w-[2px] animate-blink bg-primary align-middle" />
             </div>
           ) : (
-            <MarkdownContent content={message.content} />
+            <MarkdownContent
+              content={message.content}
+              citations={message.citations}
+              onCitationClick={openCitation}
+            />
           )}
           {!streaming && message.content && (
             <MessageActions
@@ -183,8 +213,22 @@ const MessageItem = React.memo(
     );
   },
   (prev, next) =>
-    prev.message === next.message && prev.streaming === next.streaming && prev.avatar === next.avatar,
+    prev.message === next.message &&
+    prev.streaming === next.streaming &&
+    prev.toolNote === next.toolNote &&
+    prev.avatar === next.avatar,
 );
+
+function formatTokenCount(value: number) {
+  if (value >= 1_000_000) {
+    const n = value / 1_000_000;
+    return `${n >= 10 ? Math.round(n) : n.toFixed(1)}M`;
+  }
+  if (value >= 1000) {
+    return `${Math.round(value / 1000)}K`;
+  }
+  return String(value);
+}
 
 /**
  * 统一对话视图：信源问答与Agent对话共用。
@@ -231,6 +275,7 @@ export function ConversationView({
   const docRef = React.useRef<HTMLInputElement>(null);
   const { capabilities: caps } = useApp();
   const fileRef = React.useRef<HTMLInputElement>(null);
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const [streaming, setStreaming] = React.useState(false);
   const [toolNote, setToolNote] = React.useState<string | null>(null);
   const abortRef = React.useRef<AbortController | null>(null);
@@ -366,7 +411,15 @@ export function ConversationView({
     return messages.reduce((a, m) => a + est(m.content ?? ""), 0) + est(input);
   }, [messages, input]);
   const ctxWindow = caps?.context_window ?? 128000;
-  const ctxPct = Math.min(100, Math.round((ctxTokens / ctxWindow) * 100));
+  const ctxPctRaw = Math.min(100, (ctxTokens / ctxWindow) * 100);
+  const ctxPctLabel = `${ctxPctRaw > 0 && ctxPctRaw < 10 ? ctxPctRaw.toFixed(1) : Math.round(ctxPctRaw)}%`;
+
+  React.useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 144)}px`;
+  }, [input]);
 
   async function addDocToKnowledge(files: FileList | null) {
     const f = files?.[0];
@@ -468,7 +521,7 @@ export function ConversationView({
     ]);
 
     setStreaming(true);
-    chatLive.start(tid);
+    const liveSession = chatLive.start(tid);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     const patch = (fn: (m: ConvMessage) => ConvMessage) =>
@@ -480,13 +533,13 @@ export function ConversationView({
         q,
         {
           onMeta: (citations, promptPreview) => {
-            chatLive.meta(citations);
+            chatLive.meta(citations, liveSession);
             patch((x) => ({ ...x, citations, promptPreview }));
           },
           onTool: (name) => setToolNote(name),
           onToken: (t) => {
             setToolNote(null);
-            chatLive.token(t);
+            chatLive.token(t, liveSession);
             pendingTokens.current += t;
             scheduleTokenFlush(botId);
           },
@@ -509,7 +562,7 @@ export function ConversationView({
         cancelAnimationFrame(rafId.current);
         rafId.current = null;
       }
-      chatLive.end();
+      chatLive.end(liveSession);
       setStreaming(false);
       setToolNote(null);
       abortRef.current = null;
@@ -598,10 +651,11 @@ export function ConversationView({
         </div>
       </div>
 
-      <div className="border-t bg-background px-4 py-3">
-        <div className="mx-auto flex max-w-3xl flex-col gap-2 rounded-xl border bg-card p-2 shadow-soft transition-shadow focus-within:border-foreground/20 focus-within:shadow-lift">
+      <div className="shrink-0 border-t bg-background/95 px-3 py-3 sm:px-4">
+        <div className="mx-auto max-w-3xl">
+          <div className="relative flex flex-col gap-2 rounded-2xl border bg-card px-3 py-2.5 shadow-soft transition-[border-color,box-shadow] focus-within:border-foreground/20 focus-within:shadow-lift">
           {images.length > 0 && (
-            <div className="flex flex-wrap gap-2 px-1 pt-1">
+            <div className="flex flex-wrap gap-2 px-1">
               {images.map((img) => (
                 <div key={img.url} className="group/thumb relative">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -643,9 +697,8 @@ export function ConversationView({
               ))}
             </div>
           )}
-          <div className="relative flex items-end gap-2">
           {mentionOpen && (
-            <div className="absolute bottom-full left-0 z-20 mb-2 max-h-56 w-64 overflow-y-auto rounded-lg border bg-card p-1 shadow-lift">
+            <div className="absolute bottom-full left-3 z-20 mb-2 max-h-56 w-64 overflow-y-auto rounded-lg border bg-card p-1 shadow-lift">
               <p className="px-2 py-1 text-[11px] text-muted-foreground">@ 知识库范围（可多选）</p>
               {sources.length === 0 && (
                 <p className="px-2 py-1.5 text-xs text-muted-foreground">还没有信源</p>
@@ -660,6 +713,7 @@ export function ConversationView({
                       setScoped((p) =>
                         on ? p.filter((x) => x.id !== src.id) : [...p, { id: src.id, name: src.name }],
                       );
+                      setMentionOpen(false);
                     }}
                     className={cn(
                       "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted",
@@ -694,32 +748,13 @@ export function ConversationView({
               e.target.value = "";
             }}
           />
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" disabled={streaming} aria-label="添加附件" title="添加附件">
-                <Paperclip className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent side="top" align="start">
-              <DropdownMenuItem
-                disabled={images.length >= MAX_IMAGES}
-                onClick={() => fileRef.current?.click()}
-              >
-                <ImagePlus className="size-4" />
-                图片（可直接粘贴）
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => docRef.current?.click()}>
-                <FileUp className="size-4" />
-                文档 → 入知识库
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
           <textarea
+            ref={textareaRef}
             autoFocus
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "@" ) setMentionOpen(true);
+              if (e.key === "@") setMentionOpen(true);
               if (e.key === "Escape") setMentionOpen(false);
               onKeyDown(e);
             }}
@@ -729,43 +764,110 @@ export function ConversationView({
                 addImages(e.clipboardData.files);
               }
             }}
-            rows={2}
+            rows={1}
             placeholder={placeholder}
-            className="max-h-40 min-h-[56px] flex-1 resize-none bg-transparent px-2 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
+            className="max-h-36 min-h-11 w-full resize-none overflow-y-auto bg-transparent px-1 pt-1 text-[15px] leading-6 text-foreground outline-none placeholder:text-muted-foreground"
           />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span
-                aria-label="上下文占用"
-                className="mb-1.5 mr-1 hidden size-5 shrink-0 cursor-default rounded-full sm:block"
-                style={{
-                  background: `conic-gradient(hsl(var(--primary)) ${ctxPct * 3.6}deg, hsl(var(--muted)) 0deg)`,
-                  WebkitMask: "radial-gradient(farthest-side, transparent 58%, black 60%)",
-                  mask: "radial-gradient(farthest-side, transparent 58%, black 60%)",
-                }}
-              />
-            </TooltipTrigger>
-            <TooltipContent side="top" className="tabular-nums">
-              上下文 ≈{ctxTokens >= 1000 ? (ctxTokens / 1000).toFixed(1) + "k" : ctxTokens} /
-              {" "}{Math.round(ctxWindow / 1000)}k tok（{ctxPct}%）· {caps?.llm_model ?? "未配置"}
-            </TooltipContent>
-          </Tooltip>
-          {streaming ? (
-            <Button variant="outline" size="icon" onClick={stop} title="停止">
-              <Square className="size-4" />
-            </Button>
-          ) : (
-            <Button
-              size="icon"
-              onClick={() => send()}
-              disabled={!input.trim() && images.length === 0}
-              title="发送"
-            >
-              <ArrowUp className="size-4" />
-            </Button>
-          )}
+
+          <div className="flex min-w-0 items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    disabled={streaming}
+                    aria-label="添加"
+                    title="添加"
+                    className="size-8 rounded-full text-muted-foreground hover:text-foreground"
+                  >
+                    <Plus className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="top" align="start">
+                  <DropdownMenuItem
+                    disabled={images.length >= MAX_IMAGES}
+                    onClick={() => fileRef.current?.click()}
+                  >
+                    <ImagePlus className="size-4" />
+                    图片（可直接粘贴）
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => docRef.current?.click()}>
+                    <FileUp className="size-4" />
+                    文档 → 入知识库
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="min-w-0 max-w-[42vw] truncate px-1 text-xs text-muted-foreground sm:max-w-56">
+                    {caps?.llm_model ?? "未配置模型"}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-72">
+                  当前模型：{caps?.llm_model ?? "未配置模型"}
+                </TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    aria-label="上下文占用"
+                    className="size-4 shrink-0 cursor-default rounded-full"
+                    style={{
+                      background: `conic-gradient(hsl(var(--primary)) ${ctxPctRaw * 3.6}deg, hsl(var(--muted)) 0deg)`,
+                      WebkitMask: "radial-gradient(farthest-side, transparent 56%, black 58%)",
+                      mask: "radial-gradient(farthest-side, transparent 56%, black 58%)",
+                    }}
+                  />
+                </TooltipTrigger>
+                <TooltipContent
+                  side="top"
+                  className="w-64 rounded-lg border bg-card p-3 text-card-foreground shadow-lift"
+                >
+                  <div className="space-y-2">
+                    <div>
+                      <p className="text-sm font-medium">窗口使用情况</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        当前对话占模型上下文窗口的比例
+                      </p>
+                    </div>
+                    <div className="flex items-center justify-between text-xs tabular-nums">
+                      <span>{ctxPctLabel}</span>
+                      <span className="text-muted-foreground">
+                        {formatTokenCount(ctxTokens)} / {formatTokenCount(ctxWindow)}
+                      </span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-primary"
+                        style={{ width: `${Math.max(ctxPctRaw, ctxTokens > 0 ? 2 : 0)}%` }}
+                      />
+                    </div>
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+
+            {streaming ? (
+              <Button variant="outline" size="icon" onClick={stop} title="停止" className="size-8 rounded-full">
+                <Square className="size-4" />
+              </Button>
+            ) : (
+              <Button
+                size="icon"
+                onClick={() => send()}
+                disabled={!input.trim() && images.length === 0}
+                title="发送"
+                className="size-8 rounded-full shadow-none disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
+              >
+                <ArrowUp className="size-4" />
+              </Button>
+            )}
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

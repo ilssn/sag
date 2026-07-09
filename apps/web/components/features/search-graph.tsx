@@ -5,6 +5,8 @@ import {
   Background,
   BackgroundVariant,
   Controls,
+  Handle,
+  Position,
   ReactFlow,
   type Edge,
   type Node,
@@ -31,26 +33,30 @@ type GraphNodeData = {
 function GraphNode({ data }: NodeProps) {
   const d = data as GraphNodeData;
   return (
-    <div
-      className={cn(
-        "max-w-44 rounded-md border px-2.5 py-1.5 text-xs leading-snug shadow-soft transition-shadow",
-        d.kind === "query" && "border-transparent bg-primary font-medium text-primary-foreground",
-        d.kind === "source" && "bg-card font-medium",
-        d.kind === "chunk" && "cursor-pointer bg-card hover:shadow-lift",
-      )}
-      style={
-        d.kind === "chunk" && d.score != null
-          ? { borderColor: `hsl(var(--primary) / ${Math.min(0.9, Math.max(0.15, d.score))})` }
-          : undefined
-      }
-    >
-      <span className="line-clamp-2">{d.label}</span>
-      {d.kind === "chunk" && d.score != null && (
-        <span className="mt-0.5 block font-mono text-[10px] tabular-nums text-muted-foreground">
-          {d.score.toFixed(3)}
-        </span>
-      )}
-    </div>
+    <>
+      <Handle type="target" position={Position.Top} className="!size-0 !border-0 !bg-transparent" />
+      <Handle type="source" position={Position.Bottom} className="!size-0 !border-0 !bg-transparent" />
+      <div
+        className={cn(
+          "max-w-44 rounded-md border px-2.5 py-1.5 text-xs leading-snug shadow-soft transition-shadow",
+          d.kind === "query" && "border-transparent bg-primary font-medium text-primary-foreground",
+          d.kind === "source" && "bg-card font-medium",
+          d.kind === "chunk" && "cursor-pointer bg-card hover:shadow-lift",
+        )}
+        style={
+          d.kind === "chunk" && d.score != null
+            ? { borderColor: `hsl(var(--primary) / ${Math.min(0.9, Math.max(0.15, d.score))})` }
+            : undefined
+        }
+      >
+        <span className="line-clamp-2">{d.label}</span>
+        {d.kind === "chunk" && d.score != null && (
+          <span className="mt-0.5 block font-mono text-[10px] tabular-nums text-muted-foreground">
+            {d.score.toFixed(3)}
+          </span>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -95,7 +101,8 @@ function buildGraph(query: string, results: Section[]): { nodes: Node[]; edges: 
       id: `e:q-${sid}`,
       source: "q",
       target: sourceId,
-      style: { strokeOpacity: 0.5 },
+      type: "smoothstep",
+      style: { stroke: "hsl(var(--muted-foreground) / 0.42)", strokeWidth: 1.4 },
     });
 
     // 片段沿信源外侧扇形展开（±60°）
@@ -121,7 +128,8 @@ function buildGraph(query: string, results: Section[]): { nodes: Node[]; edges: 
         id: `e:${sourceId}-${cid}`,
         source: sourceId,
         target: cid,
-        style: { strokeOpacity: 0.3 },
+        type: "smoothstep",
+        style: { stroke: "hsl(var(--muted-foreground) / 0.28)", strokeWidth: 1.2 },
       });
     });
   });
@@ -152,6 +160,7 @@ export default function SearchGraph({
         proOptions={{ hideAttribution: true }}
         nodesDraggable={false}
         nodesConnectable={false}
+        defaultEdgeOptions={{ selectable: false }}
         onNodeClick={(_e, node) => {
           const d = node.data as GraphNodeData;
           if (d.kind === "chunk" && d.section?.chunk_id && d.section.source_id) {
