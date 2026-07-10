@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Expand, Shrink, TriangleAlert } from "lucide-react";
 
+import { PRODUCT_NAME } from "@/lib/branding";
 import { useApp } from "@/components/features/app-shell";
 import { ThemeToggle } from "@/components/features/theme-toggle";
 import {
@@ -28,7 +29,7 @@ const SECTION: Record<string, string> = {
 
 function sectionLabel(pathname: string): string {
   const key = Object.keys(SECTION).find((k) => pathname === k || pathname.startsWith(k + "/"));
-  return key ? SECTION[key] : "sag";
+  return key ? SECTION[key] : PRODUCT_NAME;
 }
 
 export function SiteHeader() {
@@ -45,7 +46,7 @@ export function SiteHeader() {
         <BreadcrumbList>
           <BreadcrumbItem className="hidden sm:block">
             <BreadcrumbLink asChild>
-              <Link href="/chat">sag</Link>
+              <Link href="/chat">{PRODUCT_NAME}</Link>
             </BreadcrumbLink>
           </BreadcrumbItem>
           <BreadcrumbSeparator className="hidden sm:block" />

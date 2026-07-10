@@ -11,11 +11,12 @@
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -33,7 +34,10 @@ class Settings(BaseSettings):
     debug: bool = True
     secret_key: str = "dev-insecure-secret-change-me-in-production-0123456789"
     access_token_expire_minutes: int = 60 * 24 * 7  # 7 天
-    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    # NoDecode 让逗号分隔值先进入下方 validator，避免 settings 源强制按 JSON 解码。
+    cors_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["http://localhost:3000"]
+    )
     # 关闭后仅允许首个用户注册（部署引导），其余返回 403
     allow_registration: bool = True
 
@@ -105,8 +109,9 @@ class Settings(BaseSettings):
             v = v.strip()
             if not v:
                 return []
-            if not v.startswith("["):
-                return [o.strip() for o in v.split(",") if o.strip()]
+            if v.startswith("["):
+                return json.loads(v)
+            return [o.strip() for o in v.split(",") if o.strip()]
         return v
 
     @property

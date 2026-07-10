@@ -7,9 +7,25 @@
 import httpx
 import pytest
 
-from sag_api.core.config import settings
+from sag_api.core.config import Settings, settings
 
 _RESTORE = ("llm_model", "llm_temperature", "search_top_k", "sag_language", "llm_api_key")
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("http://localhost:3000", ["http://localhost:3000"]),
+        (
+            "http://localhost:3000,https://sag.example.com",
+            ["http://localhost:3000", "https://sag.example.com"],
+        ),
+        ('["http://localhost:3000"]', ["http://localhost:3000"]),
+    ],
+)
+def test_cors_origins_env_formats(monkeypatch, raw, expected):
+    monkeypatch.setenv("SAG_CORS_ORIGINS", raw)
+    assert Settings(_env_file=None).cors_origins == expected
 
 
 async def _register(c, email):

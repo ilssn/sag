@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help dev api web install install-api install-web test build compose-config compose-up compose-down
+.PHONY: help dev api web install install-api install-web test build compose-config compose-up compose-ps compose-logs compose-down compose-up-postgres compose-down-postgres
 
 help: ## 显示可用命令
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -28,11 +28,23 @@ test: ## 运行后端与 Agent Core 测试
 build: ## 构建前端产物
 	cd apps/web && npm run build
 
-compose-config: ## 校验 docker compose 配置
-	cd deploy && docker compose config
+compose-config: ## 校验默认 Docker 配置（SQLite + LanceDB）
+	docker compose config --quiet
 
-compose-up: ## 生产：docker compose 启动（web+api+postgres）
-	cd deploy && docker compose up -d --build
+compose-up: ## Docker 快速启动（web + api，数据持久化）
+	docker compose up -d --build
+
+compose-ps: ## 查看 Docker 服务状态
+	docker compose ps
+
+compose-logs: ## 持续查看 Docker 日志
+	docker compose logs -f api web
 
 compose-down: ## 停止 compose
-	cd deploy && docker compose down
+	docker compose down
+
+compose-up-postgres: ## 使用 Postgres + pgvector 覆盖启动（需先配置 .env）
+	docker compose -f compose.yaml -f compose.postgres.yaml up -d --build
+
+compose-down-postgres: ## 停止 Postgres 覆盖部署
+	docker compose -f compose.yaml -f compose.postgres.yaml down

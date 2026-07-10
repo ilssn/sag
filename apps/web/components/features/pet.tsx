@@ -14,6 +14,8 @@ import {
   Loader2,
   MessageCircleQuestion,
   MessageSquarePlus,
+  Maximize2,
+  Minimize2,
   Music2,
   Plus,
   Rocket,
@@ -28,6 +30,7 @@ import {
 
 import { api } from "@/lib/api";
 import { normalizeAvatar } from "@/lib/avatar";
+import { DEFAULT_AGENT_AVATAR, DEFAULT_AGENT_NAME } from "@/lib/branding";
 import { chatLive, type ChatLiveState } from "@/lib/chat-live";
 import {
   PetAgent,
@@ -40,8 +43,10 @@ import {
   PET_DRAFT_KEY,
   type PetDraftPayload,
 } from "@/lib/pet-events";
+import { setPetEnabled, usePetEnabled } from "@/lib/pet-preferences";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/components/features/app-shell";
+import { petFaceStyle } from "@/components/features/pet-head-avatar";
 
 type PetVisualMode = PetAgentActivity | "jumping" | "flying" | "roaming" | "dancing";
 
@@ -70,10 +75,11 @@ const IDLE_EXPRESSIONS = ["^_^", "-_-", "o_o", "._.", "u_u"] as const;
 const PET_FACE_KEY = "sag:pet-face";
 const PET_FACE_MODE_KEY = "sag:pet-face-mode";
 const PET_FACE_PRESETS_KEY = "sag:pet-face-presets";
+const PET_COLLAPSED_KEY = "sag:pet-collapsed";
 const MAX_FACE_PRESETS = 24;
 const PET_VIEWPORT_MARGIN = 24;
 const MODE_EXPRESSIONS: Partial<Record<PetVisualMode, string>> = {
-  thinking: "._.",
+  thinking: "◔_◔",
   searching: "o_o",
   working: ">_<",
   answering: "^_^",
@@ -85,18 +91,6 @@ const MODE_EXPRESSIONS: Partial<Record<PetVisualMode, string>> = {
   dancing: "^3^",
 };
 const RETRIEVAL_TOOL = /search|context|entity|retriev|knowledge|source|chunk/i;
-
-function faceStyle(value: string): React.CSSProperties {
-  const length = Array.from(value).length;
-  const emojiLike = /\p{Extended_Pictographic}/u.test(value);
-  if (emojiLike && length <= 2) {
-    return { fontFamily: "system-ui, sans-serif", fontSize: length === 1 ? 28 : 23 };
-  }
-  if (length <= 1) return { fontSize: 22 };
-  if (length <= 3) return { fontSize: 18 };
-  if (length <= 5) return { fontSize: 13 };
-  return { fontSize: 10 };
-}
 
 function normalizeFace(value: string) {
   const next = normalizeAvatar(value);
@@ -184,6 +178,7 @@ function compactNumber(value: number) {
 }
 
 interface PetProps {
+  ambient?: boolean;
   character?: PetAgent;
   syncIdentity?: boolean;
   visible?: boolean;
@@ -194,12 +189,17 @@ interface PetRoamPath {
   y: number[];
 }
 
+export function PetWithPreference(props: Omit<PetProps, "visible">) {
+  const [visible] = usePetEnabled();
+  return <Pet {...props} visible={visible} />;
+}
+
 interface PetActionButtonProps {
   children: React.ReactNode;
   disabled?: boolean;
   label: string;
   onClick: () => void;
-  slot: "ask" | "wave" | "fly" | "roam" | "dance" | "hide";
+  slot: "ask" | "wave" | "fly" | "roam" | "dance" | "collapse" | "expand" | "hide";
 }
 
 function PetActionButton({
@@ -229,14 +229,19 @@ function PetActionButton({
 }
 
 /** 视口级知识宇航员：角色对象负责状态与动作，组件只处理输入和渲染。 */
-export function Pet({ character: providedCharacter, syncIdentity, visible = true }: PetProps = {}) {
+export function Pet({
+  ambient = false,
+  character: providedCharacter,
+  syncIdentity,
+  visible = true,
+}: PetProps = {}) {
   const { agent, capabilities, threads } = useApp();
   const pathname = usePathname();
   const router = useRouter();
   const reduceMotion = useReducedMotion();
   const activity = usePetActivity();
   const ownedCharacter = React.useMemo(
-    () => new PetAgent({ name: "sag", avatar: "S", size: 1 }),
+    () => new PetAgent({ name: DEFAULT_AGENT_NAME, avatar: DEFAULT_AGENT_AVATAR, size: 1 }),
     [],
   );
   const character = providedCharacter ?? ownedCharacter;
@@ -249,6 +254,8 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
   const [alignRight, setAlignRight] = React.useState(false);
   const [panelAbove, setPanelAbove] = React.useState(true);
   const [open, setOpen] = React.useState(false);
+  const [collapsed, setCollapsed] = React.useState(false);
+  const [revealing, setRevealing] = React.useState(false);
   const [curious, setCurious] = React.useState(false);
   const [faceEditorOpen, setFaceEditorOpen] = React.useState(false);
   const [face, setFace] = React.useState<string | null>(null);
@@ -274,12 +281,15 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
   const lastPosRef = React.useRef<{ x: number; y: number } | null>(null);
   const suppressClickRef = React.useRef(false);
   const statsAttemptedRef = React.useRef(false);
+  const expandActionTimerRef = React.useRef<number | null>(null);
   const wasStreamingRef = React.useRef(activity.streaming);
   const pointerFrameRef = React.useRef<number | null>(null);
   const pointerRef = React.useRef({ x: 0, y: 0 });
   const elRef = React.useRef<HTMLDivElement>(null);
   const visualRef = React.useRef<HTMLDivElement>(null);
-  const agentFace = normalizeFace(agent?.avatar || agent?.name?.slice(0, 1) || "S") || "S";
+  const agentFace =
+    normalizeFace(agent?.avatar || DEFAULT_AGENT_AVATAR) ||
+    DEFAULT_AGENT_AVATAR;
   const identityFace = shouldSyncIdentity ? agentFace : characterState.identity.avatar;
   const displayFace = normalizeFace(face === null ? identityFace : face);
 
@@ -293,7 +303,7 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
   React.useEffect(() => {
     if (!shouldSyncIdentity) return;
     character.configure({
-      name: agent?.name || "sag",
+      name: agent?.name || DEFAULT_AGENT_NAME,
       avatar: displayFace,
       size: 1,
     });
@@ -325,6 +335,7 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
       }
       const savedFacing = window.localStorage.getItem("sag:pet-facing");
       if (savedFacing === "left" || savedFacing === "right") character.face(savedFacing);
+      if (!ambient) setCollapsed(window.localStorage.getItem(PET_COLLAPSED_KEY) === "true");
       const savedFaceMode = window.localStorage.getItem(PET_FACE_MODE_KEY);
       const savedFace = window.localStorage.getItem(PET_FACE_KEY);
       const legacyFace = window.localStorage.getItem("sag:pet-emoji");
@@ -350,7 +361,7 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
     } catch {
       /* ignore */
     }
-  }, [character]);
+  }, [ambient, character]);
 
   React.useEffect(() => {
     lastPosRef.current = characterState.position;
@@ -380,10 +391,10 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
     keepVisible();
     window.addEventListener("resize", keepVisible);
     return () => window.removeEventListener("resize", keepVisible);
-  }, [character]);
+  }, [character, collapsed]);
 
   React.useEffect(() => {
-    if (!open || knowledgeStats || statsAttemptedRef.current) return;
+    if (ambient || !capabilities || !open || knowledgeStats || statsAttemptedRef.current) return;
     statsAttemptedRef.current = true;
     setStatsLoading(true);
     api
@@ -396,7 +407,7 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
       )
       .catch(() => {})
       .finally(() => setStatsLoading(false));
-  }, [knowledgeStats, open]);
+  }, [ambient, capabilities, knowledgeStats, open]);
 
   const recentThread = React.useMemo(
     () =>
@@ -457,6 +468,21 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
   }, [canAct, character]);
 
   React.useEffect(() => {
+    if (!revealing) return;
+    const timer = window.setTimeout(() => setRevealing(false), 560);
+    return () => window.clearTimeout(timer);
+  }, [revealing]);
+
+  React.useEffect(
+    () => () => {
+      if (expandActionTimerRef.current !== null) {
+        window.clearTimeout(expandActionTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  React.useEffect(() => {
     if (activity.streaming) {
       const options = {
         threadId: activity.threadId ?? undefined,
@@ -490,6 +516,7 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
     if (
       reduceMotion ||
       !visible ||
+      collapsed ||
       open ||
       characterState.activity !== "idle" ||
       characterState.motion !== "idle"
@@ -506,6 +533,7 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
   }, [
     characterState.activity,
     characterState.motion,
+    collapsed,
     open,
     reduceMotion,
     triggerDance,
@@ -592,7 +620,9 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
     (curious && !open && visualMode === "idle" ? "?_?" : null) ??
     characterState.expression ??
     displayFace;
-  const petName = Array.from(characterState.identity.name || "sag").slice(0, 7).join("");
+  const petName = Array.from(characterState.identity.name || DEFAULT_AGENT_NAME)
+    .slice(0, 7)
+    .join("");
   const canAddFacePreset =
     Boolean(displayFace) &&
     !facePresets.includes(displayFace) &&
@@ -631,8 +661,49 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
 
   function hide() {
     setOpen(false);
-    window.localStorage.setItem("sag:pet", "off");
-    window.dispatchEvent(new Event("sag:pet-toggle"));
+    if (expandActionTimerRef.current !== null) {
+      window.clearTimeout(expandActionTimerRef.current);
+      expandActionTimerRef.current = null;
+    }
+    setPetEnabled(false);
+  }
+
+  function collapseToHead() {
+    if (ambient || characterState.motion !== "idle") return;
+    setOpen(false);
+    setFaceEditorOpen(false);
+    setCurious(false);
+    setRevealing(false);
+    if (expandActionTimerRef.current !== null) {
+      window.clearTimeout(expandActionTimerRef.current);
+      expandActionTimerRef.current = null;
+    }
+    setCollapsed(true);
+    window.localStorage.setItem(PET_COLLAPSED_KEY, "true");
+  }
+
+  function expandFromHead() {
+    if (!collapsed) return;
+    setCollapsed(false);
+    setCurious(false);
+    setRevealing(true);
+    window.localStorage.setItem(PET_COLLAPSED_KEY, "false");
+
+    const snapshot = character.getSnapshot();
+    if (snapshot.activity !== "idle" || snapshot.motion !== "idle") return;
+    character.emote("^o^", 2_400);
+    if (reduceMotion) return;
+
+    expandActionTimerRef.current = window.setTimeout(() => {
+      expandActionTimerRef.current = null;
+      const current = character.getSnapshot();
+      if (current.activity !== "idle" || current.motion !== "idle") return;
+      const roll = Math.random();
+      if (roll < 0.4) triggerWave();
+      else if (roll < 0.68) triggerDance();
+      else if (roll < 0.88) triggerFlight();
+      else triggerRoam();
+    }, 260);
   }
 
   function onPointerDown(event: React.PointerEvent) {
@@ -723,8 +794,8 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
   const panelVertical = panelAbove ? "bottom-full mb-2" : "top-full mt-2";
   const scale = characterState.identity.size;
   const visualStyle = {
-    width: 94 * scale,
-    height: 118 * scale,
+    width: (collapsed ? 82 : 94) * scale,
+    height: (collapsed ? 82 : 118) * scale,
   } as React.CSSProperties;
   const characterStyle = {
     "--pet-scale": scale,
@@ -734,6 +805,8 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
   } as React.CSSProperties;
   const visualAnimate = reduceMotion
     ? undefined
+    : collapsed
+      ? { x: [0, 0.8, 0], y: [0, -2.2, 0], rotate: [0, 0.65, 0] }
     : characterState.motion === "fly"
       ? {
           x: [0, 1.8, -1.2, 0.8, -0.5, 0.3, -0.2, 0],
@@ -774,6 +847,8 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
           : { x: [0, 0.45, 0], y: [0, -1, 0], rotate: [0, 0, 0] };
   const visualTransition = reduceMotion
     ? undefined
+    : collapsed
+      ? { duration: 4.6, repeat: Infinity, ease: "easeInOut" as const }
     : characterState.motion === "fly"
       ? {
           duration: 6.8,
@@ -805,8 +880,12 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
   return (
     <div
       ref={elRef}
-      className="sag-pet-shell group/pet fixed bottom-24 left-5 z-40 hidden select-none md:block"
+      className={cn(
+        "sag-pet-shell group/pet fixed z-40 hidden select-none md:block",
+        ambient ? "bottom-16 right-7" : "bottom-24 left-5",
+      )}
       data-facing={characterState.facing}
+      data-collapsed={collapsed ? "true" : "false"}
       style={style}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -816,7 +895,7 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
       onPointerLeave={() => setCurious(false)}
     >
       <AnimatePresence>
-        {!open && statusText && (
+        {!ambient && !open && statusText && (
           <motion.button
             type="button"
             initial={{ opacity: 0, scale: 0.96, y: 6 }}
@@ -854,7 +933,7 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
           </motion.button>
         )}
 
-        {open && (
+        {!ambient && open && (
           <motion.div
             initial={{ opacity: 0, scale: 0.94, y: 7 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -909,9 +988,19 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
               </button>
               <button
                 type="button"
+                onClick={collapseToHead}
+                disabled={characterState.motion !== "idle"}
+                aria-label="收起为头部"
+                title="收起为头部"
+                className="grid size-7 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-35"
+              >
+                <Minimize2 className="size-3.5" />
+              </button>
+              <button
+                type="button"
                 onClick={() => setOpen(false)}
-                aria-label="收起面板"
-                title="收起面板"
+                aria-label="关闭面板"
+                title="关闭面板"
                 className="grid size-7 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <X className="size-3.5" />
@@ -1108,20 +1197,31 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
         transition={visualTransition}
         style={visualStyle}
         data-facing={characterState.facing}
+        data-collapsed={collapsed ? "true" : "false"}
         className="sag-pet-rig relative"
       >
-        {!open && (
-          <div className="sag-pet__actions" role="toolbar" aria-label="宠物动作">
-            <PetActionButton
-              slot="ask"
-              label={`向${characterState.identity.name}提问`}
-              onClick={() => {
-                setCurious(false);
-                setOpen(true);
-              }}
-            >
-              <MessageCircleQuestion />
+        {collapsed && (
+          <div className="sag-pet__actions sag-pet__actions--collapsed" role="toolbar" aria-label="宠物显示状态">
+            <PetActionButton slot="expand" label="展开宠物" onClick={expandFromHead}>
+              <Maximize2 />
             </PetActionButton>
+          </div>
+        )}
+
+        {!collapsed && !open && (
+          <div className="sag-pet__actions" role="toolbar" aria-label="宠物动作">
+            {!ambient && (
+              <PetActionButton
+                slot="ask"
+                label={`向${characterState.identity.name}提问`}
+                onClick={() => {
+                  setCurious(false);
+                  setOpen(true);
+                }}
+              >
+                <MessageCircleQuestion />
+              </PetActionButton>
+            )}
             <PetActionButton slot="wave" label="挥手" onClick={triggerWave} disabled={!canAct}>
               <Hand />
             </PetActionButton>
@@ -1134,48 +1234,124 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
             <PetActionButton slot="dance" label="跳舞" onClick={triggerDance} disabled={!canAct}>
               <Music2 />
             </PetActionButton>
-            <PetActionButton slot="hide" label="隐藏宠物" onClick={hide}>
-              <EyeOff />
-            </PetActionButton>
+            {!ambient && (
+              <PetActionButton
+                slot="collapse"
+                label="收起为头部"
+                onClick={collapseToHead}
+                disabled={characterState.motion !== "idle"}
+              >
+                <Minimize2 />
+              </PetActionButton>
+            )}
+            {!ambient && (
+              <PetActionButton slot="hide" label="隐藏宠物" onClick={hide}>
+                <EyeOff />
+              </PetActionButton>
+            )}
           </div>
         )}
 
-        <div
-          role="button"
-          tabIndex={0}
-          data-mode={visualMode}
-          data-wave={characterState.motion === "wave" ? "true" : "false"}
-          data-facing={characterState.facing}
-          data-curious={curious && !open && visualMode === "idle" ? "true" : "false"}
-          onClick={() => {
-            if (suppressClickRef.current) {
-              suppressClickRef.current = false;
-              return;
-            }
-            setCurious(false);
-            setOpen((value) => !value);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
+        {collapsed ? (
+          <div
+            role="button"
+            tabIndex={0}
+            data-mode={visualMode}
+            data-facing={characterState.facing}
+            data-curious={curious && visualMode === "idle" ? "true" : "false"}
+            onClick={() => {
+              if (suppressClickRef.current) {
+                suppressClickRef.current = false;
+                return;
+              }
+              expandFromHead();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                expandFromHead();
+              }
+            }}
+            aria-label={`${characterState.identity.name} 已收起，点击展开${statusText ? `，${statusText}` : ""}`}
+            title="展开宇航员"
+            style={characterStyle}
+            className="sag-pet-collapsed relative cursor-grab outline-none active:cursor-grabbing"
+          >
+            <div className="sag-pet__helmet" aria-hidden>
+              <span className="sag-pet__antenna" />
+              <div className="sag-pet__visor">
+                <span className="sag-pet__glass" />
+                <span
+                  className="sag-pet__face"
+                  style={visualMode === "thinking" ? undefined : petFaceStyle(renderedFace)}
+                >
+                  {visualMode === "thinking" ? (
+                    <span className="sag-pet__signal-meter">
+                      <span />
+                      <span />
+                      <span />
+                      <span />
+                    </span>
+                  ) : (
+                    <AnimatePresence initial={false} mode="wait">
+                      <motion.span
+                        key={renderedFace}
+                        initial={{ opacity: 0, scale: 0.82, y: 1 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.88, y: -1 }}
+                        transition={{ duration: 0.16 }}
+                        className="sag-pet__face-glyph"
+                      >
+                        {renderedFace}
+                      </motion.span>
+                    </AnimatePresence>
+                  )}
+                </span>
+              </div>
+              <span className="sag-pet__shine" />
+            </div>
+          </div>
+        ) : (
+          <div
+            role="button"
+            tabIndex={0}
+            data-mode={visualMode}
+            data-wave={characterState.motion === "wave" ? "true" : "false"}
+            data-facing={characterState.facing}
+            data-curious={curious && !open && visualMode === "idle" ? "true" : "false"}
+            data-revealing={revealing ? "true" : "false"}
+            onClick={() => {
+              if (suppressClickRef.current) {
+                suppressClickRef.current = false;
+                return;
+              }
               setCurious(false);
+              if (ambient) {
+                triggerWave();
+                return;
+              }
               setOpen((value) => !value);
-            }
-          }}
-          aria-label={`${characterState.identity.name} 宇航员${statusText ? `，${statusText}` : ""}`}
-          title={characterState.identity.name}
-          style={characterStyle}
-          className="sag-pet-astronaut relative h-full w-full cursor-grab outline-none active:cursor-grabbing"
-        >
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                setCurious(false);
+                if (ambient) {
+                  triggerWave();
+                  return;
+                }
+                setOpen((value) => !value);
+              }
+            }}
+            aria-label={`${characterState.identity.name} 宇航员${statusText ? `，${statusText}` : ""}`}
+            title={characterState.identity.name}
+            style={characterStyle}
+            className="sag-pet-astronaut relative h-full w-full cursor-grab outline-none active:cursor-grabbing"
+          >
           <div className="sag-pet__scale" aria-hidden>
             <div className="sag-pet__stage">
               <span className="sag-pet__orbit" />
               <span className="sag-pet__shadow" />
-              <span className="sag-pet__thoughts">
-                <span />
-                <span />
-                <span />
-              </span>
               <span className="sag-pet__celebrate">
                 <Sparkles />
                 <Sparkles />
@@ -1210,45 +1386,43 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
                 <span className="sag-pet__leg sag-pet__leg--right" />
               </div>
               <div className="sag-pet__helmet">
+                {visualMode === "thinking" && <span className="sag-pet__antenna" />}
                 <div className="sag-pet__visor">
                   <span className="sag-pet__glass" />
-                  <span className="sag-pet__face" style={faceStyle(renderedFace)}>
-                    <AnimatePresence initial={false} mode="wait">
-                      <motion.span
-                        key={renderedFace}
-                        initial={{ opacity: 0, scale: 0.82, y: 1 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.88, y: -1 }}
-                        transition={{ duration: 0.16 }}
-                        className="sag-pet__face-glyph"
-                      >
-                        {renderedFace}
-                      </motion.span>
-                    </AnimatePresence>
+                  <span
+                    className="sag-pet__face"
+                    style={visualMode === "thinking" ? undefined : petFaceStyle(renderedFace)}
+                  >
+                    {visualMode === "thinking" ? (
+                      <span className="sag-pet__signal-meter">
+                        <span />
+                        <span />
+                        <span />
+                        <span />
+                      </span>
+                    ) : (
+                      <AnimatePresence initial={false} mode="wait">
+                        <motion.span
+                          key={renderedFace}
+                          initial={{ opacity: 0, scale: 0.82, y: 1 }}
+                          animate={{ opacity: 1, scale: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.88, y: -1 }}
+                          transition={{ duration: 0.16 }}
+                          className="sag-pet__face-glyph"
+                        >
+                          {renderedFace}
+                        </motion.span>
+                      </AnimatePresence>
+                    )}
                   </span>
                 </div>
                 <span className="sag-pet__shine" />
               </div>
             </div>
           </div>
-        </div>
+          </div>
+        )}
       </motion.div>
     </div>
   );
-}
-
-/** 宠物开关（localStorage sag:pet，默认开）。 */
-export function usePetEnabled(): [boolean, (on: boolean) => void] {
-  const [on, setOn] = React.useState(false);
-  React.useEffect(() => {
-    const sync = () => setOn(window.localStorage.getItem("sag:pet") !== "off");
-    sync();
-    window.addEventListener("sag:pet-toggle", sync);
-    return () => window.removeEventListener("sag:pet-toggle", sync);
-  }, []);
-  const set = React.useCallback((value: boolean) => {
-    window.localStorage.setItem("sag:pet", value ? "on" : "off");
-    window.dispatchEvent(new Event("sag:pet-toggle"));
-  }, []);
-  return [on, set];
 }

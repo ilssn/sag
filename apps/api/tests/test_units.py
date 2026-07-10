@@ -4,7 +4,7 @@ from sag_api.connectors import registry
 from sag_api.core.config import settings
 from sag_api.core.security import hash_password, verify_password
 from sag_api.enums import ConnectorKind
-from sag_api.generation.prompt import build_citations, build_messages
+from sag_api.generation.prompt import build_agent_messages, build_citations, build_messages
 from sag_api.sag import RetrievedSection
 from sag_api.sag.config_builder import build_engine_config
 
@@ -40,6 +40,20 @@ def test_prompt_and_citations():
     sections = [RetrievedSection(chunk_id="c1", heading="创立", content="Acme 由张三创立", score=0.8, rank=0)]
     msgs = build_messages("谁创立了 Acme？", sections, language="zh")
     assert msgs[0]["role"] == "system"
+    assert "Zleap" in msgs[0]["content"] and "你是 sag" not in msgs[0]["content"]
     assert "[1]" in msgs[-1]["content"] and "Acme" in msgs[-1]["content"]
     cites = build_citations(sections)
     assert cites[0]["n"] == 1 and cites[0]["heading"] == "创立"
+
+
+def test_agent_name_is_injected_into_prompt():
+    messages = build_agent_messages(
+        "小跃",
+        {"system_prompt": "保持严谨。"},
+        "你叫什么？",
+        language="zh",
+    )
+    system = messages[0]["content"]
+    assert "你的名字是「小跃」" in system
+    assert "保持严谨。" in system
+    assert "sag" not in system.lower()

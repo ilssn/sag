@@ -38,10 +38,22 @@ async def test_default_agent_activity_and_document_file():
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
             A = await _register(c, "clientform@t.com")
 
-            # 默认 agent：lifespan 已播种；端点 get-or-create 幂等（id 稳定）
+            # 模拟旧版本完整默认值；正式端点应安全迁移到新身份。
+            async with SessionLocal() as s:
+                legacy = await s.scalar(select(Agent).where(Agent.is_default.is_(True)))
+                legacy.name = "sag"
+                legacy.avatar = "s"
+                legacy.persona = {
+                    "greeting": "我在。上传资料到知识库，或直接问我任何问题。",
+                    "system_prompt": "",
+                }
+                await s.commit()
+
+            # 默认 agent：端点 get-or-create 幂等（id 稳定），旧默认自动迁移。
             a1 = (await c.get("/api/v1/agents/default", headers=A)).json()
             a2 = (await c.get("/api/v1/agents/default", headers=A)).json()
             assert a1["id"] == a2["id"] and a1["is_default"] is True
+            assert a1["name"] == "Zleap" and a1["avatar"] == "AI"
             async with SessionLocal() as s:
                 defaults = (
                     (await s.execute(select(Agent).where(Agent.is_default.is_(True))))

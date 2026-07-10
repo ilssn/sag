@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from sag_agent import AgentRuntime
 from sag_api import __version__
 from sag_api.api.v1 import api_router
+from sag_api.branding import PRODUCT_NAME
 from sag_api.core.config import settings
 from sag_api.core.db import SessionLocal, dispose_db, init_db
 from sag_api.core.errors import ApiError
@@ -81,7 +82,7 @@ async def lifespan(app: FastAPI):
             if source_mcp is not None:
                 try:
                     await stack.enter_async_context(source_mcp.session_manager.run())
-                    log.info("MCP 端点已就绪 · /mcp?source_id=<信源 id>")
+                    log.info("MCP 端点已就绪 · /mcp/（全库）· 可选 ?source_id=<信源 id>")
                 except Exception as e:  # noqa: BLE001
                     log.warning("MCP 会话管理器启动失败（/mcp 不可用）：%s", e)
             yield
@@ -125,7 +126,7 @@ async def _warmup_engines(engine_manager: EngineManager) -> None:
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="sag API",
+        title=f"{PRODUCT_NAME} API",
         version=__version__,
         summary="开源知识库平台 · 从信息源到知识问答",
         lifespan=lifespan,
@@ -181,7 +182,7 @@ def create_app() -> FastAPI:
 
     @app.get("/", tags=["system"])
     async def root() -> dict:
-        return {"name": "sag", "version": __version__, "docs": "/docs"}
+        return {"name": PRODUCT_NAME, "version": __version__, "docs": "/docs"}
 
     return app
 

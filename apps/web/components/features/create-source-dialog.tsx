@@ -63,7 +63,7 @@ export function CreateSourceDialog({
         <DialogHeader>
           <DialogTitle>新建信源</DialogTitle>
           <DialogDescription>
-            信源用来装内容。创建后上传文档，sag 会自动解析、分块并抽取事件。
+            信源用来装内容。创建后上传文档，SAG 会自动解析、分块并抽取事件。
           </DialogDescription>
         </DialogHeader>
 

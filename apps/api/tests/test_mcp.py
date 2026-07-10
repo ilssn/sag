@@ -10,7 +10,7 @@ import pytest
 from mcp.server.fastmcp import FastMCP
 from mcp.shared.memory import create_connected_server_and_client_session as connect
 
-from sag_api.mcp.server import build_source_mcp, use_scope
+from sag_api.mcp.server import MCP_TOOL_NAMES, build_source_mcp, use_scope
 from sag_api.tools import registry
 from sag_api.tools.base import Tool, ToolContext, ToolMeta, ToolResult
 from sag_api.tools.mcp import tools_from_session
@@ -24,7 +24,7 @@ async def _register(c, email):
 
 @pytest.mark.asyncio
 async def test_source_mcp_lists_and_calls_tools_over_engine():
-    """信源 MCP server：真实（空）引擎 + 作用域注入，三个工具可列出可调用。"""
+    """知识库 MCP server：真实引擎 + 全库作用域，探索与检索工具均可调用。"""
     from sqlalchemy import select
 
     from sag_api.core.db import SessionLocal
@@ -36,22 +36,37 @@ async def test_source_mcp_lists_and_calls_tools_over_engine():
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
             A = await _register(c, "mcpsrv@t.com")
             src = (await c.post("/api/v1/sources", headers=A, json={"name": "MCP 源"})).json()
+            src2 = (
+                await c.post("/api/v1/sources", headers=A, json={"name": "第二个 MCP 源"})
+            ).json()
             async with SessionLocal() as s:
-                source = (
-                    await s.execute(select(Source).where(Source.id == src["id"]))
-                ).scalar_one()
+                sources = tuple(
+                    (
+                        await s.execute(
+                            select(Source)
+                            .where(Source.id.in_([src["id"], src2["id"]]))
+                            .order_by(Source.created_at, Source.id)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
 
             mcp = build_source_mcp()
             # 作用域须在 connect（起服务任务）之前设置，任务会复制含作用域的上下文
-            with use_scope(app.state.engine_manager, source):
+            with use_scope(app.state.engine_manager, sources):
                 async with connect(mcp) as client:
                     await client.initialize()
                     listed = await client.list_tools()
                     names = {t.name for t in listed.tools}
                     assert {
                         "search", "get_entity", "get_chunk",
-                        "list_documents", "outline", "grep", "read",
+                        "list_sources", "list_documents", "outline", "grep", "read",
                     } <= names
+
+                    r_sources = await client.call_tool("list_sources", {})
+                    assert "MCP 源" in r_sources.content[0].text
+                    assert "第二个 MCP 源" in r_sources.content[0].text
 
                     # 探索原语（离线）：先上传一个 md
                     up = await c.post(
@@ -66,20 +81,28 @@ async def test_source_mcp_lists_and_calls_tools_over_engine():
                     assert "hello mcp world" in r_read.content[0].text
                     r_out = await client.call_tool("outline", {"document_id": doc["id"]})
                     assert isinstance(r_out.content[0].text, str)  # 处理中→占位文案亦可
-                    r_grep = await client.call_tool("grep", {"pattern": "不存在的串xyz"})
+                    r_grep = await client.call_tool(
+                        "grep", {"pattern": "不存在的串xyz", "source_id": src["id"]}
+                    )
                     assert "未匹配" in r_grep.content[0].text or "chunk_id" in r_grep.content[0].text
 
-                    r_chunk = await client.call_tool("get_chunk", {"chunk_id": "does-not-exist"})
+                    r_chunk = await client.call_tool(
+                        "get_chunk", {"chunk_id": "does-not-exist", "source_id": src["id"]}
+                    )
                     assert not r_chunk.isError
                     assert "未找到" in r_chunk.content[0].text
 
-                    r_entity = await client.call_tool("get_entity", {"name": "查无此实体"})
+                    r_entity = await client.call_tool(
+                        "get_entity", {"name": "查无此实体", "source_id": src["id"]}
+                    )
                     assert not r_entity.isError
                     assert "未找到" in r_entity.content[0].text
 
                     # 检索走真实引擎（离线下 SAG 需 LLM 抽取实体 → 结构化报错）；
                     # 关键是工具正确派发并返回结构化 MCP 响应，不使 server 崩溃
-                    r_search = await client.call_tool("search", {"query": "任意问题"})
+                    r_search = await client.call_tool(
+                        "search", {"query": "任意问题", "source_id": src["id"]}
+                    )
                     assert r_search.content and isinstance(r_search.content[0].text, str)
 
 
@@ -138,7 +161,20 @@ async def test_mcp_binding_validation_and_source_descriptor():
             body = desc.json()
             assert src["id"] in body["http"]["url"]
             assert body["stdio"]["env"]["SAG_MCP_SOURCE_ID"] == src["id"]
-            assert set(body["tools"]) == {"search", "get_entity", "get_chunk"}
+            assert set(body["tools"]) == set(MCP_TOOL_NAMES)
+
+            knowledge = await c.get("/api/v1/system/mcp", headers=A)
+            assert knowledge.status_code == 200, knowledge.text
+            global_body = knowledge.json()
+            assert global_body["scope"] == "knowledge_base"
+            assert global_body["source_count"] >= 1
+            assert "source_id" not in global_body["http"]["url"]
+            assert global_body["http"]["url"].endswith("/mcp/")
+            assert global_body["stdio"]["env"] == {}
+            assert set(global_body["tools"]) == set(MCP_TOOL_NAMES)
+
+            unauthorized = await c.get("/mcp/")
+            assert unauthorized.status_code == 401
 
             agent = (await c.post("/api/v1/agents", headers=A, json={"name": "挂载助手"})).json()
             ok = await c.post(

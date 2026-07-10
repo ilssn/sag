@@ -2,17 +2,18 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sag_api.core.config import settings
 from sag_api.core.db import SessionLocal, get_session
 from sag_api.core.deps import get_current_user
-from sag_api.core.errors import ApiError
+from sag_api.core.errors import ApiError, ConflictError
 from sag_api.core.logging import get_logger
-from sag_api.db.models import User
+from sag_api.db.models import Source, User
 from sag_api.generation import LLMClient
-from sag_api.schemas.system import ModelConfigUpdate
+from sag_api.mcp.server import MCP_TOOL_NAMES
+from sag_api.schemas.system import ModelConfigUpdate, QuickModelSetupRequest
 from sag_api.services import settings_service
 
 router = APIRouter(prefix="/system", tags=["system"])
@@ -63,6 +64,62 @@ async def get_model_config(
 ) -> dict:
     """当前生效的模型与检索配置（密钥脱敏为 *_set 布尔）。"""
     return settings_service.effective_model_config()
+
+
+@router.get("/model-setup")
+async def get_model_setup_status(
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """首次进入时判断是否需要展示快捷模型配置。"""
+    return await settings_service.model_setup_status(session)
+
+
+@router.get("/mcp")
+async def knowledge_mcp_descriptor(
+    request: Request,
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """返回将整个 SAG 知识库挂入外部 MCP 宿主的连接信息。"""
+    source_count = await session.scalar(select(func.count(Source.id))) or 0
+    base = str(request.base_url).rstrip("/")
+    return {
+        "name": "SAG 知识库",
+        "scope": "knowledge_base",
+        "source_count": source_count,
+        "tools": list(MCP_TOOL_NAMES),
+        "http": {
+            "transport": "streamable-http",
+            "url": f"{base}/mcp/",
+            "headers": {"Authorization": "Bearer <SAG_TOKEN>"},
+            "note": "默认开放全部信源；可在 URL 添加 ?source_id=<id> 临时限定单个信源。",
+        },
+        "stdio": {
+            "command": "python",
+            "args": ["-m", "sag_api.mcp.server"],
+            "env": {},
+            "note": "默认开放全部信源；设置 SAG_MCP_SOURCE_ID 可限定单个信源。",
+        },
+    }
+
+
+@router.post("/model-setup/302")
+async def quick_setup_302(
+    body: QuickModelSetupRequest,
+    request: Request,
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """只接收一个 302.AI Key，写入生成、向量与快速检索的完整预设。"""
+    status = await settings_service.model_setup_status(session)
+    if not status["required"]:
+        raise ConflictError("模型配置已存在，请在设置中修改")
+
+    config = await settings_service.save_302_quick_setup(session, body.api_key)
+    request.app.state.llm = LLMClient(settings)
+    await request.app.state.engine_manager.aclose_all()
+    return {"config": config, "capabilities": _capabilities()}
 
 
 @router.put("/model-config")

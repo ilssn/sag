@@ -135,14 +135,14 @@
   }
   /* 中性星空：多尺度星点与角落轨道，前景闪光由 SpaceBackdrop 承担。 */
   .bg-space-field {
-    --space-bg: hsl(var(--muted) / 0.46);
-    --space-star-strong: hsl(var(--foreground) / 0.22);
-    --space-star: hsl(var(--foreground) / 0.14);
-    --space-star-soft: hsl(var(--foreground) / 0.075);
-    --space-line: hsl(var(--foreground) / 0.075);
-    --space-sparkle: hsl(var(--foreground) / 0.58);
-    --space-wash: hsl(var(--background) / 0.22);
-    --space-wash-secondary: hsl(var(--foreground) / 0.018);
+    --space-bg: hsl(210 24% 97%);
+    --space-star-strong: hsl(var(--foreground) / 0.28);
+    --space-star: hsl(var(--foreground) / 0.18);
+    --space-star-soft: hsl(var(--foreground) / 0.095);
+    --space-line: hsl(var(--foreground) / 0.09);
+    --space-sparkle: hsl(43 92% 52% / 0.9);
+    --space-wash: hsl(var(--background) / 0.34);
+    --space-wash-secondary: hsl(215 30% 72% / 0.045);
     position: relative;
     isolation: isolate;
     overflow: hidden;
@@ -172,7 +172,7 @@
     --space-star: hsl(0 0% 100% / 0.28);
     --space-star-soft: hsl(0 0% 100% / 0.12);
     --space-line: hsl(0 0% 100% / 0.1);
-    --space-sparkle: hsl(0 0% 100% / 0.9);
+    --space-sparkle: hsl(45 96% 68% / 0.96);
     --space-wash: hsl(194 18% 11% / 0.44);
     --space-wash-secondary: hsl(330 12% 10% / 0.28);
   }
@@ -250,27 +250,45 @@
   }
 
   .sag-space-meteor {
+    --meteor-angle: -18deg;
     position: absolute;
     z-index: 2;
     width: 86px;
     height: 1px;
     background: linear-gradient(90deg, transparent, var(--space-sparkle));
     opacity: 0;
-    transform: rotate(-18deg) translateX(-140px);
+    transform: rotate(var(--meteor-angle)) translateX(-140px);
     transform-origin: right center;
   }
 
   .sag-space-meteor--one {
     right: 17%;
     top: 19%;
-    animation: sag-space-meteor 21s ease-in 3.4s infinite;
+    animation: sag-space-meteor 16s ease-in 3.4s infinite;
   }
 
   .sag-space-meteor--two {
+    --meteor-angle: -22deg;
     left: 24%;
     top: 71%;
     width: 58px;
-    animation: sag-space-meteor 29s ease-in 15.6s infinite;
+    animation: sag-space-meteor 22s ease-in 15.6s infinite;
+  }
+
+  .sag-space-meteor--three {
+    --meteor-angle: -12deg;
+    right: 39%;
+    top: 43%;
+    width: 72px;
+    animation: sag-space-meteor 19s ease-in 9.1s infinite;
+  }
+
+  .sag-space-meteor--four {
+    --meteor-angle: -27deg;
+    left: 8%;
+    top: 27%;
+    width: 48px;
+    animation: sag-space-meteor 26s ease-in 22.4s infinite;
   }
 
   .sag-space-sparkle {
@@ -319,19 +337,19 @@
 
   @keyframes sag-space-twinkle {
     0%,
-    82%,
+    68%,
     100% {
       opacity: 0;
       transform: scale(0.35) rotate(0deg);
     }
-    87% {
+    74% {
       opacity: 0.24;
     }
-    90% {
+    79% {
       opacity: 1;
       transform: scale(1) rotate(45deg);
     }
-    94% {
+    88% {
       opacity: 0;
       transform: scale(0.55) rotate(75deg);
     }
@@ -360,7 +378,7 @@
     82%,
     100% {
       opacity: 0;
-      transform: rotate(-18deg) translateX(-140px);
+      transform: rotate(var(--meteor-angle)) translateX(-140px);
     }
     84% {
       opacity: 0.08;
@@ -370,7 +388,7 @@
     }
     91% {
       opacity: 0;
-      transform: rotate(-18deg) translateX(170px);
+      transform: rotate(var(--meteor-angle)) translateX(170px);
     }
   }
 }
@@ -382,7 +400,9 @@
     transform-origin: center bottom;
   }
 
-  .sag-pet-astronaut {
+  .sag-pet-astronaut,
+  .sag-pet-collapsed,
+  .sag-pet-head-avatar {
     --pet-suit-high: hsl(var(--card));
     --pet-suit-low: hsl(var(--muted));
     --pet-edge: hsl(var(--foreground) / 0.24);
@@ -396,11 +416,16 @@
     --pet-look-x: 0px;
     --pet-look-y: 0px;
     --pet-look-rotate: 0deg;
+  }
+
+  .sag-pet-astronaut {
     width: 94px;
     height: 118px;
   }
 
-  .dark .sag-pet-astronaut {
+  .dark .sag-pet-astronaut,
+  .dark .sag-pet-collapsed,
+  .dark .sag-pet-head-avatar {
     --pet-suit-high: hsl(var(--foreground) / 0.94);
     --pet-suit-low: hsl(var(--muted-foreground) / 0.88);
     --pet-edge: hsl(var(--background) / 0.82);
@@ -410,6 +435,61 @@
     --pet-visor-low: hsl(222 22% 68% / 0.7);
     --pet-visor-glow: hsl(194 68% 78% / 0.34);
     --pet-screen: hsl(224 25% 18%);
+  }
+
+  .sag-pet-head-avatar {
+    position: relative;
+    display: grid;
+    place-items: center;
+    isolation: isolate;
+    pointer-events: none;
+  }
+
+  .sag-pet-head-avatar .sag-pet__helmet {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    flex: none;
+    transform: translate(-50%, -50%) scale(var(--pet-head-scale));
+    transform-origin: center;
+    transition: none;
+  }
+
+  .sag-pet-head-avatar .sag-pet__face {
+    transform: none;
+    transition: none;
+  }
+
+  .sag-full-loader__avatar {
+    filter: drop-shadow(0 12px 14px hsl(var(--foreground) / 0.09));
+    animation: sag-full-loader-float 3.2s ease-in-out infinite;
+  }
+
+  .sag-full-loader__avatar .sag-pet__glass {
+    animation: sag-pet-glass-idle 5.8s ease-in-out infinite;
+  }
+
+  .sag-full-loader__avatar .sag-pet__face {
+    animation: sag-pet-screen-blink 5.2s step-end infinite;
+  }
+
+  .sag-pet-collapsed {
+    width: 82px;
+    height: 82px;
+    transform: scale(var(--pet-scale));
+    transform-origin: left top;
+  }
+
+  .sag-pet-collapsed .sag-pet__helmet {
+    left: 5px;
+    top: 12px;
+  }
+
+  .sag-pet-collapsed:focus-visible {
+    border-radius: 50%;
+    outline: 1px solid hsl(var(--ring) / 0.46);
+    outline-offset: 3px;
+    box-shadow: 0 0 0 3px hsl(var(--ring) / 0.08);
   }
 
   .sag-pet__scale {
@@ -433,6 +513,11 @@
     outline: 1px solid hsl(var(--ring) / 0.46);
     outline-offset: 3px;
     box-shadow: 0 0 0 3px hsl(var(--ring) / 0.08);
+  }
+
+  .sag-pet-astronaut[data-revealing="true"] {
+    animation: sag-pet-expand-reveal 560ms cubic-bezier(0.16, 0.82, 0.24, 1) both;
+    transform-origin: 50% 72%;
   }
 
   .sag-pet__orbit {
@@ -749,6 +834,49 @@
     border-radius: 0 12px 12px 0;
   }
 
+  .sag-pet__antenna {
+    position: absolute;
+    right: 13px;
+    top: -11px;
+    z-index: 0;
+    width: 2px;
+    height: 15px;
+    pointer-events: none;
+    border-radius: 999px;
+    background: linear-gradient(180deg, hsl(var(--foreground) / 0.62), var(--pet-edge));
+    box-shadow: 0 0 0 0.5px hsl(var(--background) / 0.28);
+    transform: rotate(18deg);
+    transform-origin: 50% 100%;
+  }
+
+  .sag-pet__antenna::before,
+  .sag-pet__antenna::after {
+    position: absolute;
+    left: 50%;
+    content: "";
+    border-radius: 999px;
+    transform: translateX(-50%);
+  }
+
+  .sag-pet__antenna::before {
+    top: -9px;
+    width: 15px;
+    height: 15px;
+    border: 1px solid hsl(var(--foreground) / 0.28);
+    opacity: 0;
+  }
+
+  .sag-pet__antenna::after {
+    top: -5px;
+    width: 7px;
+    height: 7px;
+    border: 1px solid var(--pet-edge);
+    background: linear-gradient(145deg, var(--pet-visor-high), var(--pet-visor-low));
+    box-shadow:
+      inset 0 1px 0 hsl(0 0% 100% / 0.42),
+      0 0 0 2px hsl(var(--foreground) / 0.035);
+  }
+
   .sag-pet__visor {
     position: relative;
     z-index: 1;
@@ -841,6 +969,47 @@
     display: block;
     transform: scaleX(1);
     transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .sag-pet__signal-meter {
+    position: relative;
+    display: flex;
+    width: 32px;
+    height: 17px;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 3px;
+  }
+
+  .sag-pet__signal-meter > span {
+    width: 4px;
+    flex: none;
+    border-radius: 999px;
+    background: var(--pet-screen);
+    box-shadow: 0 0 5px var(--pet-visor-glow);
+    opacity: 0.28;
+    transform: scaleY(0.58);
+    transform-origin: center bottom;
+    animation: sag-pet-signal-meter 1.2s ease-in-out infinite;
+  }
+
+  .sag-pet__signal-meter > span:nth-child(1) {
+    height: 5px;
+  }
+
+  .sag-pet__signal-meter > span:nth-child(2) {
+    height: 8px;
+    animation-delay: 0.12s;
+  }
+
+  .sag-pet__signal-meter > span:nth-child(3) {
+    height: 12px;
+    animation-delay: 0.24s;
+  }
+
+  .sag-pet__signal-meter > span:nth-child(4) {
+    height: 17px;
+    animation-delay: 0.36s;
   }
 
   .sag-pet__shine {
@@ -977,46 +1146,6 @@
     transform: rotate(-2deg);
   }
 
-  .sag-pet__thoughts {
-    position: absolute;
-    left: 66px;
-    top: 0;
-    z-index: 7;
-    width: 24px;
-    height: 22px;
-    opacity: 0;
-    pointer-events: none;
-  }
-
-  .sag-pet__thoughts > span {
-    position: absolute;
-    border: 1px solid hsl(var(--foreground) / 0.24);
-    border-radius: 999px;
-    background: hsl(var(--card) / 0.9);
-    box-shadow: 0 2px 5px hsl(var(--foreground) / 0.08);
-  }
-
-  .sag-pet__thoughts > span:nth-child(1) {
-    bottom: 1px;
-    left: 1px;
-    width: 5px;
-    height: 5px;
-  }
-
-  .sag-pet__thoughts > span:nth-child(2) {
-    bottom: 7px;
-    left: 8px;
-    width: 8px;
-    height: 8px;
-  }
-
-  .sag-pet__thoughts > span:nth-child(3) {
-    right: 0;
-    top: 0;
-    width: 11px;
-    height: 11px;
-  }
-
   .sag-pet__celebrate {
     position: absolute;
     inset: 0;
@@ -1086,7 +1215,7 @@
 
   .sag-pet__action[data-slot="ask"] {
     right: -17px;
-    top: 24px;
+    top: 12px;
     transform: translate(-6px, 2px) scale(0.74);
   }
 
@@ -1098,7 +1227,7 @@
 
   .sag-pet__action[data-slot="fly"] {
     right: -14px;
-    bottom: 11px;
+    bottom: 4px;
     transform: translate(-5px, -3px) scale(0.74);
   }
 
@@ -1113,6 +1242,18 @@
     top: -20px;
     margin-left: -14px;
     transform: translateY(6px) scale(0.74);
+  }
+
+  .sag-pet__action[data-slot="collapse"] {
+    right: -22px;
+    top: 47px;
+    transform: translate(-5px, 0) scale(0.74);
+  }
+
+  .sag-pet__action[data-slot="expand"] {
+    right: -11px;
+    top: 27px;
+    transform: translate(-5px, 0) scale(0.74);
   }
 
   .sag-pet__action[data-slot="hide"] {
@@ -1135,6 +1276,13 @@
   .sag-pet__actions:focus-within .sag-pet__action[data-slot="dance"],
   .sag-pet__actions:focus-within .sag-pet__action[data-slot="hide"] {
     transform: translateY(0) scale(1);
+  }
+
+  .sag-pet-shell:hover .sag-pet__action[data-slot="collapse"],
+  .sag-pet-shell:hover .sag-pet__action[data-slot="expand"],
+  .sag-pet__actions:focus-within .sag-pet__action[data-slot="collapse"],
+  .sag-pet__actions:focus-within .sag-pet__action[data-slot="expand"] {
+    transform: translate(0, 0) scale(1);
   }
 
   .sag-pet__action:hover {
@@ -1173,11 +1321,11 @@
     animation: sag-pet-status 1.8s ease-in-out infinite;
   }
 
-  .sag-pet-astronaut[data-mode="idle"] .sag-pet__glass {
+  :is(.sag-pet-astronaut, .sag-pet-collapsed)[data-mode="idle"] .sag-pet__glass {
     animation: sag-pet-glass-idle 9.4s ease-in-out infinite;
   }
 
-  .sag-pet-astronaut[data-mode="idle"] .sag-pet__face {
+  :is(.sag-pet-astronaut, .sag-pet-collapsed)[data-mode="idle"] .sag-pet__face {
     animation: sag-pet-screen-blink 7.8s step-end infinite;
   }
 
@@ -1223,46 +1371,46 @@
     transform: rotate(-68deg);
   }
 
-  .sag-pet-astronaut[data-mode="thinking"] .sag-pet__helmet {
-    transform: translate(var(--pet-look-x), calc(var(--pet-look-y) - 1px)) rotate(-5deg);
-    animation: sag-pet-think-head 1.9s ease-in-out infinite;
+  .sag-pet-collapsed[data-mode="idle"][data-curious="true"] .sag-pet__helmet {
+    transform: translate(calc(var(--pet-look-x) + 1px), calc(var(--pet-look-y) - 1px)) rotate(3deg);
+  }
+
+  :is(.sag-pet-astronaut, .sag-pet-collapsed)[data-mode="thinking"] .sag-pet__helmet {
+    animation: sag-pet-think-focus 2.4s ease-in-out infinite;
+  }
+
+  .sag-pet-astronaut[data-mode="thinking"] .sag-pet__body {
+    animation: sag-pet-think-body 2.4s ease-in-out infinite;
+  }
+
+  .sag-pet-astronaut[data-mode="thinking"] .sag-pet__arm--left {
+    z-index: 3;
+    animation: sag-pet-think-left-arm 2.4s ease-in-out infinite;
   }
 
   .sag-pet-astronaut[data-mode="thinking"] .sag-pet__arm--right {
-    z-index: 5;
-    transform: rotate(116deg);
-    animation: sag-pet-think-arm 1.9s ease-in-out infinite;
+    z-index: 3;
+    animation: sag-pet-think-right-arm 2.4s ease-in-out infinite;
   }
 
-  .sag-pet-astronaut[data-mode="thinking"][data-facing="right"] .sag-pet__arm--right {
-    z-index: -1;
-    transform: rotate(-12deg);
-    animation: none;
+  :is(.sag-pet-astronaut, .sag-pet-collapsed)[data-mode="thinking"] .sag-pet__face {
+    animation: sag-pet-think-face 2.6s ease-in-out infinite;
   }
 
-  .sag-pet-astronaut[data-mode="thinking"][data-facing="right"] .sag-pet__arm--left {
-    z-index: 5;
-    transform: rotate(-116deg);
-    animation: sag-pet-think-arm-left 1.9s ease-in-out infinite;
+  :is(.sag-pet-astronaut, .sag-pet-collapsed)[data-mode="thinking"] .sag-pet__glass {
+    animation: sag-pet-think-glass 2.6s ease-in-out infinite;
   }
 
-  .sag-pet-astronaut[data-mode="thinking"] .sag-pet__thoughts {
-    opacity: 1;
+  :is(.sag-pet-astronaut, .sag-pet-collapsed)[data-mode="thinking"] .sag-pet__antenna {
+    animation: sag-pet-think-antenna 1.6s ease-in-out infinite;
   }
 
-  .sag-pet-astronaut[data-mode="thinking"] .sag-pet__thoughts > span {
-    animation: sag-pet-thought 1.45s ease-in-out infinite;
+  :is(.sag-pet-astronaut, .sag-pet-collapsed)[data-mode="thinking"]
+    .sag-pet__antenna::before {
+    animation: sag-pet-signal 1.6s ease-out infinite;
   }
 
-  .sag-pet-astronaut[data-mode="thinking"] .sag-pet__thoughts > span:nth-child(2) {
-    animation-delay: 0.16s;
-  }
-
-  .sag-pet-astronaut[data-mode="thinking"] .sag-pet__thoughts > span:nth-child(3) {
-    animation-delay: 0.32s;
-  }
-
-  .sag-pet-astronaut[data-mode="searching"] .sag-pet__helmet {
+  :is(.sag-pet-astronaut, .sag-pet-collapsed)[data-mode="searching"] .sag-pet__helmet {
     transform: translate(3px, var(--pet-look-y)) rotate(4deg);
     animation: sag-pet-search-head 1.2s ease-in-out infinite;
   }
@@ -1286,7 +1434,8 @@
     animation: sag-pet-rummage 0.68s ease-in-out infinite;
   }
 
-  .sag-pet-astronaut[data-mode="searching"][data-facing="right"] .sag-pet__helmet {
+  :is(.sag-pet-astronaut, .sag-pet-collapsed)[data-mode="searching"][data-facing="right"]
+    .sag-pet__helmet {
     transform: translate(-3px, var(--pet-look-y)) rotate(-4deg);
     animation-name: sag-pet-search-head-left;
   }
@@ -1347,11 +1496,11 @@
     animation: sag-pet-answer-body 1.1s ease-in-out infinite;
   }
 
-  .sag-pet-astronaut[data-mode="answering"] .sag-pet__face {
+  :is(.sag-pet-astronaut, .sag-pet-collapsed)[data-mode="answering"] .sag-pet__face {
     animation: sag-pet-answer-screen 1.1s ease-in-out infinite;
   }
 
-  .sag-pet-astronaut[data-mode="answering"] .sag-pet__glass {
+  :is(.sag-pet-astronaut, .sag-pet-collapsed)[data-mode="answering"] .sag-pet__glass {
     animation: sag-pet-glass-answer 1.7s ease-in-out infinite;
   }
 
@@ -1379,7 +1528,7 @@
     animation-delay: -0.68s;
   }
 
-  .sag-pet-astronaut[data-mode="error"] .sag-pet__helmet {
+  :is(.sag-pet-astronaut, .sag-pet-collapsed)[data-mode="error"] .sag-pet__helmet {
     animation: sag-pet-error-head 0.46s ease-in-out 3;
   }
 
@@ -1571,6 +1720,24 @@
     }
   }
 
+  @keyframes sag-pet-expand-reveal {
+    0% {
+      opacity: 0.36;
+      transform: translateY(7px) scale(0.76);
+    }
+    52% {
+      opacity: 1;
+      transform: translateY(-3px) scale(1.06);
+    }
+    78% {
+      transform: translateY(1px) scale(0.98);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
   @keyframes sag-pet-screen-blink {
     0%,
     46%,
@@ -1603,6 +1770,16 @@
     }
     50% {
       transform: translateY(-0.8px) scaleY(1.012);
+    }
+  }
+
+  @keyframes sag-full-loader-float {
+    0%,
+    100% {
+      transform: translate3d(-1px, 2px, 0) rotate(-1deg);
+    }
+    50% {
+      transform: translate3d(2px, -5px, 0) rotate(1deg);
     }
   }
 
@@ -1642,45 +1819,141 @@
     }
   }
 
-  @keyframes sag-pet-think-head {
+  @keyframes sag-pet-think-focus {
     0%,
     100% {
-      transform: translate(var(--pet-look-x), calc(var(--pet-look-y) - 1px)) rotate(-5deg);
+      transform: translate(var(--pet-look-x), calc(var(--pet-look-y) - 1px)) rotate(-2deg);
     }
-    50% {
-      transform: translate(var(--pet-look-x), calc(var(--pet-look-y) - 3px)) rotate(-7deg);
+    28% {
+      transform: translate(calc(var(--pet-look-x) + 1px), calc(var(--pet-look-y) - 3px))
+        rotate(2deg);
+    }
+    58% {
+      transform: translate(calc(var(--pet-look-x) - 1px), calc(var(--pet-look-y) - 1px))
+        rotate(-0.5deg);
+    }
+    78% {
+      transform: translate(var(--pet-look-x), calc(var(--pet-look-y) - 2px)) rotate(1deg);
     }
   }
 
-  @keyframes sag-pet-think-arm {
+  @keyframes sag-pet-think-body {
     0%,
     100% {
-      transform: rotate(112deg) translateY(0);
+      transform: translateY(0) rotate(-0.5deg);
     }
-    50% {
-      transform: rotate(122deg) translateY(-1px);
+    28% {
+      transform: translateY(-1.4px) rotate(0.7deg);
+    }
+    58% {
+      transform: translateY(-0.4px) rotate(-0.4deg);
+    }
+    78% {
+      transform: translateY(-1px) rotate(0.35deg);
     }
   }
 
-  @keyframes sag-pet-think-arm-left {
+  @keyframes sag-pet-think-left-arm {
     0%,
     100% {
-      transform: rotate(-112deg) translateY(0);
+      transform: rotate(148deg) translateY(0);
     }
-    50% {
-      transform: rotate(-122deg) translateY(-1px);
+    30% {
+      transform: rotate(154deg) translateY(-1px);
+    }
+    56% {
+      transform: rotate(150deg) translateY(0);
+    }
+    76% {
+      transform: rotate(153deg) translateY(-1px);
     }
   }
 
-  @keyframes sag-pet-thought {
+  @keyframes sag-pet-think-right-arm {
     0%,
     100% {
-      opacity: 0.28;
-      transform: translateY(1px) scale(0.86);
+      transform: rotate(-148deg) translateY(0);
+    }
+    30% {
+      transform: rotate(-154deg) translateY(-1px);
+    }
+    56% {
+      transform: rotate(-150deg) translateY(0);
+    }
+    76% {
+      transform: rotate(-153deg) translateY(-1px);
+    }
+  }
+
+  @keyframes sag-pet-signal-meter {
+    0%,
+    100% {
+      opacity: 0.24;
+      transform: scaleY(0.58);
+    }
+    38% {
+      opacity: 1;
+      transform: scaleY(1);
+    }
+    66% {
+      opacity: 0.48;
+      transform: scaleY(0.82);
+    }
+  }
+
+  @keyframes sag-pet-think-face {
+    0%,
+    100% {
+      opacity: 0.86;
+      text-shadow:
+        0 1px 0 hsl(0 0% 100% / 0.48),
+        0 0 7px hsl(198 66% 72% / 0.18);
     }
     50% {
       opacity: 1;
-      transform: translateY(-2px) scale(1);
+      text-shadow:
+        0 1px 0 hsl(0 0% 100% / 0.54),
+        0 0 12px hsl(198 66% 72% / 0.36);
+    }
+  }
+
+  @keyframes sag-pet-think-glass {
+    0%,
+    100% {
+      opacity: 0.68;
+      transform: translateX(-8%);
+    }
+    50% {
+      opacity: 0.94;
+      transform: translateX(8%);
+    }
+  }
+
+  @keyframes sag-pet-think-antenna {
+    0%,
+    100% {
+      transform: rotate(13deg) scaleY(0.92);
+    }
+    35% {
+      transform: rotate(23deg) scaleY(1.04);
+    }
+    68% {
+      transform: rotate(17deg) scaleY(0.98);
+    }
+  }
+
+  @keyframes sag-pet-signal {
+    0% {
+      opacity: 0;
+      transform: translateX(-50%) scale(0.45);
+    }
+    34% {
+      opacity: 0.48;
+    }
+    78%,
+    100% {
+      opacity: 0;
+      transform: translateX(-50%) scale(1.25);
     }
   }
 
@@ -2025,8 +2298,15 @@
     .sag-space-dust,
     .sag-space-meteor,
     .sag-space-sparkle,
+    .sag-full-loader__avatar,
+    .sag-full-loader__avatar *,
     .sag-pet-status-dot,
+    .sag-pet__action,
+    .sag-pet-astronaut,
     .sag-pet-astronaut *,
+    .sag-pet-collapsed *,
+    .sag-pet__antenna::before,
+    .sag-pet__antenna::after,
     .sag-pet__thrusters > span::before,
     .sag-pet__thrusters > span::after,
     .sag-pet__pack-status,

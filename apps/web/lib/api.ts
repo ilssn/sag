@@ -11,6 +11,8 @@ import type {
   Message,
   ModelConfig,
   ModelConfigPatch,
+  ModelSetupStatus,
+  KnowledgeMcpDescriptor,
   Persona,
   SearchResponse,
   Source,
@@ -103,13 +105,22 @@ export const api = {
   // auth / system
   register: (b: { email: string; password: string; name?: string }) =>
     request<TokenResponse>("/api/v1/auth/register", { method: "POST", body: JSON.stringify(b) }),
-  login: (b: { email: string; password: string }) =>
+  login: (b: { name: string; email?: string; password?: string }) =>
     request<TokenResponse>("/api/v1/auth/login", { method: "POST", body: JSON.stringify(b) }),
   me: () => request<User>("/api/v1/auth/me"),
   capabilities: () => request<Capabilities>("/api/v1/system/capabilities"),
 
   // 模型与检索配置
   getModelConfig: () => request<ModelConfig>("/api/v1/system/model-config"),
+  modelSetupStatus: () => request<ModelSetupStatus>("/api/v1/system/model-setup"),
+  quickSetup302: (apiKey: string) =>
+    request<{ config: ModelConfig; capabilities: Capabilities }>(
+      "/api/v1/system/model-setup/302",
+      {
+        method: "POST",
+        body: JSON.stringify({ api_key: apiKey }),
+      },
+    ),
   saveModelConfig: (b: ModelConfigPatch) =>
     request<{ config: ModelConfig; capabilities: Capabilities }>("/api/v1/system/model-config", {
       method: "PUT",
@@ -267,4 +278,7 @@ export const api = {
   // 信源即 MCP：外部宿主（Claude Desktop / Cursor）挂载信息
   sourceMcp: (sourceId: string) =>
     request<SourceMcpDescriptor>(`/api/v1/sources/${sourceId}/mcp`),
+
+  // 整个 SAG 知识库的 MCP 挂载信息
+  knowledgeMcp: () => request<KnowledgeMcpDescriptor>("/api/v1/system/mcp"),
 };

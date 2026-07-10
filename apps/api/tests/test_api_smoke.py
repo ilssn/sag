@@ -27,6 +27,15 @@ async def test_end_to_end_offline():
 
             assert (await c.get("/api/v1/auth/me", headers=H)).json()["email"] == "a@b.com"
             assert (await c.get("/api/v1/auth/me")).status_code == 401
+            local_login = await c.post("/api/v1/auth/login", json={"name": "Ada"})
+            assert local_login.status_code == 200
+            assert local_login.json()["user"]["id"] == r.json()["user"]["id"]
+            login = await c.post(
+                "/api/v1/auth/login",
+                json={"name": "Ada", "email": "a@b.com", "password": "password123"},
+            )
+            assert login.status_code == 200
+            assert login.json()["user"]["id"] == r.json()["user"]["id"]
             dup = await c.post(
                 "/api/v1/auth/register", json={"email": "a@b.com", "password": "password123"}
             )

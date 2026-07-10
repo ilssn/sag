@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from sag_api.branding import DEFAULT_AGENT_NAME
 from sag_api.sag import RetrievedSection
 
-_SYSTEM = {
+_GUIDANCE = {
     "zh": (
-        "你是 sag，一个带知识库的智能助手。自然对话，按需用工具。\n"
+        "你是一个带知识库的智能助手。自然对话，按需用工具。\n"
         "何时用工具：\n"
         "- 寒暄、闲聊、翻译、改写、通用常识——直接回答，**不要调用工具**。\n"
         "- 涉及用户资料/知识库内容、具体事实核查——先调用 search_context 检索；"
@@ -26,7 +27,7 @@ _SYSTEM = {
         "- 简洁、结构化（要点/短段落）。"
     ),
     "en": (
-        "You are sag, an assistant with a knowledge base. Converse naturally; use tools only when needed.\n"
+        "You are an assistant with a knowledge base. Converse naturally; use tools only when needed.\n"
         "When to use tools:\n"
         "- Greetings, chit-chat, translation, rewriting, general knowledge — answer directly, no tools.\n"
         "- Questions about the user's documents or fact-checking — call search_context first; "
@@ -38,6 +39,11 @@ _SYSTEM = {
         "tool-free answers carry no citations.\n"
         "- Be concise and structured."
     ),
+}
+
+_IDENTITY = {
+    "zh": "你的名字是「{name}」。当用户询问你的身份或名字时，使用这个名称回答。",
+    "en": "Your name is {name}. Use this name when the user asks who you are.",
 }
 
 _USER_TEMPLATE = {
@@ -62,15 +68,26 @@ def _format_context(sections: list[RetrievedSection]) -> str:
     return "\n\n".join(blocks)
 
 
+def _identity_prompt(name: str, language: str) -> str:
+    display_name = name.strip() or DEFAULT_AGENT_NAME
+    return _IDENTITY[language].format(name=display_name)
+
+
 def build_messages(
     query: str,
     sections: list[RetrievedSection],
     *,
     history: list[dict[str, str]] | None = None,
     language: str = "zh",
+    name: str = DEFAULT_AGENT_NAME,
 ) -> list[dict[str, str]]:
-    lang = language if language in _SYSTEM else "zh"
-    messages: list[dict[str, str]] = [{"role": "system", "content": _SYSTEM[lang]}]
+    lang = language if language in _GUIDANCE else "zh"
+    messages: list[dict[str, str]] = [
+        {
+            "role": "system",
+            "content": "\n\n".join((_identity_prompt(name, lang), _GUIDANCE[lang])),
+        }
+    ]
     if history:
         messages.extend(history)
     messages.append(
@@ -94,9 +111,13 @@ def build_agent_messages(
     attachments: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """注入 Agent 设定（agent-first：无预置资料区，检索由工具按需完成）。"""
-    lang = language if language in _SYSTEM else "zh"
+    lang = language if language in _GUIDANCE else "zh"
     persona = persona or {}
-    parts = [persona.get("system_prompt") or f"你是{name}。", _SYSTEM[lang]]
+    parts = [_identity_prompt(name, lang)]
+    system_prompt = str(persona.get("system_prompt") or "").strip()
+    if system_prompt:
+        parts.append(system_prompt)
+    parts.append(_GUIDANCE[lang])
     guardrails = persona.get("guardrails") or []
     if guardrails:
         parts.append("约束：" + "；".join(guardrails))

@@ -18,7 +18,7 @@ export function AccountSettings() {
 
   return (
     <div className="flex flex-col gap-6">
-      <SettingsSection title="账户资料" description="当前登录身份和会话状态。">
+      <SettingsSection title="本地身份" description="宇航员在知识航行中使用的称呼。">
         <div className="flex items-center justify-between gap-4 p-4 sm:p-5">
           <div className="flex min-w-0 items-center gap-3">
             <Avatar className="size-10">
@@ -34,17 +34,17 @@ export function AccountSettings() {
             </div>
           </div>
           <Badge variant="success" className="shrink-0">
-            已登录
+            本机
           </Badge>
         </div>
         <SettingsRow
-          title="退出当前账户"
-          description="退出后，本机需要重新登录才能继续访问。"
+          title="退出当前身份"
+          description="返回启动页，可重新确认或更换本地身份。"
           layout="inline"
         >
           <Button variant="outline" size="sm" onClick={logout}>
             <LogOut />
-            退出登录
+            退出到启动页
           </Button>
         </SettingsRow>
       </SettingsSection>

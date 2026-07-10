@@ -7,7 +7,9 @@ import { motion } from "motion/react";
 
 import { api, ApiError } from "@/lib/api";
 import { clearToken, getToken } from "@/lib/auth";
+import { DEFAULT_AGENT_AVATAR, DEFAULT_AGENT_NAME } from "@/lib/branding";
 import { PetAgent } from "@/lib/pet-agent";
+import { SIDEBAR_THREADS_PAGE_SIZE } from "@/lib/settings-config";
 import type { Agent, Capabilities, Thread, User } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { AppSidebar } from "@/components/features/app-sidebar";
@@ -19,7 +21,9 @@ import {
   useDetailPanel,
   useIsLgUp,
 } from "@/components/features/detail-panel";
-import { Pet, usePetEnabled } from "@/components/features/pet";
+import { PetWithPreference } from "@/components/features/pet";
+import { PetHeadAvatar } from "@/components/features/pet-head-avatar";
+import { QuickModelSetupDialog } from "@/components/features/quick-model-setup-dialog";
 import { SpaceBackdrop } from "@/components/features/space-backdrop";
 import { SiteHeader } from "@/components/features/site-header";
 import {
@@ -74,8 +78,14 @@ interface AppCtx {
   agent: Agent | null;
   /** 可编排的桌面角色，与业务 Agent 分离。 */
   petAgent: PetAgent | null;
+  replaceAgent: (agent: Agent) => void;
   threads: Thread[];
+  hasMoreThreads: boolean;
+  threadsExpanded: boolean;
+  loadingMoreThreads: boolean;
   refreshThreads: () => Promise<void>;
+  loadMoreThreads: () => Promise<void>;
+  collapseThreads: () => void;
   windowMode: WindowMode;
   toggleWindowMode: () => void;
   logout: () => void;
@@ -87,8 +97,14 @@ const AppContext = React.createContext<AppCtx>({
   capabilities: null,
   agent: null,
   petAgent: null,
+  replaceAgent: () => {},
   threads: [],
+  hasMoreThreads: false,
+  threadsExpanded: false,
+  loadingMoreThreads: false,
   refreshThreads: async () => {},
+  loadMoreThreads: async () => {},
+  collapseThreads: () => {},
   windowMode: "full",
   toggleWindowMode: () => {},
   logout: () => {},
@@ -109,10 +125,16 @@ function FullLoader() {
   return (
     <div className="bg-space-field grid h-screen place-items-center">
       <SpaceBackdrop />
-      <div className="relative z-10 flex flex-col items-center gap-3">
-        <span className="grid size-9 animate-pulse place-items-center rounded-[9px] bg-gradient-to-br from-primary to-primary/85 text-base font-bold text-primary-foreground">
-          s
-        </span>
+      <div
+        className="relative z-10 flex flex-col items-center gap-2.5"
+        role="status"
+        aria-live="polite"
+      >
+        <PetHeadAvatar
+          face={DEFAULT_AGENT_AVATAR}
+          size="lg"
+          className="sag-full-loader__avatar"
+        />
         <span className="text-sm text-muted-foreground">载入中…</span>
       </div>
     </div>
@@ -122,20 +144,33 @@ function FullLoader() {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const petAgent = React.useMemo(
-    () => new PetAgent({ name: "sag", avatar: "S", serialNumber: 1, size: 1 }),
+    () =>
+      new PetAgent({
+        name: DEFAULT_AGENT_NAME,
+        avatar: DEFAULT_AGENT_AVATAR,
+        serialNumber: 1,
+        size: 1,
+      }),
     [],
   );
   const [user, setUser] = React.useState<User | null>(null);
   const [capabilities, setCapabilities] = React.useState<Capabilities | null>(null);
   const [agent, setAgent] = React.useState<Agent | null>(null);
   const [threads, setThreads] = React.useState<Thread[]>([]);
+  const [hasMoreThreads, setHasMoreThreads] = React.useState(false);
+  const [threadsExpanded, setThreadsExpanded] = React.useState(false);
+  const [loadingMoreThreads, setLoadingMoreThreads] = React.useState(false);
   const [windowMode, setWindowMode] = React.useState<WindowMode>("full");
   const [windowSize, setWindowSize] = React.useState<WindowSize>(DEFAULT_WINDOW_SIZE);
   const [sidebarOpen, setSidebarOpen] = React.useState(true);
   const [isDesktop, setIsDesktop] = React.useState(true);
   const [loading, setLoading] = React.useState(true);
+  const [quickSetupOpen, setQuickSetupOpen] = React.useState(false);
   const sidebarOpenRef = React.useRef(true);
   const restoreSidebarOpenRef = React.useRef<boolean | null>(null);
+  const threadLimitRef = React.useRef(SIDEBAR_THREADS_PAGE_SIZE);
+  const threadRequestIdRef = React.useRef(0);
+  const loadingMoreThreadsRef = React.useRef(false);
 
   React.useEffect(() => {
     const mq = window.matchMedia("(min-width: 768px)");
@@ -234,14 +269,54 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const loadThreadLimit = React.useCallback(async (targetAgent: Agent, limit: number) => {
+    const requestId = ++threadRequestIdRef.current;
+    const page = await api.listThreads(targetAgent.id, { limit: limit + 1 });
+    if (requestId !== threadRequestIdRef.current) return;
+
+    const visible = page.slice(0, limit);
+    const expanded = limit > SIDEBAR_THREADS_PAGE_SIZE && visible.length > SIDEBAR_THREADS_PAGE_SIZE;
+
+    setThreads(visible);
+    setHasMoreThreads(page.length > limit);
+    setThreadsExpanded(expanded);
+    if (!expanded) threadLimitRef.current = SIDEBAR_THREADS_PAGE_SIZE;
+  }, []);
+
   const refreshThreads = React.useCallback(async () => {
     try {
-      const a = agent ?? (await api.getDefaultAgent());
-      setThreads(await api.listThreads(a.id));
+      const targetAgent = agent ?? (await api.getDefaultAgent());
+      await loadThreadLimit(targetAgent, threadLimitRef.current);
     } catch {
-      /* ignore */
+      /* keep the current sidebar list when refresh fails */
     }
-  }, [agent]);
+  }, [agent, loadThreadLimit]);
+
+  const loadMoreThreads = React.useCallback(async () => {
+    if (!agent || loadingMoreThreadsRef.current) return;
+    const previousLimit = threadLimitRef.current;
+    const nextLimit = previousLimit + SIDEBAR_THREADS_PAGE_SIZE;
+    threadLimitRef.current = nextLimit;
+    loadingMoreThreadsRef.current = true;
+    setLoadingMoreThreads(true);
+    try {
+      await loadThreadLimit(agent, nextLimit);
+    } catch (error) {
+      if (threadLimitRef.current === nextLimit) threadLimitRef.current = previousLimit;
+      throw error;
+    } finally {
+      loadingMoreThreadsRef.current = false;
+      setLoadingMoreThreads(false);
+    }
+  }, [agent, loadThreadLimit]);
+
+  const collapseThreads = React.useCallback(() => {
+    threadRequestIdRef.current += 1;
+    threadLimitRef.current = SIDEBAR_THREADS_PAGE_SIZE;
+    setThreads((current) => current.slice(0, SIDEBAR_THREADS_PAGE_SIZE));
+    setThreadsExpanded(false);
+    setHasMoreThreads(true);
+  }, []);
 
   React.useEffect(() => {
     let alive = true;
@@ -251,15 +326,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         return;
       }
       try {
-        const [u, c, a] = await Promise.all([api.me(), api.capabilities(), api.getDefaultAgent()]);
+        const [u, c, a, setup] = await Promise.all([
+          api.me(),
+          api.capabilities(),
+          api.getDefaultAgent(),
+          api.modelSetupStatus().catch(() => null),
+        ]);
         if (!alive) return;
         setUser(u);
         setCapabilities(c);
         setAgent(a);
-        api
-          .listThreads(a.id)
-          .then((t) => alive && setThreads(t))
-          .catch(() => {});
+        setQuickSetupOpen(Boolean(setup?.required));
+        threadLimitRef.current = SIDEBAR_THREADS_PAGE_SIZE;
+        loadThreadLimit(a, SIDEBAR_THREADS_PAGE_SIZE).catch(() => {});
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) {
           clearToken();
@@ -272,8 +351,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     })();
     return () => {
       alive = false;
+      threadRequestIdRef.current += 1;
     };
-  }, [router]);
+  }, [loadThreadLimit, router]);
 
   // ⌘K / Ctrl+K → 搜索页
   React.useEffect(() => {
@@ -292,8 +372,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     router.replace("/login");
   }, [router]);
 
-  const [petOn] = usePetEnabled();
-
   if (loading) return <FullLoader />;
   if (!user) return null;
 
@@ -304,14 +382,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         capabilities,
         agent,
         petAgent,
+        replaceAgent: setAgent,
         threads,
+        hasMoreThreads,
+        threadsExpanded,
+        loadingMoreThreads,
         refreshThreads,
+        loadMoreThreads,
+        collapseThreads,
         windowMode,
         toggleWindowMode,
         logout,
         refreshCapabilities,
       }}
     >
+      <QuickModelSetupDialog
+        open={quickSetupOpen}
+        onOpenChange={setQuickSetupOpen}
+        onConfigured={(nextCapabilities) => {
+          setCapabilities(nextCapabilities);
+          setQuickSetupOpen(false);
+        }}
+      />
       <DetailPanelProvider>
         <div
           className={cn(
@@ -365,7 +457,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             )}
           </motion.div>
         </div>
-        <Pet character={petAgent} syncIdentity visible={petOn} />
+        <PetWithPreference character={petAgent} syncIdentity />
       </DetailPanelProvider>
     </AppContext.Provider>
   );

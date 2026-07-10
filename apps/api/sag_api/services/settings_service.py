@@ -38,6 +38,20 @@ _FIELDS = frozenset(
 _SECRET_FIELDS = frozenset({"llm_api_key", "embedding_api_key"})
 _NULLABLE_FIELDS = frozenset({"llm_base_url", "embedding_base_url", "embedding_dimensions"})
 
+QUICK_SETUP_302 = {
+    "llm_base_url": "https://api.302.ai/v1",
+    "llm_model": "qwen3.6-flash",
+    "llm_temperature": 0.3,
+    "llm_max_tokens": 2048,
+    "llm_context_window": 128_000,
+    "embedding_model": "Qwen/Qwen3-Embedding-4B",
+    "embedding_base_url": "https://api.302.ai/v1",
+    "embedding_dimensions": 1024,
+    "search_strategy": "vector",
+    "search_top_k": 8,
+    "sag_language": "zh",
+}
+
 
 async def _load_row(session: AsyncSession) -> Setting | None:
     return await session.scalar(
@@ -48,6 +62,18 @@ async def _load_row(session: AsyncSession) -> Setting | None:
 async def load_overrides(session: AsyncSession) -> dict:
     row = await _load_row(session)
     return dict(row.value) if row and isinstance(row.value, dict) else {}
+
+
+async def model_setup_status(session: AsyncSession) -> dict[str, bool]:
+    """判断是否需要首次模型配置，不受运行期 DB 覆盖后的 settings 单例干扰。"""
+    row = await _load_row(session)
+    environment_configured = Settings().llm_configured
+    database_configured = bool(row and isinstance(row.value, dict) and row.value)
+    return {
+        "required": not environment_configured and not database_configured,
+        "environment_configured": environment_configured,
+        "database_configured": database_configured,
+    }
 
 
 def apply_overrides(settings: Settings, overrides: dict) -> None:
@@ -113,3 +139,15 @@ async def save_model_config(session: AsyncSession, patch: dict) -> dict:
 
     apply_overrides(_settings, stored)
     return effective_model_config()
+
+
+async def save_302_quick_setup(session: AsyncSession, api_key: str) -> dict:
+    """用单个 302.AI Key 写入完整的生成、向量与快速检索预设。"""
+    return await save_model_config(
+        session,
+        {
+            **QUICK_SETUP_302,
+            "llm_api_key": api_key,
+            "embedding_api_key": api_key,
+        },
+    )

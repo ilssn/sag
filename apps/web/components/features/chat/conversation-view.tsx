@@ -11,6 +11,7 @@ import { parsePetDraft, PET_DRAFT_EVENT, PET_DRAFT_KEY } from "@/lib/pet-events"
 import { relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { chatLive, type LiveStep } from "@/lib/chat-live";
+import { copyText } from "@/lib/clipboard";
 import { useApp } from "@/components/features/app-shell";
 import { useDetailPanel } from "@/components/features/detail-panel";
 import { CitationBlock } from "@/components/features/chat/citation-block";
@@ -396,7 +397,7 @@ function MessageActions({
               type="button"
               onClick={async () => {
                 try {
-                  await navigator.clipboard.writeText(content);
+                  await copyText(content);
                   setDone(true);
                   setTimeout(() => setDone(false), 1500);
                 } catch {

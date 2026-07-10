@@ -1,3 +1,5 @@
+import { DEFAULT_AGENT_AVATAR, DEFAULT_AGENT_NAME } from "./branding";
+
 export type PetAgentFacing = "left" | "right";
 
 export type PetAgentActivity =
@@ -116,8 +118,8 @@ export class PetAgent {
     this.state = {
       identity: {
         id: options.id ?? `pet-${String(options.serialNumber ?? "primary")}`,
-        name: options.name || "sag",
-        avatar: options.avatar ?? "S",
+        name: options.name || DEFAULT_AGENT_NAME,
+        avatar: options.avatar ?? DEFAULT_AGENT_AVATAR,
         serialNumber: options.serialNumber,
         size: clamp(options.size ?? 1, 0.72, 1.35),
       },

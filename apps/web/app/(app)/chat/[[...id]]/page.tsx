@@ -4,27 +4,14 @@ import * as React from "react";
 import { useParams, useRouter } from "next/navigation";
 
 import { api } from "@/lib/api";
-import { normalizeAvatar } from "@/lib/avatar";
+import { DEFAULT_AGENT_AVATAR } from "@/lib/branding";
 import { streamAgentAsk } from "@/lib/sse";
-import { cn } from "@/lib/utils";
 import { useApp } from "@/components/features/app-shell";
 import {
   ConversationView,
   type ConvMessage,
 } from "@/components/features/chat/conversation-view";
-
-function avatarGlyphClass(value: string, size: "sm" | "lg") {
-  const length = Array.from(value).length;
-  if (size === "lg") {
-    if (length <= 1) return "text-xl";
-    if (length <= 3) return "text-base";
-    if (length <= 5) return "text-xs";
-    return "text-[10px]";
-  }
-  if (length <= 1) return "text-[11px]";
-  if (length <= 3) return "text-[9px]";
-  return "text-[7px]";
-}
+import { PetHeadAvatar } from "@/components/features/pet-head-avatar";
 
 /** 对话 —— 产品主入口：默认 agent + 会话（/chat 新会话，/chat/[id] 续聊）。 */
 export default function ChatPage() {
@@ -97,35 +84,13 @@ export default function ChatPage() {
     return t.id;
   }, [agent, threadId, refreshThreads]);
 
-  const glyph = normalizeAvatar(agent?.avatar || "s") || "s";
+  const glyph = agent?.avatar || DEFAULT_AGENT_AVATAR;
   const avatarNode = React.useMemo(
-    () => (
-      <span
-        className={cn(
-          "mt-0.5 grid size-6 shrink-0 place-items-center overflow-hidden rounded-full bg-muted px-0.5 font-mono font-semibold leading-none text-foreground",
-          avatarGlyphClass(glyph, "sm"),
-        )}
-      >
-        {glyph}
-      </span>
-    ),
+    () => <PetHeadAvatar face={glyph} size="sm" className="mt-0.5" />,
     [glyph],
   );
   const heroNode = React.useMemo(
-    () => (
-      <span
-        className={cn(
-          "relative grid size-12 place-items-center overflow-hidden rounded-full bg-gradient-to-br from-primary to-primary/85 px-1 font-mono font-semibold leading-none text-primary-foreground shadow-lift",
-          avatarGlyphClass(glyph, "lg"),
-        )}
-      >
-        <span
-          aria-hidden
-          className="absolute -inset-3 -z-10 rounded-full bg-primary/10 blur-xl"
-        />
-        {glyph}
-      </span>
-    ),
+    () => <PetHeadAvatar face={glyph} size="lg" />,
     [glyph],
   );
 

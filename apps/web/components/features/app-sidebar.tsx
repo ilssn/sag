@@ -3,10 +3,21 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Archive, ChevronsUpDown, Library, LogOut, MessageSquarePlus, Search, Settings } from "lucide-react";
+import {
+  Archive,
+  ChevronDown,
+  ChevronUp,
+  ChevronsUpDown,
+  Library,
+  LogOut,
+  MessageSquarePlus,
+  Search,
+  Settings,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
+import { PRODUCT_NAME } from "@/lib/branding";
 import { useChatLive } from "@/lib/chat-live";
 import { relativeTime } from "@/lib/format";
 import { useApp } from "@/components/features/app-shell";
@@ -43,7 +54,7 @@ function Brand() {
               <span className="text-base font-semibold">S</span>
             </div>
             <div className="grid flex-1 text-left leading-tight">
-              <span className="truncate text-base font-semibold">SAG</span>
+              <span className="truncate text-base font-semibold">{PRODUCT_NAME}</span>
               <span className="truncate text-xs text-muted-foreground">知识库 Agent</span>
             </div>
           </Link>
@@ -70,7 +81,9 @@ function NavUser() {
               </div>
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-medium">{user?.name}</span>
-                <span className="truncate text-xs text-muted-foreground">{user?.email}</span>
+                <span className="truncate text-xs text-muted-foreground">
+                  {user?.email || "本地身份"}
+                </span>
               </div>
               <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" />
             </SidebarMenuButton>
@@ -84,13 +97,21 @@ function NavUser() {
             <DropdownMenuLabel className="font-normal">
               <div className="flex flex-col">
                 <span className="truncate text-sm font-medium">{user?.name}</span>
-                <span className="truncate text-xs text-muted-foreground">{user?.email}</span>
+                <span className="truncate text-xs text-muted-foreground">
+                  {user?.email || "本地身份"}
+                </span>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+              <Link href="/settings">
+                <Settings className="size-4" />
+                本地身份设置
+              </Link>
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={logout} className="text-destructive focus:text-destructive">
               <LogOut className="size-4" />
-              退出登录
+              退出到启动页
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -102,7 +123,16 @@ function NavUser() {
 export function AppSidebar({ contained = false }: { contained?: boolean }) {
   const routePath = usePathname();
   const router = useRouter();
-  const { agent, threads, refreshThreads } = useApp();
+  const {
+    agent,
+    threads,
+    hasMoreThreads,
+    threadsExpanded,
+    loadingMoreThreads,
+    refreshThreads,
+    loadMoreThreads,
+    collapseThreads,
+  } = useApp();
   const live = useChatLive();
 
   // replaceState（新会话接管 URL 不打断流式）不会触发 usePathname —— 监听自定义事件补齐
@@ -129,6 +159,14 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
       toast.success("已归档");
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "归档失败");
+    }
+  }
+
+  async function revealMoreThreads() {
+    try {
+      await loadMoreThreads();
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "加载更多会话失败");
     }
   }
 
@@ -222,6 +260,52 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
                 </SidebarMenuItem>
               );
             })}
+            {hasMoreThreads ? (
+              <SidebarMenuItem className="pt-1">
+                <div className="flex items-center gap-1">
+                  <SidebarMenuButton
+                    type="button"
+                    size="sm"
+                    disabled={loadingMoreThreads}
+                    aria-label="展开更多会话"
+                    onClick={() => void revealMoreThreads()}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <span className="min-w-0 flex-1 truncate">
+                      {loadingMoreThreads ? "加载中…" : "更多"}
+                    </span>
+                    {loadingMoreThreads ? <Spinner className="size-3.5" /> : <ChevronDown />}
+                  </SidebarMenuButton>
+                  {threadsExpanded && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label="收起"
+                          onClick={collapseThreads}
+                          className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+                        >
+                          <ChevronUp className="size-3.5" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="right">收起</TooltipContent>
+                    </Tooltip>
+                  )}
+                </div>
+              </SidebarMenuItem>
+            ) : threadsExpanded ? (
+              <SidebarMenuItem className="pt-1">
+                <SidebarMenuButton
+                  type="button"
+                  size="sm"
+                  onClick={collapseThreads}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <span className="min-w-0 flex-1 truncate">收起</span>
+                  <ChevronUp />
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ) : null}
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>

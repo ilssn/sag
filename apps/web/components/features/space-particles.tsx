@@ -14,7 +14,7 @@ const PARTICLE_OPTIONS: ISourceOptions = {
   pauseOnBlur: true,
   pauseOnOutsideViewport: true,
   particles: {
-    color: { value: ["#ffffff", "#d7e1e8", "#eee6d5"] },
+    color: { value: ["#ffffff", "#d7e1e8", "#f2dfa2"] },
     move: {
       direction: "none",
       enable: true,
@@ -25,7 +25,7 @@ const PARTICLE_OPTIONS: ISourceOptions = {
     },
     number: {
       density: { enable: true, height: 800, width: 1200 },
-      value: 62,
+      value: 86,
     },
     opacity: {
       animation: {

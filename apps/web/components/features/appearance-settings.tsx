@@ -3,19 +3,16 @@
 import * as React from "react";
 import { useTheme } from "next-themes";
 
-import { usePetEnabled } from "@/components/features/pet";
 import { SettingsRow, SettingsSection } from "@/components/features/settings-section";
-import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { THEME_OPTIONS } from "@/lib/settings-config";
 
 export function AppearanceSettings() {
   return (
-    <SettingsSection title="界面偏好" description="主题和桌面辅助显示。">
-      <SettingsRow title="主题" description="选择界面的明暗模式。" layout="inline">
+    <SettingsSection title="界面主题" description="选择适合当前环境的明暗模式。">
+      <SettingsRow title="主题模式" description="控制整个界面的明暗显示。" layout="inline">
         <ThemeSegment />
       </SettingsRow>
-      <PetToggleRow />
     </SettingsSection>
   );
 }
@@ -48,19 +45,5 @@ function ThemeSegment() {
         </ToggleGroupItem>
       ))}
     </ToggleGroup>
-  );
-}
-
-function PetToggleRow() {
-  const [enabled, setEnabled] = usePetEnabled();
-
-  return (
-    <SettingsRow
-      title="桌面宠物"
-      description="仅在桌面端显示右下角的可拖动快捷入口。"
-      layout="inline"
-    >
-      <Switch checked={enabled} onCheckedChange={setEnabled} aria-label="桌面宠物开关" />
-    </SettingsRow>
   );
 }

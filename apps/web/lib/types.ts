@@ -135,11 +135,36 @@ export type ModelConfigPatch = Partial<{
   sag_language: "zh" | "en";
 }>;
 
+export interface ModelSetupStatus {
+  required: boolean;
+  environment_configured: boolean;
+  database_configured: boolean;
+}
+
 export interface SourceMcpDescriptor {
   source_id: string;
   source_name: string;
   tools: string[];
-  http: { transport: string; url: string; note: string };
+  http: {
+    transport: string;
+    url: string;
+    headers?: Record<string, string>;
+    note: string;
+  };
+  stdio: { command: string; args: string[]; env: Record<string, string>; note: string };
+}
+
+export interface KnowledgeMcpDescriptor {
+  name: string;
+  scope: "knowledge_base";
+  source_count: number;
+  tools: string[];
+  http: {
+    transport: string;
+    url: string;
+    headers: Record<string, string>;
+    note: string;
+  };
   stdio: { command: string; args: string[]; env: Record<string, string>; note: string };
 }
 

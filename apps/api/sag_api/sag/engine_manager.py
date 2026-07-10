@@ -205,23 +205,28 @@ class EngineManager:
                 outcome = await self.search(
                     scid, query, source=source, strategy=strategy, top_k=per_source_k
                 )
-                return outcome
+                return scid, outcome
             except Exception as e:  # noqa: BLE001
                 log.warning("fan-out 检索失败 %s：%s", scid, getattr(e, "message", None) or e)
                 return None
 
         results = await asyncio.gather(*(_one(scid, src) for scid, src in targets))
 
-        best: dict[str, RetrievedSection] = {}
+        best: dict[tuple[str, str], RetrievedSection] = {}
         loose: list[RetrievedSection] = []
-        for res in results:
-            if res is None:
+        for result in results:
+            if result is None:
                 continue
-            for sec in res.sections:
+            scid, outcome = result
+            for sec in outcome.sections:
+                # 部分向量后端不会回填来源；跨源聚合时补齐，供 MCP/UI 正确标注。
+                if not sec.source_config_id:
+                    sec.source_config_id = scid
                 if sec.chunk_id:
-                    prev = best.get(sec.chunk_id)
+                    key = (sec.source_config_id, sec.chunk_id)
+                    prev = best.get(key)
                     if prev is None or sec.score > prev.score:
-                        best[sec.chunk_id] = sec
+                        best[key] = sec
                 else:
                     loose.append(sec)
         merged = sorted([*best.values(), *loose], key=lambda x: x.score, reverse=True)[:top_k]

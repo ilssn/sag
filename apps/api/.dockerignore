@@ -3,7 +3,10 @@ __pycache__/
 .venv/
 .pytest_cache/
 .ruff_cache/
+.data/
 .sag/
 *.db
-.env
+.env*
+data/
+uploads/
 tests/

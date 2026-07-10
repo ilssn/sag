@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from sag_api.branding import DEFAULT_AGENT_AVATAR, DEFAULT_AGENT_NAME
 from sag_api.core.config import settings
 from sag_api.core.errors import ConflictError, NotFoundError, ValidationError
 from sag_api.db.models import Agent, AgentBinding, Message, Source, Thread
@@ -64,18 +65,33 @@ async def update_agent(
 
 
 _DEFAULT_GREETING = "我在。上传资料到知识库，或直接问我任何问题。"
+_DEFAULT_PERSONA = {"greeting": _DEFAULT_GREETING, "system_prompt": ""}
+
+
+def _is_legacy_default_agent(agent: Agent) -> bool:
+    """仅识别旧版本完全未自定义的默认助手，避免覆盖用户修改。"""
+    return (
+        agent.name == "sag"
+        and agent.avatar in {"s", "S"}
+        and (agent.persona or {}) == _DEFAULT_PERSONA
+    )
 
 
 async def get_default_agent(session: AsyncSession) -> Agent:
     """默认 agent（开箱即用的主对话入口）：get-or-create，幂等。"""
     agent = await session.scalar(select(Agent).where(Agent.is_default.is_(True)))
     if agent is not None:
+        if _is_legacy_default_agent(agent):
+            agent.name = DEFAULT_AGENT_NAME
+            agent.avatar = DEFAULT_AGENT_AVATAR
+            await session.commit()
+            await session.refresh(agent)
         return agent
     agent = Agent(
-        name="sag",
-        avatar="s",
+        name=DEFAULT_AGENT_NAME,
+        avatar=DEFAULT_AGENT_AVATAR,
         is_default=True,
-        persona={"greeting": _DEFAULT_GREETING, "system_prompt": ""},
+        persona=dict(_DEFAULT_PERSONA),
     )
     session.add(agent)
     await session.commit()

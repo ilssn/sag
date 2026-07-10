@@ -20,13 +20,25 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: str
-    password: str
+    name: str = Field(min_length=1, max_length=120)
+    email: str = Field(default="", max_length=255)
+    password: str | None = Field(default=None, max_length=128)
+
+    @field_validator("name")
+    @classmethod
+    def _name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("请先填写名字")
+        return v
 
     @field_validator("email")
     @classmethod
-    def _lower(cls, v: str) -> str:
-        return v.strip().lower()
+    def _optional_email(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v and ("@" not in v or "." not in v.split("@")[-1]):
+            raise ValueError("邮箱格式不正确")
+        return v
 
 
 class UserOut(BaseModel):

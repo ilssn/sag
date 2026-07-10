@@ -2,11 +2,12 @@ import "./globals.css";
 
 import type { Metadata } from "next";
 
+import { PRODUCT_NAME } from "@/lib/branding";
 import { Providers } from "@/components/providers";
 import { fontVars } from "./fonts";
 
 export const metadata: Metadata = {
-  title: "sag",
+  title: PRODUCT_NAME,
   description: "上传信息，创建助手，带引用对话 · 开源知识助手平台",
 };
 

@@ -6,22 +6,27 @@ import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
 import { MAX_AVATAR_CHARS, normalizeAvatar } from "@/lib/avatar";
+import { DEFAULT_AGENT_AVATAR, DEFAULT_AGENT_NAME } from "@/lib/branding";
+import { usePetEnabled } from "@/lib/pet-preferences";
 import { useApp } from "@/components/features/app-shell";
+import { PetHeadAvatar } from "@/components/features/pet-head-avatar";
 import { SettingsRow, SettingsSection } from "@/components/features/settings-section";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
 /** 助手设定 —— 默认 agent 的名字 / 头像 / 开场白 / 系统提示。 */
 export function AgentSettingsCard() {
-  const { agent } = useApp();
+  const { agent, replaceAgent } = useApp();
   const [name, setName] = React.useState("");
   const [avatar, setAvatar] = React.useState("");
   const [greeting, setGreeting] = React.useState("");
   const [systemPrompt, setSystemPrompt] = React.useState("");
   const [saving, setSaving] = React.useState(false);
+  const [petEnabled, setPetEnabled] = usePetEnabled();
 
   React.useEffect(() => {
     if (!agent) return;
@@ -38,12 +43,13 @@ export function AgentSettingsCard() {
     if (!agent) return;
     setSaving(true);
     try {
-      await api.updateAgent(agent.id, {
-        name: name.trim() || "sag",
-        avatar: normalizeAvatar(avatar) || normalizeAvatar(name).slice(0, 1) || "s",
+      const updated = await api.updateAgent(agent.id, {
+        name: name.trim() || DEFAULT_AGENT_NAME,
+        avatar: normalizeAvatar(avatar) || DEFAULT_AGENT_AVATAR,
         persona: { ...agent.persona, greeting: greeting.trim(), system_prompt: systemPrompt },
       });
-      toast.success("助手设定已保存（新对话生效）");
+      replaceAgent(updated);
+      toast.success("助手设定已保存");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "保存失败");
     } finally {
@@ -73,12 +79,10 @@ export function AgentSettingsCard() {
             <Field className="min-w-0">
               <FieldLabel htmlFor="a-avatar">头像字符</FieldLabel>
               <div className="flex items-center gap-2">
-                <div
-                  className="grid size-9 shrink-0 place-items-center rounded-md border bg-muted text-sm font-medium"
-                  aria-hidden="true"
-                >
-                  {avatar || normalizeAvatar(name).slice(0, 1) || "s"}
-                </div>
+                <PetHeadAvatar
+                  face={avatar || DEFAULT_AGENT_AVATAR}
+                  size="md"
+                />
                 <Input
                   id="a-avatar"
                   value={avatar}
@@ -94,6 +98,19 @@ export function AgentSettingsCard() {
               <Input id="a-name" value={name} onChange={(e) => setName(e.target.value)} required />
             </Field>
           </div>
+        </SettingsRow>
+        <SettingsRow
+          title="显示桌面宠物"
+          description="默认开启；在桌面端显示可拖动的助手入口，设置立即生效。"
+          layout="inline"
+          contentClassName="self-end sm:self-auto"
+        >
+          <Switch
+            type="button"
+            checked={petEnabled}
+            onCheckedChange={setPetEnabled}
+            aria-label="显示桌面宠物"
+          />
         </SettingsRow>
         <SettingsRow title="开场白" description="新对话开始时的第一句话。">
           <Field>

@@ -26,26 +26,91 @@
 - **Agent** — 绑定若干信源、带设定（system prompt / 开场白），依据信源带引用作答；可挂载外部 MCP server 扩展工具。
 - **搜索（Search）** — ⌘K 全局唤出，可锁定信源范围，命中即可跳到原文。
 
-## 快速开始（零依赖，单用户）
+## 快速开始（Docker，推荐）
+
+准备 Docker Desktop，或 Docker Engine + Compose v2。下载代码后，在项目根目录运行：
 
 ```bash
-# 后端
-cd apps/api
-python -m venv .venv && . .venv/bin/activate
-pip install -e ".[dev]"
-cp .env.example .env          # 可选：预填 OpenAI 兼容的 LLM / embedding（也可启动后在界面里配）
-uvicorn sag_api.main:app --reload      # http://localhost:8000
-
-# 前端
-cd apps/web
-npm install
-npm run dev                   # http://localhost:3000
+# 在下载或克隆后的仓库根目录
+docker compose up -d --build
 ```
 
-- **首个注册用户即你的账号。** 引导完成后可在 `.env` 设 `SAG_ALLOW_REGISTRATION=false`，此后不再开放注册。
-- **模型可视化配置**：登录后在 **设置 → 模型** 里填 LLM / 向量模型（Base URL、API Key、模型、温度、检索策略…），**保存即生效、无需重启**，并可一键「测试连接」。也可继续用 `.env` 的 `SAG_LLM_*` 预置。
-- 未配置 LLM 也能启动、建信源、上传文档；仅**事件抽取**与**问答**需要模型。
-- 默认零基础设施：元数据 SQLite（`./.data/sag.db`）+ SAG 存储 LanceDB（`./.data/engine`）。**升级后若旧库结构不兼容，删除 `apps/api/.data/` 后重启即重建。**
+不需要先安装 Python、Node 或数据库，也不需要先填写 API Key。首次构建完成后：
+
+- 打开前端：[http://localhost:3000](http://localhost:3000)
+- API 文档：[http://localhost:8000/docs](http://localhost:8000/docs)
+- 查看状态：`docker compose ps`（`api`、`web` 应显示 `healthy`）
+- 查看日志：`docker compose logs -f api web`
+
+首次打开时填写名字（邮箱可选），系统会创建并在此数据卷中自动恢复本地身份。随后可使用首次引导里的 302.AI 快速配置，或跳过引导，在 **设置 → 模型** 中填写任意 OpenAI 兼容的 LLM 与 Embedding 配置；保存立即生效。未配置模型时，服务和界面可以正常启动，也可以创建信源和保存上传文件；Embedding 用于文档向量化/向量检索，LLM 用于事件抽取、查询理解与问答。
+
+### 默认数据库与数据持久化
+
+默认数据库是 **SQLite**：应用元数据写入容器卷内的 `/data/sag.db`；知识引擎默认使用 **LanceDB + 内置 SQLite**，上传文件与引擎数据也在同一个 `sagdata` 卷中。因此 `docker compose down` 或重新构建镜像不会丢数据。
+
+| 运行方式 | 应用元数据 | 知识引擎 | 持久化位置 |
+|---|---|---|---|
+| Docker 快速启动（默认） | SQLite | LanceDB + 内置 SQLite | Docker `sagdata` 卷 |
+| 本地开发（默认） | SQLite | LanceDB + 内置 SQLite | `apps/api/.data/` |
+| Postgres 覆盖 | PostgreSQL | pgvector + PostgreSQL | `pgdata` + `sagdata` 卷 |
+
+> **注意：**`docker compose down -v` 会永久删除数据库、知识库和上传文件。只有确认要完全重置时才使用。
+
+### 常用 Docker 命令
+
+```bash
+docker compose ps                  # 查看状态
+docker compose logs --tail=200     # 查看最近日志
+docker compose restart             # 重启
+docker compose down                # 停止并保留数据
+
+# 拉取代码更新后，重建并滚动替换容器（数据卷保留）
+docker compose up -d --build
+```
+
+默认只监听本机 `127.0.0.1`。当前产品是自动恢复身份的本地单用户模式；不要把 3000/8000 端口直接暴露到公网。如需自定义端口、受信局域网地址或预置模型配置：
+
+```bash
+cp .env.example .env
+# 编辑 .env；局域网访问需设置 BIND_ADDRESS=0.0.0.0
+docker compose up -d --build
+```
+
+如果修改 `WEB_PORT`，请同步修改 `SAG_CORS_ORIGINS`；如果修改 `API_PORT` 或公网 API 地址，请同步修改 `NEXT_PUBLIC_API_BASE`。后者是前端构建期配置，必须带 `--build` 重建。
+
+### Postgres / pgvector 部署（可选）
+
+需要服务器部署或 Postgres 时，使用覆盖文件。先复制 `.env.example`，至少设置强随机的 `SAG_SECRET_KEY`、`POSTGRES_PASSWORD`、实际的 `SAG_CORS_ORIGINS` 与 `NEXT_PUBLIC_API_BASE`；服务器对外监听还需设置 `BIND_ADDRESS=0.0.0.0`。
+
+```bash
+cp .env.example .env
+openssl rand -hex 32              # 将输出填入 .env 的 SAG_SECRET_KEY
+docker compose -f compose.yaml -f compose.postgres.yaml config
+docker compose -f compose.yaml -f compose.postgres.yaml up -d --build
+```
+
+公网部署必须在 Web/API 前配置 HTTPS 反向代理与额外访问控制（如 VPN、IP 白名单或反向代理认证），不能依赖本地自动身份作为公网认证。升级前请同时备份 `pgdata` 与 `sagdata`；已有 Postgres 卷创建后，仅修改 `.env` 中的数据库密码不会自动修改数据库内部密码。
+
+### 本地开发
+
+本地开发仍默认使用 SQLite + LanceDB。分别打开两个终端，并都从仓库根目录执行：
+
+```bash
+# 终端 1：后端（http://localhost:8000）
+cd apps/api
+python -m venv .venv
+. .venv/bin/activate
+pip install -e ".[dev]"
+cp .env.example .env
+uvicorn sag_api.main:app --reload
+```
+
+```bash
+# 终端 2：前端（http://localhost:3000）
+cd apps/web
+npm install
+npm run dev
+```
 
 ### 三步走完主干
 

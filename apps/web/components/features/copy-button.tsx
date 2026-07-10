@@ -5,18 +5,20 @@ import { Check, Copy } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { copyText } from "@/lib/clipboard";
 
 /** 复制按钮 —— 成功后短暂切换为对勾并 toast，统一全站复制交互。 */
 export function CopyButton({ text, label = "内容" }: { text: string; label?: string }) {
   const [done, setDone] = React.useState(false);
   return (
     <Button
+      type="button"
       variant="ghost"
       size="sm"
       className="h-7 gap-1.5 px-2 text-xs"
       onClick={async () => {
         try {
-          await navigator.clipboard.writeText(text);
+          await copyText(text);
           setDone(true);
           toast.success(`${label}已复制`);
           setTimeout(() => setDone(false), 1500);

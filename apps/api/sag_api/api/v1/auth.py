@@ -8,7 +8,7 @@ from sag_api.core.deps import get_current_user
 from sag_api.core.security import create_access_token
 from sag_api.db.models import User
 from sag_api.schemas.auth import LoginRequest, RegisterRequest, TokenResponse, UserOut
-from sag_api.services.auth_service import authenticate, register_user
+from sag_api.services.auth_service import authenticate_or_register, register_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -21,7 +21,12 @@ async def register(body: RegisterRequest, session: AsyncSession = Depends(get_se
 
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest, session: AsyncSession = Depends(get_session)) -> TokenResponse:
-    user = await authenticate(session, email=body.email, password=body.password)
+    user = await authenticate_or_register(
+        session,
+        name=body.name,
+        email=body.email,
+        password=body.password,
+    )
     return TokenResponse(access_token=create_access_token(user.id), user=UserOut.model_validate(user))
 
 
