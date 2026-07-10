@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel
@@ -68,6 +69,38 @@ class EntityInfo(BaseModel):
     type: str
     description: str = ""
     heat: int = 0  # 关联事件数（频次 × 中心度的代理指标）
+
+
+class GraphEventInfo(BaseModel):
+    """信息源图谱中的事件节点。"""
+
+    id: str
+    source_id: str
+    title: str
+    summary: str = ""
+    category: str = ""
+    rank: int = 0
+    parent_id: str | None = None
+    chunk_id: str | None = None
+    start_time: datetime | None = None
+
+
+class GraphAssociationInfo(BaseModel):
+    """事件与实体之间的真实抽取关系。"""
+
+    event_id: str
+    entity_id: str
+    weight: float = 1.0
+    description: str = ""
+
+
+class SourceGraphInfo(BaseModel):
+    """引擎侧图谱切片；Web 文档映射由 API 层补齐。"""
+
+    events: list[GraphEventInfo] = []
+    entities: list[EntityInfo] = []
+    associations: list[GraphAssociationInfo] = []
+    total_entities: int = 0
 
 
 class ProcessOutcome(BaseModel):

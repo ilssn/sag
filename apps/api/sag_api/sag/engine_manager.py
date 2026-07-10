@@ -19,7 +19,15 @@ from zleap.sag import DataEngine
 from sag_api.core.config import Settings
 from sag_api.core.logging import get_logger
 from sag_api.sag.config_builder import build_engine_config
-from sag_api.sag.dto import EntityInfo, ProcessOutcome, RetrievedSection, SearchOutcome
+from sag_api.sag.dto import (
+    EntityInfo,
+    GraphAssociationInfo,
+    GraphEventInfo,
+    ProcessOutcome,
+    RetrievedSection,
+    SearchOutcome,
+    SourceGraphInfo,
+)
 from sag_api.sag.errors import map_sag_errors
 
 if TYPE_CHECKING:
@@ -262,6 +270,163 @@ class EngineManager:
             )
             for e, h in rows
         ]
+
+    async def source_graph(
+        self,
+        source_config_id: str,
+        source_ids: list[str],
+        *,
+        source: Source | None = None,
+        event_limit: int = 60,
+        entity_limit: int = 48,
+    ) -> SourceGraphInfo:
+        """读取一个有界、按文档均衡的事件—实体图谱切片。
+
+        图谱只读取本次展示文档对应的引擎 source_id。事件使用窗口排名轮询各文档，
+        避免单篇长文占满配额；关联边另设硬上限，防止高基数抽取拖垮响应与浏览器。
+        """
+        await self._slot(source_config_id, source)
+        from sqlalchemy import func, select
+        from zleap.sag.db import get_session_factory
+        from zleap.sag.db.models import Entity, EventEntity, SourceEvent
+
+        sf = get_session_factory()
+        async with sf() as s:
+            total_entities = int(
+                (
+                    await s.execute(select(func.count(Entity.id)).where(Entity.source_config_id == source_config_id))
+                ).scalar_one()
+                or 0
+            )
+            if not source_ids:
+                return SourceGraphInfo(total_entities=total_entities)
+
+            # 每个文档先取 rank 较小的事件，再在文档之间轮询，兼顾层级根节点与覆盖面。
+            source_rank = (
+                func.row_number()
+                .over(
+                    partition_by=SourceEvent.source_id,
+                    order_by=(SourceEvent.rank.asc(), SourceEvent.created_time.desc()),
+                )
+                .label("source_rank")
+            )
+            ranked = (
+                select(
+                    SourceEvent.id.label("id"),
+                    SourceEvent.source_id.label("source_id"),
+                    SourceEvent.title.label("title"),
+                    SourceEvent.summary.label("summary"),
+                    SourceEvent.category.label("category"),
+                    SourceEvent.rank.label("rank"),
+                    SourceEvent.parent_id.label("parent_id"),
+                    SourceEvent.chunk_id.label("chunk_id"),
+                    SourceEvent.start_time.label("start_time"),
+                    SourceEvent.created_time.label("created_time"),
+                    source_rank,
+                )
+                .where(
+                    SourceEvent.source_config_id == source_config_id,
+                    SourceEvent.source_id.in_(source_ids),
+                    (SourceEvent.status.is_(None) | (SourceEvent.status != "DELETED")),
+                )
+                .subquery()
+            )
+            event_rows = (
+                (
+                    await s.execute(
+                        select(ranked)
+                        .order_by(ranked.c.source_rank.asc(), ranked.c.created_time.desc())
+                        .limit(event_limit)
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            events = [
+                GraphEventInfo(
+                    id=row["id"],
+                    source_id=row["source_id"],
+                    title=row["title"] or "未命名事件",
+                    summary=str(row["summary"] or "")[:800],
+                    category=row["category"] or "",
+                    rank=int(row["rank"] or 0),
+                    parent_id=row["parent_id"],
+                    chunk_id=row["chunk_id"],
+                    start_time=row["start_time"],
+                )
+                for row in event_rows
+            ]
+            event_ids = [event.id for event in events]
+            if not event_ids:
+                return SourceGraphInfo(events=events, total_entities=total_entities)
+
+            association_limit = min(600, max(240, event_limit * 6, entity_limit * 8))
+            association_rows = (
+                await s.execute(
+                    select(
+                        EventEntity.event_id,
+                        EventEntity.entity_id,
+                        EventEntity.weight,
+                        EventEntity.description,
+                        Entity.name,
+                        Entity.type,
+                        Entity.description.label("entity_description"),
+                    )
+                    .join(Entity, Entity.id == EventEntity.entity_id)
+                    .where(
+                        EventEntity.event_id.in_(event_ids),
+                        Entity.source_config_id == source_config_id,
+                    )
+                    .order_by(EventEntity.weight.desc(), EventEntity.created_time.asc())
+                    .limit(association_limit)
+                )
+            ).all()
+
+        # 热度在当前图谱切片中计算；优先保留跨事件出现的实体。
+        heat: dict[str, int] = {}
+        entity_rows: dict[str, tuple[str, str, str]] = {}
+        for _event_id, entity_id, _weight, _description, name, kind, entity_description in association_rows:
+            heat[entity_id] = heat.get(entity_id, 0) + 1
+            entity_rows[entity_id] = (
+                str(name or "")[:500],
+                str(kind or "")[:50],
+                str(entity_description or "")[:500],
+            )
+        selected_entity_ids = {
+            entity_id
+            for entity_id, _count in sorted(
+                heat.items(),
+                key=lambda item: (-item[1], entity_rows[item[0]][0], item[0]),
+            )[:entity_limit]
+        }
+        entities = [
+            EntityInfo(
+                id=entity_id,
+                name=entity_rows[entity_id][0],
+                type=entity_rows[entity_id][1],
+                description=entity_rows[entity_id][2],
+                heat=heat[entity_id],
+            )
+            for entity_id in selected_entity_ids
+        ]
+        entities.sort(key=lambda entity: (-entity.heat, entity.name, entity.id))
+
+        associations = [
+            GraphAssociationInfo(
+                event_id=event_id,
+                entity_id=entity_id,
+                weight=float(weight or 1.0),
+                description=str(description or "")[:240],
+            )
+            for event_id, entity_id, weight, description, *_rest in association_rows
+            if entity_id in selected_entity_ids
+        ][:300]
+        return SourceGraphInfo(
+            events=events,
+            entities=entities,
+            associations=associations,
+            total_entities=total_entities,
+        )
 
     async def entity_context(
         self,

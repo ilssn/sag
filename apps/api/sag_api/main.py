@@ -131,14 +131,25 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-        expose_headers=["X-Request-Id"],
-    )
+    cors_kwargs: dict = {
+        "allow_origins": settings.cors_origins,
+        "allow_credentials": True,
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+        "expose_headers": ["X-Request-Id"],
+    }
+    # 开发环境放行局域网前端（如 http://192.168.x.x:3000），避免本机 IP 访问时 CORS 拦截
+    if settings.environment == "dev":
+        cors_kwargs["allow_origin_regex"] = (
+            r"https?://("
+            r"localhost|"
+            r"127\.0\.0\.1|"
+            r"192\.168\.\d{1,3}\.\d{1,3}|"
+            r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+            r"172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
+            r")(:\d+)?"
+        )
+    app.add_middleware(CORSMiddleware, **cors_kwargs)
     # 请求追踪（放在 CORS 之后添加 → 更外层执行，最先分配 request_id）
     app.add_middleware(RequestContextMiddleware)
 

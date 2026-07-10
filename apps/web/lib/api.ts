@@ -14,14 +14,33 @@ import type {
   Persona,
   SearchResponse,
   Source,
+  SourceGraphResponse,
   SourceMcpDescriptor,
   Thread,
   TokenResponse,
   User,
 } from "./types";
 
-export const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+/** 浏览器通过局域网 IP 打开前端时，自动将 API 指向同主机 8000 端口。 */
+function resolveApiBase(): string {
+  const configured = process.env.NEXT_PUBLIC_API_BASE;
+  if (typeof window !== "undefined") {
+    const { protocol, hostname } = window.location;
+    const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1";
+    if (!isLocalHost) {
+      const pointsToLocal =
+        !configured ||
+        configured.includes("localhost") ||
+        configured.includes("127.0.0.1");
+      if (pointsToLocal) {
+        return `${protocol}//${hostname}:8000`;
+      }
+    }
+  }
+  return configured || "http://localhost:8000";
+}
+
+export const API_BASE = resolveApiBase();
 
 export class ApiError extends Error {
   status: number;
@@ -223,6 +242,8 @@ export const api = {
 
   // 实体（图谱增强）
   listEntities: (sid: string) => request<Entity[]>(`/api/v1/sources/${sid}/entities`),
+  getSourceGraph: (sid: string) =>
+    request<SourceGraphResponse>(`/api/v1/sources/${sid}/graph`),
 
   // 近期动态（搜索页时间线）
   getActivity: () => request<ActivityItem[]>("/api/v1/activity"),

@@ -203,6 +203,57 @@ export interface Entity {
   heat: number;
 }
 
+export interface SourceGraphDocument {
+  id: string;
+  filename: string;
+  status: DocumentStatus;
+  chunk_count: number;
+  event_count: number;
+  created_at: string;
+}
+
+export interface SourceGraphEvent {
+  id: string;
+  document_id: string | null;
+  title: string;
+  summary: string;
+  category: string;
+  rank: number;
+  parent_id: string | null;
+  chunk_id: string | null;
+  start_time: string | null;
+}
+
+export type SourceGraphNodeKind = "document" | "event" | "entity";
+export type SourceGraphRelationKind = "contains" | "subevent" | "mentions";
+
+export interface SourceGraphRelation {
+  source_id: string;
+  source_kind: SourceGraphNodeKind;
+  target_id: string;
+  target_kind: SourceGraphNodeKind;
+  kind: SourceGraphRelationKind;
+  weight: number;
+  description: string;
+}
+
+export interface SourceGraphResponse {
+  documents: SourceGraphDocument[];
+  events: SourceGraphEvent[];
+  entities: Entity[];
+  relations: SourceGraphRelation[];
+  counts: {
+    documents: number;
+    events: number;
+    entities: number;
+    shown_documents: number;
+    shown_events: number;
+    shown_entities: number;
+    shown_relations: number;
+  };
+  truncated: boolean;
+}
+
 export interface Section {
   chunk_id: string | null;
   heading: string;

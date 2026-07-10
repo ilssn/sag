@@ -16,11 +16,11 @@ dev: ## 提示：分别在两个终端运行 make api / make web
 	@echo "在一个终端运行:  make api"
 	@echo "在另一个终端运行: make web"
 
-api: ## 启动后端（本地零依赖 SQLite+LanceDB，热重载）
-	cd apps/api && . .venv/bin/activate && uvicorn sag_api.main:app --reload --port 8000
+api: ## 启动后端（本地零依赖 SQLite+LanceDB，热重载，局域网可访问）
+	cd apps/api && . .venv/bin/activate && uvicorn sag_api.main:app --reload --host 0.0.0.0 --port 8000
 
-web: ## 启动前端（Next dev）
-	cd apps/web && npm run dev
+web: ## 启动前端（Next dev，局域网可访问）
+	cd apps/web && npm run dev -- -H 0.0.0.0
 
 test: ## 运行后端与 Agent Core 测试
 	cd apps/api && . .venv/bin/activate && pytest -q

@@ -9,7 +9,8 @@ import pytest
 @pytest.mark.asyncio
 async def test_entity_read_path():
     from sag_api.core.db import SessionLocal
-    from sag_api.db.models import Source
+    from sag_api.db.models import Document, Source
+    from sag_api.enums import DocumentStatus
     from sag_api.main import app
 
     transport = httpx.ASGITransport(app=app)
@@ -25,7 +26,27 @@ async def test_entity_read_path():
             src = (await c.post("/api/v1/sources", headers=H, json={"name": "三国演义"})).json()
             sid = src["id"]
             async with SessionLocal() as s:
-                scid = (await s.get(Source, sid)).sag_source_config_id
+                source = await s.get(Source, sid)
+                scid = source.sag_source_config_id
+                document_id = uuid.uuid4().hex
+                s.add(
+                    Document(
+                        id=document_id,
+                        source_id=sid,
+                        filename="三国演义.md",
+                        content_type="text/markdown",
+                        size_bytes=128,
+                        storage_path="/tmp/three-kingdoms.md",
+                        status=DocumentStatus.READY,
+                        chunk_count=1,
+                        event_count=1,
+                        sag_source_id="d1",
+                    )
+                )
+                source.document_count = 1
+                source.chunk_count = 1
+                source.event_count = 1
+                await s.commit()
 
             # 注入事件—实体图谱（模拟 extract 产物）
             from zleap.sag.db import get_session_factory
@@ -65,3 +86,34 @@ async def test_entity_read_path():
             # 读实体（带热度）
             ents = (await c.get(f"/api/v1/sources/{sid}/entities?types=person", headers=H)).json()
             assert any(e["name"] == "关羽" and e["heat"] >= 1 for e in ents)
+
+            # 图谱读路径保留真实文档—事件—实体关系，并返回展示/总量信息。
+            response = await c.get(f"/api/v1/sources/{sid}/graph", headers=H)
+            assert response.status_code == 200
+            graph = response.json()
+            assert graph["documents"][0]["id"] == document_id
+            assert graph["events"][0]["title"] == "过五关斩六将"
+            assert graph["events"][0]["document_id"] == document_id
+            assert graph["entities"][0]["name"] == "关羽"
+            assert {relation["kind"] for relation in graph["relations"]} == {
+                "contains",
+                "mentions",
+            }
+            assert graph["counts"]["shown_relations"] == 2
+            assert graph["truncated"] is False
+
+            # 参数有硬上限，避免调用方绕过服务端性能护栏。
+            invalid = await c.get(f"/api/v1/sources/{sid}/graph?event_limit=121", headers=H)
+            assert invalid.status_code == 422
+
+            empty_source = (
+                await c.post("/api/v1/sources", headers=H, json={"name": "空信源"})
+            ).json()
+            empty_graph = (
+                await c.get(f"/api/v1/sources/{empty_source['id']}/graph", headers=H)
+            ).json()
+            assert empty_graph["documents"] == []
+            assert empty_graph["events"] == []
+            assert empty_graph["entities"] == []
+            assert empty_graph["relations"] == []
+            assert empty_graph["truncated"] is False

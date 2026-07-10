@@ -333,141 +333,155 @@ function SearchPageInner() {
     await searchFor(query, k);
   }
 
+  const graphViewActive = view === "graph" && Boolean(results?.length);
+
   return (
-    <div className="flex w-full flex-col gap-6 p-4 md:p-6">
-      <form onSubmit={run} className="mx-auto flex w-full max-w-3xl flex-col gap-2">
+    <div
+      className={cn(
+        "flex w-full flex-col gap-6 p-4 md:p-6",
+        graphViewActive && "h-full min-h-0 overflow-hidden",
+      )}
+    >
+      <form onSubmit={run} className="mx-auto flex w-full max-w-3xl shrink-0 flex-col gap-2">
         <div className="flex w-full items-center gap-2">
           <div className="relative flex-1">
-          <div
-            className={cn(
-              "flex min-h-11 flex-wrap items-center gap-1 rounded-lg border border-input bg-card py-1.5 pl-10 pr-9 shadow-soft transition-[border-color,box-shadow]",
-              "focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/25",
-            )}
-          >
-            <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            {scoped.map((sc) => (
-              <span
-                key={sc.id}
-                className="inline-flex max-w-[min(100%,12rem)] items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary"
-              >
-                <Library className="size-3 shrink-0" />
-                <span className="truncate">{sc.name}</span>
+            <div
+              className={cn(
+                "flex min-h-11 items-center gap-1 rounded-lg border border-input bg-card py-1.5 pl-10 pr-2 shadow-soft transition-[border-color,box-shadow]",
+                "focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/25",
+              )}
+            >
+              <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+                {scoped.map((sc) => (
+                  <span
+                    key={sc.id}
+                    className="inline-flex max-w-[min(100%,12rem)] items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary"
+                  >
+                    <Library className="size-3 shrink-0" />
+                    <span className="truncate">{sc.name}</span>
+                    <button
+                      type="button"
+                      aria-label={`移除 ${sc.name}`}
+                      onClick={() => setScoped((p) => p.filter((x) => x.id !== sc.id))}
+                      className="rounded-sm text-primary/70 hover:bg-primary/15 hover:text-primary"
+                    >
+                      <X className="size-2.5" />
+                    </button>
+                  </span>
+                ))}
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={query}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    const nextMentionOpen = mentionTerm(v) !== null;
+                    setQuery(v);
+                    if (!v.trim()) {
+                      searchRequestIdRef.current += 1;
+                      setBusy(false);
+                      setResults(null);
+                      setLastQuery("");
+                    }
+                    setMentionOpen(nextMentionOpen);
+                  }}
+                  onKeyDown={(e) => {
+                    if (mentionOpen) {
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        setMentionIndex((i) => (filteredSources.length ? (i + 1) % filteredSources.length : 0));
+                        return;
+                      }
+                      if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        setMentionIndex((i) =>
+                          filteredSources.length ? (i - 1 + filteredSources.length) % filteredSources.length : 0,
+                        );
+                        return;
+                      }
+                      if (e.key === "Enter" || e.key === "Tab") {
+                        e.preventDefault();
+                        chooseSource(filteredSources[mentionIndex]);
+                        return;
+                      }
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        setMentionOpen(false);
+                        return;
+                      }
+                    }
+                    if (e.key === "@") {
+                      setMentionOpen(true);
+                      setMentionIndex(0);
+                    }
+                  }}
+                  placeholder={scoped.length ? "继续输入关键词…" : "搜索知识库 · 输入 @ 限定范围"}
+                  className="min-w-[8ch] flex-1 bg-transparent py-0.5 text-sm outline-none placeholder:text-muted-foreground"
+                />
+              </div>
+              {query && (
                 <button
                   type="button"
-                  aria-label={`移除 ${sc.name}`}
-                  onClick={() => setScoped((p) => p.filter((x) => x.id !== sc.id))}
-                  className="rounded-sm text-primary/70 hover:bg-primary/15 hover:text-primary"
-                >
-                  <X className="size-2.5" />
-                </button>
-              </span>
-            ))}
-            <input
-              ref={inputRef}
-              type="text"
-              value={query}
-              onChange={(e) => {
-                const v = e.target.value;
-                const nextMentionOpen = mentionTerm(v) !== null;
-                setQuery(v);
-                if (!v.trim()) {
-                  searchRequestIdRef.current += 1;
-                  setBusy(false);
-                  setResults(null);
-                  setLastQuery("");
-                }
-                setMentionOpen(nextMentionOpen);
-              }}
-              onKeyDown={(e) => {
-                if (mentionOpen) {
-                  if (e.key === "ArrowDown") {
-                    e.preventDefault();
-                    setMentionIndex((i) => (filteredSources.length ? (i + 1) % filteredSources.length : 0));
-                    return;
-                  }
-                  if (e.key === "ArrowUp") {
-                    e.preventDefault();
-                    setMentionIndex((i) =>
-                      filteredSources.length ? (i - 1 + filteredSources.length) % filteredSources.length : 0,
-                    );
-                    return;
-                  }
-                  if (e.key === "Enter" || e.key === "Tab") {
-                    e.preventDefault();
-                    chooseSource(filteredSources[mentionIndex]);
-                    return;
-                  }
-                  if (e.key === "Escape") {
-                    e.preventDefault();
+                  onClick={() => {
+                    searchRequestIdRef.current += 1;
+                    setQuery("");
+                    setBusy(false);
+                    setResults(null);
+                    setLastQuery("");
                     setMentionOpen(false);
-                    return;
-                  }
-                }
-                if (e.key === "@") {
-                  setMentionOpen(true);
-                  setMentionIndex(0);
-                }
-              }}
-              placeholder={scoped.length ? "继续输入关键词…" : "搜索知识库 · 输入 @ 限定范围"}
-              className="min-w-[8ch] flex-1 bg-transparent py-0.5 text-sm outline-none placeholder:text-muted-foreground"
-            />
-          </div>
-          {query && (
-            <button
-              type="button"
-              onClick={() => {
-                searchRequestIdRef.current += 1;
-                setQuery("");
-                setBusy(false);
-                setResults(null);
-                setLastQuery("");
-                setMentionOpen(false);
-                inputRef.current?.focus();
-              }}
-              aria-label="清空"
-              className="absolute right-2.5 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <X className="size-3.5" />
-            </button>
-          )}
-          {mentionOpen && (
-            <div className="absolute left-0 top-full z-20 mt-2 w-full">
-              <div className="overflow-hidden rounded-lg border bg-card shadow-lift">
-                <div className="border-b px-3 py-2 text-xs font-medium text-muted-foreground">
-                  知识库范围
-                </div>
-                <div className="max-h-64 overflow-y-auto p-1" role="listbox">
-                  {filteredSources.length === 0 ? (
-                    <p className="px-3 py-5 text-center text-sm text-muted-foreground">没有匹配的信源</p>
-                  ) : (
-                    filteredSources.map((s, index) => {
-                      const on = scoped.some((x) => x.id === s.id);
-                      const active = index === mentionIndex;
-                      return (
-                        <button
-                          key={s.id}
-                          type="button"
-                          role="option"
-                          aria-selected={active}
-                          onMouseEnter={() => setMentionIndex(index)}
-                          onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => chooseSource(s)}
-                          className={cn(
-                            "flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm outline-none transition-colors",
-                            active && "bg-muted text-foreground",
-                          )}
-                        >
-                          <Library className="size-3.5 shrink-0 text-muted-foreground" />
-                          <span className="min-w-0 flex-1 truncate">{s.name}</span>
-                          {on && <span className="text-xs text-muted-foreground">已选</span>}
-                        </button>
-                      );
-                    })
-                  )}
+                    inputRef.current?.focus();
+                  }}
+                  aria-label="清空"
+                  className="grid size-5 shrink-0 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <X className="size-3.5" />
+                </button>
+              )}
+              <SearchStrategyControl
+                value={strategy}
+                defaultValue={defaultStrategy}
+                onValueChange={changeStrategy}
+              />
+            </div>
+            {mentionOpen && (
+              <div className="absolute left-0 top-full z-20 mt-2 w-full">
+                <div className="overflow-hidden rounded-lg border bg-card shadow-lift">
+                  <div className="border-b px-3 py-2 text-xs font-medium text-muted-foreground">
+                    知识库范围
+                  </div>
+                  <div className="max-h-64 overflow-y-auto p-1" role="listbox">
+                    {filteredSources.length === 0 ? (
+                      <p className="px-3 py-5 text-center text-sm text-muted-foreground">没有匹配的信源</p>
+                    ) : (
+                      filteredSources.map((s, index) => {
+                        const on = scoped.some((x) => x.id === s.id);
+                        const active = index === mentionIndex;
+                        return (
+                          <button
+                            key={s.id}
+                            type="button"
+                            role="option"
+                            aria-selected={active}
+                            onMouseEnter={() => setMentionIndex(index)}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => chooseSource(s)}
+                            className={cn(
+                              "flex h-9 w-full items-center gap-2 rounded-md px-2 text-left text-sm outline-none transition-colors",
+                              active && "bg-muted text-foreground",
+                            )}
+                          >
+                            <Library className="size-3.5 shrink-0 text-muted-foreground" />
+                            <span className="min-w-0 flex-1 truncate">{s.name}</span>
+                            {on && <span className="text-xs text-muted-foreground">已选</span>}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
           </div>
           <button
             type="button"
@@ -477,12 +491,6 @@ function SearchPageInner() {
             取消
           </button>
         </div>
-
-        <SearchStrategyControl
-          value={strategy}
-          defaultValue={defaultStrategy}
-          onValueChange={changeStrategy}
-        />
       </form>
 
       {busy && results === null ? (
@@ -493,7 +501,9 @@ function SearchPageInner() {
         <div
           className={cn(
             "flex w-full flex-col gap-2",
-            view === "graph" && results.length > 0 ? "mx-auto max-w-[1200px]" : "mx-auto max-w-3xl",
+            view === "graph" && results.length > 0
+              ? "mx-auto min-h-0 max-w-[1200px] flex-1"
+              : "mx-auto max-w-3xl",
           )}
         >
           <div className="flex items-center justify-between gap-3 px-1">

@@ -8,12 +8,16 @@ import {
   ArrowUp,
   Check,
   ChevronDown,
+  EyeOff,
   Hand,
   History,
   Loader2,
   MessageCircleQuestion,
   MessageSquarePlus,
+  Music2,
+  Plus,
   Rocket,
+  Route,
   Search,
   Settings2,
   Smile,
@@ -39,7 +43,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useApp } from "@/components/features/app-shell";
 
-type PetVisualMode = PetAgentActivity | "jumping" | "flying";
+type PetVisualMode = PetAgentActivity | "jumping" | "flying" | "roaming" | "dancing";
 
 interface PetActivity {
   streaming: boolean;
@@ -49,7 +53,7 @@ interface PetActivity {
   failed: boolean;
 }
 
-const FACE_PRESETS = [
+const DEFAULT_FACE_PRESETS = [
   "@_@",
   "^_^",
   "-_-",
@@ -59,11 +63,15 @@ const FACE_PRESETS = [
   "x_x",
   "AI",
   "01",
-  "s",
+  "S",
+  "Z",
 ] as const;
 const IDLE_EXPRESSIONS = ["^_^", "-_-", "o_o", "._.", "u_u"] as const;
 const PET_FACE_KEY = "sag:pet-face";
 const PET_FACE_MODE_KEY = "sag:pet-face-mode";
+const PET_FACE_PRESETS_KEY = "sag:pet-face-presets";
+const MAX_FACE_PRESETS = 24;
+const PET_VIEWPORT_MARGIN = 24;
 const MODE_EXPRESSIONS: Partial<Record<PetVisualMode, string>> = {
   thinking: "._.",
   searching: "o_o",
@@ -73,6 +81,8 @@ const MODE_EXPRESSIONS: Partial<Record<PetVisualMode, string>> = {
   error: "x_x",
   jumping: "^_^",
   flying: "^O^",
+  roaming: "^o^",
+  dancing: "^3^",
 };
 const RETRIEVAL_TOOL = /search|context|entity|retriev|knowledge|source|chunk/i;
 
@@ -86,6 +96,11 @@ function faceStyle(value: string): React.CSSProperties {
   if (length <= 3) return { fontSize: 18 };
   if (length <= 5) return { fontSize: 13 };
   return { fontSize: 10 };
+}
+
+function normalizeFace(value: string) {
+  const next = normalizeAvatar(value);
+  return next === "s" ? "S" : next;
 }
 
 function nameplateStyle(value: string): React.CSSProperties {
@@ -174,6 +189,45 @@ interface PetProps {
   visible?: boolean;
 }
 
+interface PetRoamPath {
+  x: number[];
+  y: number[];
+}
+
+interface PetActionButtonProps {
+  children: React.ReactNode;
+  disabled?: boolean;
+  label: string;
+  onClick: () => void;
+  slot: "ask" | "wave" | "fly" | "roam" | "dance" | "hide";
+}
+
+function PetActionButton({
+  children,
+  disabled,
+  label,
+  onClick,
+  slot,
+}: PetActionButtonProps) {
+  return (
+    <button
+      type="button"
+      data-slot={slot}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      className="sag-pet__action"
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 /** 视口级知识宇航员：角色对象负责状态与动作，组件只处理输入和渲染。 */
 export function Pet({ character: providedCharacter, syncIdentity, visible = true }: PetProps = {}) {
   const { agent, capabilities, threads } = useApp();
@@ -182,7 +236,7 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
   const reduceMotion = useReducedMotion();
   const activity = usePetActivity();
   const ownedCharacter = React.useMemo(
-    () => new PetAgent({ name: "sag", avatar: "s", size: 1 }),
+    () => new PetAgent({ name: "sag", avatar: "S", size: 1 }),
     [],
   );
   const character = providedCharacter ?? ownedCharacter;
@@ -198,6 +252,10 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
   const [curious, setCurious] = React.useState(false);
   const [faceEditorOpen, setFaceEditorOpen] = React.useState(false);
   const [face, setFace] = React.useState<string | null>(null);
+  const [facePresets, setFacePresets] = React.useState<string[]>(() => [
+    ...DEFAULT_FACE_PRESETS,
+  ]);
+  const [roamPath, setRoamPath] = React.useState<PetRoamPath | null>(null);
   const [draft, setDraft] = React.useState("");
   const [knowledgeStats, setKnowledgeStats] = React.useState<{
     sources: number;
@@ -221,9 +279,9 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
   const pointerRef = React.useRef({ x: 0, y: 0 });
   const elRef = React.useRef<HTMLDivElement>(null);
   const visualRef = React.useRef<HTMLDivElement>(null);
-  const agentFace = normalizeAvatar(agent?.avatar || agent?.name?.slice(0, 1) || "s") || "s";
+  const agentFace = normalizeFace(agent?.avatar || agent?.name?.slice(0, 1) || "S") || "S";
   const identityFace = shouldSyncIdentity ? agentFace : characterState.identity.avatar;
-  const displayFace = normalizeAvatar(face === null ? identityFace : face);
+  const displayFace = normalizeFace(face === null ? identityFace : face);
 
   React.useEffect(
     () => () => {
@@ -250,8 +308,14 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
           const width = 94 * character.getSnapshot().identity.size;
           const height = 118 * character.getSnapshot().identity.size;
           const next = {
-            x: Math.min(Math.max(8, parsed.x), Math.max(8, window.innerWidth - width - 8)),
-            y: Math.min(Math.max(8, parsed.y), Math.max(8, window.innerHeight - height - 8)),
+            x: Math.min(
+              Math.max(PET_VIEWPORT_MARGIN, parsed.x),
+              Math.max(PET_VIEWPORT_MARGIN, window.innerWidth - width - PET_VIEWPORT_MARGIN),
+            ),
+            y: Math.min(
+              Math.max(PET_VIEWPORT_MARGIN, parsed.y),
+              Math.max(PET_VIEWPORT_MARGIN, window.innerHeight - height - PET_VIEWPORT_MARGIN),
+            ),
           };
           character.moveTo(next);
           lastPosRef.current = next;
@@ -264,9 +328,25 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
       const savedFaceMode = window.localStorage.getItem(PET_FACE_MODE_KEY);
       const savedFace = window.localStorage.getItem(PET_FACE_KEY);
       const legacyFace = window.localStorage.getItem("sag:pet-emoji");
-      if (savedFaceMode === "custom") setFace(normalizeAvatar(savedFace ?? ""));
-      else if (savedFace !== null) setFace(normalizeAvatar(savedFace));
-      else if (legacyFace !== null) setFace(normalizeAvatar(legacyFace));
+      if (savedFaceMode === "custom") setFace(normalizeFace(savedFace ?? ""));
+      else if (savedFace !== null) setFace(normalizeFace(savedFace));
+      else if (legacyFace !== null) setFace(normalizeFace(legacyFace));
+
+      const savedPresets = window.localStorage.getItem(PET_FACE_PRESETS_KEY);
+      if (savedPresets !== null) {
+        const parsed = JSON.parse(savedPresets) as unknown;
+        if (Array.isArray(parsed)) {
+          const next = Array.from(
+            new Set(
+              parsed
+                .filter((value): value is string => typeof value === "string")
+                .map(normalizeFace)
+                .filter(Boolean),
+            ),
+          ).slice(0, MAX_FACE_PRESETS);
+          setFacePresets(next);
+        }
+      }
     } catch {
       /* ignore */
     }
@@ -283,8 +363,14 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
       const width = visualRef.current?.offsetWidth ?? 94;
       const height = visualRef.current?.offsetHeight ?? 118;
       const next = {
-        x: Math.min(Math.max(8, current.x), Math.max(8, window.innerWidth - width - 8)),
-        y: Math.min(Math.max(8, current.y), Math.max(8, window.innerHeight - height - 8)),
+        x: Math.min(
+          Math.max(PET_VIEWPORT_MARGIN, current.x),
+          Math.max(PET_VIEWPORT_MARGIN, window.innerWidth - width - PET_VIEWPORT_MARGIN),
+        ),
+        y: Math.min(
+          Math.max(PET_VIEWPORT_MARGIN, current.y),
+          Math.max(PET_VIEWPORT_MARGIN, window.innerHeight - height - PET_VIEWPORT_MARGIN),
+        ),
       };
       lastPosRef.current = next;
       character.moveTo(next);
@@ -322,20 +408,53 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
   const activeThread = activity.threadId
     ? threads.find((thread) => thread.id === activity.threadId) ?? null
     : null;
+  const canAct = !reduceMotion && !activity.streaming && characterState.motion === "idle";
 
   const triggerWave = React.useCallback(() => {
-    if (reduceMotion || activity.streaming) return;
+    if (!canAct) return;
     character.wave();
-  }, [activity.streaming, character, reduceMotion]);
+  }, [canAct, character]);
 
   const triggerFlight = React.useCallback(() => {
-    if (reduceMotion || activity.streaming) return;
+    if (!canAct) return;
     const top = visualRef.current?.getBoundingClientRect().top ?? 140;
     const availableLift = top - 10;
     setOpen(false);
     if (availableLift < 42) character.jump();
-    else character.fly({ height: Math.min(220, availableLift) });
-  }, [activity.streaming, character, reduceMotion]);
+    else character.fly({ height: Math.min(300, availableLift) });
+  }, [canAct, character]);
+
+  const triggerDance = React.useCallback(() => {
+    if (!canAct) return;
+    setOpen(false);
+    character.dance();
+  }, [canAct, character]);
+
+  const triggerRoam = React.useCallback(() => {
+    if (!canAct) return;
+    const visual = visualRef.current;
+    if (!visual) return;
+    const rect = visual.getBoundingClientRect();
+    const margin = 14;
+    const left = margin - rect.left;
+    const right = window.innerWidth - rect.width - margin - rect.left;
+    const top = margin - rect.top;
+    const bottom = window.innerHeight - rect.height - margin - rect.top;
+    const startsBelowCenter = rect.top + rect.height / 2 > window.innerHeight / 2;
+    setRoamPath(
+      startsBelowCenter
+        ? {
+            x: [0, left, left, right, right, left, 0],
+            y: [0, bottom, top, top, bottom, bottom, 0],
+          }
+        : {
+            x: [0, left, left, right, right, left, 0],
+            y: [0, top, bottom, bottom, top, top, 0],
+          },
+    );
+    setOpen(false);
+    character.roam();
+  }, [canAct, character]);
 
   React.useEffect(() => {
     if (activity.streaming) {
@@ -378,7 +497,9 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
       return;
     }
     const timer = window.setTimeout(() => {
-      if (Math.random() < 0.32) triggerFlight();
+      const roll = Math.random();
+      if (roll < 0.2) triggerDance();
+      else if (roll < 0.44) triggerFlight();
       else triggerWave();
     }, 16_000 + Math.round(Math.random() * 12_000));
     return () => window.clearTimeout(timer);
@@ -387,6 +508,7 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
     characterState.motion,
     open,
     reduceMotion,
+    triggerDance,
     triggerFlight,
     triggerWave,
     visible,
@@ -450,9 +572,13 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
   const visualMode: PetVisualMode =
     characterState.motion === "fly"
       ? "flying"
+      : characterState.motion === "roam"
+        ? "roaming"
+        : characterState.motion === "dance"
+          ? "dancing"
       : characterState.motion === "jump"
-        ? "jumping"
-        : characterState.activity;
+          ? "jumping"
+          : characterState.activity;
   const statusText = characterState.speech?.text ?? "";
   const statusThread = characterState.speech?.threadId
     ? threads.find((thread) => thread.id === characterState.speech?.threadId) ?? null
@@ -467,14 +593,32 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
     characterState.expression ??
     displayFace;
   const petName = Array.from(characterState.identity.name || "sag").slice(0, 7).join("");
+  const canAddFacePreset =
+    Boolean(displayFace) &&
+    !facePresets.includes(displayFace) &&
+    facePresets.length < MAX_FACE_PRESETS;
 
   function saveFace(value: string) {
-    const next = normalizeAvatar(value);
+    const next = normalizeFace(value);
     setFace(next);
     character.setAvatar(next);
     window.localStorage.removeItem("sag:pet-emoji");
     window.localStorage.setItem(PET_FACE_MODE_KEY, "custom");
     window.localStorage.setItem(PET_FACE_KEY, next);
+  }
+
+  function persistFacePresets(next: string[]) {
+    setFacePresets(next);
+    window.localStorage.setItem(PET_FACE_PRESETS_KEY, JSON.stringify(next));
+  }
+
+  function addFacePreset() {
+    if (!canAddFacePreset) return;
+    persistFacePresets([...facePresets, displayFace]);
+  }
+
+  function removeFacePreset(preset: string) {
+    persistFacePresets(facePresets.filter((value) => value !== preset));
   }
 
   function followAvatar() {
@@ -526,8 +670,14 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
     const width = visualRef.current?.offsetWidth ?? 94;
     const height = visualRef.current?.offsetHeight ?? 118;
     const next = {
-      x: Math.min(Math.max(8, event.clientX - drag.dx), window.innerWidth - width - 8),
-      y: Math.min(Math.max(8, event.clientY - drag.dy), window.innerHeight - height - 8),
+      x: Math.min(
+        Math.max(PET_VIEWPORT_MARGIN, event.clientX - drag.dx),
+        window.innerWidth - width - PET_VIEWPORT_MARGIN,
+      ),
+      y: Math.min(
+        Math.max(PET_VIEWPORT_MARGIN, event.clientY - drag.dy),
+        window.innerHeight - height - PET_VIEWPORT_MARGIN,
+      ),
     };
     lastPosRef.current = next;
     character.moveTo(next);
@@ -599,6 +749,20 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
           ],
           rotate: [0, -3.2, 1.8, -1.4, 0.8, -0.5, 0.2, 0],
         }
+      : characterState.motion === "roam"
+        ? roamPath
+          ? {
+              x: roamPath.x,
+              y: roamPath.y,
+              rotate: [0, -2.4, 1.2, 2.2, -1.4, -2, 0],
+            }
+          : { x: 0, y: 0, rotate: 0 }
+      : characterState.motion === "dance"
+        ? {
+            x: [0, -5, 5, -6, 6, -5, 5, 0],
+            y: [0, -8, 0, -12, 0, -9, 0, 0],
+            rotate: [0, -7, 7, -9, 9, -7, 7, 0],
+          }
       : characterState.motion === "jump"
         ? { x: [0, 0.5, 0], y: [0, -8, 0], rotate: [0, -2, 0] }
         : visualMode === "idle"
@@ -612,10 +776,22 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
     ? undefined
     : characterState.motion === "fly"
       ? {
-          duration: 6.4,
+          duration: 6.8,
           times: [0, 0.04, 0.18, 0.28, 0.42, 0.6, 0.82, 1],
           ease: "easeInOut" as const,
         }
+      : characterState.motion === "roam"
+        ? {
+            duration: roamPath ? 14 : 0,
+            times: roamPath ? [0, 0.08, 0.27, 0.51, 0.73, 0.91, 1] : undefined,
+            ease: "easeInOut" as const,
+          }
+      : characterState.motion === "dance"
+        ? {
+            duration: 5.2,
+            times: [0, 0.1, 0.22, 0.36, 0.5, 0.64, 0.8, 1],
+            ease: "easeInOut" as const,
+          }
       : characterState.motion === "jump"
         ? { duration: 0.76, times: [0, 0.46, 1], ease: "easeOut" as const }
         : {
@@ -733,10 +909,10 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
               </button>
               <button
                 type="button"
-                onClick={hide}
-                aria-label="隐藏宠物"
-                title="隐藏宠物"
-                className="grid size-7 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => setOpen(false)}
+                aria-label="收起面板"
+                title="收起面板"
+                className="grid size-7 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <X className="size-3.5" />
               </button>
@@ -848,25 +1024,53 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
                     className="overflow-hidden"
                   >
                     <div className="border-t px-3 py-2.5">
-                      <input
-                        value={displayFace}
-                        onChange={(event) => saveFace(event.target.value)}
-                        aria-label="自定义面罩字符"
-                        className="h-8 w-full rounded-md border bg-background px-2 text-center font-mono text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      />
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          value={displayFace}
+                          onChange={(event) => saveFace(event.target.value)}
+                          aria-label="自定义面罩字符"
+                          className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 text-center font-mono text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        />
+                        <button
+                          type="button"
+                          onClick={addFacePreset}
+                          disabled={!canAddFacePreset}
+                          aria-label="添加表情预设"
+                          title="添加表情预设"
+                          className="grid size-8 shrink-0 place-items-center rounded-md border text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30"
+                        >
+                          <Plus className="size-3.5" />
+                        </button>
+                      </div>
                       <div className="mt-1.5 flex flex-wrap gap-1">
-                        {FACE_PRESETS.map((preset) => (
-                          <button
+                        {facePresets.map((preset) => (
+                          <span
                             key={preset}
-                            type="button"
-                            onClick={() => saveFace(preset)}
                             className={cn(
-                              "grid h-7 min-w-8 place-items-center rounded-md px-1 font-mono text-xs outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
-                              displayFace === preset && "bg-muted ring-1 ring-border",
+                              "group/preset inline-flex h-7 items-stretch overflow-hidden rounded-md border transition-colors",
+                              displayFace === preset
+                                ? "border-border bg-muted"
+                                : "border-transparent hover:border-border/70 hover:bg-muted/50",
                             )}
                           >
-                            {preset}
-                          </button>
+                            <button
+                              type="button"
+                              onClick={() => saveFace(preset)}
+                              aria-label={`使用表情 ${preset}`}
+                              className="min-w-8 max-w-20 truncate px-1.5 font-mono text-xs outline-none focus-visible:bg-muted"
+                            >
+                              {preset}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeFacePreset(preset)}
+                              aria-label={`删除表情 ${preset}`}
+                              title={`删除 ${preset}`}
+                              className="grid w-5 place-items-center border-l border-border/60 text-muted-foreground/45 outline-none transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive"
+                            >
+                              <X className="size-2.5" />
+                            </button>
+                          </span>
                         ))}
                         <button
                           type="button"
@@ -906,34 +1110,34 @@ export function Pet({ character: providedCharacter, syncIdentity, visible = true
         data-facing={characterState.facing}
         className="sag-pet-rig relative"
       >
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            hide();
-          }}
-          onPointerDown={(event) => event.stopPropagation()}
-          aria-label="隐藏宠物"
-          className="absolute right-0 top-0 z-20 grid size-5 place-items-center rounded-full border bg-background text-muted-foreground opacity-0 shadow-soft outline-none transition-opacity hover:text-destructive focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover/pet:opacity-100"
-        >
-          <X className="size-3" />
-        </button>
-
         {!open && (
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              setCurious(false);
-              setOpen(true);
-            }}
-            onPointerDown={(event) => event.stopPropagation()}
-            aria-label={`向${characterState.identity.name}提问`}
-            title={`向${characterState.identity.name}提问`}
-            className="sag-pet__ask-entry"
-          >
-            <MessageCircleQuestion />
-          </button>
+          <div className="sag-pet__actions" role="toolbar" aria-label="宠物动作">
+            <PetActionButton
+              slot="ask"
+              label={`向${characterState.identity.name}提问`}
+              onClick={() => {
+                setCurious(false);
+                setOpen(true);
+              }}
+            >
+              <MessageCircleQuestion />
+            </PetActionButton>
+            <PetActionButton slot="wave" label="挥手" onClick={triggerWave} disabled={!canAct}>
+              <Hand />
+            </PetActionButton>
+            <PetActionButton slot="fly" label="升空" onClick={triggerFlight} disabled={!canAct}>
+              <Rocket />
+            </PetActionButton>
+            <PetActionButton slot="roam" label="沿边漫游" onClick={triggerRoam} disabled={!canAct}>
+              <Route />
+            </PetActionButton>
+            <PetActionButton slot="dance" label="跳舞" onClick={triggerDance} disabled={!canAct}>
+              <Music2 />
+            </PetActionButton>
+            <PetActionButton slot="hide" label="隐藏宠物" onClick={hide}>
+              <EyeOff />
+            </PetActionButton>
+          </div>
         )}
 
         <div

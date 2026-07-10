@@ -1050,11 +1050,15 @@
     height: 8px;
   }
 
-  .sag-pet__ask-entry {
+  .sag-pet__actions {
     position: absolute;
-    right: -12px;
-    top: 24px;
+    inset: 0;
     z-index: 30;
+    pointer-events: none;
+  }
+
+  .sag-pet__action {
+    position: absolute;
     display: grid;
     width: 28px;
     height: 28px;
@@ -1067,7 +1071,7 @@
     opacity: 0;
     outline: none;
     pointer-events: none;
-    transform: translate(-4px, 3px) scale(0.78);
+    transform: scale(0.74);
     transition:
       opacity 160ms ease,
       transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
@@ -1075,38 +1079,83 @@
       background-color 160ms ease;
   }
 
-  .sag-pet__ask-entry svg {
+  .sag-pet__action svg {
     width: 14px;
     height: 14px;
   }
 
-  .sag-pet-shell:hover .sag-pet__ask-entry,
-  .sag-pet__ask-entry:focus-visible {
+  .sag-pet__action[data-slot="ask"] {
+    right: -17px;
+    top: 24px;
+    transform: translate(-6px, 2px) scale(0.74);
+  }
+
+  .sag-pet__action[data-slot="wave"] {
+    left: -18px;
+    top: 29px;
+    transform: translate(6px, 2px) scale(0.74);
+  }
+
+  .sag-pet__action[data-slot="fly"] {
+    right: -14px;
+    bottom: 11px;
+    transform: translate(-5px, -3px) scale(0.74);
+  }
+
+  .sag-pet__action[data-slot="roam"] {
+    bottom: 12px;
+    left: -18px;
+    transform: translate(5px, -3px) scale(0.74);
+  }
+
+  .sag-pet__action[data-slot="dance"] {
+    left: 50%;
+    top: -20px;
+    margin-left: -14px;
+    transform: translateY(6px) scale(0.74);
+  }
+
+  .sag-pet__action[data-slot="hide"] {
+    bottom: -17px;
+    left: 50%;
+    margin-left: -14px;
+    transform: translateY(-5px) scale(0.74);
+  }
+
+  .sag-pet-shell:hover .sag-pet__action,
+  .sag-pet__actions:focus-within .sag-pet__action,
+  .sag-pet__action:focus-visible {
     opacity: 1;
     pointer-events: auto;
     transform: translate(0, 0) scale(1);
   }
 
-  .sag-pet__ask-entry:hover {
+  .sag-pet-shell:hover .sag-pet__action[data-slot="dance"],
+  .sag-pet-shell:hover .sag-pet__action[data-slot="hide"],
+  .sag-pet__actions:focus-within .sag-pet__action[data-slot="dance"],
+  .sag-pet__actions:focus-within .sag-pet__action[data-slot="hide"] {
+    transform: translateY(0) scale(1);
+  }
+
+  .sag-pet__action:hover {
     background: hsl(var(--muted));
     color: hsl(var(--foreground));
   }
 
-  .sag-pet__ask-entry:focus-visible {
+  .sag-pet__action[data-slot="hide"]:hover {
+    color: hsl(var(--destructive));
+  }
+
+  .sag-pet__action:focus-visible {
     box-shadow:
       0 0 0 2px hsl(var(--ring) / 0.24),
       0 8px 18px -10px hsl(var(--foreground) / 0.52);
   }
 
-  .sag-pet-shell[data-facing="left"] .sag-pet__ask-entry {
-    left: -12px;
-    right: auto;
-    transform: translate(4px, 3px) scale(0.78);
-  }
-
-  .sag-pet-shell[data-facing="left"]:hover .sag-pet__ask-entry,
-  .sag-pet-shell[data-facing="left"] .sag-pet__ask-entry:focus-visible {
-    transform: translate(0, 0) scale(1);
+  .sag-pet-shell:hover .sag-pet__action:disabled,
+  .sag-pet__actions:focus-within .sag-pet__action:disabled {
+    opacity: 0.32;
+    pointer-events: none;
   }
 
   .sag-pet-status-dot {
@@ -1343,7 +1392,9 @@
       [data-mode="searching"],
       [data-mode="working"],
       [data-mode="answering"],
-      [data-mode="flying"]
+      [data-mode="flying"],
+      [data-mode="roaming"],
+      [data-mode="dancing"]
     )
     .sag-pet__panel-light {
     background: hsl(var(--success));
@@ -1420,6 +1471,83 @@
 
   .sag-pet-astronaut[data-mode="flying"] .sag-pet__leg--right {
     transform: translateY(2px) rotate(-5deg);
+  }
+
+  .sag-pet-astronaut[data-mode="roaming"] .sag-pet__shadow {
+    opacity: 0.06;
+  }
+
+  .sag-pet-astronaut[data-mode="roaming"] .sag-pet__orbit {
+    opacity: 0.44;
+    animation: sag-pet-flight-orbit 3.8s linear infinite;
+  }
+
+  .sag-pet-astronaut[data-mode="roaming"] .sag-pet__backpack {
+    animation: sag-pet-flight-pack 0.34s ease-in-out infinite alternate;
+  }
+
+  .sag-pet-astronaut[data-mode="roaming"][data-facing="right"] .sag-pet__backpack {
+    animation-name: sag-pet-flight-pack-left;
+  }
+
+  .sag-pet-astronaut[data-mode="roaming"] .sag-pet__thrusters > span::before {
+    opacity: 0.46;
+    animation: sag-pet-thrust-outer 0.32s ease-in-out infinite alternate;
+  }
+
+  .sag-pet-astronaut[data-mode="roaming"] .sag-pet__thrusters > span::after {
+    opacity: 0.68;
+    animation: sag-pet-thrust 0.22s ease-in-out infinite alternate;
+  }
+
+  .sag-pet-astronaut[data-mode="roaming"] .sag-pet__arm--left {
+    transform: rotate(18deg);
+  }
+
+  .sag-pet-astronaut[data-mode="roaming"] .sag-pet__arm--right {
+    transform: rotate(-18deg);
+  }
+
+  .sag-pet-astronaut[data-mode="dancing"] .sag-pet__helmet {
+    animation: sag-pet-dance-head 0.58s ease-in-out infinite alternate;
+  }
+
+  .sag-pet-astronaut[data-mode="dancing"] .sag-pet__body {
+    animation: sag-pet-dance-body 0.44s ease-in-out infinite;
+  }
+
+  .sag-pet-astronaut[data-mode="dancing"] .sag-pet__arm--left {
+    z-index: 5;
+    animation: sag-pet-dance-left 0.58s ease-in-out infinite alternate;
+  }
+
+  .sag-pet-astronaut[data-mode="dancing"] .sag-pet__arm--right {
+    z-index: 5;
+    animation: sag-pet-dance-right 0.58s ease-in-out infinite alternate-reverse;
+  }
+
+  .sag-pet-astronaut[data-mode="dancing"] .sag-pet__leg--left {
+    animation: sag-pet-dance-leg-left 0.44s ease-in-out infinite alternate;
+  }
+
+  .sag-pet-astronaut[data-mode="dancing"] .sag-pet__leg--right {
+    animation: sag-pet-dance-leg-right 0.44s ease-in-out infinite alternate-reverse;
+  }
+
+  .sag-pet-astronaut[data-mode="dancing"] .sag-pet__celebrate {
+    opacity: 0.82;
+  }
+
+  .sag-pet-astronaut[data-mode="dancing"] .sag-pet__celebrate svg {
+    animation: sag-pet-dance-spark 0.88s ease-in-out infinite;
+  }
+
+  .sag-pet-astronaut[data-mode="dancing"] .sag-pet__celebrate svg:nth-child(2) {
+    animation-delay: -0.29s;
+  }
+
+  .sag-pet-astronaut[data-mode="dancing"] .sag-pet__celebrate svg:nth-child(3) {
+    animation-delay: -0.58s;
   }
 
   .sag-pet-astronaut[data-wave="true"] .sag-pet__arm--left {
@@ -1751,6 +1879,74 @@
     }
     to {
       transform: scaleY(1.14) scaleX(1.04);
+    }
+  }
+
+  @keyframes sag-pet-dance-head {
+    from {
+      transform: translate(calc(var(--pet-look-x) - 2px), var(--pet-look-y)) rotate(-5deg);
+    }
+    to {
+      transform: translate(calc(var(--pet-look-x) + 2px), calc(var(--pet-look-y) - 2px))
+        rotate(5deg);
+    }
+  }
+
+  @keyframes sag-pet-dance-body {
+    0%,
+    100% {
+      transform: translateY(0) rotate(-2deg);
+    }
+    50% {
+      transform: translateY(-3px) rotate(2deg);
+    }
+  }
+
+  @keyframes sag-pet-dance-left {
+    from {
+      transform: rotate(22deg);
+    }
+    to {
+      transform: rotate(148deg);
+    }
+  }
+
+  @keyframes sag-pet-dance-right {
+    from {
+      transform: rotate(-22deg);
+    }
+    to {
+      transform: rotate(-148deg);
+    }
+  }
+
+  @keyframes sag-pet-dance-leg-left {
+    from {
+      transform: translate(-1px, 1px) rotate(9deg);
+    }
+    to {
+      transform: translate(1px, -3px) rotate(-7deg);
+    }
+  }
+
+  @keyframes sag-pet-dance-leg-right {
+    from {
+      transform: translate(1px, 1px) rotate(-9deg);
+    }
+    to {
+      transform: translate(-1px, -3px) rotate(7deg);
+    }
+  }
+
+  @keyframes sag-pet-dance-spark {
+    0%,
+    100% {
+      opacity: 0.28;
+      transform: scale(0.72) rotate(-12deg);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.12) rotate(24deg);
     }
   }
 

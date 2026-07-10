@@ -122,7 +122,7 @@ function FullLoader() {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const petAgent = React.useMemo(
-    () => new PetAgent({ name: "sag", avatar: "s", serialNumber: 1, size: 1 }),
+    () => new PetAgent({ name: "sag", avatar: "S", serialNumber: 1, size: 1 }),
     [],
   );
   const [user, setUser] = React.useState<User | null>(null);

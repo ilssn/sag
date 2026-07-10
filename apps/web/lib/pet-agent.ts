@@ -9,7 +9,7 @@ export type PetAgentActivity =
   | "done"
   | "error";
 
-export type PetAgentMotion = "idle" | "wave" | "jump" | "fly";
+export type PetAgentMotion = "idle" | "wave" | "jump" | "fly" | "roam" | "dance";
 export type PetAgentSpeechTone = "neutral" | "active" | "success" | "error";
 
 export interface PetAgentIdentity {
@@ -82,7 +82,9 @@ type Timer = ReturnType<typeof setTimeout>;
 const MOTION_DURATION: Record<Exclude<PetAgentMotion, "idle">, number> = {
   wave: 1_450,
   jump: 760,
-  fly: 6_400,
+  fly: 6_800,
+  roam: 14_000,
+  dance: 5_200,
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -115,7 +117,7 @@ export class PetAgent {
       identity: {
         id: options.id ?? `pet-${String(options.serialNumber ?? "primary")}`,
         name: options.name || "sag",
-        avatar: options.avatar ?? "s",
+        avatar: options.avatar ?? "S",
         serialNumber: options.serialNumber,
         size: clamp(options.size ?? 1, 0.72, 1.35),
       },
@@ -126,7 +128,7 @@ export class PetAgent {
       motion: "idle",
       expression: null,
       speech: null,
-      flightLift: 180,
+      flightLift: 240,
       revision: 0,
     };
   }
@@ -309,6 +311,14 @@ export class PetAgent {
     return this.act("fly", options);
   }
 
+  roam(options: Omit<PetAgentMotionOptions, "height"> = {}) {
+    return this.act("roam", options);
+  }
+
+  dance(options: Omit<PetAgentMotionOptions, "height"> = {}) {
+    return this.act("dance", options);
+  }
+
   sequence(...commands: PetAgentMotionCommand[]) {
     this.clearMotion();
     this.motionQueue.push(...commands);
@@ -376,7 +386,7 @@ export class PetAgent {
       motion: command.motion,
       flightLift:
         command.motion === "fly"
-          ? clamp(command.height ?? this.state.flightLift, 24, 260)
+          ? clamp(command.height ?? this.state.flightLift, 24, 360)
           : this.state.flightLift,
     });
     this.motionTimer = setTimeout(() => {

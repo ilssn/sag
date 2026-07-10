@@ -2,21 +2,13 @@
 
 import * as React from "react";
 import {
-  Background,
-  BackgroundVariant,
-  Controls,
-  Handle,
   MarkerType,
-  Position,
-  ReactFlow,
-  useNodesInitialized,
-  useReactFlow,
   type Edge,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Library, ListTree, Maximize2, Minimize2, Orbit, Search, Share2, Sparkles } from "lucide-react";
+import { Library, Search, Sparkles } from "lucide-react";
 import {
   forceCollide,
   forceLink,
@@ -31,8 +23,16 @@ import {
 import { api } from "@/lib/api";
 import type { Entity, Section } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useDetailPanel } from "@/components/features/detail-panel";
+import {
+  GRAPH_EDGE_TYPE,
+  GraphCanvas,
+  GraphHandles,
+  GraphLegend,
+  graphEdgeHandles,
+  type GraphLayout,
+  type GraphPoint,
+} from "@/components/features/graph-canvas";
 
 /**
  * 搜索结果网状图谱 —— 辐射分层布局：查询（中心）→ 信源 → 命中片段 → 实体。
@@ -48,8 +48,6 @@ type GraphNodeData = {
   section?: Section;
 };
 
-type Point = { x: number; y: number };
-
 /** 布局配置（集中可调）：多源=按命中数比例的全周扇区；单源=自信源向下半环发散。 */
 const LAYOUT = {
   sourceR: 210,
@@ -58,7 +56,6 @@ const LAYOUT = {
   minSector: 0.55, // rad，命中很少的源也保有的最小扇区
   single: { queryGap: 230, chunkR: 320, entityGap: 150, arcStartDeg: -15, arcEndDeg: 195 },
 } as const;
-type Side = "top" | "right" | "bottom" | "left";
 
 const KIND_META: Record<
   Exclude<Kind, "entity">,
@@ -73,37 +70,6 @@ const KIND_META: Record<
     height: 96,
   },
 };
-
-function GraphHandles() {
-  const sides: { side: Side; position: Position }[] = [
-    { side: "top", position: Position.Top },
-    { side: "right", position: Position.Right },
-    { side: "bottom", position: Position.Bottom },
-    { side: "left", position: Position.Left },
-  ];
-  return (
-    <>
-      {sides.map(({ side, position }) => (
-        <React.Fragment key={side}>
-          <Handle
-            id={`target-${side}`}
-            type="target"
-            position={position}
-            isConnectable={false}
-            className="!size-2 !border-0 !bg-transparent !opacity-0"
-          />
-          <Handle
-            id={`source-${side}`}
-            type="source"
-            position={position}
-            isConnectable={false}
-            className="!size-2 !border-0 !bg-transparent !opacity-0"
-          />
-        </React.Fragment>
-      ))}
-    </>
-  );
-}
 
 function GraphNode({ data }: NodeProps) {
   const d = data as GraphNodeData;
@@ -151,37 +117,21 @@ function GraphNode({ data }: NodeProps) {
 
 const nodeTypes = { sag: GraphNode };
 
-function sideFromVector(from: Point, to: Point): Side {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? "right" : "left";
-  return dy >= 0 ? "bottom" : "top";
-}
-
-function oppositeSide(side: Side): Side {
-  if (side === "top") return "bottom";
-  if (side === "bottom") return "top";
-  if (side === "left") return "right";
-  return "left";
-}
-
 function edgeOf(
   source: string,
   target: string,
   kind: "qs" | "sc" | "ce",
   i: number,
-  from: Point,
-  to: Point,
+  from: GraphPoint,
+  to: GraphPoint,
   edgeType: "straight" | "smoothstep" = "straight",
 ): Edge {
   const labels = { qs: "检索", sc: "命中", ce: "提及" };
-  const side = sideFromVector(from, to);
   return {
     id: `e-${kind}-${i}`,
     source,
     target,
-    sourceHandle: `source-${side}`,
-    targetHandle: `target-${oppositeSide(side)}`,
+    ...graphEdgeHandles(from, to),
     type: edgeType,
     label: labels[kind],
     labelStyle: { fontSize: 10, fill: "hsl(var(--muted-foreground))", fontWeight: 500 },
@@ -202,15 +152,6 @@ function edgeOf(
     },
   };
 }
-
-type LayoutKind = "radial" | "tree" | "force";
-
-/** 边型规范：辐射/力导=直线（放射与网状几何），层级=正交折线（树形惯例）。 */
-const EDGE_TYPE: Record<LayoutKind, "straight" | "smoothstep"> = {
-  radial: "straight",
-  tree: "smoothstep",
-  force: "straight",
-};
 
 type Grouped = { sid: string; name: string; chunks: Section[]; ents: Entity[] };
 
@@ -241,7 +182,7 @@ function groupResults(results: Section[], entitiesBySource: Map<string, Entity[]
   });
 }
 
-function chunkNode(sec: Section, id: string, position: Point): Node {
+function chunkNode(sec: Section, id: string, position: GraphPoint): Node {
   return {
     id,
     type: "sag",
@@ -260,11 +201,11 @@ function linkEntities(
   group: Grouped,
   sec: Section,
   cid: string,
-  chunkPos: Point,
+  chunkPos: GraphPoint,
   nodes: Node[],
   edges: Edge[],
   nextIdx: () => number,
-  positionOf: (linked: number) => Point,
+  positionOf: (linked: number) => GraphPoint,
   edgeType: "straight" | "smoothstep" = "straight",
 ) {
   let linked = 0;
@@ -311,7 +252,7 @@ function buildRadial(query: string, groups: Grouped[]): { nodes: Node[]; edges: 
     g.chunks.forEach((sec, ci) => {
       const t = n === 1 ? 0.5 : ci / (n - 1);
       let angle: number;
-      let center: Point;
+      let center: GraphPoint;
       let radius: number;
       if (single) {
         // 开口朝上的弧环：片段仅分布于信源两侧与下方（扇贝形），上方空档留给查询
@@ -361,17 +302,17 @@ function buildTree(query: string, groups: Grouped[]): { nodes: Node[]; edges: Ed
     const sPos = { x: xs.reduce((a, b) => a + b, 0) / xs.length, y: 190 };
     const sid = `s:${g.sid}`;
     nodes.push({ id: sid, type: "sag", position: sPos, data: { label: g.name, kind: "source" } });
-    edges.push(edgeOf("q", sid, "qs", nextIdx(), { x: 0, y: 0 }, sPos, EDGE_TYPE.tree));
+    edges.push(edgeOf("q", sid, "qs", nextIdx(), { x: 0, y: 0 }, sPos, GRAPH_EDGE_TYPE.tree));
 
     g.chunks.forEach((sec, ci) => {
       const cPos = { x: xs[ci], y: 380 };
       const cid = `c:${sec.chunk_id ?? `${g.sid}-${ci}`}`;
       nodes.push(chunkNode(sec, cid, cPos));
-      edges.push(edgeOf(sid, cid, "sc", nextIdx(), sPos, cPos, EDGE_TYPE.tree));
+      edges.push(edgeOf(sid, cid, "sc", nextIdx(), sPos, cPos, GRAPH_EDGE_TYPE.tree));
       linkEntities(g, sec, cid, cPos, nodes, edges, nextIdx, (k) => ({
         x: cPos.x + (k - 1) * 104,
         y: 545 + (k % 2) * 44,
-      }), EDGE_TYPE.tree);
+      }), GRAPH_EDGE_TYPE.tree);
     });
   });
   return { nodes, edges };
@@ -437,7 +378,7 @@ function buildForce(query: string, groups: Grouped[]): { nodes: Node[]; edges: E
         edgeIdx++,
         posOf.get(source) ?? { x: 0, y: 0 },
         posOf.get(target) ?? { x: 0, y: 0 },
-        EDGE_TYPE.force,
+        GRAPH_EDGE_TYPE.force,
       );
     }),
   };
@@ -447,7 +388,7 @@ function buildNetwork(
   query: string,
   results: Section[],
   entitiesBySource: Map<string, Entity[]>,
-  layout: LayoutKind,
+  layout: GraphLayout,
 ): { nodes: Node[]; edges: Edge[] } {
   const groups = groupResults(results, entitiesBySource);
   if (layout === "tree") return buildTree(query, groups);
@@ -455,67 +396,16 @@ function buildNetwork(
   return buildRadial(query, groups);
 }
 
-function GraphLegend() {
-  const items = [
-    { label: "检索问题", className: "bg-primary" },
-    { label: "信源", className: "bg-sky-500" },
-    { label: "命中片段", className: "bg-emerald-500" },
-    { label: "实体", className: "border border-dashed border-violet-500 bg-violet-500/20" },
-  ];
-  return (
-    <div className="pointer-events-none absolute left-3 top-3 z-10 flex flex-wrap gap-2 rounded-lg border bg-card/95 px-2.5 py-2 shadow-soft backdrop-blur-sm">
-      {items.map((item) => (
-        <span key={item.label} className="inline-flex items-center gap-1.5 text-[10px] text-muted-foreground">
-          <span className={cn("size-2 rounded-full", item.className)} />
-          {item.label}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function FitViewOnChange({
-  nodes,
-  edges,
-  refreshKey,
-}: {
-  nodes: Node[];
-  edges: Edge[];
-  refreshKey: unknown;
-}) {
-  const { fitView } = useReactFlow();
-  const nodesInitialized = useNodesInitialized();
-  React.useEffect(() => {
-    if (!nodesInitialized || nodes.length === 0) return;
-    let frame = 0;
-    const timers: number[] = [];
-    const runFit = (duration = 260) => {
-      fitView({ padding: 0.2, duration, minZoom: 0.28, maxZoom: 1.05 });
-    };
-    frame = window.requestAnimationFrame(() => {
-      runFit(0);
-      timers.push(window.setTimeout(() => runFit(), 120));
-      timers.push(window.setTimeout(() => runFit(), 360));
-    });
-    return () => {
-      window.cancelAnimationFrame(frame);
-      timers.forEach((timer) => window.clearTimeout(timer));
-    };
-  }, [nodesInitialized, nodes, edges, refreshKey, fitView]);
-  return null;
-}
-
 export default function SearchGraph({ query, results }: { query: string; results: Section[] }) {
   const { open } = useDetailPanel();
   const [entities, setEntities] = React.useState<Map<string, Entity[]>>(new Map());
-  const [expanded, setExpanded] = React.useState(false);
-  const [layout, setLayout] = React.useState<LayoutKind>("radial");
+  const [layout, setLayout] = React.useState<GraphLayout>("radial");
 
   React.useEffect(() => {
     const saved = window.localStorage.getItem("sag:graph-layout");
     if (saved === "tree" || saved === "force") setLayout(saved);
   }, []);
-  const changeLayout = (v: LayoutKind) => {
+  const changeLayout = (v: GraphLayout) => {
     setLayout(v);
     window.localStorage.setItem("sag:graph-layout", v);
   };
@@ -538,94 +428,47 @@ export default function SearchGraph({ query, results }: { query: string; results
     };
   }, [results]);
 
-  React.useEffect(() => {
-    if (!expanded) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setExpanded(false);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [expanded]);
-
   const { nodes, edges } = React.useMemo(
     () => buildNetwork(query, results, entities, layout),
     [query, results, entities, layout],
   );
 
   return (
-    <div
-      className={cn(
-        "relative overflow-hidden rounded-lg border bg-card/40",
-        expanded
-          ? "fixed inset-4 z-50 min-h-0 bg-card shadow-lift"
-          : "h-[clamp(460px,calc(100svh-16rem),820px)]",
-      )}
-    >
-      <GraphLegend />
-      <div className="absolute right-3 top-3 z-20 flex items-center gap-1.5">
-        <ToggleGroup
-          type="single"
-          variant="outline"
-          size="sm"
-          value={layout}
-          onValueChange={(v) => v && changeLayout(v as LayoutKind)}
-          aria-label="图谱布局"
-          className="rounded-md bg-card/95 shadow-soft backdrop-blur-sm"
-        >
-          <ToggleGroupItem value="radial" aria-label="辐射布局" title="辐射">
-            <Orbit />
-          </ToggleGroupItem>
-          <ToggleGroupItem value="tree" aria-label="层级布局" title="层级">
-            <ListTree />
-          </ToggleGroupItem>
-          <ToggleGroupItem value="force" aria-label="力导布局" title="力导网状">
-            <Share2 />
-          </ToggleGroupItem>
-        </ToggleGroup>
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          aria-label={expanded ? "退出图谱全屏" : "放大图谱"}
-          className="grid size-8 place-items-center rounded-md border bg-card/95 text-muted-foreground shadow-soft outline-none backdrop-blur-sm transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-        </button>
-      </div>
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        nodeOrigin={[0.5, 0.5]}
-        fitView
-        fitViewOptions={{ padding: 0.2, minZoom: 0.28, maxZoom: 1.05 }}
-        minZoom={0.2}
-        maxZoom={1.6}
-        proOptions={{ hideAttribution: true }}
-        nodesDraggable
-        nodesConnectable={false}
-        elementsSelectable={false}
-        onNodeClick={(_e, node) => {
-          const d = node.data as GraphNodeData;
-          if (d.kind === "chunk" && d.section?.chunk_id && d.section.source_id) {
-            open({
-              kind: "chunk",
-              sourceId: d.section.source_id,
-              chunkId: d.section.chunk_id,
-              heading: d.section.heading ?? undefined,
-              sourceName: d.section.source_name ?? undefined,
-            });
-          }
-        }}
-        className="sag-graph"
-      >
-        <FitViewOnChange nodes={nodes} edges={edges} refreshKey={`${expanded}-${layout}`} />
-        <Background variant={BackgroundVariant.Dots} gap={22} size={1} className="!bg-transparent" />
-        <Controls showInteractive={false} className="!shadow-soft" />
-      </ReactFlow>
-      <div className="pointer-events-none absolute bottom-3 right-3 z-10 flex items-center gap-1 rounded-md border bg-card/90 px-2 py-1 text-[10px] text-muted-foreground shadow-soft backdrop-blur-sm">
-        {layout === "radial" ? <Orbit className="size-3" /> : layout === "tree" ? <ListTree className="size-3" /> : <Share2 className="size-3" />}
-        {layout === "radial" ? "辐射布局" : layout === "tree" ? "层级布局" : "力导网状"}
-      </div>
-    </div>
+    <GraphCanvas
+      nodes={nodes}
+      edges={edges}
+      nodeTypes={nodeTypes}
+      layout={layout}
+      onLayoutChange={changeLayout}
+      legend={
+        <GraphLegend
+          items={[
+            { label: "检索问题", className: "bg-primary" },
+            { label: "信源", className: "bg-sky-500" },
+            { label: "命中片段", className: "bg-emerald-500" },
+            { label: "实体", className: "border border-dashed border-violet-500 bg-violet-500/20" },
+          ]}
+        />
+      }
+      heightClassName="h-full min-h-0"
+      fitMinZoom={0.28}
+      minZoom={0.2}
+      maxZoom={1.6}
+      refreshKey={results.length}
+      ariaLabel="搜索结果图谱"
+      flowClassName="sag-graph"
+      onNodeClick={(_event, node) => {
+        const d = node.data as GraphNodeData;
+        if (d.kind === "chunk" && d.section?.chunk_id && d.section.source_id) {
+          open({
+            kind: "chunk",
+            sourceId: d.section.source_id,
+            chunkId: d.section.chunk_id,
+            heading: d.section.heading ?? undefined,
+            sourceName: d.section.source_name ?? undefined,
+          });
+        }
+      }}
+    />
   );
 }
