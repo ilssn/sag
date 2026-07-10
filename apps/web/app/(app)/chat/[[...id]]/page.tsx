@@ -42,13 +42,12 @@ export default function ChatPage() {
       signal: AbortSignal,
       attachments?: string[],
       sourceIds?: string[],
-      mode?: "agentic" | "fast",
     ) => {
       if (!agent) return Promise.resolve();
       return streamAgentAsk(
         agent.id,
         tid,
-        { query, attachments, source_ids: sourceIds, mode },
+        { query, attachments, source_ids: sourceIds },
         handlers,
         signal,
       );

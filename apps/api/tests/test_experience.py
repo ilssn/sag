@@ -1,12 +1,33 @@
-"""R4 体验四件套：防幻觉短路、prompt 透明、记忆面板、OpenAI 兼容端点。
+"""R4 体验：兜底话术注入、prompt 透明、OpenAI 兼容端点。
 
-离线（无 LLM key）下用 empty_response 短路路径获得确定性回答，无需真实模型。
+agent-first 架构下 empty_response 不再是「跳过 LLM 的短路」，而是注入系统提示的
+收尾指令；测试用桩 LLM（直答、无工具）获得确定性回答，全离线。
 """
 
 import json
 
 import httpx
 import pytest
+
+
+class DirectLLM:
+    """直答桩：决策轮不要工具，流式输出固定 token。"""
+
+    @property
+    def configured(self):
+        return True
+
+    async def chat(self, messages, tools=None):
+        from sag_api.generation.llm import ChatTurn
+
+        return ChatTurn(content="direct", tool_calls=[])
+
+    async def stream(self, messages):
+        for t in ["你好", "！"]:
+            yield t
+
+    async def complete(self, messages):
+        return "摘要"
 
 
 async def _register(c, email="exp@t.com"):
@@ -30,17 +51,17 @@ async def _make_soul_with_empty_response(c, headers):
 
 
 @pytest.mark.asyncio
-async def test_empty_response_short_circuit_and_prompt_preview():
+async def test_empty_response_injection_and_prompt_preview():
     from sag_api.main import app
 
     transport = httpx.ASGITransport(app=app)
     async with app.router.lifespan_context(app):
+        app.state.llm = DirectLLM()
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
             A = await _register(c)
             soul = await _make_soul_with_empty_response(c, A)
             thread = (await c.post(f"/api/v1/agents/{soul['id']}/threads", headers=A, json={})).json()
 
-            # 无绑定信源 → 检索为空 → 兜底话术，且不需要 LLM（离线也可）
             events: list[tuple[str, dict]] = []
             async with c.stream(
                 "POST",
@@ -60,15 +81,16 @@ async def test_empty_response_short_circuit_and_prompt_preview():
             assert "meta" in kinds and "token" in kinds and "done" in kinds
             assert "error" not in kinds
             meta = next(d for e, d in events if e == "meta")
-            assert meta["prompt_preview"]  # prompt 透明
+            assert meta["prompt_preview"]          # prompt 透明
+            assert EMPTY in meta["prompt_preview"]  # 兜底话术已注入系统提示
             tokens = "".join(d["text"] for e, d in events if e == "token")
-            assert tokens == EMPTY
+            assert tokens == "你好！"
 
             # 该轮回答已落库
             msgs = (
                 await c.get(f"/api/v1/agents/{soul['id']}/threads/{thread['id']}/messages", headers=A)
             ).json()
-            assert any(m["content"] == EMPTY and m["role"] == "assistant" for m in msgs)
+            assert any(m["content"] == "你好！" and m["role"] == "assistant" for m in msgs)
 
 
 @pytest.mark.asyncio
@@ -77,6 +99,7 @@ async def test_openai_compatible_endpoint():
 
     transport = httpx.ASGITransport(app=app)
     async with app.router.lifespan_context(app):
+        app.state.llm = DirectLLM()
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
             A = await _register(c, "oai@t.com")
             soul = await _make_soul_with_empty_response(c, A)
@@ -90,7 +113,7 @@ async def test_openai_compatible_endpoint():
             assert r.status_code == 200, r.text
             body = r.json()
             assert body["object"] == "chat.completion"
-            assert body["choices"][0]["message"]["content"] == EMPTY
+            assert body["choices"][0]["message"]["content"] == "你好！"
             assert body["choices"][0]["finish_reason"] == "stop"
             assert "sag" in body  # 扩展字段：引用
 
@@ -112,7 +135,7 @@ async def test_openai_compatible_endpoint():
                 for ch in chunks
                 if ch != "[DONE]"
             )
-            assert content == EMPTY
+            assert content == "你好！"
 
             # 缺少 user 消息 → 422
             bad = await c.post(

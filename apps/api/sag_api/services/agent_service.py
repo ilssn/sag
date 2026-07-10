@@ -70,10 +70,15 @@ async def _run_tool_loop(
     llm: LLMClient,
     tool_registry: ToolRegistry,
     session_factory: async_sessionmaker,
+    source_ids: list[str] | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """就地驱动工具循环，改写 messages/citations，并 yield 透明化的 tool 事件。"""
     async with session_factory() as s:
         sources = await resolve_sources(s, agent)
+    if source_ids:
+        # @范围：用户锁定的信源对整个循环生效（检索工具只见这些源）
+        wanted = set(source_ids)
+        sources = [s for s in sources if s.id in wanted]
     ctx = ToolContext(
         engine_manager=engine_manager, sources=sources, persona=agent.persona or {}, agent=agent
     )
@@ -172,35 +177,20 @@ async def generate_stream(
     engine_manager: EngineManager,
     llm: LLMClient,
     tool_registry: ToolRegistry,
-    agentic: bool = True,
-    preface_trace: list[dict] | None = None,
 ) -> AsyncIterator[AgentEvent]:
-    """驱动一次问答，产出事件流：meta → (status/tool/tool_result)* → token* → done / error。
+    """驱动一次问答，产出事件流：(status/tool/tool_result)* → meta → token* → done / error。
 
-    `agentic=False`（快速模式）跳过工具循环：仅用首轮检索种子直答，低延迟。
-
-    `thread_id` 为 None 时（如 OpenAI 无状态端点）跳过落库。
+    是否检索由模型经工具决定（寒暄直答、涉库先搜）；`thread_id` 为 None 时
+    （如 OpenAI 无状态端点）跳过落库。
     """
-    # 防幻觉短路：检索为空且配置了兜底话术 → 不调用 LLM
-    if plan.short_circuit is not None:
-        yield ("meta", {"citations": plan.citations, "prompt_preview": plan.prompt_preview})
-        yield ("token", {"text": plan.short_circuit})
-        mid = None
-        if thread_id is not None:
-            mid = await persist_answer(session_factory, thread_id, plan.short_circuit, plan.citations)
-        yield ("done", {"message_id": mid})
-        return
-
     messages = [dict(m) for m in plan.messages]
     citations = list(plan.citations)
-    trace: list[dict] = list(preface_trace or [])
+    trace: list[dict] = []
     preview = plan.prompt_preview
 
-    tool_names = _enabled_tool_names(agent) if agentic else []
-    mcp_specs: list = []
-    if agentic:
-        async with session_factory() as s:
-            mcp_specs = await resolve_mcp_specs(s, agent)
+    tool_names = _enabled_tool_names(agent)
+    async with session_factory() as s:
+        mcp_specs = await resolve_mcp_specs(s, agent)
     if (tool_names or mcp_specs) and llm.configured:
         # 外部 MCP 连接在整个工具循环期间保持打开，循环结束即断开
         async with open_agent_mcp_tools(mcp_specs) as mcp_tools:
@@ -216,6 +206,7 @@ async def generate_stream(
                 llm=llm,
                 tool_registry=loop_registry,
                 session_factory=session_factory,
+                source_ids=plan.source_ids,
             ):
                 yield ev
         preview = build_prompt_preview(messages)

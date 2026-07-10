@@ -76,10 +76,8 @@ async def chat_completions(
     agent = await svc.get_agent(session, agent_id)
     query, history = _split_query(body.messages)
 
-    plan = await svc.build_ask_context(
-        session, agent=agent, query=query, engine_manager=engine_manager, history=history
-    )
-    if plan.short_circuit is None and not llm.configured:
+    plan = svc.build_ask_context(agent=agent, query=query, history=history)
+    if not llm.configured:
         raise ConfigurationError("尚未配置 LLM，无法生成回答")
 
     created = int(time.time())
@@ -146,5 +144,5 @@ async def chat_completions(
         ],
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         # sag 扩展：引用溯源（标准客户端忽略未知字段）
-        "sag": {"citations": citations, "sources": plan.section_count},
+        "sag": {"citations": citations, "sources": len(citations)},
     }

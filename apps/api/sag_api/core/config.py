@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 2048
     llm_context_window: int = 128_000  # 模型上下文窗口（供用量圆环分母）
     llm_request_timeout: float = 120.0  # 单次 LLM 请求超时（秒）；不设则 SDK 默认 600s×重试=假死
+    # 透传给 chat/completions 的额外请求体（JSON），如 {"enable_thinking": false}；
+    # 未配置时对 qwen 系模型自动关闭思考（思考模式会让决策/首 token 慢 10 倍以上）
+    llm_extra_body: dict | None = None
 
     # ── Embedding（缺省复用 LLM 的 key / base_url）─────────────────────
     embedding_model: str = "bge-large-en-v1.5"
