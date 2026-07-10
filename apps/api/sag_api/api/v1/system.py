@@ -12,7 +12,7 @@ from sag_api.core.errors import ApiError, ConflictError
 from sag_api.core.logging import get_logger
 from sag_api.db.models import Source, User
 from sag_api.generation import LLMClient
-from sag_api.mcp.server import MCP_TOOL_NAMES
+from sag_api.mcp.server import MCP_TOOL_DETAILS, MCP_TOOL_NAMES
 from sag_api.schemas.system import ModelConfigUpdate, QuickModelSetupRequest
 from sag_api.services import settings_service
 
@@ -26,6 +26,9 @@ def _capabilities() -> dict:
         "llm_model": settings.llm_model,
         "context_window": settings.llm_context_window,
         "embedding_model": settings.embedding_model,
+        "document_parser": settings.document_parser,
+        "effective_document_parser": settings.effective_document_parser,
+        "mineru_configured": settings.mineru_configured,
         "vector_provider": settings.sag_vector_provider,
         "language": settings.sag_language,
         "search_strategy": settings.search_strategy,
@@ -89,6 +92,7 @@ async def knowledge_mcp_descriptor(
         "scope": "knowledge_base",
         "source_count": source_count,
         "tools": list(MCP_TOOL_NAMES),
+        "tool_details": list(MCP_TOOL_DETAILS),
         "http": {
             "transport": "streamable-http",
             "url": f"{base}/mcp/",
@@ -111,7 +115,7 @@ async def quick_setup_302(
     _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """只接收一个 302.AI Key，写入生成、向量与快速检索的完整预设。"""
+    """只接收一个 302.AI Key，写入生成、向量、MinerU 与检索预设。"""
     status = await settings_service.model_setup_status(session)
     if not status["required"]:
         raise ConflictError("模型配置已存在，请在设置中修改")
@@ -129,13 +133,38 @@ async def update_model_config(
     _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """保存模型配置 → 入库 + 覆盖运行期 + 重建 LLM 客户端 + 重置暖引擎（无需重启即生效）。"""
-    config = await settings_service.save_model_config(
-        session, body.model_dump(exclude_unset=True)
+    """保存运行期配置；仅在模型/向量配置实际变化时安全重建引擎。"""
+    patch = body.model_dump(exclude_unset=True)
+    before = settings_service.effective_model_config()
+    config = await settings_service.save_model_config(session, patch)
+
+    # 解析器/检索参数保存无需打断暖引擎；只有引擎配置真的变化才安全重建。
+    engine_fields = {
+        "llm_base_url",
+        "llm_model",
+        "embedding_model",
+        "embedding_base_url",
+        "embedding_dimensions",
+        "sag_language",
+    }
+    engine_changed = any(before.get(key) != config.get(key) for key in engine_fields)
+    engine_changed = engine_changed or bool(
+        patch.get("llm_api_key") or patch.get("embedding_api_key")
     )
-    # 重建运行期：新 LLM 客户端 + 让暖引擎按新配置重建
-    request.app.state.llm = LLMClient(settings)
-    await request.app.state.engine_manager.aclose_all()
+    if before.get("llm_base_url") != config.get("llm_base_url") or patch.get("llm_api_key"):
+        request.app.state.llm = LLMClient(settings)
+    if engine_changed:
+        await request.app.state.engine_manager.aclose_all()
+    return {"config": config, "capabilities": _capabilities()}
+
+
+@router.post("/model-config/mineru/302")
+async def configure_302_mineru(
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """已有 302 LLM/Embedding 用户一键复用服务端保存的 Key 启用 MinerU。"""
+    config = await settings_service.save_302_mineru_setup(session)
     return {"config": config, "capabilities": _capabilities()}
 
 

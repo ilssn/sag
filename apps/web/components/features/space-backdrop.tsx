@@ -36,6 +36,18 @@ export function SpaceBackdrop() {
   return (
     <div className="sag-space-sparkles" aria-hidden>
       {!reducedMotion && <SpaceParticles />}
+      <span className="sag-space-moon">
+        <span className="sag-space-moon__crater sag-space-moon__crater--one" />
+        <span className="sag-space-moon__crater sag-space-moon__crater--two" />
+        <span className="sag-space-moon__crater sag-space-moon__crater--three" />
+        <span className="sag-space-moon__crater sag-space-moon__crater--four" />
+        <span className="sag-space-moon__crater sag-space-moon__crater--five" />
+        <span className="sag-space-moon__crater sag-space-moon__crater--six" />
+        <span className="sag-space-moon__crater sag-space-moon__crater--seven" />
+        <span className="sag-space-moon__crater sag-space-moon__crater--eight" />
+        <span className="sag-space-moon__crater sag-space-moon__crater--nine" />
+        <span className="sag-space-moon__crater sag-space-moon__crater--ten" />
+      </span>
       <span className="sag-space-dust" />
       <span className="sag-space-meteor sag-space-meteor--one" />
       <span className="sag-space-meteor sag-space-meteor--two" />

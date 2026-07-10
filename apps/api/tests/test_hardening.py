@@ -162,6 +162,40 @@ async def test_engine_lru_eviction():
 
 
 @pytest.mark.asyncio
+async def test_engine_close_all_waits_for_inflight_use():
+    """运行期保存配置不能关闭正在 ingest/search 的引擎。"""
+    from sag_api.core.config import settings
+    from sag_api.sag.engine_manager import EngineManager, _Slot
+
+    class FakeEngine:
+        closed = False
+
+        async def aclose(self):
+            self.closed = True
+
+    engine = FakeEngine()
+    manager = EngineManager(settings)
+    manager._slots["source"] = _Slot(engine=engine)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def in_flight():
+        async with manager.use("source"):
+            entered.set()
+            await release.wait()
+
+    use_task = asyncio.create_task(in_flight())
+    await entered.wait()
+    close_task = asyncio.create_task(manager.aclose_all())
+    await asyncio.sleep(0)
+    assert engine.closed is False
+    release.set()
+    await use_task
+    await close_task
+    assert engine.closed is True
+
+
+@pytest.mark.asyncio
 async def test_search_falls_back_to_vector():
     """multi 失败或空结果时自动回退 vector；vector 自身失败不再回退。"""
     from sag_api.core.config import settings

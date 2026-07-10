@@ -16,6 +16,10 @@ _RESTORE = (
     "embedding_base_url",
     "embedding_api_key",
     "embedding_dimensions",
+    "document_parser",
+    "mineru_base_url",
+    "mineru_api_key",
+    "mineru_version",
     "search_strategy",
     "search_top_k",
     "sag_language",
@@ -101,6 +105,11 @@ async def test_302_quick_model_setup(monkeypatch: pytest.MonkeyPatch):
                     "embedding_base_url": "https://api.302.ai/v1",
                     "embedding_dimensions": 1024,
                     "embedding_api_key_set": True,
+                    "document_parser": "auto",
+                    "effective_document_parser": "mineru",
+                    "mineru_base_url": "https://api.302.ai",
+                    "mineru_version": "2.5",
+                    "mineru_api_key_set": True,
                     "search_strategy": "vector",
                     "search_top_k": 8,
                     "sag_language": "zh",
@@ -109,6 +118,8 @@ async def test_302_quick_model_setup(monkeypatch: pytest.MonkeyPatch):
                 assert body["capabilities"]["search_strategy"] == "vector"
                 assert settings.llm_api_key == fake_key
                 assert settings.embedding_api_key == fake_key
+                assert settings.mineru_api_key == fake_key
+                assert settings.effective_document_parser == "mineru"
 
                 configured_status = await client.get(
                     "/api/v1/system/model-setup", headers=headers

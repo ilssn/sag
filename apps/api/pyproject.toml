@@ -21,6 +21,7 @@ dependencies = [
     "zleap-sag>=0.7.1",
     "alembic>=1.13",
     "trafilatura>=1.8",
+    "markitdown[docx,pdf,pptx,xls,xlsx]>=0.1.6,<0.2",
     "mcp>=1.28,<2",
 ]
 

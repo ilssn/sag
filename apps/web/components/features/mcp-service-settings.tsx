@@ -1,10 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { Database, Globe2, LockKeyhole, RotateCw, Terminal, Wrench } from "lucide-react";
+import { Database, Globe2, LockKeyhole, RotateCw, Terminal } from "lucide-react";
 
 import { CodeBlock } from "@/components/features/code-block";
 import { CopyButton } from "@/components/features/copy-button";
+import { McpToolList } from "@/components/features/mcp-tool-list";
 import { SettingsRow, SettingsSection } from "@/components/features/settings-section";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -181,14 +182,7 @@ export function McpServiceSettings() {
       </SettingsRow>
 
       <SettingsRow title="可用工具" description="外部客户端可调用的只读知识库能力。">
-        <div className="flex flex-wrap gap-2">
-          {descriptor.tools.map((tool) => (
-            <Badge key={tool} variant="outline" className="gap-1.5 font-mono text-xs">
-              <Wrench className="size-3" />
-              {tool}
-            </Badge>
-          ))}
-        </div>
+        <McpToolList tools={descriptor.tool_details} />
       </SettingsRow>
     </SettingsSection>
   );

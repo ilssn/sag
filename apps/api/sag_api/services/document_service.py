@@ -121,6 +121,11 @@ async def reprocess_document(
     session: AsyncSession, source: Source, document_id: str, *, job_queue: JobQueue
 ) -> Job:
     document = await get_document(session, source, document_id)
+    latest = await session.scalar(
+        select(Job).where(Job.document_id == document.id).order_by(Job.created_at.desc())
+    )
+    if latest is not None and latest.status in {JobStatus.QUEUED, JobStatus.RUNNING}:
+        return latest
     document.status = DocumentStatus.PENDING
     document.error = None
     job = Job(
@@ -128,6 +133,8 @@ async def reprocess_document(
         source_id=source.id,
         document_id=document.id,
         status=JobStatus.QUEUED,
+        # 上次失败若已创建 MinerU 任务，重新处理应继续轮询而不是再次计费。
+        payload=dict(latest.payload or {}) if latest is not None else {},
     )
     session.add(job)
     await session.commit()
@@ -150,8 +157,12 @@ async def delete_document(session: AsyncSession, source: Source, document_id: st
         )
     )
     await session.commit()
-    try:
-        if path and os.path.exists(path):
-            os.remove(path)
-    except OSError:
-        pass
+    if path:
+        from sag_api.parsing.service import parsed_sidecar_paths
+
+        for candidate in [path, *parsed_sidecar_paths(path)]:
+            try:
+                if os.path.exists(candidate):
+                    os.remove(candidate)
+            except OSError:
+                pass

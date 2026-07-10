@@ -7,11 +7,14 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from sag_api.core.config import Settings
 from sag_api.core.config import settings as _settings
+from sag_api.core.errors import ConfigurationError
 from sag_api.db.models import Setting
 
 _SCOPE = "global"
@@ -30,13 +33,19 @@ _FIELDS = frozenset(
         "embedding_base_url",
         "embedding_api_key",
         "embedding_dimensions",
+        "document_parser",
+        "mineru_base_url",
+        "mineru_api_key",
+        "mineru_version",
         "search_strategy",
         "search_top_k",
         "sag_language",
     }
 )
-_SECRET_FIELDS = frozenset({"llm_api_key", "embedding_api_key"})
-_NULLABLE_FIELDS = frozenset({"llm_base_url", "embedding_base_url", "embedding_dimensions"})
+_SECRET_FIELDS = frozenset({"llm_api_key", "embedding_api_key", "mineru_api_key"})
+_NULLABLE_FIELDS = frozenset(
+    {"llm_base_url", "embedding_base_url", "embedding_dimensions", "mineru_base_url"}
+)
 
 QUICK_SETUP_302 = {
     "llm_base_url": "https://api.302.ai/v1",
@@ -47,6 +56,9 @@ QUICK_SETUP_302 = {
     "embedding_model": "Qwen/Qwen3-Embedding-4B",
     "embedding_base_url": "https://api.302.ai/v1",
     "embedding_dimensions": 1024,
+    "document_parser": "auto",
+    "mineru_base_url": "https://api.302.ai",
+    "mineru_version": "2.5",
     "search_strategy": "vector",
     "search_top_k": 8,
     "sag_language": "zh",
@@ -68,7 +80,9 @@ async def model_setup_status(session: AsyncSession) -> dict[str, bool]:
     """判断是否需要首次模型配置，不受运行期 DB 覆盖后的 settings 单例干扰。"""
     row = await _load_row(session)
     environment_configured = Settings().llm_configured
-    database_configured = bool(row and isinstance(row.value, dict) and row.value)
+    database_configured = bool(
+        row and isinstance(row.value, dict) and row.value.get("llm_api_key")
+    )
     return {
         "required": not environment_configured and not database_configured,
         "environment_configured": environment_configured,
@@ -102,6 +116,11 @@ def effective_model_config() -> dict:
         "embedding_base_url": _settings.embedding_base_url,
         "embedding_dimensions": _settings.embedding_dimensions,
         "embedding_api_key_set": bool(_settings.embedding_api_key),
+        "document_parser": _settings.document_parser,
+        "effective_document_parser": _settings.effective_document_parser,
+        "mineru_base_url": _settings.mineru_base_url,
+        "mineru_version": _settings.mineru_version,
+        "mineru_api_key_set": bool(_settings.mineru_api_key),
         "search_strategy": _settings.search_strategy,
         "search_top_k": _settings.search_top_k,
         "sag_language": _settings.sag_language,
@@ -142,12 +161,37 @@ async def save_model_config(session: AsyncSession, patch: dict) -> dict:
 
 
 async def save_302_quick_setup(session: AsyncSession, api_key: str) -> dict:
-    """用单个 302.AI Key 写入完整的生成、向量与快速检索预设。"""
+    """用单个 302.AI Key 写入生成、向量、MinerU 与快速检索预设。"""
     return await save_model_config(
         session,
         {
             **QUICK_SETUP_302,
             "llm_api_key": api_key,
             "embedding_api_key": api_key,
+            "mineru_api_key": api_key,
         },
     )
+
+
+async def save_302_mineru_setup(session: AsyncSession) -> dict:
+    """为已有 302 模型配置复用现有 Key，不把密钥回传给浏览器。"""
+    candidates = (
+        (_settings.llm_base_url, _settings.llm_api_key),
+        (_settings.effective_embedding_base_url, _settings.effective_embedding_api_key),
+    )
+    for base_url, api_key in candidates:
+        parsed = urlparse(base_url or "")
+        host = (parsed.hostname or "").lower()
+        if host not in {"api.302.ai", "api.302ai.cn"} or not api_key:
+            continue
+        root = f"https://{host}"
+        return await save_model_config(
+            session,
+            {
+                "document_parser": "auto",
+                "mineru_base_url": root,
+                "mineru_api_key": api_key,
+                "mineru_version": "2.5",
+            },
+        )
+    raise ConfigurationError("未找到可复用的 302.AI 模型 API Key")

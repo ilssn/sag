@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import type { SourceMcpDescriptor } from "@/lib/types";
 import { CodeBlock } from "@/components/features/code-block";
 import { CopyButton } from "@/components/features/copy-button";
+import { McpToolList } from "@/components/features/mcp-tool-list";
 
 export function SourceMcpCard({ sourceId }: { sourceId: string }) {
   const [desc, setDesc] = React.useState<SourceMcpDescriptor | null>(null);
@@ -42,13 +43,9 @@ export function SourceMcpCard({ sourceId }: { sourceId: string }) {
         <h2 className="text-sm font-medium">作为 MCP 挂载</h2>
       </div>
       <p className="text-xs text-muted-foreground">
-        把这个信源接入 Claude Desktop / Cursor 等 MCP 宿主，直接检索它的内容。提供工具：
-        {desc.tools.map((t) => (
-          <code key={t} className="ml-1 rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
-            {t}
-          </code>
-        ))}
+        把这个信源接入 Claude Desktop / Cursor 等 MCP 宿主，直接检索它的内容。提供以下只读工具：
       </p>
+      <McpToolList tools={desc.tool_details} />
 
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center justify-between">

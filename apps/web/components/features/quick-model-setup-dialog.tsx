@@ -6,6 +6,7 @@ import {
   Cpu,
   Eye,
   EyeOff,
+  FileText,
   KeyRound,
   Search,
   Sparkles,
@@ -43,6 +44,7 @@ interface QuickModelSetupDialogProps {
 const PRESET_ROWS = [
   { icon: Cpu, label: "生成模型", value: "qwen3.6-flash" },
   { icon: Sparkles, label: "向量模型", value: "Qwen3-Embedding-4B · 1024 维" },
+  { icon: FileText, label: "文档解析", value: "MinerU 2.5" },
   { icon: Search, label: "检索模式", value: "快速模式 · 纯向量" },
 ];
 
@@ -106,7 +108,7 @@ export function QuickModelSetupDialog({
             </div>
             <DialogTitle>快速配置 302.AI</DialogTitle>
             <DialogDescription className="max-w-[34rem] leading-6">
-              填写一个 API Key，即可完成生成模型、向量模型和检索配置。
+              填写一个 API Key，即可完成生成模型、向量模型、MinerU 文档解析和检索配置。
             </DialogDescription>
           </DialogHeader>
 
@@ -172,7 +174,7 @@ export function QuickModelSetupDialog({
             <Alert className="border-border/80 bg-background py-2.5">
               <Check className="size-4" />
               <AlertDescription className="text-muted-foreground">
-                默认启用 128K 上下文、1024 维向量和纯向量快速检索。
+                默认启用 MinerU 2.5（按页计费）、128K 上下文、1024 维向量和纯向量快速检索。
               </AlertDescription>
             </Alert>
           </div>

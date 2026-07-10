@@ -15,6 +15,8 @@ export interface TokenResponse {
 
 export type SourceStatus = "active" | "paused" | "error";
 export type SourceType = "document" | "web" | "message" | "audio";
+export type DocumentParser = "auto" | "markitdown" | "mineru";
+export type EffectiveDocumentParser = Exclude<DocumentParser, "auto">;
 export interface Source {
   id: string;
   name: string;
@@ -114,6 +116,11 @@ export interface ModelConfig {
   embedding_base_url: string | null;
   embedding_dimensions: number | null;
   embedding_api_key_set: boolean;
+  document_parser: DocumentParser;
+  mineru_base_url: string | null;
+  mineru_version: "2.0" | "2.5";
+  mineru_api_key_set: boolean;
+  effective_document_parser: EffectiveDocumentParser;
   search_strategy: SearchStrategy;
   search_top_k: number;
   sag_language: "zh" | "en";
@@ -130,6 +137,10 @@ export type ModelConfigPatch = Partial<{
   embedding_base_url: string;
   embedding_api_key: string;
   embedding_dimensions: number | null;
+  document_parser: DocumentParser;
+  mineru_base_url: string | null;
+  mineru_version: "2.0" | "2.5";
+  mineru_api_key: string;
   search_strategy: SearchStrategy;
   search_top_k: number;
   sag_language: "zh" | "en";
@@ -141,10 +152,17 @@ export interface ModelSetupStatus {
   database_configured: boolean;
 }
 
+export interface McpToolDetail {
+  name: string;
+  label: string;
+  description: string;
+}
+
 export interface SourceMcpDescriptor {
   source_id: string;
   source_name: string;
   tools: string[];
+  tool_details: McpToolDetail[];
   http: {
     transport: string;
     url: string;
@@ -159,6 +177,7 @@ export interface KnowledgeMcpDescriptor {
   scope: "knowledge_base";
   source_count: number;
   tools: string[];
+  tool_details: McpToolDetail[];
   http: {
     transport: string;
     url: string;
@@ -289,9 +308,18 @@ export interface Section {
   source_name?: string | null;
 }
 
+export interface SearchEvent extends SourceGraphEvent {
+  source_id: string | null;
+  source_name?: string | null;
+  score: number;
+}
+
 export interface SearchResponse {
   query: string;
   sections: Section[];
+  events: SearchEvent[];
+  entities: Entity[];
+  relations: SourceGraphRelation[];
   stats: Record<string, unknown>;
 }
 
@@ -303,6 +331,9 @@ export interface Capabilities {
   vector_provider: string;
   language: string;
   search_strategy: SearchStrategy;
+  document_parser: DocumentParser;
+  effective_document_parser: EffectiveDocumentParser;
+  mineru_configured: boolean;
   max_upload_mb: number;
   allowed_upload_exts?: string[];
 }

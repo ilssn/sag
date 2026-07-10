@@ -43,6 +43,7 @@ class _Slot:
     engine: DataEngine
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     last_used: float = field(default_factory=time.monotonic)
+    closing: bool = False
 
 
 class EngineManager:
@@ -60,12 +61,12 @@ class EngineManager:
 
     async def _slot(self, source_config_id: str, source: Source | None = None) -> _Slot:
         slot = self._slots.get(source_config_id)
-        if slot is not None:
+        if slot is not None and not slot.closing:
             slot.last_used = time.monotonic()
             return slot
         async with self._create_lock:
             slot = self._slots.get(source_config_id)
-            if slot is None:
+            if slot is None or slot.closing:
                 log.info("构造引擎 source_config_id=%s", source_config_id)
                 config = self._config_for(source)
                 engine = DataEngine(config, source_config_id=source_config_id, health_check=False)
@@ -91,8 +92,10 @@ class EngineManager:
                 break  # 其余都在忙，暂不逐出
             _, victim = min(candidates)
             slot = self._slots.pop(victim)
+            slot.closing = True
             try:
-                await slot.engine.aclose()
+                async with slot.lock:
+                    await slot.engine.aclose()
                 log.info("LRU 逐出引擎 source_config_id=%s（缓存上限 %d）", victim, self._cache_size)
             except Exception as e:  # noqa: BLE001
                 log.warning("逐出引擎失败 %s: %s", victim, e)
@@ -100,10 +103,18 @@ class EngineManager:
     @asynccontextmanager
     async def use(self, source_config_id: str, source: Source | None = None):
         """取得该源的引擎并持有其锁（串行化本源上的操作）。"""
-        slot = await self._slot(source_config_id, source)
-        async with slot.lock:
+        while True:
+            slot = await self._slot(source_config_id, source)
+            await slot.lock.acquire()
+            if slot.closing:
+                slot.lock.release()
+                continue
+            break
+        try:
             slot.last_used = time.monotonic()
             yield slot.engine
+        finally:
+            slot.lock.release()
 
     async def provision(self, source_config_id: str, source: Source | None = None) -> None:
         """确保该源的引擎 schema 就绪（幂等）。"""
@@ -236,6 +247,199 @@ class EngineManager:
             stats={"sources": len(targets), "candidates": len(best) + len(loose)},
         )
 
+    async def graph_for_sections(
+        self,
+        sections: list[RetrievedSection],
+        sources_by_config: dict[str, Source | None],
+        *,
+        event_limit: int = 50,
+        entity_limit: int = 48,
+    ) -> SourceGraphInfo:
+        """把命中分块映射回真实事件—实体关系，并保持检索相关度顺序。"""
+        chunk_scores: dict[tuple[str, str], float] = {}
+        chunk_ids_by_config: dict[str, set[str]] = {}
+        for section in sections:
+            source_config_id = (section.source_config_id or "").strip()
+            chunk_id = (section.chunk_id or "").strip()
+            if not source_config_id or not chunk_id:
+                continue
+            key = (source_config_id, chunk_id)
+            chunk_scores[key] = max(chunk_scores.get(key, 0.0), section.score)
+            chunk_ids_by_config.setdefault(source_config_id, set()).add(chunk_id)
+
+        if not chunk_ids_by_config:
+            return SourceGraphInfo()
+
+        await asyncio.gather(
+            *(
+                self._slot(source_config_id, sources_by_config.get(source_config_id))
+                for source_config_id in chunk_ids_by_config
+            )
+        )
+
+        from sqlalchemy import and_, or_, select
+        from zleap.sag.db import get_session_factory
+        from zleap.sag.db.models import Entity, EventEntity, SourceEvent
+
+        section_filters = [
+            and_(
+                SourceEvent.source_config_id == source_config_id,
+                SourceEvent.chunk_id.in_(chunk_ids),
+            )
+            for source_config_id, chunk_ids in chunk_ids_by_config.items()
+        ]
+        sf = get_session_factory()
+        async with sf() as session:
+            event_rows = (
+                (
+                    await session.execute(
+                        select(
+                            SourceEvent.id.label("id"),
+                            SourceEvent.source_config_id.label("source_config_id"),
+                            SourceEvent.source_id.label("source_id"),
+                            SourceEvent.title.label("title"),
+                            SourceEvent.summary.label("summary"),
+                            SourceEvent.category.label("category"),
+                            SourceEvent.rank.label("rank"),
+                            SourceEvent.parent_id.label("parent_id"),
+                            SourceEvent.chunk_id.label("chunk_id"),
+                            SourceEvent.start_time.label("start_time"),
+                        ).where(
+                            or_(*section_filters),
+                            (SourceEvent.status.is_(None) | (SourceEvent.status != "DELETED")),
+                        )
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            events_by_chunk: dict[tuple[str, str], list[Any]] = {}
+            for row in event_rows:
+                key = (row["source_config_id"], row["chunk_id"] or "")
+                events_by_chunk.setdefault(key, []).append(row)
+            for rows in events_by_chunk.values():
+                rows.sort(key=lambda row: (int(row["rank"] or 0), row["id"]))
+
+            # 每个高相关分块先贡献一个事件，再进入下一轮，避免单个长分块占满结果。
+            ordered_chunk_keys = sorted(
+                chunk_scores,
+                key=lambda key: (-chunk_scores[key], key[0], key[1]),
+            )
+            balanced_rows: list[Any] = []
+            depth = 0
+            while True:
+                added = False
+                for key in ordered_chunk_keys:
+                    rows = events_by_chunk.get(key, [])
+                    if depth >= len(rows):
+                        continue
+                    balanced_rows.append(rows[depth])
+                    added = True
+                if not added:
+                    break
+                depth += 1
+
+            # 重复上传或重叠分块会抽取出同名事件；同一信源只保留相关度最高的一条。
+            seen_titles: set[tuple[str, str]] = set()
+            event_rows = []
+            for row in balanced_rows:
+                normalized_title = re.sub(r"\s+", "", str(row["title"] or "")).casefold()
+                title_key = (row["source_config_id"], normalized_title or row["id"])
+                if title_key in seen_titles:
+                    continue
+                seen_titles.add(title_key)
+                event_rows.append(row)
+                if len(event_rows) >= event_limit:
+                    break
+            events = [
+                GraphEventInfo(
+                    id=row["id"],
+                    source_config_id=row["source_config_id"],
+                    source_id=row["source_id"],
+                    title=row["title"] or "未命名事件",
+                    summary=str(row["summary"] or "")[:800],
+                    category=row["category"] or "",
+                    rank=int(row["rank"] or 0),
+                    parent_id=row["parent_id"],
+                    chunk_id=row["chunk_id"],
+                    start_time=row["start_time"],
+                    score=chunk_scores.get(
+                        (row["source_config_id"], row["chunk_id"] or ""),
+                        0.0,
+                    ),
+                )
+                for row in event_rows
+            ]
+            event_ids = [event.id for event in events]
+            if not event_ids:
+                return SourceGraphInfo(events=events)
+
+            association_limit = min(600, max(120, event_limit * 6, entity_limit * 8))
+            association_rows = (
+                await session.execute(
+                    select(
+                        EventEntity.event_id,
+                        EventEntity.entity_id,
+                        EventEntity.weight,
+                        EventEntity.description,
+                        Entity.name,
+                        Entity.type,
+                        Entity.description.label("entity_description"),
+                    )
+                    .join(Entity, Entity.id == EventEntity.entity_id)
+                    .where(
+                        EventEntity.event_id.in_(event_ids),
+                        Entity.source_config_id.in_(chunk_ids_by_config),
+                    )
+                    .order_by(EventEntity.weight.desc(), EventEntity.created_time.asc())
+                    .limit(association_limit)
+                )
+            ).all()
+
+        heat: dict[str, int] = {}
+        entity_rows: dict[str, tuple[str, str, str]] = {}
+        for _event_id, entity_id, _weight, _description, name, kind, description in association_rows:
+            heat[entity_id] = heat.get(entity_id, 0) + 1
+            entity_rows[entity_id] = (
+                str(name or "")[:500],
+                str(kind or "")[:50],
+                str(description or "")[:500],
+            )
+        selected_entity_ids = {
+            entity_id
+            for entity_id, _count in sorted(
+                heat.items(),
+                key=lambda item: (-item[1], entity_rows[item[0]][0], item[0]),
+            )[:entity_limit]
+        }
+        entities = [
+            EntityInfo(
+                id=entity_id,
+                name=entity_rows[entity_id][0],
+                type=entity_rows[entity_id][1],
+                description=entity_rows[entity_id][2],
+                heat=heat[entity_id],
+            )
+            for entity_id in selected_entity_ids
+        ]
+        entities.sort(key=lambda entity: (-entity.heat, entity.name, entity.id))
+        associations = [
+            GraphAssociationInfo(
+                event_id=event_id,
+                entity_id=entity_id,
+                weight=float(weight or 1.0),
+                description=str(description or "")[:240],
+            )
+            for event_id, entity_id, weight, description, *_rest in association_rows
+            if entity_id in selected_entity_ids
+        ][:300]
+        return SourceGraphInfo(
+            events=events,
+            entities=entities,
+            associations=associations,
+            total_entities=len(entities),
+        )
+
     async def list_entities(
         self,
         source_config_id: str,
@@ -350,6 +554,7 @@ class EngineManager:
             events = [
                 GraphEventInfo(
                     id=row["id"],
+                    source_config_id=source_config_id,
                     source_id=row["source_id"],
                     title=row["title"] or "未命名事件",
                     summary=str(row["summary"] or "")[:800],
@@ -493,6 +698,29 @@ class EngineManager:
             for cid, h, r in rows
         ]
 
+    async def get_document_markdown(
+        self,
+        source_config_id: str,
+        article_id: str,
+        *,
+        source: Source | None = None,
+    ) -> str | None:
+        """读取成功入库时保存的整篇 Markdown；不存在或内容为空时返回 None。"""
+        await self._slot(source_config_id, source)
+        from sqlalchemy import select
+        from zleap.sag.db import get_session_factory
+        from zleap.sag.db.models import Article
+
+        sf = get_session_factory()
+        async with sf() as session:
+            content = await session.scalar(
+                select(Article.content).where(
+                    Article.id == article_id,
+                    Article.source_config_id == source_config_id,
+                )
+            )
+        return str(content) if content else None
+
     async def grep_chunks(
         self,
         source_config_id: str,
@@ -603,19 +831,27 @@ class EngineManager:
 
     async def release(self, source_config_id: str) -> None:
         """关闭并移除某源的引擎槽（信源删除时调用；幂等）。"""
-        slot = self._slots.pop(source_config_id, None)
-        if slot is None:
-            return
-        try:
-            async with slot.lock:  # 等待在途操作结束
-                await slot.engine.aclose()
-        except Exception as e:  # noqa: BLE001
-            log.warning("释放引擎失败 %s: %s", source_config_id, e)
+        async with self._create_lock:
+            slot = self._slots.pop(source_config_id, None)
+            if slot is None:
+                return
+            slot.closing = True
+            try:
+                async with slot.lock:  # 等待在途操作结束
+                    await slot.engine.aclose()
+            except Exception as e:  # noqa: BLE001
+                log.warning("释放引擎失败 %s: %s", source_config_id, e)
 
     async def aclose_all(self) -> None:
-        for scid, slot in list(self._slots.items()):
-            try:
-                await slot.engine.aclose()
-            except Exception as e:  # noqa: BLE001
-                log.warning("关闭引擎失败 %s: %s", scid, e)
-        self._slots.clear()
+        # 先标记并摘除，阻止新请求拿到即将关闭的槽；逐槽等待在途操作完成。
+        async with self._create_lock:
+            slots = list(self._slots.items())
+            for _, slot in slots:
+                slot.closing = True
+            self._slots.clear()
+            for scid, slot in slots:
+                try:
+                    async with slot.lock:
+                        await slot.engine.aclose()
+                except Exception as e:  # noqa: BLE001
+                    log.warning("关闭引擎失败 %s: %s", scid, e)

@@ -9,7 +9,18 @@ import pytest
 
 from sag_api.core.config import Settings, settings
 
-_RESTORE = ("llm_model", "llm_temperature", "search_top_k", "sag_language", "llm_api_key")
+_RESTORE = (
+    "llm_base_url",
+    "llm_model",
+    "llm_temperature",
+    "search_top_k",
+    "sag_language",
+    "llm_api_key",
+    "document_parser",
+    "mineru_base_url",
+    "mineru_api_key",
+    "mineru_version",
+)
 
 
 @pytest.mark.parametrize(
@@ -52,6 +63,8 @@ async def test_model_config_crud_masking_and_test():
                 # GET：密钥脱敏为 *_set，离线下未配置
                 body = (await c.get("/api/v1/system/model-config", headers=A)).json()
                 assert "llm_api_key" not in body and body["llm_api_key_set"] is False
+                assert "mineru_api_key" not in body and body["mineru_api_key_set"] is False
+                assert body["effective_document_parser"] == "markitdown"
                 assert "search_top_k" in body and "sag_language" in body
 
                 # 连接测试（未配置）→ 立即 ok False，无网络
@@ -74,9 +87,21 @@ async def test_model_config_crud_masking_and_test():
 
                 # 密钥：设假 key → set=True 且不回显明文
                 r = await c.put(
-                    "/api/v1/system/model-config", headers=A, json={"llm_api_key": "sk-fake-xyz"}
+                    "/api/v1/system/model-config",
+                    headers=A,
+                    json={
+                        "llm_base_url": "https://api.302.ai/v1",
+                        "llm_api_key": "sk-fake-xyz",
+                    },
                 )
                 assert r.json()["config"]["llm_api_key_set"] is True
+                assert "sk-fake" not in r.text
+
+                # 升级前已配置 302 的用户可在服务端复用旧 Key，一键补齐 MinerU。
+                r = await c.post("/api/v1/system/model-config/mineru/302", headers=A)
+                assert r.status_code == 200
+                assert r.json()["config"]["mineru_base_url"] == "https://api.302.ai"
+                assert r.json()["config"]["mineru_api_key_set"] is True
                 assert "sk-fake" not in r.text
                 # 留空提交 → 保留原 key（仍 set），同时更新其他字段
                 r = await c.put(
@@ -87,6 +112,22 @@ async def test_model_config_crud_masking_and_test():
                 assert r.json()["config"]["llm_api_key_set"] is True
                 assert r.json()["config"]["llm_model"] == "m2"
 
+                # 文档解析配置与密钥同样支持持久化、脱敏和即时生效。
+                r = await c.put(
+                    "/api/v1/system/model-config",
+                    headers=A,
+                    json={
+                        "document_parser": "auto",
+                        "mineru_base_url": "https://mineru.example.test",
+                        "mineru_api_key": "sk-mineru-fake",
+                        "mineru_version": "2.5",
+                    },
+                )
+                parser_config = r.json()["config"]
+                assert parser_config["mineru_api_key_set"] is True
+                assert parser_config["effective_document_parser"] == "mineru"
+                assert "sk-mineru-fake" not in r.text
+
                 # 非法值 → 422（Literal / 越界）
                 assert (
                     await c.put(
@@ -96,6 +137,11 @@ async def test_model_config_crud_masking_and_test():
                 assert (
                     await c.put(
                         "/api/v1/system/model-config", headers=A, json={"search_top_k": 999}
+                    )
+                ).status_code == 422
+                assert (
+                    await c.put(
+                        "/api/v1/system/model-config", headers=A, json={"document_parser": None}
                     )
                 ).status_code == 422
     finally:

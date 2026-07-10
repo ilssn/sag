@@ -50,11 +50,30 @@ async def test_entity_read_path():
 
             # 注入事件—实体图谱（模拟 extract 产物）
             from zleap.sag.db import get_session_factory
-            from zleap.sag.db.models import Entity, EntityType, EventEntity, SourceConfig, SourceEvent
+            from zleap.sag.db.models import (
+                Article,
+                ArticleParseStatus,
+                Entity,
+                EntityType,
+                EventEntity,
+                SourceConfig,
+                SourceEvent,
+            )
 
             sf = get_session_factory()
             async with sf() as s:
                 await s.merge(SourceConfig(id=scid, name="三国演义"))
+                s.add(
+                    Article(
+                        id="d1",
+                        source_config_id=scid,
+                        source_id="d1",
+                        title="三国演义",
+                        content="# 三国演义\n\n关羽过五关斩六将。\n",
+                        status="COMPLETED",
+                        parse_status=ArticleParseStatus.COMPLETED,
+                    )
+                )
                 et = EntityType(id=uuid.uuid4().hex, type="person", name="人物")
                 s.add(et)
                 await s.flush()
@@ -77,11 +96,20 @@ async def test_entity_read_path():
                     title="过五关斩六将",
                     summary="关羽千里走单骑，护送二嫂寻兄。",
                     content="关羽过五关斩六将。",
+                    chunk_id="chunk-1",
                 )
                 s.add(ev)
                 await s.flush()
                 s.add(EventEntity(id=uuid.uuid4().hex, event_id=ev.id, entity_id=ent.id, weight=1.0))
                 await s.commit()
+
+            parsed = await c.get(
+                f"/api/v1/sources/{sid}/documents/{document_id}/parsed",
+                headers=H,
+            )
+            assert parsed.status_code == 200
+            assert parsed.headers["content-type"].startswith("text/markdown")
+            assert parsed.text == "# 三国演义\n\n关羽过五关斩六将。\n"
 
             # 读实体（带热度）
             ents = (await c.get(f"/api/v1/sources/{sid}/entities?types=person", headers=H)).json()
@@ -101,6 +129,25 @@ async def test_entity_read_path():
             }
             assert graph["counts"]["shown_relations"] == 2
             assert graph["truncated"] is False
+
+            # 搜索命中分块可稳定映射回事件标题、摘要及真实事件—实体关系。
+            from sag_api.sag import RetrievedSection
+
+            search_graph = await app.state.engine_manager.graph_for_sections(
+                [
+                    RetrievedSection(
+                        chunk_id="chunk-1",
+                        score=0.91,
+                        source_config_id=scid,
+                    )
+                ],
+                {scid: source},
+            )
+            assert search_graph.events[0].title == "过五关斩六将"
+            assert search_graph.events[0].summary.startswith("关羽千里走单骑")
+            assert search_graph.events[0].score == pytest.approx(0.91)
+            assert search_graph.entities[0].name == "关羽"
+            assert search_graph.associations[0].event_id == search_graph.events[0].id
 
             # 参数有硬上限，避免调用方绕过服务端性能护栏。
             invalid = await c.get(f"/api/v1/sources/{sid}/graph?event_limit=121", headers=H)

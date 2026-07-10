@@ -126,6 +126,11 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(b),
     }),
+  setup302MinerU: () =>
+    request<{ config: ModelConfig; capabilities: Capabilities }>(
+      "/api/v1/system/model-config/mineru/302",
+      { method: "POST" },
+    ),
   testModelConfig: () =>
     request<{ ok: boolean; message: string }>("/api/v1/system/model-config/test", {
       method: "POST",
@@ -263,6 +268,8 @@ export const api = {
   getDocument: (sid: string, did: string) => request<Doc>(`/api/v1/sources/${sid}/documents/${did}`),
   documentFileUrl: (sid: string, did: string) =>
     `${API_BASE}/api/v1/sources/${sid}/documents/${did}/file`,
+  documentParsedUrl: (sid: string, did: string) =>
+    `${API_BASE}/api/v1/sources/${sid}/documents/${did}/parsed`,
 
   // 对话图片附件（≤10MB，png/jpg/webp/gif）
   uploadAttachment: (file: File) => {

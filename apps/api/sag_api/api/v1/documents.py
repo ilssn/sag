@@ -5,10 +5,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sag_api.core.config import settings
 from sag_api.core.db import get_session
-from sag_api.core.deps import get_current_user, get_job_queue
-from sag_api.core.errors import ValidationError
+from sag_api.core.deps import get_current_user, get_engine_manager, get_job_queue
+from sag_api.core.errors import ConflictError, NotFoundError, ValidationError
 from sag_api.db.models import User
+from sag_api.enums import DocumentStatus
 from sag_api.jobs import JobQueue
+from sag_api.sag import EngineManager
 from sag_api.schemas.common import Ok
 from sag_api.schemas.document import DocumentOut, IngestRequest
 from sag_api.schemas.job import JobOut
@@ -130,6 +132,36 @@ async def get_file(
         filename=document.filename,
         content_disposition_type="inline",
     )
+
+
+@router.get("/{document_id}/parsed")
+async def get_parsed(
+    source_id: str,
+    document_id: str,
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+    engine_manager: EngineManager = Depends(get_engine_manager),
+):
+    """返回文档成功入库时保存的整篇 Markdown，不在读取时触发重新解析。"""
+    from fastapi.responses import Response
+
+    source = await get_source(session, source_id)
+    document = await get_document(session, source, document_id)
+    if document.status != DocumentStatus.READY:
+        if document.status == DocumentStatus.FAILED:
+            raise ConflictError(document.error or "文档解析失败，暂无解析内容")
+        raise ConflictError("文档尚未解析完成")
+    if not document.sag_source_id:
+        raise NotFoundError("解析内容不存在，请重新处理文档")
+
+    markdown = await engine_manager.get_document_markdown(
+        source.sag_source_config_id,
+        document.sag_source_id,
+        source=source,
+    )
+    if not markdown:
+        raise NotFoundError("解析内容不存在，请重新处理文档")
+    return Response(content=markdown, media_type="text/markdown")
 
 
 @router.post("/{document_id}/reprocess", response_model=JobOut)

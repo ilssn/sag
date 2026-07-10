@@ -35,6 +35,18 @@ class ModelConfigUpdate(BaseModel):
     embedding_api_key: str | None = Field(default=None, max_length=500)
     embedding_dimensions: int | None = Field(default=None, ge=1, le=8192)
 
+    document_parser: Literal["auto", "markitdown", "mineru"] | None = None
+    mineru_base_url: str | None = Field(default=None, max_length=500)
+    mineru_api_key: str | None = Field(default=None, max_length=500)
+    mineru_version: Literal["2.0", "2.5"] | None = None
+
     search_strategy: Literal["multi", "vector", "atomic"] | None = None
     search_top_k: int | None = Field(default=None, ge=1, le=50)
     sag_language: Literal["zh", "en"] | None = None
+
+    @field_validator("document_parser", "mineru_version")
+    @classmethod
+    def reject_null_parser_fields(cls, value: str | None) -> str:
+        if value is None:
+            raise ValueError("解析器与 MinerU 版本不能为 null")
+        return value

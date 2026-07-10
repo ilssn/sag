@@ -8,6 +8,7 @@ import {
   Handle,
   Position,
   ReactFlow,
+  useNodesState,
   useNodesInitialized,
   useReactFlow,
   type Edge,
@@ -16,7 +17,7 @@ import {
   type ReactFlowProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { ListTree, Maximize2, Minimize2, Orbit, Share2 } from "lucide-react";
+import { ListTree, Maximize2, Minimize2, Orbit, RotateCcw, Share2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -139,14 +140,14 @@ function GraphLayoutToggle({
       aria-label="图谱布局"
       className="rounded-md bg-card/95 shadow-soft backdrop-blur-sm"
     >
+      <ToggleGroupItem value="force" aria-label="力导布局" title="力导布局">
+        <Share2 />
+      </ToggleGroupItem>
       <ToggleGroupItem value="radial" aria-label="辐射布局" title="辐射布局">
         <Orbit />
       </ToggleGroupItem>
       <ToggleGroupItem value="tree" aria-label="层级布局" title="层级布局">
         <ListTree />
-      </ToggleGroupItem>
-      <ToggleGroupItem value="force" aria-label="力导布局" title="力导布局">
-        <Share2 />
       </ToggleGroupItem>
     </ToggleGroup>
   );
@@ -244,7 +245,69 @@ export function GraphCanvas({
   onNodeClick?: ReactFlowProps["onNodeClick"];
   onPaneClick?: ReactFlowProps["onPaneClick"];
 }) {
+  const [mounted, setMounted] = React.useState(false);
   const [expanded, setExpanded] = React.useState(false);
+  const [flowNodes, setFlowNodes, onNodesChange] = useNodesState(nodes);
+  const [hoveredNodeId, setHoveredNodeId] = React.useState<string | null>(null);
+  const [positionVersion, setPositionVersion] = React.useState(0);
+
+  React.useEffect(() => setMounted(true), []);
+
+  React.useEffect(() => {
+    setFlowNodes(nodes);
+    setHoveredNodeId(null);
+  }, [nodes, setFlowNodes]);
+
+  const connectedNodeIds = React.useMemo(() => {
+    if (!hoveredNodeId) return null;
+    const connected = new Set([hoveredNodeId]);
+    edges.forEach((edge) => {
+      if (edge.source === hoveredNodeId) connected.add(edge.target);
+      if (edge.target === hoveredNodeId) connected.add(edge.source);
+    });
+    return connected;
+  }, [edges, hoveredNodeId]);
+
+  const renderedNodes = React.useMemo(() => {
+    if (!connectedNodeIds) return flowNodes;
+    return flowNodes.map((node) => ({
+      ...node,
+      style: {
+        ...node.style,
+        opacity: connectedNodeIds.has(node.id) ? 1 : 0.22,
+      },
+    }));
+  }, [connectedNodeIds, flowNodes]);
+
+  const renderedEdges = React.useMemo(() => {
+    const positions = new Map(flowNodes.map((node) => [node.id, node.position]));
+    return edges.map((edge) => {
+      const from = positions.get(edge.source) ?? { x: 0, y: 0 };
+      const to = positions.get(edge.target) ?? { x: 0, y: 0 };
+      const highlighted = Boolean(
+        hoveredNodeId && (edge.source === hoveredNodeId || edge.target === hoveredNodeId),
+      );
+      const muted = Boolean(hoveredNodeId && !highlighted);
+      const strokeWidth =
+        typeof edge.style?.strokeWidth === "number" ? edge.style.strokeWidth : 1.25;
+      return {
+        ...edge,
+        ...graphEdgeHandles(from, to),
+        zIndex: highlighted ? 2 : edge.zIndex,
+        style: {
+          ...edge.style,
+          opacity: muted ? 0.1 : 1,
+          strokeWidth: highlighted ? strokeWidth + 0.85 : strokeWidth,
+        },
+      };
+    });
+  }, [edges, flowNodes, hoveredNodeId]);
+
+  const resetNodePositions = React.useCallback(() => {
+    setFlowNodes(nodes);
+    setHoveredNodeId(null);
+    setPositionVersion((value) => value + 1);
+  }, [nodes, setFlowNodes]);
 
   React.useEffect(() => {
     if (!expanded) return;
@@ -272,6 +335,16 @@ export function GraphCanvas({
       {legend}
       <div className="absolute right-3 top-3 z-20 flex items-center gap-1.5">
         <GraphLayoutToggle value={layout} onValueChange={onLayoutChange} />
+        <button
+          type="button"
+          onClick={resetNodePositions}
+          disabled={nodes.length === 0}
+          aria-label="重置节点位置"
+          title="重置节点位置"
+          className="grid size-8 place-items-center rounded-md border bg-card/95 text-muted-foreground shadow-soft outline-none backdrop-blur-sm transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
+        >
+          <RotateCcw className="size-4" />
+        </button>
         {toolbarActions}
         <button
           type="button"
@@ -284,35 +357,50 @@ export function GraphCanvas({
         </button>
       </div>
 
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        nodeOrigin={[0.5, 0.5]}
-        fitView
-        fitViewOptions={{ padding: fitPadding, minZoom: fitMinZoom, maxZoom: 1.05 }}
-        minZoom={minZoom}
-        maxZoom={maxZoom}
-        proOptions={{ hideAttribution: true }}
-        nodesDraggable
-        nodesConnectable={false}
-        elementsSelectable={elementsSelectable}
-        onlyRenderVisibleElements={onlyRenderVisibleElements}
-        onNodeClick={onNodeClick}
-        onPaneClick={onPaneClick}
-        aria-label={ariaLabel}
-        className={flowClassName}
-      >
-        <FitViewOnChange
-          nodes={nodes}
-          edges={edges}
-          refreshKey={`${expanded}-${layout}-${String(refreshKey ?? "")}`}
-          padding={fitPadding}
-          minZoom={fitMinZoom}
-        />
-        <Background variant={BackgroundVariant.Dots} gap={22} size={1} className="!bg-transparent" />
-        <Controls showInteractive={false} className="!shadow-soft" />
-      </ReactFlow>
+      {mounted ? (
+        <ReactFlow
+          nodes={renderedNodes}
+          edges={renderedEdges}
+          nodeTypes={nodeTypes}
+          nodeOrigin={[0.5, 0.5]}
+          fitView
+          fitViewOptions={{ padding: fitPadding, minZoom: fitMinZoom, maxZoom: 1.05 }}
+          minZoom={minZoom}
+          maxZoom={maxZoom}
+          proOptions={{ hideAttribution: true }}
+          nodesDraggable
+          onNodesChange={onNodesChange}
+          nodesConnectable={false}
+          elementsSelectable={elementsSelectable}
+          onlyRenderVisibleElements={onlyRenderVisibleElements}
+          onNodeClick={onNodeClick}
+          onNodeMouseEnter={(_event, node) => setHoveredNodeId(node.id)}
+          onNodeMouseLeave={() => setHoveredNodeId(null)}
+          onPaneClick={(event) => {
+            setHoveredNodeId(null);
+            onPaneClick?.(event);
+          }}
+          aria-label={ariaLabel}
+          className={flowClassName}
+        >
+          <FitViewOnChange
+            nodes={nodes}
+            edges={edges}
+            refreshKey={`${expanded}-${layout}-${positionVersion}-${String(refreshKey ?? "")}`}
+            padding={fitPadding}
+            minZoom={fitMinZoom}
+          />
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={22}
+            size={1}
+            className="!bg-transparent"
+          />
+          <Controls showInteractive={false} className="!shadow-soft" />
+        </ReactFlow>
+      ) : (
+        <div className="absolute inset-0 bg-card/20" aria-hidden="true" />
+      )}
 
       {children}
       <div className="pointer-events-none absolute bottom-3 right-3 z-10 flex items-center gap-1 rounded-md border bg-card/90 px-2 py-1 text-[10px] text-muted-foreground shadow-soft backdrop-blur-sm">

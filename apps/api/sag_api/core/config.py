@@ -5,6 +5,7 @@
 - **sag 元数据库**（用户 / 信源 / 文档 / 会话）：`database_url`
 - **zleap-sag 存储**（分块 / 向量 / 事件图谱）：`sag_*` + `data_dir`
 - **LLM / embedding**（抽取与答案生成）：`llm_*` / `embedding_*`
+- **文档解析**（PDF / Office 等转 Markdown）：`document_parser` / `mineru_*`
 
 默认零依赖：SQLite 元数据 + zleap-sag 本地 LanceDB。生产可整体切到 Postgres。
 """
@@ -54,9 +55,8 @@ class Settings(BaseSettings):
     engine_warmup_count: int = 4          # 启动时预热最近使用的信源引擎数
     # 允许上传的扩展名白名单（小写，含点）；空集合表示不限制
     allowed_upload_exts: set[str] = {
-        ".md", ".markdown", ".txt", ".text", ".pdf", ".doc", ".docx",
-        ".ppt", ".pptx", ".xls", ".xlsx", ".csv", ".tsv", ".html", ".htm",
-        ".json", ".rtf", ".epub", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp",
+        ".md", ".markdown", ".txt", ".text", ".pdf", ".docx", ".pptx",
+        ".xls", ".xlsx", ".csv", ".tsv", ".html", ".htm", ".json", ".epub",
     }
 
     # ── zleap-sag 后端选择 ─────────────────────────────────────────────
@@ -89,6 +89,18 @@ class Settings(BaseSettings):
     embedding_base_url: str | None = None
     embedding_api_key: str | None = None
     embedding_dimensions: int | None = None
+
+    # ── 文档解析（进入 zleap-sag 前统一转为 Markdown）─────────────────
+    # auto：PDF 优先 MinerU，未配置或 MinerU 失败时回退本地 MarkItDown。
+    document_parser: Literal["auto", "markitdown", "mineru"] = "auto"
+    mineru_base_url: str | None = None
+    mineru_api_key: str | None = None
+    mineru_version: Literal["2.0", "2.5"] = "2.5"
+    mineru_parse_method: Literal["auto", "txt", "ocr"] = "auto"
+    mineru_request_timeout: float = 60.0
+    mineru_poll_interval: float = 2.0
+    mineru_poll_timeout: float = 300.0
+    mineru_result_max_mb: int = 100
 
     # ── 检索默认 ────────────────────────────────────────────────────────
     search_strategy: Literal["multi", "vector", "atomic"] = "multi"
@@ -126,6 +138,18 @@ class Settings(BaseSettings):
     @property
     def effective_embedding_base_url(self) -> str | None:
         return self.embedding_base_url or self.llm_base_url
+
+    @property
+    def mineru_configured(self) -> bool:
+        """MinerU 是否具备可调用的端点与密钥。"""
+        return bool(self.mineru_base_url and self.mineru_api_key)
+
+    @property
+    def effective_document_parser(self) -> Literal["markitdown", "mineru"]:
+        """当前自动解析偏好；具体文件仍由解析服务按格式路由。"""
+        if self.document_parser == "markitdown":
+            return "markitdown"
+        return "mineru" if self.mineru_configured else "markitdown"
 
 
 @lru_cache
