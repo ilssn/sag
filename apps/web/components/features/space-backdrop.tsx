@@ -32,10 +32,72 @@ const SPARKLES = [
 
 export function SpaceBackdrop() {
   const reducedMotion = useReducedMotion();
+  const cursorMeteorRef = React.useRef<HTMLSpanElement>(null);
+
+  React.useEffect(() => {
+    if (reducedMotion || !cursorMeteorRef.current) return;
+
+    const meteor = cursorMeteorRef.current;
+    const field = meteor.closest<HTMLElement>(".bg-space-field");
+    if (!field) return;
+
+    let hideTimer: number | undefined;
+    let hasPreviousPoint = false;
+    let previousX = 0;
+    let previousY = 0;
+    let angle = -0.35;
+
+    const hideMeteor = () => {
+      meteor.dataset.active = "false";
+      hasPreviousPoint = false;
+      if (hideTimer) window.clearTimeout(hideTimer);
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (event.pointerType !== "mouse" || event.target !== field) {
+        hideMeteor();
+        return;
+      }
+
+      const bounds = field.getBoundingClientRect();
+      const x = event.clientX - bounds.left;
+      const y = event.clientY - bounds.top;
+      const deltaX = hasPreviousPoint ? x - previousX : 0;
+      const deltaY = hasPreviousPoint ? y - previousY : 0;
+      const speed = Math.hypot(deltaX, deltaY);
+
+      if (speed > 0.4) angle = Math.atan2(deltaY, deltaX);
+
+      previousX = x;
+      previousY = y;
+      hasPreviousPoint = true;
+
+      meteor.style.setProperty("--cursor-meteor-x", `${x}px`);
+      meteor.style.setProperty("--cursor-meteor-y", `${y}px`);
+      meteor.style.setProperty("--cursor-meteor-angle", `${angle}rad`);
+      meteor.style.setProperty("--cursor-meteor-tail", `${Math.min(138, 46 + speed * 3.4)}px`);
+      meteor.dataset.active = "true";
+
+      if (hideTimer) window.clearTimeout(hideTimer);
+      hideTimer = window.setTimeout(hideMeteor, 300);
+    };
+
+    field.addEventListener("pointermove", handlePointerMove);
+    field.addEventListener("pointerleave", hideMeteor);
+
+    return () => {
+      field.removeEventListener("pointermove", handlePointerMove);
+      field.removeEventListener("pointerleave", hideMeteor);
+      if (hideTimer) window.clearTimeout(hideTimer);
+    };
+  }, [reducedMotion]);
 
   return (
     <div className="sag-space-sparkles" aria-hidden>
       {!reducedMotion && <SpaceParticles />}
+      {!reducedMotion && (
+        <span ref={cursorMeteorRef} className="sag-space-cursor-meteor" data-active="false" />
+      )}
       <span className="sag-space-moon">
         <span className="sag-space-moon__crater sag-space-moon__crater--one" />
         <span className="sag-space-moon__crater sag-space-moon__crater--two" />

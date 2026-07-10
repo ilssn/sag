@@ -146,18 +146,20 @@
     --space-dust-cool: hsl(210 18% 46% / 0.025);
     --space-dust-warm: hsl(43 52% 48% / 0.035);
     --space-dust-secondary: hsl(320 12% 50% / 0.018);
-    --space-moon-highlight: hsl(0 0% 98% / 0.92);
-    --space-moon-surface: hsl(0 0% 84% / 0.88);
-    --space-moon-shade: hsl(0 0% 64% / 0.34);
-    --space-moon-edge: hsl(0 0% 52% / 0.2);
-    --space-moon-lower-shadow: hsl(0 0% 48% / 0.2);
-    --space-moon-crater: hsl(0 0% 56% / 0.16);
-    --space-moon-crater-edge: hsl(0 0% 44% / 0.14);
-    --space-moon-crater-highlight: hsl(0 0% 100% / 0.26);
-    --space-moon-crater-shadow: hsl(0 0% 34% / 0.12);
-    --space-moon-shadow: hsl(0 0% 34% / 0.16);
-    --space-moon-glow: hsl(44 72% 72% / 0.12);
-    --space-moon-opacity: 0.76;
+    --space-moon-highlight: hsl(0 0% 98% / 0.65);
+    --space-moon-surface: hsl(0 0% 84% / 0.62);
+    --space-moon-shade: hsl(0 0% 64% / 0.22);
+    --space-moon-edge: hsl(0 0% 52% / 0.11);
+    --space-moon-lower-shadow: hsl(0 0% 48% / 0.11);
+    --space-moon-crater: hsl(0 0% 56% / 0.09);
+    --space-moon-crater-edge: hsl(0 0% 44% / 0.08);
+    --space-moon-crater-highlight: hsl(0 0% 100% / 0.14);
+    --space-moon-crater-shadow: hsl(0 0% 34% / 0.07);
+    --space-moon-shadow: hsl(0 0% 34% / 0.1);
+    --space-moon-glow: hsl(44 72% 72% / 0.07);
+    --space-moon-opacity: 0.42;
+    --space-cursor-meteor-core: hsl(42 78% 40% / 0.88);
+    --space-cursor-meteor-tail: hsl(42 76% 52% / 0.38);
     position: relative;
     isolation: isolate;
     overflow: hidden;
@@ -193,18 +195,20 @@
     --space-dust-cool: hsl(200 24% 78% / 0.018);
     --space-dust-warm: hsl(42 34% 82% / 0.028);
     --space-dust-secondary: hsl(330 20% 78% / 0.014);
-    --space-moon-highlight: hsl(0 0% 94% / 0.88);
-    --space-moon-surface: hsl(0 0% 76% / 0.82);
-    --space-moon-shade: hsl(0 0% 44% / 0.68);
-    --space-moon-edge: hsl(0 0% 94% / 0.18);
-    --space-moon-lower-shadow: hsl(0 0% 18% / 0.5);
-    --space-moon-crater: hsl(0 0% 16% / 0.28);
-    --space-moon-crater-edge: hsl(0 0% 6% / 0.24);
-    --space-moon-crater-highlight: hsl(0 0% 100% / 0.16);
-    --space-moon-crater-shadow: hsl(0 0% 0% / 0.24);
-    --space-moon-shadow: hsl(0 0% 0% / 0.32);
-    --space-moon-glow: hsl(0 0% 94% / 0.12);
-    --space-moon-opacity: 0.78;
+    --space-moon-highlight: hsl(0 0% 94% / 0.52);
+    --space-moon-surface: hsl(0 0% 76% / 0.5);
+    --space-moon-shade: hsl(0 0% 44% / 0.32);
+    --space-moon-edge: hsl(0 0% 94% / 0.07);
+    --space-moon-lower-shadow: hsl(0 0% 18% / 0.2);
+    --space-moon-crater: hsl(0 0% 16% / 0.12);
+    --space-moon-crater-edge: hsl(0 0% 6% / 0.09);
+    --space-moon-crater-highlight: hsl(0 0% 100% / 0.09);
+    --space-moon-crater-shadow: hsl(0 0% 0% / 0.13);
+    --space-moon-shadow: hsl(0 0% 0% / 0.18);
+    --space-moon-glow: hsl(0 0% 94% / 0.035);
+    --space-moon-opacity: 0.34;
+    --space-cursor-meteor-core: hsl(44 96% 82% / 0.96);
+    --space-cursor-meteor-tail: hsl(210 24% 88% / 0.48);
   }
 
   .bg-space-field::before {
@@ -259,12 +263,64 @@
     z-index: 1;
   }
 
+  .sag-space-cursor-meteor {
+    --cursor-meteor-x: -120px;
+    --cursor-meteor-y: -120px;
+    --cursor-meteor-angle: -0.35rad;
+    --cursor-meteor-tail: 64px;
+    position: absolute;
+    left: 0;
+    top: 0;
+    z-index: 5;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+    transform: translate3d(var(--cursor-meteor-x), var(--cursor-meteor-y), 0)
+      rotate(var(--cursor-meteor-angle));
+    transition: opacity 110ms ease;
+    will-change: transform, opacity;
+  }
+
+  .sag-space-cursor-meteor::before {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    width: var(--cursor-meteor-tail);
+    height: 1px;
+    content: "";
+    background: linear-gradient(90deg, transparent, var(--space-cursor-meteor-tail) 72%, var(--space-cursor-meteor-core));
+    box-shadow: 0 0 5px var(--space-cursor-meteor-tail);
+    transform: translateY(-50%);
+    transform-origin: right center;
+    transition: width 70ms linear;
+  }
+
+  .sag-space-cursor-meteor::after {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 5px;
+    height: 5px;
+    content: "";
+    border-radius: 50%;
+    background: var(--space-cursor-meteor-core);
+    box-shadow:
+      0 0 5px var(--space-cursor-meteor-core),
+      0 0 11px var(--space-cursor-meteor-tail);
+    transform: translate(-50%, -50%);
+  }
+
+  .sag-space-cursor-meteor[data-active="true"] {
+    opacity: 0.82;
+  }
+
   .sag-space-moon {
     position: absolute;
-    right: 5%;
-    top: 7%;
+    right: -4.5%;
+    top: 6.5%;
     z-index: 0;
-    width: clamp(220px, 19vw, 380px);
+    width: clamp(170px, 14vw, 280px);
     aspect-ratio: 1;
     overflow: hidden;
     pointer-events: none;
@@ -276,7 +332,7 @@
     box-shadow:
       inset 12px 9px 24px hsl(0 0% 100% / 0.08),
       inset -26px -24px 34px var(--space-moon-shadow),
-      0 0 52px var(--space-moon-glow);
+      0 0 36px var(--space-moon-glow);
     opacity: var(--space-moon-opacity);
     transform: rotate(-8deg);
     animation: sag-space-moon-drift 72s ease-in-out -18s infinite alternate;
