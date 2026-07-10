@@ -42,7 +42,7 @@ docker compose up -d --build
 - 查看状态：`docker compose ps`（`api`、`web` 应显示 `healthy`）
 - 查看日志：`docker compose logs -f api web`
 
-首次打开时填写名字（邮箱可选），系统会创建并在此数据卷中自动恢复本地身份。随后可使用首次引导里的 302.AI 快速配置，或跳过引导，在 **设置 → 模型** 中填写任意 OpenAI 兼容的 LLM 与 Embedding 配置；保存立即生效。未配置模型时，服务和界面可以正常启动，也可以创建信源和保存上传文件；Embedding 用于文档向量化/向量检索，LLM 用于事件抽取、查询理解与问答。
+首次打开时填写名字（邮箱可选），系统会创建并在此数据卷中自动恢复本地身份。随后可使用首次引导里的 302.AI 快速配置，或跳过引导，在 **设置 → 模型** 中填写任意 OpenAI 兼容的 LLM、Embedding 与文档解析配置；保存立即生效。302.AI 快速配置会用同一个 Key 启用 LLM、Embedding 和 MinerU 2.5；从旧版本升级且已配置 302 模型的用户，也可在文档解析区直接复用服务端保存的 Key。PDF 在 MinerU 配置完整时优先走 MinerU；未配置或 MinerU 解析失败时自动回退本地 MarkItDown，其他 Office/文本格式也默认由 MarkItDown 转为 Markdown。未配置模型时，服务和界面仍可启动、创建信源和保存上传文件；Embedding 用于文档向量化/向量检索，LLM 用于事件抽取、查询理解与问答。
 
 ### 默认数据库与数据持久化
 
@@ -179,11 +179,12 @@ curl -s http://localhost:8000/api/v1/openai/<AGENT_ID>/chat/completions \
 
 ```
 apps/web   Next.js 15 + shadcn/ui（中性主题，亮暗双色，⌘K 全局搜索）
-apps/api   FastAPI · services 纯领域 · sag/ 唯一引擎适配层 · jobs 进程内队列（退避重试）
+apps/api   FastAPI · services 纯领域 · parsing/ 文档转 Markdown · sag/ 唯一引擎适配层
+           · jobs 进程内队列（解析任务续跑 + 退避重试）
            tools/ Agent 工具层（内置检索/实体 + MCP 适配）· mcp/ 信源 MCP server + HTTP 挂载
            · 引擎槽 LRU · 就绪/存活探针 · OpenAI 兼容端点
 apps/api/sag_agent  独立 Agent Core · 生命周期 · 版本化事件 · 工具/审批/取消 · RunStore
-zleap-sag  解析 · 分块 · 向量 · 事件—实体图谱 · 检索（只做检索，不做生成）
+zleap-sag  Markdown 分块 · 向量 · 事件—实体图谱 · 检索（只做检索，不做生成）
 ```
 
 数据模型（单用户、极简）：

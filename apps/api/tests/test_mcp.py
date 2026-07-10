@@ -10,7 +10,7 @@ import pytest
 from mcp.server.fastmcp import FastMCP
 from mcp.shared.memory import create_connected_server_and_client_session as connect
 
-from sag_api.mcp.server import MCP_TOOL_NAMES, build_source_mcp, use_scope
+from sag_api.mcp.server import MCP_TOOL_DETAILS, MCP_TOOL_NAMES, build_source_mcp, use_scope
 from sag_api.tools import registry
 from sag_api.tools.base import Tool, ToolContext, ToolMeta, ToolResult
 from sag_api.tools.mcp import tools_from_session
@@ -58,11 +58,28 @@ async def test_source_mcp_lists_and_calls_tools_over_engine():
                 async with connect(mcp) as client:
                     await client.initialize()
                     listed = await client.list_tools()
-                    names = {t.name for t in listed.tools}
+                    tools_by_name = {tool.name: tool for tool in listed.tools}
+                    names = set(tools_by_name)
                     assert {
-                        "search", "get_entity", "get_chunk",
-                        "list_sources", "list_documents", "outline", "grep", "read",
+                        "search",
+                        "get_entity",
+                        "get_chunk",
+                        "list_sources",
+                        "list_documents",
+                        "outline",
+                        "grep",
+                        "read",
                     } <= names
+                    for detail in MCP_TOOL_DETAILS:
+                        tool = tools_by_name[detail["name"]]
+                        assert tool.title == detail["label"]
+                        assert tool.description == detail["description"]
+                        assert tool.annotations is not None
+                        assert tool.annotations.readOnlyHint is True
+                        assert tool.annotations.destructiveHint is False
+                    search_properties = tools_by_name["search"].inputSchema["properties"]
+                    assert search_properties["query"]["description"]
+                    assert search_properties["source_id"]["description"]
 
                     r_sources = await client.call_tool("list_sources", {})
                     assert "MCP 源" in r_sources.content[0].text
@@ -162,6 +179,7 @@ async def test_mcp_binding_validation_and_source_descriptor():
             assert src["id"] in body["http"]["url"]
             assert body["stdio"]["env"]["SAG_MCP_SOURCE_ID"] == src["id"]
             assert set(body["tools"]) == set(MCP_TOOL_NAMES)
+            assert body["tool_details"] == list(MCP_TOOL_DETAILS)
 
             knowledge = await c.get("/api/v1/system/mcp", headers=A)
             assert knowledge.status_code == 200, knowledge.text
@@ -172,6 +190,7 @@ async def test_mcp_binding_validation_and_source_descriptor():
             assert global_body["http"]["url"].endswith("/mcp/")
             assert global_body["stdio"]["env"] == {}
             assert set(global_body["tools"]) == set(MCP_TOOL_NAMES)
+            assert global_body["tool_details"] == list(MCP_TOOL_DETAILS)
 
             unauthorized = await c.get("/mcp/")
             assert unauthorized.status_code == 401

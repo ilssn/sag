@@ -4,62 +4,76 @@ import * as React from "react";
 import type { ISourceOptions } from "@tsparticles/engine";
 import Particles, { ParticlesProvider } from "@tsparticles/react";
 import { loadSlim } from "@tsparticles/slim";
+import { useTheme } from "next-themes";
 
-const PARTICLE_OPTIONS: ISourceOptions = {
-  autoPlay: true,
-  background: { color: { value: "transparent" } },
-  detectRetina: true,
-  fpsLimit: 45,
-  fullScreen: { enable: false },
-  pauseOnBlur: true,
-  pauseOnOutsideViewport: true,
-  particles: {
-    color: { value: ["#ffffff", "#d7e1e8", "#f2dfa2"] },
-    move: {
-      direction: "none",
-      enable: true,
-      outModes: { default: "out" },
-      random: true,
-      speed: { min: 0.025, max: 0.11 },
-      straight: false,
-    },
-    number: {
-      density: { enable: true, height: 800, width: 1200 },
-      value: 86,
-    },
-    opacity: {
-      animation: {
-        destroy: "none",
-        enable: true,
-        speed: 0.22,
-        startValue: "random",
-        sync: false,
+const BASE_PARTICLE_COUNT = 86;
+const STAR_DENSITY_MULTIPLIER = 5;
+
+function createParticleOptions(dark: boolean): ISourceOptions {
+  return {
+    autoPlay: true,
+    background: { color: { value: "transparent" } },
+    detectRetina: true,
+    fpsLimit: 45,
+    fullScreen: { enable: false },
+    pauseOnBlur: true,
+    pauseOnOutsideViewport: true,
+    particles: {
+      color: {
+        value: dark
+          ? ["#ffffff", "#d7e1e8", "#d7e1e8", "#f2dfa2"]
+          : ["#69727d", "#858e98", "#a0a5aa", "#b4965f"],
       },
-      value: { min: 0.12, max: 0.68 },
-    },
-    shape: { type: "circle" },
-    size: {
-      animation: {
-        destroy: "none",
+      move: {
+        direction: "none",
         enable: true,
-        speed: 0.16,
-        startValue: "random",
-        sync: false,
+        outModes: { default: "out" },
+        random: true,
+        speed: { min: 0.025, max: 0.11 },
+        straight: false,
       },
-      value: { min: 0.35, max: 1.45 },
+      number: {
+        density: { enable: true, height: 800, width: 1200 },
+        value: BASE_PARTICLE_COUNT * STAR_DENSITY_MULTIPLIER,
+      },
+      opacity: {
+        animation: {
+          destroy: "none",
+          enable: true,
+          speed: 0.22,
+          startValue: "random",
+          sync: false,
+        },
+        value: dark ? { min: 0.12, max: 0.68 } : { min: 0.12, max: 0.42 },
+      },
+      shape: { type: "circle" },
+      size: {
+        animation: {
+          destroy: "none",
+          enable: true,
+          speed: 0.16,
+          startValue: "random",
+          sync: false,
+        },
+        value: dark ? { min: 0.35, max: 1.45 } : { min: 0.35, max: 1.25 },
+      },
     },
-  },
-};
+  };
+}
 
 export function SpaceParticles() {
   const id = React.useId().replace(/:/g, "");
+  const { resolvedTheme } = useTheme();
+  const dark = resolvedTheme === "dark";
+  const options = React.useMemo(() => createParticleOptions(dark), [dark]);
 
   return (
     <ParticlesProvider init={loadSlim}>
       <Particles
+        key={dark ? "dark" : "light"}
         id={`sag-space-${id}`}
         className="sag-space-particles"
-        options={PARTICLE_OPTIONS}
+        options={options}
       />
     </ParticlesProvider>
   );

@@ -77,12 +77,14 @@ class GraphEventInfo(BaseModel):
     id: str
     source_id: str
     title: str
+    source_config_id: str = ""
     summary: str = ""
     category: str = ""
     rank: int = 0
     parent_id: str | None = None
     chunk_id: str | None = None
     start_time: datetime | None = None
+    score: float = 0.0
 
 
 class GraphAssociationInfo(BaseModel):

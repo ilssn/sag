@@ -3,7 +3,15 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowUpRight, ChevronsLeft, ChevronsRight, Code, Download, TextQuote, X } from "lucide-react";
+import {
+  ArrowUpRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Code2,
+  Download,
+  Eye,
+  X,
+} from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
 import { getToken } from "@/lib/auth";
@@ -24,7 +32,7 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 /** 详情面板目标：引用/搜索结果的原文分块，或知识库文档（含原始文件预览）。 */
 export type DetailTarget =
@@ -112,7 +120,7 @@ export function DetailPanelMain({ children }: { children: React.ReactNode }) {
 
 // ── 内容视图 ─────────────────────────────────────────────────────────
 
-/** 渲染模式切换：markdown（默认）/ 原文。icon-only + Tooltip。 */
+/** 单按钮切换 Markdown 预览与原始内容，图标表示当前模式。 */
 function RenderModeToggle({
   mode,
   onChange,
@@ -120,22 +128,25 @@ function RenderModeToggle({
   mode: "md" | "raw";
   onChange: (m: "md" | "raw") => void;
 }) {
+  const isPreview = mode === "md";
+  const label = isPreview ? "切换到原始 Markdown" : "切换到预览格式";
+
   return (
-    <ToggleGroup
-      type="single"
-      variant="outline"
-      size="sm"
-      value={mode}
-      onValueChange={(v) => v && onChange(v as "md" | "raw")}
-      aria-label="渲染模式"
-    >
-      <ToggleGroupItem value="md" aria-label="Markdown 渲染" title="Markdown 渲染">
-        <TextQuote />
-      </ToggleGroupItem>
-      <ToggleGroupItem value="raw" aria-label="原文" title="原文">
-        <Code />
-      </ToggleGroupItem>
-    </ToggleGroup>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="size-8 bg-background"
+          aria-label={label}
+          onClick={() => onChange(isPreview ? "raw" : "md")}
+        >
+          {isPreview ? <Eye /> : <Code2 />}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -212,7 +223,7 @@ function ChunkView({
   );
 }
 
-function DocumentPreview({ doc }: { doc: Doc }) {
+function OriginalDocumentPreview({ doc }: { doc: Doc }) {
   const [state, setState] = React.useState<
     | { phase: "loading" }
     | { phase: "blob"; url: string; kind: "pdf" | "image" }
@@ -282,7 +293,7 @@ function DocumentPreview({ doc }: { doc: Doc }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-muted-foreground">原文预览</span>
+        <span className="text-xs font-medium text-muted-foreground">原始文件预览</span>
         <span className="flex items-center gap-1.5">
           {state.phase === "text" && <RenderModeToggle mode={textMode} onChange={setTextMode} />}
           <Button variant="ghost" size="sm" className="h-7 gap-1.5 px-2 text-xs" onClick={download}>
@@ -321,6 +332,134 @@ function DocumentPreview({ doc }: { doc: Doc }) {
         </div>
       )}
     </div>
+  );
+}
+
+type ParsedPreviewState =
+  | { phase: "loading" }
+  | { phase: "text"; text: string; truncated: boolean }
+  | { phase: "none"; message: string }
+  | { phase: "error"; message: string };
+
+function ParsedDocumentPreview({ doc }: { doc: Doc }) {
+  const [state, setState] = React.useState<ParsedPreviewState>({ phase: "loading" });
+  const [textMode, setTextMode] = React.useState<"md" | "raw">("md");
+  const parsedUrl = api.documentParsedUrl(doc.source_id, doc.id);
+
+  React.useEffect(() => {
+    if (doc.status !== "ready") {
+      setState({
+        phase: "none",
+        message:
+          doc.status === "failed"
+            ? doc.error || "文档解析失败，暂无 Markdown 预览。"
+            : "文档正在解析，完成后即可查看 Markdown 预览。",
+      });
+      return;
+    }
+
+    let alive = true;
+    const controller = new AbortController();
+    setState({ phase: "loading" });
+    fetch(parsedUrl, {
+      headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+      signal: controller.signal,
+    })
+      .then(async (res) => {
+        if (res.status === 404) {
+          if (alive) {
+            setState({ phase: "none", message: "暂未找到解析内容，可重新处理文档后再试。" });
+          }
+          return;
+        }
+        if (res.status === 409) {
+          if (alive) setState({ phase: "none", message: "文档尚未解析完成。" });
+          return;
+        }
+        if (!res.ok) throw new Error(`解析内容不可用（${res.status}）`);
+        const text = await res.text();
+        if (!alive) return;
+        if (!text.trim()) {
+          setState({ phase: "none", message: "解析内容为空，可重新处理文档后再试。" });
+          return;
+        }
+        const limit = 500_000;
+        setState({ phase: "text", text: text.slice(0, limit), truncated: text.length > limit });
+      })
+      .catch((error) => {
+        if (!alive || controller.signal.aborted) return;
+        setState({
+          phase: "error",
+          message: error instanceof Error ? error.message : "解析内容加载失败",
+        });
+      });
+    return () => {
+      alive = false;
+      controller.abort();
+    };
+  }, [doc.error, doc.status, parsedUrl]);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-muted-foreground">解析后的 Markdown</span>
+        {state.phase === "text" && <RenderModeToggle mode={textMode} onChange={setTextMode} />}
+      </div>
+      {state.phase === "loading" && (
+        <div className="grid flex-1 place-items-center rounded-md border">
+          <Spinner />
+        </div>
+      )}
+      {state.phase === "error" && (
+        <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {state.message}
+        </p>
+      )}
+      {state.phase === "none" && (
+        <p className="rounded-md border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
+          {state.message}
+        </p>
+      )}
+      {state.phase === "text" && (
+        <div className="flex min-h-0 flex-1 flex-col gap-2">
+          {state.truncated && (
+            <p className="text-xs text-muted-foreground">内容较长，预览仅展示前 50 万字符。</p>
+          )}
+          <TextBody text={state.text} mode={textMode} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DocumentPreview({ doc }: { doc: Doc }) {
+  const [previewMode, setPreviewMode] = React.useState<"parsed" | "original">(
+    doc.status === "ready" ? "parsed" : "original",
+  );
+
+  return (
+    <Tabs
+      value={previewMode}
+      onValueChange={(value) => setPreviewMode(value as "parsed" | "original")}
+      className="flex min-h-0 flex-1 flex-col"
+    >
+      <TabsList className="grid w-full grid-cols-2">
+        <TabsTrigger value="parsed">解析内容</TabsTrigger>
+        <TabsTrigger value="original">原始文件</TabsTrigger>
+      </TabsList>
+      <TabsContent
+        value="parsed"
+        className="mt-2 min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col"
+      >
+        <ParsedDocumentPreview doc={doc} />
+      </TabsContent>
+      <TabsContent
+        value="original"
+        className="mt-2 min-h-0 flex-1 data-[state=active]:flex data-[state=active]:flex-col"
+      >
+        <OriginalDocumentPreview doc={doc} />
+      </TabsContent>
+    </Tabs>
   );
 }
 

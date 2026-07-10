@@ -36,9 +36,31 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 type WindowMode = "full" | "window";
 type WindowSize = { width: number; height: number };
 
+const WINDOW_MODE_KEY = "sag:window";
 const WINDOW_SIZE_KEY = "sag:window-size";
+const DEFAULT_WINDOW_MODE: WindowMode = "window";
 const DEFAULT_WINDOW_SIZE: WindowSize = { width: 1360, height: 860 };
 const MIN_WINDOW_SIZE: WindowSize = { width: 900, height: 560 };
+
+function readWindowMode(): WindowMode {
+  if (typeof window === "undefined") return DEFAULT_WINDOW_MODE;
+  try {
+    const saved = window.localStorage.getItem(WINDOW_MODE_KEY);
+    if (saved === "full" || saved === "window") return saved;
+    window.localStorage.setItem(WINDOW_MODE_KEY, DEFAULT_WINDOW_MODE);
+  } catch {
+    /* Use the default when browser storage is unavailable. */
+  }
+  return DEFAULT_WINDOW_MODE;
+}
+
+function persistWindowMode(mode: WindowMode) {
+  try {
+    window.localStorage.setItem(WINDOW_MODE_KEY, mode);
+  } catch {
+    /* The in-memory preference still applies for this session. */
+  }
+}
 
 function clampWindowSize(size: WindowSize): WindowSize {
   if (typeof window === "undefined") return size;
@@ -105,7 +127,7 @@ const AppContext = React.createContext<AppCtx>({
   refreshThreads: async () => {},
   loadMoreThreads: async () => {},
   collapseThreads: () => {},
-  windowMode: "full",
+  windowMode: DEFAULT_WINDOW_MODE,
   toggleWindowMode: () => {},
   logout: () => {},
   refreshCapabilities: async () => {},
@@ -160,7 +182,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [hasMoreThreads, setHasMoreThreads] = React.useState(false);
   const [threadsExpanded, setThreadsExpanded] = React.useState(false);
   const [loadingMoreThreads, setLoadingMoreThreads] = React.useState(false);
-  const [windowMode, setWindowMode] = React.useState<WindowMode>("full");
+  const [windowMode, setWindowMode] = React.useState<WindowMode>(DEFAULT_WINDOW_MODE);
   const [windowSize, setWindowSize] = React.useState<WindowSize>(DEFAULT_WINDOW_SIZE);
   const [sidebarOpen, setSidebarOpen] = React.useState(true);
   const [isDesktop, setIsDesktop] = React.useState(true);
@@ -180,15 +202,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return () => mq.removeEventListener("change", update);
   }, []);
 
-  // 窗口形态：持久化（默认满屏）
+  // 窗口形态：首次启动默认小窗，已有用户沿用已保存的偏好。
   React.useEffect(() => {
-    if (window.localStorage.getItem("sag:window") === "window") setWindowMode("window");
+    setWindowMode(readWindowMode());
     setWindowSize(readWindowSize());
   }, []);
   const toggleWindowMode = React.useCallback(() => {
     setWindowMode((m) => {
       const next: WindowMode = m === "full" ? "window" : "full";
-      window.localStorage.setItem("sag:window", next);
+      persistWindowMode(next);
       return next;
     });
   }, []);
@@ -408,7 +430,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div
           className={cn(
             windowed &&
-              "bg-space-field bg-space-field--deep relative grid min-h-svh place-items-center overflow-hidden p-4 md:p-8",
+              "bg-space-field relative grid min-h-svh place-items-center overflow-hidden p-4 md:p-8",
           )}
         >
           {windowed && <SpaceBackdrop />}

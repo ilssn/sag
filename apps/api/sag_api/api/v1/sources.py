@@ -8,7 +8,7 @@ from sag_api.core.db import get_session
 from sag_api.core.deps import get_current_user, get_engine_manager, get_job_queue
 from sag_api.db.models import User
 from sag_api.jobs import JobQueue
-from sag_api.mcp.server import MCP_TOOL_NAMES
+from sag_api.mcp.server import MCP_TOOL_DETAILS, MCP_TOOL_NAMES
 from sag_api.sag import EngineManager
 from sag_api.schemas.common import Ok
 from sag_api.schemas.job import JobOut
@@ -115,6 +115,7 @@ async def mcp_descriptor(
         "source_id": source.id,
         "source_name": source.name,
         "tools": list(MCP_TOOL_NAMES),
+        "tool_details": list(MCP_TOOL_DETAILS),
         "http": {
             "transport": "streamable-http",
             "url": f"{base}/mcp/?source_id={source.id}",

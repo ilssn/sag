@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Check, Plug, RotateCw, Save, X } from "lucide-react";
+import { Check, Plug, RotateCw, Save, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { useApp } from "@/components/features/app-shell";
@@ -25,6 +25,15 @@ import { SEARCH_STRATEGIES } from "@/lib/retrieval-config";
 import type { ModelConfig, ModelConfigPatch } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+function is302Api(url: string | null) {
+  try {
+    const host = new URL(url ?? "").hostname;
+    return host === "api.302.ai" || host === "api.302ai.cn";
+  } catch {
+    return false;
+  }
+}
+
 export function ModelConfigForm() {
   const { refreshCapabilities } = useApp();
   const [cfg, setCfg] = React.useState<ModelConfig | null>(null);
@@ -43,6 +52,12 @@ export function ModelConfigForm() {
   const [embBaseUrl, setEmbBaseUrl] = React.useState("");
   const [embKey, setEmbKey] = React.useState("");
   const [embDims, setEmbDims] = React.useState("");
+  const [documentParser, setDocumentParser] =
+    React.useState<ModelConfig["document_parser"]>("auto");
+  const [mineruBaseUrl, setMineruBaseUrl] = React.useState("");
+  const [mineruVersion, setMineruVersion] =
+    React.useState<ModelConfig["mineru_version"]>("2.5");
+  const [mineruKey, setMineruKey] = React.useState("");
   const [strategy, setStrategy] = React.useState<ModelConfig["search_strategy"]>("multi");
   const [topK, setTopK] = React.useState(8);
   const [language, setLanguage] = React.useState<ModelConfig["sag_language"]>("zh");
@@ -57,11 +72,15 @@ export function ModelConfigForm() {
     setEmbModel(config.embedding_model);
     setEmbBaseUrl(config.embedding_base_url ?? "");
     setEmbDims(config.embedding_dimensions != null ? String(config.embedding_dimensions) : "");
+    setDocumentParser(config.document_parser);
+    setMineruBaseUrl(config.mineru_base_url ?? "");
+    setMineruVersion(config.mineru_version);
     setStrategy(config.search_strategy);
     setTopK(config.search_top_k);
     setLanguage(config.sag_language);
     setLlmKey("");
     setEmbKey("");
+    setMineruKey("");
   }, []);
 
   const load = React.useCallback(async () => {
@@ -90,12 +109,16 @@ export function ModelConfigForm() {
         embedding_model: embModel.trim(),
         embedding_base_url: embBaseUrl.trim(),
         embedding_dimensions: embDims.trim() ? Number(embDims) : null,
+        document_parser: documentParser,
+        mineru_base_url: mineruBaseUrl.trim() || null,
+        mineru_version: mineruVersion,
         search_strategy: strategy,
         search_top_k: topK,
         sag_language: language,
       };
       if (llmKey.trim()) patch.llm_api_key = llmKey.trim();
       if (embKey.trim()) patch.embedding_api_key = embKey.trim();
+      if (mineruKey.trim()) patch.mineru_api_key = mineruKey.trim();
 
       const { config } = await api.saveModelConfig(patch);
       hydrate(config);
@@ -120,6 +143,20 @@ export function ModelConfigForm() {
       });
     } finally {
       setTesting(false);
+    }
+  }
+
+  async function setup302MinerU() {
+    setSaving(true);
+    try {
+      const { config } = await api.setup302MinerU();
+      hydrate(config);
+      await refreshCapabilities();
+      toast.success("已复用现有 302.AI Key 启用 MinerU 2.5");
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : "MinerU 配置失败");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -148,6 +185,7 @@ export function ModelConfigForm() {
         {[
           ["生成模型", "正在加载模型连接。"],
           ["向量模型", "正在加载向量化配置。"],
+          ["文档解析", "正在加载文件解析配置。"],
           ["检索", "正在加载检索规则。"],
         ].map(([title, description]) => (
           <SettingsSection key={title} title={title} description={description}>
@@ -162,6 +200,9 @@ export function ModelConfigForm() {
   }
 
   const keyPlaceholder = (isSet: boolean) => (isSet ? "已配置，留空保持不变" : "sk-…");
+  const canReuse302Key =
+    (cfg.llm_api_key_set && is302Api(cfg.llm_base_url)) ||
+    (cfg.embedding_api_key_set && is302Api(cfg.embedding_base_url));
 
   return (
     <div className="flex flex-col gap-6">
@@ -297,6 +338,93 @@ export function ModelConfigForm() {
         </SettingsRow>
       </SettingsSection>
 
+      <SettingsSection
+        title="文档解析"
+        description="配置 PDF 等文件的解析方式；MinerU 未配置或解析失败时自动回退 MarkItDown。"
+      >
+        <SettingsRow title="解析引擎" description="选择默认引擎，并配置可选的 MinerU 服务。">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field>
+              <FieldLabel htmlFor="document-parser">解析方式</FieldLabel>
+              <Select
+                value={documentParser}
+                onValueChange={(value) =>
+                  setDocumentParser(value as ModelConfig["document_parser"])
+                }
+              >
+                <SelectTrigger id="document-parser">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">Auto（推荐）</SelectItem>
+                  <SelectItem value="markitdown">MarkItDown</SelectItem>
+                  <SelectItem value="mineru">MinerU</SelectItem>
+                </SelectContent>
+              </Select>
+              <FieldDescription>
+                {documentParser === "auto"
+                  ? "配置 MinerU 后优先使用；服务异常或解析失败时回退 MarkItDown。"
+                  : documentParser === "markitdown"
+                    ? "使用内置 MarkItDown 解析文件，无需额外配置。"
+                    : "PDF 优先使用 MinerU，失败时回退；其他格式仍由 MarkItDown 解析。"}
+              </FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="mineru-version">MinerU 版本</FieldLabel>
+              <Select
+                value={mineruVersion}
+                onValueChange={(value) =>
+                  setMineruVersion(value as ModelConfig["mineru_version"])
+                }
+              >
+                <SelectTrigger id="mineru-version">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="2.5">2.5</SelectItem>
+                  <SelectItem value="2.0">2.0</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="mineru-url">MinerU Base URL</FieldLabel>
+              <Input
+                id="mineru-url"
+                value={mineruBaseUrl}
+                onChange={(event) => setMineruBaseUrl(event.target.value)}
+                placeholder="https://api.302.ai"
+              />
+              <FieldDescription>302 MinerU 按 PDF 页数计费，请以服务商价格为准。</FieldDescription>
+              {canReuse302Key && !cfg.mineru_api_key_set && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={saving || testing}
+                  onClick={() => void setup302MinerU()}
+                  className="w-fit"
+                >
+                  <Sparkles />
+                  复用现有 302 Key
+                </Button>
+              )}
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="mineru-key">MinerU API Key</FieldLabel>
+              <Input
+                id="mineru-key"
+                type="password"
+                autoComplete="off"
+                value={mineruKey}
+                onChange={(event) => setMineruKey(event.target.value)}
+                placeholder={keyPlaceholder(cfg.mineru_api_key_set)}
+              />
+              <FieldDescription>密钥不会回显，留空保持当前配置不变。</FieldDescription>
+            </Field>
+          </div>
+        </SettingsRow>
+      </SettingsSection>
+
       <SettingsSection title="检索" description="控制知识召回方式和信息抽取语言。">
         <SettingsRow title="检索规则" description="调整策略、召回条数和语言。">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -360,7 +488,7 @@ export function ModelConfigForm() {
         <div className="flex flex-wrap items-center gap-2">
           <Button type="button" onClick={test} variant="outline" disabled={testing || saving}>
             {testing ? <Spinner /> : <Plug />}
-            {testing ? "测试中…" : "测试连接"}
+            {testing ? "测试中…" : "测试生成模型"}
           </Button>
           <Button type="button" onClick={save} disabled={saving || testing}>
             {saving ? <Spinner /> : <Save />}

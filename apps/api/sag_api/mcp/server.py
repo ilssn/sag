@@ -12,25 +12,84 @@ import contextlib
 import contextvars
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, TypedDict
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+from pydantic import Field
 
 if TYPE_CHECKING:
     from sag_api.db.models import Document, Source
     from sag_api.sag import EngineManager
 
 
-MCP_TOOL_NAMES = (
-    "list_sources",
-    "search",
-    "get_entity",
-    "list_documents",
-    "outline",
-    "grep",
-    "read",
-    "get_chunk",
+class MCPToolDetail(TypedDict):
+    name: str
+    label: str
+    description: str
+
+
+MCP_TOOL_DETAILS: tuple[MCPToolDetail, ...] = (
+    {
+        "name": "list_sources",
+        "label": "查看信源",
+        "description": "查看当前可访问的知识来源、文档数和分块数，并获取 source_id。",
+    },
+    {
+        "name": "search",
+        "label": "语义检索",
+        "description": "按含义查找相关资料，适合自然语言问题、概念和模糊表述；返回证据片段及 chunk_id。",
+    },
+    {
+        "name": "get_entity",
+        "label": "查询实体",
+        "description": "查找人物、组织或概念，并汇总它在资料中的相关上下文。",
+    },
+    {
+        "name": "list_documents",
+        "label": "查看文档",
+        "description": "列出文档、处理状态和分块数量，并获取 document_id。",
+    },
+    {
+        "name": "outline",
+        "label": "文档大纲",
+        "description": "查看指定文档的章节和分块结构，并获取 chunk_id，便于快速定位内容。",
+    },
+    {
+        "name": "grep",
+        "label": "精确查找",
+        "description": "按原文字面内容查找，适合专名、编号、固定短语和代码；返回命中上下文及 chunk_id。",
+    },
+    {
+        "name": "read",
+        "label": "按行读原文",
+        "description": "按行分页读取指定文档的原始文本，适合查看连续上下文。",
+    },
+    {
+        "name": "get_chunk",
+        "label": "读取分块",
+        "description": "通过 chunk_id 读取一个分块的完整原文，用于核对和引用证据。",
+    },
 )
+MCP_TOOL_NAMES = tuple(tool["name"] for tool in MCP_TOOL_DETAILS)
+MCP_TOOL_LABELS = {tool["name"]: tool["label"] for tool in MCP_TOOL_DETAILS}
+MCP_TOOL_DESCRIPTIONS = {tool["name"]: tool["description"] for tool in MCP_TOOL_DETAILS}
+READ_ONLY_TOOL_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=True,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=False,
+)
+
+SourceId = Annotated[
+    str,
+    Field(description="可选。来自 list_sources；留空时查询全部可见信源。"),
+]
+DocumentId = Annotated[str, Field(description="来自 list_documents 的文档 ID。")]
+ChunkId = Annotated[
+    str,
+    Field(description="来自 search、outline 或 grep 结果的分块 ID。"),
+]
 
 
 @dataclass(frozen=True)
@@ -123,7 +182,11 @@ def build_source_mcp(*, stateless_http: bool = False) -> FastMCP:
         stateless_http=stateless_http,
     )
 
-    @mcp.tool(description="列出当前知识库可见的全部信源及其规模，便于选择检索范围。")
+    @mcp.tool(
+        title=MCP_TOOL_LABELS["list_sources"],
+        description=MCP_TOOL_DESCRIPTIONS["list_sources"],
+        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    )
     async def list_sources() -> str:
         scope = _require_scope()
         if not scope.sources:
@@ -134,9 +197,18 @@ def build_source_mcp(*, stateless_http: bool = False) -> FastMCP:
         )
 
     @mcp.tool(
-        description="检索知识库中的相关资料；source_id 可选，不填时检索全部信源。"
+        title=MCP_TOOL_LABELS["search"],
+        description=MCP_TOOL_DESCRIPTIONS["search"],
+        annotations=READ_ONLY_TOOL_ANNOTATIONS,
     )
-    async def search(query: str, top_k: int = 8, source_id: str = "") -> str:
+    async def search(
+        query: Annotated[str, Field(description="要查找的问题、主题或关键词。")],
+        top_k: Annotated[
+            int,
+            Field(description="最多返回多少条证据；默认 8，服务端会限制在 1–50。"),
+        ] = 8,
+        source_id: SourceId = "",
+    ) -> str:
         scope = _require_scope()
         selected = _selected_sources(scope, source_id)
         if not selected:
@@ -152,9 +224,17 @@ def build_source_mcp(*, stateless_http: bool = False) -> FastMCP:
         return _sections_to_text(outcome.sections, selected)
 
     @mcp.tool(
-        description="按名称查询实体及其上下文；source_id 可选，不填时查询全部信源。"
+        title=MCP_TOOL_LABELS["get_entity"],
+        description=MCP_TOOL_DESCRIPTIONS["get_entity"],
+        annotations=READ_ONLY_TOOL_ANNOTATIONS,
     )
-    async def get_entity(name: str, source_id: str = "") -> str:
+    async def get_entity(
+        name: Annotated[
+            str,
+            Field(description="人物、组织、概念等实体名称；支持完整名称或部分名称。"),
+        ],
+        source_id: SourceId = "",
+    ) -> str:
         scope = _require_scope()
         selected = _selected_sources(scope, source_id)
         if not selected:
@@ -199,9 +279,11 @@ def build_source_mcp(*, stateless_http: bool = False) -> FastMCP:
         return "\n\n".join(matches) if matches else "（未找到该实体）"
 
     @mcp.tool(
-        description="列出知识库文档；source_id 可选，不填时按信源列出全部文档。"
+        title=MCP_TOOL_LABELS["list_documents"],
+        description=MCP_TOOL_DESCRIPTIONS["list_documents"],
+        annotations=READ_ONLY_TOOL_ANNOTATIONS,
     )
-    async def list_documents(source_id: str = "") -> str:
+    async def list_documents(source_id: SourceId = "") -> str:
         scope = _require_scope()
         selected = _selected_sources(scope, source_id)
         if not selected:
@@ -245,8 +327,12 @@ def build_source_mcp(*, stateless_http: bool = False) -> FastMCP:
             blocks.append(header + "\n".join(lines))
         return "\n\n".join(blocks)
 
-    @mcp.tool(description="读取某文档的大纲，先看结构再精确取内容。")
-    async def outline(document_id: str) -> str:
+    @mcp.tool(
+        title=MCP_TOOL_LABELS["outline"],
+        description=MCP_TOOL_DESCRIPTIONS["outline"],
+        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    )
+    async def outline(document_id: DocumentId) -> str:
         scope = _require_scope()
         match = await _document_in_scope(scope, document_id)
         if match is None:
@@ -268,9 +354,21 @@ def build_source_mcp(*, stateless_http: bool = False) -> FastMCP:
         )
 
     @mcp.tool(
-        description="精确文本匹配；source_id 可选，不填时查全部信源，适合专名、编号和代码。"
+        title=MCP_TOOL_LABELS["grep"],
+        description=MCP_TOOL_DESCRIPTIONS["grep"],
+        annotations=READ_ONLY_TOOL_ANNOTATIONS,
     )
-    async def grep(pattern: str, limit: int = 20, source_id: str = "") -> str:
+    async def grep(
+        pattern: Annotated[
+            str,
+            Field(description="要在原文中精确查找的文字；适合专名、编号、固定短语和代码。"),
+        ],
+        limit: Annotated[
+            int,
+            Field(description="最多返回多少处匹配；默认 20，服务端会限制在 1–100。"),
+        ] = 20,
+        source_id: SourceId = "",
+    ) -> str:
         scope = _require_scope()
         selected = _selected_sources(scope, source_id)
         if not selected:
@@ -310,8 +408,22 @@ def build_source_mcp(*, stateless_http: bool = False) -> FastMCP:
             return "（未匹配到内容）"
         return "\n\n".join(f"[{index}] {block}" for index, block in enumerate(blocks, 1))
 
-    @mcp.tool(description="按行分页读取文档原始文件，offset 从 1 起，limit 默认 120 行。")
-    async def read(document_id: str, offset: int = 1, limit: int = 120) -> str:
+    @mcp.tool(
+        title=MCP_TOOL_LABELS["read"],
+        description=MCP_TOOL_DESCRIPTIONS["read"],
+        annotations=READ_ONLY_TOOL_ANNOTATIONS,
+    )
+    async def read(
+        document_id: DocumentId,
+        offset: Annotated[
+            int,
+            Field(description="从第几行开始读取；首行为 1，默认 1。"),
+        ] = 1,
+        limit: Annotated[
+            int,
+            Field(description="本次读取多少行；默认 120，服务端最多返回 500 行。"),
+        ] = 120,
+    ) -> str:
         scope = _require_scope()
         match = await _document_in_scope(scope, document_id)
         if match is None:
@@ -338,9 +450,11 @@ def build_source_mcp(*, stateless_http: bool = False) -> FastMCP:
         )
 
     @mcp.tool(
-        description="按 chunk_id 读取完整原文；source_id 可选，可用于消除跨源 id 歧义。"
+        title=MCP_TOOL_LABELS["get_chunk"],
+        description=MCP_TOOL_DESCRIPTIONS["get_chunk"],
+        annotations=READ_ONLY_TOOL_ANNOTATIONS,
     )
-    async def get_chunk(chunk_id: str, source_id: str = "") -> str:
+    async def get_chunk(chunk_id: ChunkId, source_id: SourceId = "") -> str:
         scope = _require_scope()
         selected = _selected_sources(scope, source_id)
         if not selected:

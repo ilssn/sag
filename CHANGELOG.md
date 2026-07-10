@@ -2,6 +2,11 @@
 
 本项目遵循语义化版本。各版本 tag 均可在 [Releases](https://github.com/ilssn/sag/tags) 查看。
 
+## Unreleased
+- 文档上传先统一转为 Markdown：PDF 可使用 302.AI MinerU 2.5，未配置或 MinerU 失败时自动回退本地 MarkItDown，其他文件默认走 MarkItDown。
+- 302.AI 首次一键配置复用同一个 Key 启用 LLM、Embedding 与 MinerU；设置页新增文档解析配置。
+- MinerU 任务状态与解析结果可续跑、可缓存，避免后台重试或并发重新处理造成重复计费。
+
 ## v1.2.2 · 2026-07-09
 - 修复 v1.2.1 的 `ModelConfigPatch` 类型错误；门禁改为完整运行并取真实退出码。
 

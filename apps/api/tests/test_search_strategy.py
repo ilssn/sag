@@ -17,7 +17,14 @@ async def _register(client: httpx.AsyncClient) -> dict[str, str]:
 async def test_global_search_forwards_validated_strategy():
     from sag_api.core.deps import get_engine_manager
     from sag_api.main import app
-    from sag_api.sag.dto import SearchOutcome
+    from sag_api.sag.dto import (
+        EntityInfo,
+        GraphAssociationInfo,
+        GraphEventInfo,
+        RetrievedSection,
+        SearchOutcome,
+        SourceGraphInfo,
+    )
 
     class RecordingEngine:
         strategy: str | None = None
@@ -29,7 +36,49 @@ async def test_global_search_forwards_validated_strategy():
         async def search_many(self, targets, query, *, strategy=None, top_k=None):
             self.strategy = strategy
             self.top_k = top_k
-            return SearchOutcome(query=query, sections=[], stats={"strategy": strategy})
+            source_config_id = targets[0][0]
+            return SearchOutcome(
+                query=query,
+                sections=[
+                    RetrievedSection(
+                        chunk_id="chunk-1",
+                        heading="原始分块标题",
+                        content="原始分块正文",
+                        score=0.82,
+                        source_config_id=source_config_id,
+                    )
+                ],
+                stats={"strategy": strategy},
+            )
+
+        async def graph_for_sections(self, sections, sources_by_config, **_kwargs):
+            source_config_id = sections[0].source_config_id
+            return SourceGraphInfo(
+                events=[
+                    GraphEventInfo(
+                        id="event-1",
+                        source_config_id=source_config_id,
+                        source_id="document-1",
+                        chunk_id="chunk-1",
+                        title="外卖骑手收入变化",
+                        summary="报告分析了工作时长、技能与收入之间的关系。",
+                        category="劳动研究",
+                        score=0.82,
+                    )
+                ],
+                entities=[
+                    EntityInfo(
+                        id="entity-1",
+                        name="外卖骑手",
+                        type="职业",
+                        description="平台配送劳动者",
+                        heat=1,
+                    )
+                ],
+                associations=[
+                    GraphAssociationInfo(event_id="event-1", entity_id="entity-1")
+                ],
+            )
 
     engine = RecordingEngine()
     app.dependency_overrides[get_engine_manager] = lambda: engine
@@ -54,6 +103,12 @@ async def test_global_search_forwards_validated_strategy():
                 assert engine.strategy == "atomic"
                 assert engine.top_k == 7
                 assert response.json()["stats"]["strategy"] == "atomic"
+                result = response.json()
+                assert result["events"][0]["title"] == "外卖骑手收入变化"
+                assert result["events"][0]["summary"].startswith("报告分析")
+                assert result["events"][0]["source_id"] == source.json()["id"]
+                assert result["entities"][0]["name"] == "外卖骑手"
+                assert result["relations"][0]["kind"] == "mentions"
 
                 invalid = await client.post(
                     "/api/v1/search",

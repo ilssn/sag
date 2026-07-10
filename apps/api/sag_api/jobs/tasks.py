@@ -12,10 +12,12 @@ from collections.abc import Awaitable, Callable
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sag_api.core.config import settings
 from sag_api.core.errors import NotFoundError
 from sag_api.core.logging import get_logger
 from sag_api.db.models import Document, Job, Source
 from sag_api.enums import DocumentStatus, JobType
+from sag_api.parsing import prepare_document
 from sag_api.sag import EngineManager
 
 log = get_logger("jobs")
@@ -43,10 +45,32 @@ async def process_document(
             job.progress = 0.7
         await session.commit()
 
+    async def on_parser_state(state: dict) -> None:
+        document.status = DocumentStatus.LOADING
+        job.progress = 0.15
+        job.payload = {**(job.payload or {}), "document_parser": state}
+        await session.commit()
+
     try:
+        prepared = await prepare_document(
+            document.storage_path,
+            settings,
+            state=(job.payload or {}).get("document_parser"),
+            on_state=on_parser_state,
+        )
+        if prepared.fallback_from:
+            log.warning(
+                "文档解析已降级 doc=%s job=%s from=%s to=%s cached=%s error=%s",
+                document.id,
+                getattr(job, "id", None),
+                prepared.fallback_from,
+                prepared.provider,
+                prepared.cached,
+                prepared.fallback_error,
+            )
         outcome = await engine_manager.process_document(
             source.sag_source_config_id,
-            document.storage_path,
+            prepared.path,
             source=source,
             on_stage=on_stage,
         )
@@ -72,8 +96,10 @@ async def process_document(
     )
     await session.commit()
     log.info(
-        "文档处理完成 doc=%s chunks=%d events=%d",
+        "文档处理完成 doc=%s parser=%s cached=%s chunks=%d events=%d",
         document.id,
+        prepared.provider,
+        prepared.cached,
         outcome.chunk_count,
         outcome.event_count,
     )

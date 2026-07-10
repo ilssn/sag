@@ -71,13 +71,13 @@ const KIND_META: Record<
 > = {
   event: {
     title: "事件",
-    width: 210,
+    width: 196,
     className: "border-amber-500/30",
     header: "bg-amber-500/12 text-amber-700 dark:text-amber-300",
   },
   entity: {
     title: "实体",
-    width: 156,
+    width: 148,
     className: "border-dashed border-violet-500/35",
     header: "bg-violet-500/10 text-violet-700 dark:text-violet-300",
   },
@@ -89,7 +89,7 @@ function GraphNode({ data, selected }: NodeProps) {
   return (
     <div
       className={cn(
-        "relative cursor-pointer overflow-hidden rounded-lg border bg-card shadow-soft transition-[box-shadow,border-color] hover:shadow-lift",
+        "relative cursor-grab overflow-hidden rounded-lg border bg-card shadow-soft transition-[box-shadow,border-color] hover:shadow-lift active:cursor-grabbing",
         meta.className,
         selected && "ring-2 ring-primary/45 ring-offset-2 ring-offset-background",
       )}
@@ -318,7 +318,7 @@ function buildRadialPositions(slice: GraphSlice) {
 }
 
 function collisionRadius(kind: GraphKind) {
-  return kind === "event" ? 138 : 84;
+  return kind === "event" ? 126 : 80;
 }
 
 function buildNetwork(slice: GraphSlice, layout: GraphLayout): { nodes: Node[]; edges: Edge[] } {
@@ -342,16 +342,19 @@ function buildNetwork(slice: GraphSlice, layout: GraphLayout): { nodes: Node[]; 
   type SimNode = SimulationNodeDatum & {
     id: string;
     kind: GraphKind;
-    anchorX: number;
-    anchorY: number;
   };
+  const degree = new Map<string, number>();
+  slice.relations.forEach((relation) => {
+    const event = nodeId("event", relation.eventId);
+    const entity = nodeId("entity", relation.entityId);
+    degree.set(event, (degree.get(event) ?? 0) + 1);
+    degree.set(entity, (degree.get(entity) ?? 0) + 1);
+  });
   const simNodes: SimNode[] = radialNodes.map((node) => ({
     id: node.id,
     kind: (node.data as GraphNodeData).kind,
-    x: node.position.x,
-    y: node.position.y,
-    anchorX: node.position.x,
-    anchorY: node.position.y,
+    x: node.position.x * 0.48,
+    y: node.position.y * 0.48,
   }));
   const seedEdges = makeEdges(slice, radialPositions, "force");
   const simLinks: SimulationLinkDatum<SimNode>[] = seedEdges.map((edge) => ({
@@ -363,18 +366,39 @@ function buildNetwork(slice: GraphSlice, layout: GraphLayout): { nodes: Node[]; 
       "link",
       forceLink<SimNode, SimulationLinkDatum<SimNode>>(simLinks)
         .id((node) => node.id)
-        .distance(245)
-        .strength(0.38),
+        .distance((link) => {
+          const source = typeof link.source === "object" ? link.source.id : String(link.source);
+          const target = typeof link.target === "object" ? link.target.id : String(link.target);
+          return (
+            164 +
+            Math.min(
+              64,
+              Math.max(degree.get(source) ?? 1, degree.get(target) ?? 1) * 3.5,
+            )
+          );
+        })
+        .strength(0.46),
     )
-    .force("charge", forceManyBody().strength(-680))
+    .force(
+      "charge",
+      forceManyBody<SimNode>()
+        .strength((node) => (node.kind === "event" ? -430 : -135))
+        .distanceMax(1500),
+    )
     .force(
       "collide",
-      forceCollide<SimNode>((node) => collisionRadius(node.kind)).strength(0.92).iterations(3),
+      forceCollide<SimNode>((node) => collisionRadius(node.kind)).strength(0.96).iterations(4),
     )
-    .force("x", forceX<SimNode>((node) => node.anchorX).strength(0.055))
-    .force("y", forceY<SimNode>((node) => node.anchorY).strength(0.055))
+    .force(
+      "x",
+      forceX<SimNode>(0).strength((node) => (node.kind === "event" ? 0.028 : 0.018)),
+    )
+    .force(
+      "y",
+      forceY<SimNode>(0).strength((node) => (node.kind === "event" ? 0.028 : 0.018)),
+    )
     .stop();
-  for (let index = 0; index < 260; index += 1) simulation.tick();
+  for (let index = 0; index < 340; index += 1) simulation.tick();
   const positions = new Map(
     simNodes.map((node) => [node.id, { x: node.x ?? 0, y: node.y ?? 0 }]),
   );
@@ -386,12 +410,11 @@ function buildNetwork(slice: GraphSlice, layout: GraphLayout): { nodes: Node[]; 
 
 function SelectionCard({
   selection,
-  source,
+  onOpenEvent,
 }: {
   selection: Exclude<Selection, null>;
-  source: Source;
+  onOpenEvent?: (event: SourceGraphEvent) => void;
 }) {
-  const { open } = useDetailPanel();
   if (selection.kind === "entity") {
     const entity = selection.value;
     return (
@@ -432,20 +455,12 @@ function SelectionCard({
             )}
           </span>
         )}
-        {event.chunk_id && (
+        {event.chunk_id && onOpenEvent && (
           <Button
             variant="outline"
             size="sm"
             className="ml-auto h-7 text-xs"
-            onClick={() =>
-              open({
-                kind: "chunk",
-                sourceId: source.id,
-                chunkId: event.chunk_id as string,
-                heading: event.title,
-                sourceName: source.name,
-              })
-            }
+            onClick={() => onOpenEvent(event)}
           >
             查看原文
           </Button>
@@ -455,87 +470,54 @@ function SelectionCard({
   );
 }
 
-export function SourceGraph({ source, refreshKey }: { source: Source; refreshKey: string }) {
-  const { open } = useDetailPanel();
-  const [graph, setGraph] = React.useState<SourceGraphResponse | null>(null);
-  const [error, setError] = React.useState("");
-  const [refreshVersion, setRefreshVersion] = React.useState(0);
-  const [refreshing, setRefreshing] = React.useState(false);
+export function EventEntityGraph({
+  graph,
+  onOpenEvent,
+  toolbarActions,
+  refreshKey = "graph",
+  emptyTitle,
+  emptyDescription,
+  flowClassName = "sag-source-graph",
+}: {
+  graph: SourceGraphResponse;
+  onOpenEvent?: (event: SourceGraphEvent) => void;
+  toolbarActions?: React.ReactNode;
+  refreshKey?: React.Key;
+  emptyTitle?: string;
+  emptyDescription?: string;
+  flowClassName?: string;
+}) {
   const [selection, setSelection] = React.useState<Selection>(null);
-  const [layout, setLayout] = React.useState<GraphLayout>("radial");
+  const [layout, setLayout] = React.useState<GraphLayout>("force");
 
   React.useEffect(() => {
     const saved = window.localStorage.getItem("sag:source-graph-layout");
-    if (saved === "tree" || saved === "force") setLayout(saved);
+    if (saved === "radial" || saved === "tree" || saved === "force") {
+      setLayout(saved);
+    } else {
+      window.localStorage.setItem("sag:source-graph-layout", "force");
+    }
   }, []);
   const changeLayout = (next: GraphLayout) => {
     setLayout(next);
     window.localStorage.setItem("sag:source-graph-layout", next);
   };
 
-  React.useEffect(() => {
-    let alive = true;
-    setError("");
-    setRefreshing(Boolean(graph));
-    api
-      .getSourceGraph(source.id)
-      .then((response) => {
-        if (!alive) return;
-        setGraph(response);
-        setSelection(null);
-      })
-      .catch((reason) => {
-        if (!alive) return;
-        setError(reason instanceof ApiError ? reason.message : "图谱加载失败");
-      })
-      .finally(() => {
-        if (alive) setRefreshing(false);
-      });
-    return () => {
-      alive = false;
-    };
-    // graph 不能加入依赖；刷新时保留旧画面，避免闪烁。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source.id, refreshKey, refreshVersion]);
+  React.useEffect(() => setSelection(null), [graph]);
 
-  const slice = React.useMemo(() => (graph ? graphSlice(graph) : null), [graph]);
-  const network = React.useMemo(
-    () => (slice ? buildNetwork(slice, layout) : { nodes: [], edges: [] }),
-    [layout, slice],
-  );
-
-  if (!graph && !error) {
-    return (
-      <div className="h-full min-h-0 overflow-hidden rounded-lg border bg-card/40 p-4">
-        <div className="flex h-full flex-col gap-3">
-          <Skeleton className="h-9 w-64" />
-          <Skeleton className="min-h-0 flex-1" />
-        </div>
-      </div>
-    );
-  }
-
-  if (!graph && error) {
-    return (
-      <div className="flex h-full min-h-0 flex-col items-center justify-center rounded-lg border border-dashed bg-card/40 px-6 text-center">
-        <Network className="size-8 text-muted-foreground/60" />
-        <p className="mt-3 text-sm font-medium text-foreground">无法加载信息源图谱</p>
-        <p className="mt-1 text-xs text-muted-foreground">{error}</p>
-        <Button
-          variant="outline"
-          size="sm"
-          className="mt-4"
-          onClick={() => setRefreshVersion((value) => value + 1)}
-        >
-          <RefreshCw className="mr-1.5 size-3.5" />
-          重试
-        </Button>
-      </div>
-    );
-  }
-
-  if (!graph || !slice) return null;
+  const slice = React.useMemo(() => graphSlice(graph), [graph]);
+  const network = React.useMemo(() => buildNetwork(slice, layout), [layout, slice]);
   const empty = slice.relations.length === 0;
+  const resolvedEmptyTitle =
+    emptyTitle ??
+    (graph.documents.length === 0 && graph.events.length === 0
+      ? "还没有可展示的文档"
+      : "还没有事件—实体关系");
+  const resolvedEmptyDescription =
+    emptyDescription ??
+    (graph.documents.length === 0 && graph.events.length === 0
+      ? "添加文档后，图谱会随解析结果自动出现。"
+      : "只有已建立事件关联的实体会显示在这里。");
 
   return (
     <GraphCanvas
@@ -567,6 +549,112 @@ export function SourceGraph({ source, refreshKey }: { source: Source; refreshKey
           </div>
         </GraphLegend>
       }
+      toolbarActions={toolbarActions}
+      heightClassName="h-full min-h-0"
+      fitPadding={0.18}
+      fitMinZoom={0.12}
+      minZoom={0.08}
+      maxZoom={1.8}
+      elementsSelectable
+      onlyRenderVisibleElements
+      refreshKey={`${slice.relations.length}-${String(refreshKey)}`}
+      ariaLabel="事件与实体关系图谱"
+      flowClassName={flowClassName}
+      onPaneClick={() => setSelection(null)}
+      onNodeClick={(_event, node) => {
+        const data = node.data as GraphNodeData;
+        if (data.kind === "event" && data.event) {
+          setSelection({ kind: "event", value: data.event });
+        } else if (data.kind === "entity" && data.entity) {
+          setSelection({ kind: "entity", value: data.entity });
+        }
+      }}
+    >
+      {selection && <SelectionCard selection={selection} onOpenEvent={onOpenEvent} />}
+      {empty && (
+        <div className="pointer-events-none absolute inset-x-12 bottom-5 z-10 mx-auto max-w-md rounded-lg border bg-card/95 px-4 py-3 text-center shadow-soft backdrop-blur-sm">
+          <div className="flex items-center justify-center gap-1.5 text-xs font-medium text-foreground">
+            {graph.documents.length === 0 && graph.events.length === 0 ? (
+              <FileText className="size-3.5" />
+            ) : (
+              <Tag className="size-3.5" />
+            )}
+            {resolvedEmptyTitle}
+          </div>
+          <p className="mt-1 text-[11px] text-muted-foreground">{resolvedEmptyDescription}</p>
+        </div>
+      )}
+    </GraphCanvas>
+  );
+}
+
+export function SourceGraph({ source, refreshKey }: { source: Source; refreshKey: string }) {
+  const { open } = useDetailPanel();
+  const [graph, setGraph] = React.useState<SourceGraphResponse | null>(null);
+  const [error, setError] = React.useState("");
+  const [refreshVersion, setRefreshVersion] = React.useState(0);
+  const [refreshing, setRefreshing] = React.useState(false);
+
+  React.useEffect(() => {
+    let alive = true;
+    setError("");
+    setRefreshing(Boolean(graph));
+    api
+      .getSourceGraph(source.id)
+      .then((response) => {
+        if (!alive) return;
+        setGraph(response);
+      })
+      .catch((reason) => {
+        if (!alive) return;
+        setError(reason instanceof ApiError ? reason.message : "图谱加载失败");
+      })
+      .finally(() => {
+        if (alive) setRefreshing(false);
+      });
+    return () => {
+      alive = false;
+    };
+    // graph 不能加入依赖；刷新时保留旧画面，避免闪烁。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source.id, refreshKey, refreshVersion]);
+
+  if (!graph && !error) {
+    return (
+      <div className="h-full min-h-0 overflow-hidden rounded-lg border bg-card/40 p-4">
+        <div className="flex h-full flex-col gap-3">
+          <Skeleton className="h-9 w-64" />
+          <Skeleton className="min-h-0 flex-1" />
+        </div>
+      </div>
+    );
+  }
+
+  if (!graph && error) {
+    return (
+      <div className="flex h-full min-h-0 flex-col items-center justify-center rounded-lg border border-dashed bg-card/40 px-6 text-center">
+        <Network className="size-8 text-muted-foreground/60" />
+        <p className="mt-3 text-sm font-medium text-foreground">无法加载信息源图谱</p>
+        <p className="mt-1 text-xs text-muted-foreground">{error}</p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-4"
+          onClick={() => setRefreshVersion((value) => value + 1)}
+        >
+          <RefreshCw className="mr-1.5 size-3.5" />
+          重试
+        </Button>
+      </div>
+    );
+  }
+
+  if (!graph) return null;
+
+  return (
+    <EventEntityGraph
+      graph={graph}
+      refreshKey={`${refreshKey}-${refreshVersion}`}
       toolbarActions={
         <Button
           variant="outline"
@@ -580,44 +668,16 @@ export function SourceGraph({ source, refreshKey }: { source: Source; refreshKey
           <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
         </Button>
       }
-      heightClassName="h-full min-h-0"
-      fitPadding={0.18}
-      fitMinZoom={0.12}
-      minZoom={0.08}
-      maxZoom={1.8}
-      elementsSelectable
-      onlyRenderVisibleElements
-      refreshKey={`${slice.relations.length}-${refreshVersion}`}
-      ariaLabel="事件与实体关系图谱"
-      flowClassName="sag-source-graph"
-      onPaneClick={() => setSelection(null)}
-      onNodeClick={(_event, node) => {
-        const data = node.data as GraphNodeData;
-        if (data.kind === "event" && data.event) {
-          setSelection({ kind: "event", value: data.event });
-        } else if (data.kind === "entity" && data.entity) {
-          setSelection({ kind: "entity", value: data.entity });
-        }
+      onOpenEvent={(event) => {
+        if (!event.chunk_id) return;
+        open({
+          kind: "chunk",
+          sourceId: source.id,
+          chunkId: event.chunk_id,
+          heading: event.title,
+          sourceName: source.name,
+        });
       }}
-    >
-      {selection && <SelectionCard selection={selection} source={source} />}
-      {empty && (
-        <div className="pointer-events-none absolute inset-x-12 bottom-5 z-10 mx-auto max-w-md rounded-lg border bg-card/95 px-4 py-3 text-center shadow-soft backdrop-blur-sm">
-          <div className="flex items-center justify-center gap-1.5 text-xs font-medium text-foreground">
-            {graph.documents.length === 0 ? (
-              <FileText className="size-3.5" />
-            ) : (
-              <Tag className="size-3.5" />
-            )}
-            {graph.documents.length === 0 ? "还没有可展示的文档" : "还没有事件—实体关系"}
-          </div>
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            {graph.documents.length === 0
-              ? "添加文档后，图谱会随解析结果自动出现。"
-              : "只有已建立事件关联的实体会显示在这里。"}
-          </p>
-        </div>
-      )}
-    </GraphCanvas>
+    />
   );
 }

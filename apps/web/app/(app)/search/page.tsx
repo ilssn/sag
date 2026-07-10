@@ -10,6 +10,7 @@ import {
   Library,
   List,
   Search as SearchIcon,
+  Sparkles,
   Waypoints,
   X,
 } from "lucide-react";
@@ -23,7 +24,7 @@ import {
   type SearchStrategy,
 } from "@/lib/retrieval-config";
 import { cn } from "@/lib/utils";
-import type { ActivityItem, Section, Source } from "@/lib/types";
+import type { ActivityItem, Entity, SearchEvent, Source, SourceGraphRelation } from "@/lib/types";
 import { useApp } from "@/components/features/app-shell";
 import { useDetailPanel } from "@/components/features/detail-panel";
 import { SearchStrategyControl } from "@/components/features/search-strategy-control";
@@ -162,58 +163,70 @@ function ActivityTimeline({ items }: { items: ActivityItem[] | null }) {
   );
 }
 
-function ResultList({ results }: { results: Section[] }) {
+function ResultList({ results }: { results: SearchEvent[] }) {
   const { open } = useDetailPanel();
   if (results.length === 0) {
     return (
       <EmptyState
         icon={SearchIcon}
         title="没有召回任何内容"
-        description="换个说法试试，或确认文档已处理完成。"
+        description="换个说法试试，或确认文档已完成事件抽取。"
       />
     );
   }
   return (
     <div className="flex flex-col gap-3">
-      {results.map((s, i) => (
+      {results.map((event) => (
         <button
-          key={`${s.chunk_id}-${i}`}
+          key={event.id}
+          type="button"
+          disabled={!event.chunk_id || !event.source_id}
           onClick={() =>
-            s.chunk_id &&
-            s.source_id &&
+            event.chunk_id &&
+            event.source_id &&
             open({
               kind: "chunk",
-              sourceId: s.source_id,
-              chunkId: s.chunk_id,
-              heading: s.heading ?? undefined,
-              sourceName: s.source_name ?? undefined,
+              sourceId: event.source_id,
+              chunkId: event.chunk_id,
+              heading: event.title,
+              sourceName: event.source_name ?? undefined,
             })
           }
-          className={ROW_CARD}
+          className={cn(
+            ROW_CARD,
+            "disabled:cursor-default disabled:hover:bg-card disabled:hover:shadow-soft",
+          )}
         >
-          <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-md bg-muted font-mono text-[11px] font-semibold tabular-nums text-muted-foreground">
-            {i + 1 < 10 ? `0${i + 1}` : i + 1}
+          <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-300">
+            <Sparkles className="size-4" />
           </span>
           <span className="min-w-0 flex-1">
             <span className="flex min-w-0 items-center gap-2">
               <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                {s.heading || "片段"}
+                {event.title || "未命名事件"}
               </span>
+              {event.category && (
+                <span className="hidden shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-300 sm:inline">
+                  {event.category}
+                </span>
+              )}
               <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
-                {s.source_name}
+                {event.source_name}
               </span>
               <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-muted-foreground">
-                {s.score.toFixed(3)}
+                {event.score.toFixed(3)}
               </span>
             </span>
             <span className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-              {s.content}
+              {event.summary || "暂无事件摘要"}
             </span>
           </span>
-          <span className="mt-1 inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground transition-colors group-hover:text-foreground">
-            查看原文
-            <ArrowUpRight className="size-3" />
-          </span>
+          {event.chunk_id && event.source_id && (
+            <span className="mt-1 inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground transition-colors group-hover:text-foreground">
+              查看原文
+              <ArrowUpRight className="size-3" />
+            </span>
+          )}
         </button>
       ))}
     </div>
@@ -232,7 +245,10 @@ function SearchPageInner() {
   const [mentionOpen, setMentionOpen] = React.useState(false);
   const [mentionIndex, setMentionIndex] = React.useState(0);
   const [sources, setSources] = React.useState<Source[]>([]);
-  const [results, setResults] = React.useState<Section[] | null>(null);
+  const [results, setResults] = React.useState<SearchEvent[] | null>(null);
+  const [graphEntities, setGraphEntities] = React.useState<Entity[]>([]);
+  const [graphRelations, setGraphRelations] = React.useState<SourceGraphRelation[]>([]);
+  const [hasMoreResults, setHasMoreResults] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [activity, setActivity] = React.useState<ActivityItem[] | null>(null);
   const [view, setView] = React.useState<"list" | "graph">("list");
@@ -292,6 +308,9 @@ function SearchPageInner() {
       searchRequestIdRef.current += 1;
       setBusy(false);
       setResults(null);
+      setGraphEntities([]);
+      setGraphRelations([]);
+      setHasMoreResults(false);
       setLastQuery("");
       return;
     }
@@ -308,7 +327,10 @@ function SearchPageInner() {
         strategy: requestedStrategy,
       });
       if (requestId !== searchRequestIdRef.current) return;
-      setResults(r.sections);
+      setResults(r.events);
+      setGraphEntities(r.entities);
+      setGraphRelations(r.relations);
+      setHasMoreResults(r.sections.length >= limit);
       setLastQuery(q);
       setLastStrategy(requestedStrategy);
     } catch (err) {
@@ -351,7 +373,14 @@ function SearchPageInner() {
                 "focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/25",
               )}
             >
-              <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <button
+                type="submit"
+                aria-label="搜索"
+                disabled={!query.trim() || busy}
+                className="absolute left-2 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none"
+              >
+                <SearchIcon className="size-4" />
+              </button>
               <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
                 {scoped.map((sc) => (
                   <span
@@ -382,6 +411,9 @@ function SearchPageInner() {
                       searchRequestIdRef.current += 1;
                       setBusy(false);
                       setResults(null);
+                      setGraphEntities([]);
+                      setGraphRelations([]);
+                      setHasMoreResults(false);
                       setLastQuery("");
                     }
                     setMentionOpen(nextMentionOpen);
@@ -428,6 +460,9 @@ function SearchPageInner() {
                     setQuery("");
                     setBusy(false);
                     setResults(null);
+                    setGraphEntities([]);
+                    setGraphRelations([]);
+                    setHasMoreResults(false);
                     setLastQuery("");
                     setMentionOpen(false);
                     inputRef.current?.focus();
@@ -543,11 +578,11 @@ function SearchPageInner() {
             </div>
           </div>
           {view === "graph" && results.length > 0 ? (
-            <SearchGraph query={lastQuery} results={results} />
+            <SearchGraph events={results} entities={graphEntities} relations={graphRelations} />
           ) : (
             <>
               <ResultList results={results} />
-              {results.length >= topK && topK < 48 && (
+              {hasMoreResults && topK < 48 && (
                 <div className="flex justify-center pt-1">
                   <button
                     onClick={() => run(undefined, topK + 12)}
