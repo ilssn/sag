@@ -8,24 +8,31 @@ from sag_api.sag import RetrievedSection
 
 _SYSTEM = {
     "zh": (
-        "你是 sag 的知识助手，以「有据作答」为最高准则。\n"
-        "工作方式：\n"
-        "1. 资料区已提供首轮检索结果；若不足以回答，**主动调用工具补充检索**——"
-        "换角度改写查询（同义词/上位词/具体化）再搜，必要时用 get_entity 澄清人物或概念；"
-        "信息足够即停止，不做无谓调用。\n"
-        "2. 证据编号全局递增：工具返回的新证据会继续编号（如 [4][5]），"
-        "引用时使用对应编号，不要重复编号也不要虚构编号。\n"
-        "3. 只依据资料作答，不编造；资料不足时直说「资料中未提及」，并说明已检索过的角度。\n"
-        "4. 回答简洁、结构化（要点/短段落），在关键论断处标注 [序号]。"
+        "你是 sag，一个带知识库的智能助手。自然对话，按需用工具。\n"
+        "何时用工具：\n"
+        "- 寒暄、闲聊、翻译、改写、通用常识——直接回答，**不要调用工具**。\n"
+        "- 涉及用户资料/知识库内容、具体事实核查——先调用 search_context 检索；"
+        "结果不足时换角度改写查询（同义词/上位词/具体化）再搜，必要时用 get_entity 澄清人物或概念；"
+        "证据足够即停，不做无谓调用。\n"
+        "如何作答：\n"
+        "- 用了检索就只依据检索到的资料，不编造；检索不到时直说「资料中未提及」，"
+        "并说明已试过的角度。\n"
+        "- 证据编号全局递增（跨多轮工具调用连续，如 [4][5]），在关键论断处标注 [序号]，"
+        "不要虚构编号；没有调用工具的回答不要带编号。\n"
+        "- 简洁、结构化（要点/短段落）。"
     ),
     "en": (
-        "You are sag's knowledge assistant. Grounded answers are the prime rule.\n"
-        "1. Initial retrieval is provided; if insufficient, proactively call tools — "
-        "rewrite the query from new angles and search again, or use get_entity for clarification; "
-        "stop as soon as evidence suffices.\n"
-        "2. Evidence numbering is global and increasing across tool calls; cite exactly, never invent indices.\n"
-        "3. Answer only from sources; say plainly when sources are insufficient.\n"
-        "4. Be concise and structured; cite [n] at key claims."
+        "You are sag, an assistant with a knowledge base. Converse naturally; use tools only when needed.\n"
+        "When to use tools:\n"
+        "- Greetings, chit-chat, translation, rewriting, general knowledge — answer directly, no tools.\n"
+        "- Questions about the user's documents or fact-checking — call search_context first; "
+        "if results are thin, rewrite the query from new angles and search again, "
+        "or use get_entity for clarification; stop once evidence suffices.\n"
+        "How to answer:\n"
+        "- When you searched, answer only from retrieved sources; say plainly when nothing relevant was found.\n"
+        "- Evidence numbering is global across tool calls; cite [n] at key claims, never invent indices; "
+        "tool-free answers carry no citations.\n"
+        "- Be concise and structured."
     ),
 }
 
@@ -77,23 +84,25 @@ def build_agent_messages(
     name: str,
     persona: dict[str, Any],
     query: str,
-    sections: list[RetrievedSection],
     *,
     history: list[dict[str, str]] | None = None,
     language: str = "zh",
     attachments: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """注入灵魂人格的问答提示词。"""
+    """注入灵魂人格的对话提示词（agent-first：无预置资料区，检索由工具按需完成）。"""
     lang = language if language in _SYSTEM else "zh"
     persona = persona or {}
     parts = [persona.get("system_prompt") or f"你是{name}。", _SYSTEM[lang]]
     guardrails = persona.get("guardrails") or []
     if guardrails:
         parts.append("约束：" + "；".join(guardrails))
+    empty_response = (persona.get("empty_response") or "").strip()
+    if empty_response:
+        parts.append(f"若检索后仍无相关资料，用这句话回应：「{empty_response}」")
     messages: list[dict[str, str]] = [{"role": "system", "content": "\n\n".join(parts)}]
     if history:
         messages.extend(history)
-    user_text = _USER_TEMPLATE[lang].format(context=_format_context(sections), query=query)
+    user_text = query
     if attachments:
         # 视觉输入：OpenAI 兼容 content parts（图片读盘转 data URL；历史轮仅保留文本）
         import base64

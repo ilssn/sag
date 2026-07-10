@@ -48,7 +48,8 @@ class SearchContextTool(Tool):
         top_k = args.get("top_k") or persona.get("top_k")
         targets = [(s.sag_source_config_id, s) for s in ctx.sources]
         outcome = await ctx.engine_manager.search_many(
-            targets, query, strategy=persona.get("search_strategy"), top_k=top_k
+            # 默认 vector（毫秒级）：多轮改写补召回；multi 图谱增强需人格显式开启
+            targets, query, strategy=persona.get("search_strategy") or "vector", top_k=top_k
         )
         sections = outcome.sections
         source_refs = {s.sag_source_config_id: {"id": s.id, "name": s.name} for s in ctx.sources}

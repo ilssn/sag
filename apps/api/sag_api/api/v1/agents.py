@@ -233,21 +233,14 @@ async def ask(
     thread = await svc.get_thread(session, agent.id, thread_id)
 
     async def event_gen():
-        import time as _time
-
-        # 首轮检索作为第一个可见步骤：SSE 立刻开流，前端时间线实时呈现
-        yield _sse("status", {"phase": "retrieving", "step": 0})
-        yield _sse(
-            "tool", {"name": "search_context", "step": 0, "args": body.query[:60]}
-        )
-        _t0 = _time.perf_counter()
+        # 秒开流：先落库/压缩历史（毫秒级），随即进入 agent 循环——
+        # 是否检索由模型决定（寒暄直答；涉库先调用检索工具），事件实时透传
         try:
             plan = await svc.prepare_ask(
                 session,
                 agent=agent,
                 thread=thread,
                 query=body.query,
-                engine_manager=engine_manager,
                 attachments=body.attachments,
                 source_ids=body.source_ids,
                 llm=llm,
@@ -255,29 +248,14 @@ async def ask(
         except ApiError as e:
             yield _sse("error", {"code": e.code, "message": e.message})
             return
-        seed_ms = int((_time.perf_counter() - _t0) * 1000)
-        yield _sse(
-            "tool_result",
-            {"name": "search_context", "step": 0, "ms": seed_ms, "count": plan.section_count},
-        )
-        if plan.short_circuit is None and not llm.configured:
+        if not llm.configured:
             yield _sse("error", {"code": "configuration_error", "message": "尚未配置 LLM，无法生成回答"})
             return
-        seed_step = {
-            "kind": "tool",
-            "step": 0,
-            "name": "search_context",
-            "args": body.query[:60],
-            "ms": seed_ms,
-            "count": plan.section_count,
-        }
 
         try:
             async for name, payload in agent_service.generate_stream(
                 SessionLocal,
                 plan=plan,
-                agentic=body.mode != "fast",
-                preface_trace=[seed_step],
                 agent=agent,
                 thread_id=thread.id,
                 engine_manager=engine_manager,

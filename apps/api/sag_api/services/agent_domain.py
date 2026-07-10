@@ -11,9 +11,8 @@ from sag_api.core.config import settings
 from sag_api.core.errors import ConflictError, NotFoundError, ValidationError
 from sag_api.db.models import Agent, AgentBinding, Message, Source, Thread
 from sag_api.enums import BindingTargetType, MessageRole
-from sag_api.generation import build_agent_messages, build_citations, build_prompt_preview
+from sag_api.generation import build_agent_messages, build_prompt_preview
 from sag_api.generation.prompt import estimate_tokens
-from sag_api.sag import EngineManager
 
 _DEFAULT_TITLES = {"新会话", "New chat"}
 
@@ -289,62 +288,35 @@ async def compress_history(
 # ── 问答计划 ─────────────────────────────────────────────────────────
 @dataclass
 class AskPlan:
-    """一次问答的检索与提示词计划。"""
+    """一次问答的提示词计划（agent-first：检索由循环内工具按需完成，不预置资料区）。"""
 
     messages: list[dict[str, str]] = field(default_factory=list)
     citations: list[dict] = field(default_factory=list)
-    section_count: int = 0
     prompt_preview: str = ""
-    short_circuit: str | None = None  # 检索空 + 配置了兜底话术时跳过 LLM
+    source_ids: list[str] | None = None  # @范围：限定循环内检索工具可见的信源
 
 
-async def build_ask_context(
-    session: AsyncSession,
+def build_ask_context(
     *,
     agent: Agent,
     query: str,
-    engine_manager: EngineManager,
     history: list[dict[str, str]] | None = None,
     attachments: list[dict] | None = None,
     source_ids: list[str] | None = None,
 ) -> AskPlan:
-    """跨绑定信源 fan-out 检索并组装带系统提示的消息（不落库，对话与 OpenAI 端点复用）。"""
-    persona = agent.persona or {}
-    sources = await resolve_sources(session, agent)
-    if source_ids:
-        wanted = set(source_ids)
-        sources = [s for s in sources if s.id in wanted]
-    source_refs = {s.sag_source_config_id: {"id": s.id, "name": s.name} for s in sources}
-    if sources:
-        targets = [(s.sag_source_config_id, s) for s in sources]
-        outcome = await engine_manager.search_many(
-            targets,
-            query,
-            # 种子检索用 vector（毫秒级）；图谱增强的价值经 agentic 多轮循环兑现
-            strategy=persona.get("search_strategy") or "vector",
-            top_k=persona.get("top_k"),
-        )
-        sections = outcome.sections
-    else:
-        sections = []
-
-    citations = build_citations(sections, source_refs)
+    """组装带系统提示的消息（不落库，对话与 OpenAI 端点复用）。是否检索由模型经工具决定。"""
     messages = build_agent_messages(
         agent.name,
-        persona,
+        agent.persona or {},
         query,
-        sections,
         history=history,
         language=settings.sag_language,
         attachments=attachments,
     )
-    empty_response = (persona.get("empty_response") or "").strip()
     return AskPlan(
         messages=messages,
-        citations=citations,
-        section_count=len(sections),
         prompt_preview=build_prompt_preview(messages),
-        short_circuit=empty_response if (not sections and empty_response) else None,
+        source_ids=source_ids or None,
     )
 
 
@@ -354,7 +326,6 @@ async def prepare_ask(
     agent: Agent,
     thread: Thread,
     query: str,
-    engine_manager: EngineManager,
     attachments: list[str] | None = None,
     source_ids: list[str] | None = None,
     llm=None,
@@ -386,15 +357,13 @@ async def prepare_ask(
     await session.refresh(user_msg)
 
     history = await _history(session, thread.id, exclude_id=user_msg.id)
-    # 历史预算 = 上下文窗口的 40%（其余留给资料区/工具轮/回答）
+    # 历史预算 = 上下文窗口的 40%（其余留给工具轮/回答）
     history = await compress_history(
         history, llm=llm, budget_tokens=int(settings.llm_context_window * 0.4)
     )
-    return await build_ask_context(
-        session,
+    return build_ask_context(
         agent=agent,
         query=query,
-        engine_manager=engine_manager,
         history=history,
         attachments=resolved or None,
         source_ids=source_ids,

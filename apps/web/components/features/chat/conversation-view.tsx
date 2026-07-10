@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import * as React from "react";
-import { ArrowUp, Brain, Check, ChevronDown, Copy, FileUp, ImagePlus, Library, Loader2, Plus, RotateCcw, Square, Trash2, X, Zap } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, Copy, FileUp, ImagePlus, Library, Loader2, Plus, RotateCcw, Square, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import type { AskHandlers } from "@/lib/sse";
@@ -52,7 +52,6 @@ type Streamer = (
   signal: AbortSignal,
   attachments?: string[],
   sourceIds?: string[],
-  mode?: "agentic" | "fast",
 ) => Promise<void>;
 
 function fmtMs(ms: number): string {
@@ -304,7 +303,7 @@ const MessageItem = React.memo(
           {thinking && (!steps || steps.length === 0) ? (
             <div className="flex items-center gap-1.5 py-1 text-sm">
               <span className="size-1.5 animate-blink rounded-full bg-primary" />
-              <span className="text-shimmer">检索并生成中…</span>
+              <span className="text-shimmer">正在思考…</span>
             </div>
           ) : thinking ? null : streaming ? (
             <div className="answer-prose whitespace-pre-wrap text-foreground">
@@ -426,14 +425,6 @@ export function ConversationView({
     },
     [],
   );
-  const [chatMode, setChatMode] = React.useState<"agentic" | "fast">("agentic");
-  React.useEffect(() => {
-    if (window.localStorage.getItem("sag:chat-mode") === "fast") setChatMode("fast");
-  }, []);
-  const changeChatMode = (v: "agentic" | "fast") => {
-    setChatMode(v);
-    window.localStorage.setItem("sag:chat-mode", v);
-  };
   const docRef = React.useRef<HTMLInputElement>(null);
   const { capabilities: caps } = useApp();
   const fileRef = React.useRef<HTMLInputElement>(null);
@@ -786,7 +777,6 @@ export function ConversationView({
         ctrl.signal,
         attachmentIds.length ? attachmentIds : undefined,
         scoped.length ? scoped.map((s) => s.id) : undefined,
-        chatMode,
       );
       streamOk = true;
     } catch {
@@ -1075,32 +1065,6 @@ export function ConversationView({
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-8 rounded-full text-muted-foreground hover:text-foreground"
-                    aria-label={chatMode === "agentic" ? "深度模式（点击切换）" : "快速模式（点击切换）"}
-                    title={chatMode === "agentic" ? "深度：多轮工具推理" : "快速：单轮直答"}
-                  >
-                    {chatMode === "agentic" ? <Brain className="size-4" /> : <Zap className="size-4" />}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent side="top" align="start" className="min-w-44">
-                  <DropdownMenuItem onClick={() => changeChatMode("agentic")}>
-                    <Brain className="size-4" />
-                    <span className="flex-1">深度 · 多轮推理</span>
-                    {chatMode === "agentic" && <Check className="size-3.5" />}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => changeChatMode("fast")}>
-                    <Zap className="size-4" />
-                    <span className="flex-1">快速 · 单轮直答</span>
-                    {chatMode === "fast" && <Check className="size-3.5" />}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="min-w-0 max-w-[42vw] truncate px-1 text-xs text-muted-foreground sm:max-w-56">

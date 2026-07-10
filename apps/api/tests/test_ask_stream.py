@@ -74,7 +74,7 @@ async def test_ask_stream_agentic_events_and_trace():
             ask = await c.post(
                 f"/api/v1/agents/{a['id']}/threads/{th['id']}/ask",
                 headers=H,
-                json={"query": "深度测试", "mode": "agentic"},
+                json={"query": "深度测试"},
             )
             body = ask.text
             assert ask.status_code == 200
@@ -85,8 +85,8 @@ async def test_ask_stream_agentic_events_and_trace():
             ).json()
             asst = [m for m in msgs if m["role"] == "assistant"][-1]
             kinds = [s["kind"] for s in asst["steps"]]
-            assert "tool" in kinds and "thinking" in kinds   # 种子步 + 循环轨迹已持久化
-            assert asst["steps"][0]["step"] == 0              # 首轮检索 step0
+            assert "tool" in kinds and "thinking" in kinds and "answer" in kinds  # 全程轨迹落库
+            assert asst["steps"][0] == {**asst["steps"][0], "kind": "thinking", "step": 1}  # 无预置检索
 
 
 @pytest.mark.asyncio
@@ -102,7 +102,7 @@ async def test_ask_stream_degrades_when_gateway_rejects_tools():
             ask = await c.post(
                 f"/api/v1/agents/{a['id']}/threads/{th['id']}/ask",
                 headers=H,
-                json={"query": "容错", "mode": "agentic"},
+                json={"query": "容错"},
             )
             body = ask.text
             assert "event: token" in body and "event: done" in body
@@ -129,7 +129,7 @@ async def test_ask_stream_exhausts_max_steps_then_answers(monkeypatch):
             ask = await c.post(
                 f"/api/v1/agents/{a['id']}/threads/{th['id']}/ask",
                 headers=H,
-                json={"query": "打满轮次", "mode": "agentic"},
+                json={"query": "打满轮次"},
             )
             body = ask.text
             assert llm.calls == 2                                   # 决策恰好打满上限，未越界
@@ -142,3 +142,37 @@ async def test_ask_stream_exhausts_max_steps_then_answers(monkeypatch):
             assert asst["content"] == "答案"
             kinds = [s["kind"] for s in asst["steps"]]
             assert kinds.count("thinking") == 2 and "answer" in kinds  # 轨迹完整：2 轮思考 + 收尾
+
+
+@pytest.mark.asyncio
+async def test_ask_stream_greeting_skips_tools():
+    """agent-first：模型判定无需检索（寒暄）→ 零工具调用直答，不再「打个招呼也 RAG」。"""
+    from sag_api.main import app
+
+    class DirectLLM(AgenticLLM):
+        async def chat(self, messages, tools=None):
+            self.calls += 1
+            return ChatTurn(content="你好呀", tool_calls=[])
+
+    transport = httpx.ASGITransport(app=app)
+    async with app.router.lifespan_context(app):
+        llm = DirectLLM()
+        app.state.llm = llm
+        async with httpx.AsyncClient(transport=transport, base_url="http://t", timeout=60) as c:
+            H, a, th = await _setup(c)
+            ask = await c.post(
+                f"/api/v1/agents/{a['id']}/threads/{th['id']}/ask",
+                headers=H,
+                json={"query": "你好"},
+            )
+            body = ask.text
+            assert llm.calls == 1                       # 一轮决策即收
+            assert "event: tool" not in body            # 未触发任何检索
+            assert "event: token" in body and "event: done" in body
+            msgs = (
+                await c.get(f"/api/v1/agents/{a['id']}/threads/{th['id']}/messages", headers=H)
+            ).json()
+            asst = [m for m in msgs if m["role"] == "assistant"][-1]
+            assert asst["content"] == "答案"
+            kinds = [x["kind"] for x in asst["steps"]]
+            assert "tool" not in kinds and kinds.count("thinking") == 1
