@@ -40,4 +40,4 @@ class ToolRegistry:
 registry = ToolRegistry()
 registry.register(SearchContextTool())
 registry.register(GetEntityTool())
-# 第二阶段：MCP 适配的远端工具在运行时按 soul 绑定动态注入
+# MCP 远端工具在运行时按 Agent 绑定动态注入。

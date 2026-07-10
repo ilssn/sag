@@ -2,6 +2,8 @@
 
 import * as React from "react";
 
+import type { MessageStep } from "./types";
+
 /**
  * 流式会话镜像 —— 模块级单例。
  * 网络请求本就不随组件卸载中断（无 unmount abort，答案始终完整落库）；
@@ -10,19 +12,15 @@ import * as React from "react";
  * 2) 侧栏会话项能显示生成中角标。
  */
 
-export interface LiveStep {
-  kind: "thinking" | "tool" | "answer";
-  step: number;
-  name?: string;
-  args?: string;
-  status: "active" | "done";
-  ms?: number;
-  count?: number;
+export interface LiveStep extends MessageStep {
+  id?: string;
+  status: "active" | "done" | "error";
   startedAt: number;
 }
 
 export interface ChatLiveState {
   threadId: string | null;
+  runId: string | null;
   streaming: boolean;
   /** 已累计的助手文本（adopt 时作为初始内容） */
   content: string;
@@ -34,6 +32,7 @@ export interface ChatLiveState {
 
 let state: ChatLiveState = {
   threadId: null,
+  runId: null,
   streaming: false,
   content: "",
   citations: [],
@@ -42,8 +41,27 @@ let state: ChatLiveState = {
 };
 
 const subs = new Set<() => void>();
+const LIVE_EMIT_INTERVAL_MS = 50;
+let emitTimer: ReturnType<typeof setTimeout> | null = null;
+
 function emit() {
   for (const fn of subs) fn();
+}
+
+function emitNow() {
+  if (emitTimer !== null) {
+    clearTimeout(emitTimer);
+    emitTimer = null;
+  }
+  emit();
+}
+
+function scheduleEmit() {
+  if (emitTimer !== null) return;
+  emitTimer = setTimeout(() => {
+    emitTimer = null;
+    emit();
+  }, LIVE_EMIT_INTERVAL_MS);
 }
 
 export const chatLive = {
@@ -55,37 +73,43 @@ export const chatLive = {
   start(threadId: string) {
     state = {
       threadId,
+      runId: null,
       streaming: true,
       content: "",
       citations: [],
       steps: [],
       session: state.session + 1,
     };
-    emit();
+    emitNow();
     return state.session;
   },
   setSteps(steps: LiveStep[], session = state.session) {
     if (session !== state.session) return;
     state = { ...state, steps };
-    emit();
+    emitNow();
+  },
+  setRunId(runId: string, session = state.session) {
+    if (session !== state.session || !state.streaming) return;
+    state = { ...state, runId };
+    emitNow();
   },
   token(text: string, session = state.session) {
     if (session !== state.session) return;
     if (!state.streaming) return;
     state = { ...state, content: state.content + text };
-    emit();
+    scheduleEmit();
   },
   meta(citations: unknown[], session = state.session) {
     if (session !== state.session) return;
     if (!state.streaming) return;
     state = { ...state, citations };
-    emit();
+    emitNow();
   },
   end(session = state.session) {
     if (session !== state.session) return;
     if (!state.streaming && state.threadId === null) return;
     state = { ...state, streaming: false };
-    emit();
+    emitNow();
   },
 };
 

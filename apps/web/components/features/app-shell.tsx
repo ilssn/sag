@@ -7,6 +7,7 @@ import { motion } from "motion/react";
 
 import { api, ApiError } from "@/lib/api";
 import { clearToken, getToken } from "@/lib/auth";
+import { PetAgent } from "@/lib/pet-agent";
 import type { Agent, Capabilities, Thread, User } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { AppSidebar } from "@/components/features/app-sidebar";
@@ -19,6 +20,7 @@ import {
   useIsLgUp,
 } from "@/components/features/detail-panel";
 import { Pet, usePetEnabled } from "@/components/features/pet";
+import { SpaceBackdrop } from "@/components/features/space-backdrop";
 import { SiteHeader } from "@/components/features/site-header";
 import {
   ResizableHandle,
@@ -70,6 +72,8 @@ interface AppCtx {
   capabilities: Capabilities | null;
   /** 默认 agent（客户端主对话入口） */
   agent: Agent | null;
+  /** 可编排的桌面角色，与业务 Agent 分离。 */
+  petAgent: PetAgent | null;
   threads: Thread[];
   refreshThreads: () => Promise<void>;
   windowMode: WindowMode;
@@ -82,6 +86,7 @@ const AppContext = React.createContext<AppCtx>({
   user: null,
   capabilities: null,
   agent: null,
+  petAgent: null,
   threads: [],
   refreshThreads: async () => {},
   windowMode: "full",
@@ -94,10 +99,17 @@ export function useApp() {
   return React.useContext(AppContext);
 }
 
+export function usePetAgent() {
+  const petAgent = useApp().petAgent;
+  if (!petAgent) throw new Error("usePetAgent must be used inside AppShell");
+  return petAgent;
+}
+
 function FullLoader() {
   return (
-    <div className="grid h-screen place-items-center bg-background">
-      <div className="flex flex-col items-center gap-3">
+    <div className="bg-space-field grid h-screen place-items-center">
+      <SpaceBackdrop />
+      <div className="relative z-10 flex flex-col items-center gap-3">
         <span className="grid size-9 animate-pulse place-items-center rounded-[9px] bg-gradient-to-br from-primary to-primary/85 text-base font-bold text-primary-foreground">
           s
         </span>
@@ -109,6 +121,10 @@ function FullLoader() {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const petAgent = React.useMemo(
+    () => new PetAgent({ name: "sag", avatar: "s", serialNumber: 1, size: 1 }),
+    [],
+  );
   const [user, setUser] = React.useState<User | null>(null);
   const [capabilities, setCapabilities] = React.useState<Capabilities | null>(null);
   const [agent, setAgent] = React.useState<Agent | null>(null);
@@ -287,6 +303,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         user,
         capabilities,
         agent,
+        petAgent,
         threads,
         refreshThreads,
         windowMode,
@@ -299,9 +316,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div
           className={cn(
             windowed &&
-              "relative grid min-h-svh place-items-center bg-muted/40 bg-dot-grid p-4 md:p-8",
+              "bg-space-field bg-space-field--deep relative grid min-h-svh place-items-center overflow-hidden p-4 md:p-8",
           )}
         >
+          {windowed && <SpaceBackdrop />}
           <motion.div
             key={windowed ? "window" : "full"}
             initial={{ opacity: 0.6, scale: 0.985 }}
@@ -316,9 +334,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 : undefined
             }
             className={cn(
+              "relative z-10",
               windowed
                 ? // transform 使内部 fixed 的 Sidebar 以本窗体为 containing block（Mac 窗口形态）
-                  "relative max-h-[calc(100svh-2rem)] max-w-[calc(100vw-2rem)] transform-gpu overflow-hidden rounded-xl border bg-background shadow-lift"
+                  "max-h-[calc(100svh-2rem)] max-w-[calc(100vw-2rem)] transform-gpu overflow-hidden rounded-xl border bg-background shadow-lift"
                 : "min-h-svh",
             )}
           >
@@ -346,7 +365,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             )}
           </motion.div>
         </div>
-        {petOn && <Pet />}
+        <Pet character={petAgent} syncIdentity visible={petOn} />
       </DetailPanelProvider>
     </AppContext.Provider>
   );

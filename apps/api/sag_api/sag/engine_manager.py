@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -186,7 +187,7 @@ class EngineManager:
         strategy: str | None = None,
         top_k: int | None = None,
     ) -> SearchOutcome:
-        """跨多个信源并发检索 → 去重/合并/排序。单源失败不影响整体（灵魂 fan-out）。"""
+        """跨多个信源并发检索 → 去重/合并/排序；单源失败不影响 Agent 整体结果。"""
         strategy = strategy or self._settings.search_strategy
         top_k = top_k or self._settings.search_top_k
         per_source_k = max(top_k, 4)
@@ -352,13 +353,46 @@ class EngineManager:
         out = []
         for cid, heading, content in rows:
             text = content or ""
-            i = text.lower().find(pattern.lower())
-            lo = max(0, i - 80)
+            lowered = text.lower()
+            needle = pattern.lower()
+            positions: list[int] = []
+            start = 0
+            while (position := lowered.find(needle, start)) >= 0:
+                positions.append(position)
+                start = position + max(1, len(needle))
+
+            def quality(position: int, content: str = text) -> int:
+                window = content[max(0, position - 40) : position + 700]
+                cjk = sum("\u3400" <= char <= "\u9fff" for char in window)
+                return cjk - window.count("http") * 40 - window.count("](") * 15
+
+            best = max(positions, key=quality) if positions else 0
+            prefix_start = max(0, best - 500)
+            prefix = text[prefix_start:best]
+            dates = list(
+                re.finditer(
+                    r"20\d{2}(?:年\d{1,2}月\d{1,2}日|[-/]\d{1,2}[-/]\d{1,2})",
+                    prefix,
+                )
+            )
+            lo = prefix_start + dates[-1].start() if dates else max(0, best - 80)
+            snippet = text[lo : best + 700]
+            snippet = re.sub(r"!\[([^]]*)\]\([^)]*\)", r"\1", snippet)
+            snippet = re.sub(r"\[([^]]+)\]\([^)]*\)", r"\1", snippet)
+            snippet = re.sub(r"[ \t]+", " ", snippet).strip()
+            display_heading = (heading or "").strip()
+            for line in text.splitlines():
+                candidate = re.sub(r"!\[[^]]*\]\([^)]*\)", "", line)
+                candidate = re.sub(r"\[([^]]+)\]\([^)]*\)", r"\1", candidate)
+                candidate = candidate.lstrip("#* -").strip()
+                if needle in candidate.lower() and 2 <= len(candidate) <= 160:
+                    display_heading = candidate
+                    break
             out.append(
                 {
                     "chunk_id": cid,
-                    "heading": (heading or "").strip(),
-                    "snippet": text[lo : lo + 240].strip(),
+                    "heading": display_heading,
+                    "snippet": snippet,
                 }
             )
         return out

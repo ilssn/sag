@@ -22,6 +22,9 @@ async def test_agents_flow_offline():
             H = {"Authorization": f"Bearer {tok}"}
 
             src = (await c.post("/api/v1/sources", headers=H, json={"name": "手册"})).json()
+            scoped_src = (
+                await c.post("/api/v1/sources", headers=H, json={"name": "临时范围"})
+            ).json()
 
             # 建 agent
             r = await c.post(
@@ -55,14 +58,17 @@ async def test_agents_flow_offline():
             async with SessionLocal() as s:
                 agent_obj = await s.get(Agent, aid)
                 resolved = await resolve_sources(s, agent_obj)
+                explicitly_scoped = await resolve_sources(s, agent_obj, [scoped_src["id"]])
             assert [x.id for x in resolved] == [src["id"]]
+            assert [x.id for x in explicitly_scoped] == [scoped_src["id"]]
 
-            # 会话 + 离线 ask → 秒开流：200 + SSE error(configuration_error)
+            # 启动 run 前的配置错误使用标准 HTTP 错误，不伪装成 SSE run。
             th = (await c.post(f"/api/v1/agents/{aid}/threads", headers=H, json={})).json()
             ask = await c.post(
                 f"/api/v1/agents/{aid}/threads/{th['id']}/ask", headers=H, json={"query": "你好"}
             )
-            assert ask.status_code == 200 and "configuration_error" in ask.text
+            assert ask.status_code == 400
+            assert ask.json()["error"]["code"] == "configuration_error"
 
             # 列表 + 删除（共享测试库 → 用存在性断言而非精确计数）
             assert any(a["id"] == aid for a in (await c.get("/api/v1/agents", headers=H)).json())

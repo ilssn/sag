@@ -117,6 +117,7 @@ apps/web   Next.js 15 + shadcn/ui（中性主题，亮暗双色，⌘K 全局搜
 apps/api   FastAPI · services 纯领域 · sag/ 唯一引擎适配层 · jobs 进程内队列（退避重试）
            tools/ Agent 工具层（内置检索/实体 + MCP 适配）· mcp/ 信源 MCP server + HTTP 挂载
            · 引擎槽 LRU · 就绪/存活探针 · OpenAI 兼容端点
+apps/api/sag_agent  独立 Agent Core · 生命周期 · 版本化事件 · 工具/审批/取消 · RunStore
 zleap-sag  解析 · 分块 · 向量 · 事件—实体图谱 · 检索（只做检索，不做生成）
 ```
 
@@ -131,7 +132,7 @@ Binding { agent_id, target_type(source|mcp_server), target_id, config }         
 Thread / Message { … 带 citations }
 ```
 
-深入阅读 → [docs/architecture.md](docs/architecture.md) · [Agent · MCP · 图谱](docs/architecture/agent-mcp-graph.md)
+深入阅读 → [docs/architecture.md](docs/architecture.md) · [Agent Runtime](docs/architecture/agent-runtime.md) · [Agent · MCP · 图谱](docs/architecture/agent-mcp-graph.md)
 
 ## 工程规范（本项目同时是一份最佳实践）
 

@@ -60,7 +60,7 @@ POST /v1/sources/{id}/ingest       # 通用文本/文件条目
 | `document` | 上传 / 抓取 | 交给 SAG 的 markdown/text 切块 |
 | `web` | pull discover+fetch → markdown | 同 document |
 | `message` | push /messages → 缓冲成块 | 按 thread + 时间窗聚合，保留 author/ts |
-| `conversation` | 灵魂对话自动写入 | 一轮问答为一条；保留引用 |
+| `conversation` | Agent 对话自动写入 | 一轮问答为一条；保留引用 |
 | `audio` | 上传/流 → 转写(ASR) → 文本 | 转写后 document 化；保留时间戳/说话人 |
 
 > ASR 转写作为一个**前置处理器**（可插拔：本地 whisper / 云 ASR），产出带说话人和时间戳的文本，再走通用管线。

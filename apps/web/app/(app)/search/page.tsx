@@ -16,12 +16,21 @@ import {
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
+import {
+  DEFAULT_SEARCH_STRATEGY,
+  getSearchStrategy,
+  isSearchStrategy,
+  type SearchStrategy,
+} from "@/lib/retrieval-config";
 import { cn } from "@/lib/utils";
 import type { ActivityItem, Section, Source } from "@/lib/types";
+import { useApp } from "@/components/features/app-shell";
 import { useDetailPanel } from "@/components/features/detail-panel";
+import { SearchStrategyControl } from "@/components/features/search-strategy-control";
 import { DocStatusBadge } from "@/components/features/status-badge";
 import { EmptyState } from "@/components/features/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Spinner } from "@/components/ui/spinner";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 // 图谱视图较重，按需加载（列表为默认视图）
@@ -214,6 +223,10 @@ function ResultList({ results }: { results: Section[] }) {
 function SearchPageInner() {
   const params = useSearchParams();
   const router = useRouter();
+  const { capabilities } = useApp();
+  const defaultStrategy = isSearchStrategy(capabilities?.search_strategy)
+    ? capabilities.search_strategy
+    : DEFAULT_SEARCH_STRATEGY;
   const [query, setQuery] = React.useState("");
   const [scoped, setScoped] = React.useState<{ id: string; name: string }[]>([]);
   const [mentionOpen, setMentionOpen] = React.useState(false);
@@ -224,8 +237,11 @@ function SearchPageInner() {
   const [activity, setActivity] = React.useState<ActivityItem[] | null>(null);
   const [view, setView] = React.useState<"list" | "graph">("list");
   const [lastQuery, setLastQuery] = React.useState("");
+  const [strategy, setStrategy] = React.useState<SearchStrategy>(defaultStrategy);
+  const [lastStrategy, setLastStrategy] = React.useState<SearchStrategy>(defaultStrategy);
   const [topK, setTopK] = React.useState(12);
   const inputRef = React.useRef<HTMLInputElement>(null);
+  const searchRequestIdRef = React.useRef(0);
 
   const preset = params.get("source");
   React.useEffect(() => {
@@ -270,12 +286,16 @@ function SearchPageInner() {
     requestAnimationFrame(() => inputRef.current?.focus());
   }, []);
 
-  async function searchFor(raw: string, k?: number) {
+  async function searchFor(raw: string, k?: number, requestedStrategy: SearchStrategy = strategy) {
     const q = raw.trim();
     if (!q) {
+      searchRequestIdRef.current += 1;
+      setBusy(false);
       setResults(null);
+      setLastQuery("");
       return;
     }
+    const requestId = ++searchRequestIdRef.current;
     const limit = k ?? 12;
     setTopK(limit);
     setBusy(true);
@@ -285,15 +305,26 @@ function SearchPageInner() {
         query: q,
         source_ids: scoped.length ? scoped.map((s) => s.id) : undefined,
         top_k: limit,
-        // 搜索页用纯向量（毫秒级）；multi=图谱增强需 LLM 抽实体（秒级），留给对话检索
-        strategy: "vector",
+        strategy: requestedStrategy,
       });
+      if (requestId !== searchRequestIdRef.current) return;
       setResults(r.sections);
       setLastQuery(q);
+      setLastStrategy(requestedStrategy);
     } catch (err) {
+      if (requestId !== searchRequestIdRef.current) return;
       toast.error(err instanceof ApiError ? err.message : "检索失败");
     } finally {
-      setBusy(false);
+      if (requestId === searchRequestIdRef.current) setBusy(false);
+    }
+  }
+
+  function changeStrategy(value: SearchStrategy) {
+    if (value === strategy) return;
+    setStrategy(value);
+    const activeQuery = query.trim() || lastQuery;
+    if ((results !== null || busy) && activeQuery) {
+      void searchFor(activeQuery, topK, value);
     }
   }
 
@@ -304,8 +335,9 @@ function SearchPageInner() {
 
   return (
     <div className="flex w-full flex-col gap-6 p-4 md:p-6">
-      <form onSubmit={run} className="mx-auto flex w-full max-w-3xl items-center gap-2">
-        <div className="relative flex-1">
+      <form onSubmit={run} className="mx-auto flex w-full max-w-3xl flex-col gap-2">
+        <div className="flex w-full items-center gap-2">
+          <div className="relative flex-1">
           <div
             className={cn(
               "flex min-h-11 flex-wrap items-center gap-1 rounded-lg border border-input bg-card py-1.5 pl-10 pr-9 shadow-soft transition-[border-color,box-shadow]",
@@ -338,7 +370,12 @@ function SearchPageInner() {
                 const v = e.target.value;
                 const nextMentionOpen = mentionTerm(v) !== null;
                 setQuery(v);
-                if (!v.trim() && scoped.length === 0) setResults(null);
+                if (!v.trim()) {
+                  searchRequestIdRef.current += 1;
+                  setBusy(false);
+                  setResults(null);
+                  setLastQuery("");
+                }
                 setMentionOpen(nextMentionOpen);
               }}
               onKeyDown={(e) => {
@@ -379,8 +416,11 @@ function SearchPageInner() {
             <button
               type="button"
               onClick={() => {
+                searchRequestIdRef.current += 1;
                 setQuery("");
-                if (scoped.length === 0) setResults(null);
+                setBusy(false);
+                setResults(null);
+                setLastQuery("");
                 setMentionOpen(false);
                 inputRef.current?.focus();
               }}
@@ -428,14 +468,21 @@ function SearchPageInner() {
               </div>
             </div>
           )}
+          </div>
+          <button
+            type="button"
+            onClick={() => (window.history.length > 1 ? router.back() : router.push("/chat"))}
+            className="shrink-0 rounded-md px-2 py-1.5 text-sm text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            取消
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => (window.history.length > 1 ? router.back() : router.push("/chat"))}
-          className="shrink-0 rounded-md px-2 py-1.5 text-sm text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          取消
-        </button>
+
+        <SearchStrategyControl
+          value={strategy}
+          defaultValue={defaultStrategy}
+          onValueChange={changeStrategy}
+        />
       </form>
 
       {busy && results === null ? (
@@ -452,13 +499,21 @@ function SearchPageInner() {
           <div className="flex items-center justify-between gap-3 px-1">
             <h2 className="flex items-center gap-2 text-sm font-medium">
               检索结果
-              <span className="rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground">
-                相关度排序
+              <span
+                className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground"
+                aria-live="polite"
+              >
+                {busy && <Spinner className="size-3" />}
+                {getSearchStrategy(busy ? strategy : lastStrategy).label}
               </span>
             </h2>
             <div className="flex items-center gap-3">
               <span className="hidden text-xs text-muted-foreground sm:inline">
-                召回 {results.length} 条 · 点击查看原文
+                {busy ? (
+                  "正在更新结果…"
+                ) : (
+                  `召回 ${results.length} 条 · 点击查看原文`
+                )}
               </span>
               <ToggleGroup
                 type="single"

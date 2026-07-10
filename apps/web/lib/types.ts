@@ -1,3 +1,5 @@
+import type { SearchStrategy } from "./retrieval-config";
+
 export interface User {
   id: string;
   email: string;
@@ -112,7 +114,7 @@ export interface ModelConfig {
   embedding_base_url: string | null;
   embedding_dimensions: number | null;
   embedding_api_key_set: boolean;
-  search_strategy: "multi" | "vector" | "atomic";
+  search_strategy: SearchStrategy;
   search_top_k: number;
   sag_language: "zh" | "en";
 }
@@ -128,7 +130,7 @@ export type ModelConfigPatch = Partial<{
   embedding_base_url: string;
   embedding_api_key: string;
   embedding_dimensions: number | null;
-  search_strategy: "multi" | "vector" | "atomic";
+  search_strategy: SearchStrategy;
   search_top_k: number;
   sag_language: "zh" | "en";
 }>;
@@ -154,9 +156,26 @@ export interface MessageStep {
   kind: "thinking" | "tool" | "answer";
   step: number;
   name?: string;
+  label?: string;
   args?: string;
+  arguments?: Record<string, unknown>;
+  details?: {
+    count?: number;
+    sources?: { id?: string; name?: string }[];
+    matches?: {
+      n?: number;
+      chunk_id?: string | null;
+      heading?: string;
+      snippet?: string;
+      score?: number;
+      source_id?: string | null;
+      source_name?: string;
+    }[];
+    output_preview?: string;
+  };
   ms?: number;
   count?: number;
+  error?: string;
 }
 
 export interface MessageAttachment {
@@ -207,7 +226,7 @@ export interface Capabilities {
   embedding_model: string;
   vector_provider: string;
   language: string;
-  search_strategy: string;
+  search_strategy: SearchStrategy;
   max_upload_mb: number;
   allowed_upload_exts?: string[];
 }

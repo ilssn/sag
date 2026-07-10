@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from sag_api.enums import BindingTargetType, MessageRole
 
@@ -81,8 +81,18 @@ class MessageOut(BaseModel):
 
 
 class AskRequest(BaseModel):
-    query: str = Field(min_length=1, max_length=4000)
+    query: str = Field(default="", max_length=4000)
     # 图片附件 id 列表（≤4，经 POST /attachments 上传）
     attachments: list[str] = Field(default_factory=list, max_length=4)
     # @知识库 范围限定：仅在这些信源内检索（空=默认全部）
     source_ids: list[str] = Field(default_factory=list, max_length=8)
+
+    @model_validator(mode="after")
+    def require_text_or_attachment(self):
+        if not self.query.strip() and not self.attachments:
+            raise ValueError("问题或图片至少提供一项")
+        return self
+
+
+class ToolRejection(BaseModel):
+    reason: str = Field(default="用户拒绝执行", max_length=500)

@@ -1,21 +1,30 @@
-"""Agent 循环 —— 把「问答」从 RAG 单发升级为有界工具调用循环。
-
-设计要点（对齐旧版 SAG 的解耦思路，但用原生 function-calling）：
-- 检索不再是写死的必经步骤，而是工具（内置 `search_context` 或经 MCP 的 `search`）。
-  默认（未开启额外工具）行为：meta → 流式 token → done。额外工具在 `persona.tools`
-  开启时进入循环；最终答案始终走 `llm.stream()`，工具「决策」步走 `llm.chat(tools=)`。
-"""
+"""Host adapters connecting SAG Agent Core to the knowledge application."""
 
 from __future__ import annotations
 
-import json
-import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
+from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from sag_api.core.errors import ApiError
-from sag_api.core.logging import get_logger
+from sag_agent import (
+    Agent as RuntimeAgent,
+)
+from sag_agent import (
+    AgentEvent as RuntimeEvent,
+)
+from sag_agent import (
+    AgentRuntime,
+    AgentTool,
+    EventType,
+    ToolExecutionMode,
+    ToolRisk,
+    ToolSpec,
+)
+from sag_agent import (
+    ToolResult as RuntimeToolResult,
+)
 from sag_api.generation import LLMClient, build_prompt_preview
 from sag_api.sag import EngineManager
 from sag_api.services.agent_domain import (
@@ -24,148 +33,99 @@ from sag_api.services.agent_domain import (
     resolve_mcp_specs,
     resolve_sources,
 )
-from sag_api.tools import ToolContext, ToolRegistry
+from sag_api.tools import ToolContext as HostToolContext
+from sag_api.tools import ToolRegistry
 from sag_api.tools.mcp import open_agent_mcp_tools
 
-log = get_logger("agent")
-
-# 兜底步数（正常取 settings.agent_max_steps）；测试可 monkeypatch
 AGENT_MAX_STEPS = 4
 
-AgentEvent = tuple[str, dict]
-
-
-def _args_preview(arguments: dict, limit: int = 60) -> str:
-    """工具参数的单行预览（前端状态展示用）。"""
-    try:
-        text = "; ".join(f"{k}={v}" for k, v in arguments.items() if v is not None)
-    except Exception:  # noqa: BLE001
-        text = str(arguments)
-    return text[:limit] + ("…" if len(text) > limit else "")
-
-
 _DEFAULT_TOOLS = ["search_context", "get_entity"]
+_TOOL_LABELS = {
+    "search_context": "检索知识库",
+    "get_entity": "查询实体",
+}
 
 
-def _enabled_tool_names(agent) -> list[str]:
-    """启用的工具：persona.tools 显式配置优先；默认 agent 缺省即开启内置检索/实体
-    ——agentic 多轮检索是主对话的基础能力，无需用户配置。"""
+@dataclass(frozen=True, slots=True)
+class AgentStreamEvent:
+    """Versioned runtime event ready for an HTTP/WebSocket transport."""
+
+    type: str
+    data: dict[str, Any]
+
+
+def _enabled_tool_names(agent, *, has_sources: bool = False) -> list[str]:
     persona = agent.persona or {}
     names = persona.get("tools")
-    if isinstance(names, list):
-        return [n for n in names if isinstance(n, str)]
-    if getattr(agent, "is_default", False):
-        return list(_DEFAULT_TOOLS)
-    return []
+    configured = [name for name in names if isinstance(name, str)] if isinstance(names, list) else []
+    # 检索是信源挂载带来的基础能力，不应依赖 persona 中是否碰巧保存了 tools 字段。
+    builtins = _DEFAULT_TOOLS if has_sources or getattr(agent, "is_default", False) else []
+    return list(dict.fromkeys([*builtins, *configured]))
 
 
-async def _run_tool_loop(
-    *,
-    agent,
-    messages: list[dict],
-    citations: list[dict],
-    trace: list[dict],
-    tool_names: list[str],
-    engine_manager: EngineManager,
-    llm: LLMClient,
-    tool_registry: ToolRegistry,
-    session_factory: async_sessionmaker,
-    source_ids: list[str] | None = None,
-) -> AsyncIterator[AgentEvent]:
-    """就地驱动工具循环，改写 messages/citations，并 yield 透明化的 tool 事件。"""
-    async with session_factory() as s:
-        sources = await resolve_sources(s, agent)
-    if source_ids:
-        # @范围：用户锁定的信源对整个循环生效（检索工具只见这些源）
-        wanted = set(source_ids)
-        sources = [s for s in sources if s.id in wanted]
-    ctx = ToolContext(
-        engine_manager=engine_manager, sources=sources, persona=agent.persona or {}, agent=agent
+def _adapt_tool(host_tool, host_context: HostToolContext, citations: list[dict]) -> AgentTool:
+    async def execute(
+        arguments: Mapping[str, Any],
+        context,
+    ) -> RuntimeToolResult:
+        context.cancellation.raise_if_cancelled()
+        host_context.citation_offset = len(citations)
+        result = await host_tool.invoke(dict(arguments), host_context)
+        citations.extend(result.citations)
+        count = int(result.data.get("section_count") or len(result.citations) or 0)
+        matches = [
+            {
+                key: citation.get(key)
+                for key in (
+                    "n",
+                    "chunk_id",
+                    "heading",
+                    "snippet",
+                    "score",
+                    "source_id",
+                    "source_name",
+                )
+            }
+            for citation in result.citations[:6]
+        ]
+        details: dict[str, Any] = {
+            "count": count,
+            "sources": [{"id": source.id, "name": source.name} for source in host_context.sources],
+        }
+        if matches:
+            details["matches"] = matches
+        elif result.content:
+            details["output_preview"] = result.content[:800]
+        return RuntimeToolResult(
+            content=result.content,
+            details=details,
+            artifacts={"citations": result.citations},
+        )
+
+    name = host_tool.meta.name
+    return AgentTool(
+        spec=ToolSpec(
+            name=name,
+            label=_TOOL_LABELS.get(name, name),
+            description=host_tool.meta.description,
+            parameters=host_tool.meta.parameters,
+            risk=ToolRisk.READ_ONLY,
+            # Citation numbering currently depends on source-order execution.
+            execution_mode=ToolExecutionMode.SEQUENTIAL,
+        ),
+        executor=execute,
     )
-    schemas = tool_registry.schemas(tool_names)
-    if not schemas:
-        return
-    from sag_api.core.config import settings as _settings
 
-    max_steps = max(1, getattr(_settings, "agent_max_steps", AGENT_MAX_STEPS))
-    for _step in range(max_steps):
-        yield ("status", {"phase": "thinking", "step": _step + 1})
-        think_start = time.perf_counter()
-        try:
-            turn = await llm.chat(messages, tools=schemas)
-        except Exception as e:  # noqa: BLE001
-            # 工具决策失败（网关不支持 tools / 上游抖动）→ 降级为直答，绝不击穿流
-            log.warning("工具决策调用失败，降级直答：%s", getattr(e, "message", None) or e)
-            trace.append(
-                {
-                    "kind": "thinking",
-                    "step": _step + 1,
-                    "ms": int((time.perf_counter() - think_start) * 1000),
-                }
-            )
-            break
-        trace.append(
-            {"kind": "thinking", "step": _step + 1, "ms": int((time.perf_counter() - think_start) * 1000)}
-        )
-        if not turn.tool_calls:
-            break
-        messages.append(
-            {
-                "role": "assistant",
-                "content": turn.content or "",
-                "tool_calls": [
-                    {
-                        "id": c.id,
-                        "type": "function",
-                        "function": {"name": c.name, "arguments": json.dumps(c.arguments, ensure_ascii=False)},
-                    }
-                    for c in turn.tool_calls
-                ],
-            }
-        )
-        for call in turn.tool_calls:
-            args_preview = _args_preview(call.arguments)
-            yield ("tool", {"name": call.name, "step": _step + 1, "args": args_preview})
-            started = time.perf_counter()
-            count = 0
-            if not tool_registry.has(call.name):
-                content = f"未知工具：{call.name}"
-            else:
-                try:
-                    ctx.citation_offset = len(citations)
-                    result = await tool_registry.get(call.name).invoke(call.arguments, ctx)
-                    content = result.content
-                    citations.extend(result.citations)
-                    count = int(result.data.get("section_count") or len(result.citations) or 0)
-                except Exception as e:  # noqa: BLE001
-                    log.warning("工具执行失败 %s: %s", call.name, e)
-                    content = f"工具执行失败：{e}"
-            tool_ms = int((time.perf_counter() - started) * 1000)
-            trace.append(
-                {
-                    "kind": "tool",
-                    "step": _step + 1,
-                    "name": call.name,
-                    "args": args_preview,
-                    "ms": tool_ms,
-                    "count": count,
-                }
-            )
-            yield (
-                "tool_result",
-                {"name": call.name, "step": _step + 1, "ms": tool_ms, "count": count},
-            )
-            messages.append({"role": "tool", "tool_call_id": call.id, "content": content})
-    else:
-        # 轮次耗尽而模型仍在请求工具 → 钉住收尾：命令直答，防「我再查查」式烂尾
-        log.info("工具循环达到上限 %s 轮，强制收尾直答", max_steps)
-        messages.append(
-            {
-                "role": "system",
-                "content": "已达到工具调用轮次上限。请立即基于以上已检索到的资料直接给出最终回答，"
-                "不要再请求任何工具；若资料不足，如实说明缺口。",
-            }
-        )
+
+def _prompt_preview(handle) -> str:
+    return build_prompt_preview([message.to_model_dict() for message in handle.context.messages])
+
+
+def _stream_event(event: RuntimeEvent, *, payload: Mapping[str, Any] | None = None) -> AgentStreamEvent:
+    data = event.to_dict()
+    if payload is not None:
+        data["payload"] = dict(payload)
+    return AgentStreamEvent(type=event.type.value, data=data)
 
 
 async def generate_stream(
@@ -177,57 +137,154 @@ async def generate_stream(
     engine_manager: EngineManager,
     llm: LLMClient,
     tool_registry: ToolRegistry,
-) -> AsyncIterator[AgentEvent]:
-    """驱动一次问答，产出事件流：(status/tool/tool_result)* → meta → token* → done / error。
+    runtime: AgentRuntime | None = None,
+) -> AsyncIterator[AgentStreamEvent]:
+    """Run one request and expose the SDK event contract to the host transport."""
 
-    是否检索由模型经工具决定（寒暄直答、涉库先搜）；`thread_id` 为 None 时
-    （如 OpenAI 无状态端点）跳过落库。
-    """
-    messages = [dict(m) for m in plan.messages]
+    from sag_api.core.config import settings
+
+    owns_runtime = runtime is None
+    active_runtime = runtime or AgentRuntime()
+    if owns_runtime:
+        await active_runtime.start()
+
     citations = list(plan.citations)
     trace: list[dict] = []
-    preview = plan.prompt_preview
+    tool_inputs: dict[str, dict[str, Any]] = {}
+    handle = None
+    terminal = False
 
-    tool_names = _enabled_tool_names(agent)
-    async with session_factory() as s:
-        mcp_specs = await resolve_mcp_specs(s, agent)
-    if (tool_names or mcp_specs) and llm.configured:
-        # 外部 MCP 连接在整个工具循环期间保持打开，循环结束即断开
-        async with open_agent_mcp_tools(mcp_specs) as mcp_tools:
-            loop_registry = tool_registry.overlay(mcp_tools) if mcp_tools else tool_registry
-            loop_names = [*tool_names, *(t.meta.name for t in mcp_tools)]
-            async for ev in _run_tool_loop(
-                agent=agent,
-                messages=messages,
-                citations=citations,
-                trace=trace,
-                tool_names=loop_names,
-                engine_manager=engine_manager,
-                llm=llm,
-                tool_registry=loop_registry,
-                session_factory=session_factory,
-                source_ids=plan.source_ids,
-            ):
-                yield ev
-        preview = build_prompt_preview(messages)
+    async with session_factory() as session:
+        sources = await resolve_sources(session, agent, plan.source_ids)
+        mcp_specs = await resolve_mcp_specs(session, agent)
+    host_context = HostToolContext(
+        engine_manager=engine_manager,
+        sources=sources,
+        persona=agent.persona or {},
+        agent=agent,
+    )
 
-    # 收尾阶段可见化：前端据此从「思考中」切到「生成回答」计时
-    yield ("status", {"phase": "answering", "step": 0})
-    yield ("meta", {"citations": citations, "prompt_preview": preview})
-
-    acc: list[str] = []
-    answer_start = time.perf_counter()
     try:
-        async for token in llm.stream(messages):
-            acc.append(token)
-            yield ("token", {"text": token})
-    except ApiError as e:
-        yield ("error", {"code": e.code, "message": e.message})
-        return
+        async with open_agent_mcp_tools(mcp_specs) as mcp_tools:
+            names = _enabled_tool_names(agent, has_sources=bool(sources))
+            host_tools = [tool_registry.get(name) for name in names if tool_registry.has(name)]
+            host_tools.extend(mcp_tools)
+            tools = tuple(_adapt_tool(tool, host_context, citations) for tool in host_tools)
+            run_messages = list(plan.messages)
+            if plan.source_ids and sources:
+                scope_note = {
+                    "role": "system",
+                    "content": (
+                        "用户已通过 @ 将本轮知识范围限定为："
+                        + "、".join(source.name for source in sources)
+                        + "。问题涉及资料时必须先调用 search_context，并只依据返回证据作答。"
+                    ),
+                }
+                run_messages.insert(1 if run_messages and run_messages[0].get("role") == "system" else 0, scope_note)
+            max_turns = max(1, int(getattr(settings, "agent_max_steps", AGENT_MAX_STEPS)))
+            definition = RuntimeAgent(
+                name=agent.name,
+                model=llm,
+                tools=tools,
+                max_turns=max_turns,
+                finalize_on_max_turns=True,
+                metadata={"agent_id": agent.id},
+            )
+            handle = active_runtime.run(
+                definition,
+                history=run_messages,
+                context=host_context,
+                metadata={
+                    "thread_id": thread_id,
+                    "source_ids": [source.id for source in sources],
+                    "source_names": [source.name for source in sources],
+                },
+            )
 
-    answer = "".join(acc)
-    trace.append({"kind": "answer", "ms": int((time.perf_counter() - answer_start) * 1000)})
-    mid = None
-    if thread_id is not None:
-        mid = await persist_answer(session_factory, thread_id, answer, citations, steps=trace)
-    yield ("done", {"message_id": mid})
+            async for event in handle:
+                payload = event.payload
+                output_payload: Mapping[str, Any] = payload
+
+                if event.type == EventType.RUN_STARTED:
+                    output_payload = {
+                        **payload,
+                        "citations": citations,
+                        "sources": [{"id": source.id, "name": source.name} for source in sources],
+                        "tools": [tool.spec.name for tool in tools],
+                    }
+                elif event.type in (
+                    EventType.TOOL_APPROVAL_REQUIRED,
+                    EventType.TOOL_STARTED,
+                ):
+                    tool_inputs[str(payload.get("tool_call_id") or "")] = {
+                        "label": payload.get("label") or payload.get("name"),
+                        "arguments": dict(payload.get("arguments") or {}),
+                    }
+                elif event.type == EventType.TOOL_COMPLETED:
+                    details = payload.get("details") or {}
+                    tool_call_id = str(payload.get("tool_call_id") or "")
+                    started = tool_inputs.pop(tool_call_id, {})
+                    trace.append(
+                        {
+                            "kind": "tool",
+                            "step": event.turn,
+                            "name": payload["name"],
+                            "label": started.get("label") or payload.get("name"),
+                            "arguments": started.get("arguments") or {},
+                            "ms": payload.get("duration_ms", 0),
+                            "count": details.get("count", 0),
+                            "details": details,
+                        }
+                    )
+                elif event.type == EventType.TOOL_FAILED:
+                    error = payload.get("error") or {}
+                    tool_call_id = str(payload.get("tool_call_id") or "")
+                    started = tool_inputs.pop(tool_call_id, {})
+                    trace.append(
+                        {
+                            "kind": "tool",
+                            "step": event.turn,
+                            "name": payload["name"],
+                            "label": started.get("label") or payload.get("label") or payload.get("name"),
+                            "arguments": started.get("arguments") or {},
+                            "ms": payload.get("duration_ms", 0),
+                            "count": 0,
+                            "error": error.get("message", "工具执行失败"),
+                        }
+                    )
+                elif (
+                    event.type == EventType.MESSAGE_COMPLETED
+                    and payload.get("message", {}).get("role") == "assistant"
+                ):
+                    duration = int(payload.get("duration_ms") or 0)
+                    if payload.get("has_tool_calls"):
+                        trace.append({"kind": "thinking", "step": event.turn, "ms": duration})
+                    else:
+                        trace.append({"kind": "answer", "step": event.turn, "ms": duration})
+                elif event.type == EventType.RUN_COMPLETED:
+                    message_id = None
+                    if thread_id is not None:
+                        message_id = await persist_answer(
+                            session_factory,
+                            thread_id,
+                            str(payload.get("output") or ""),
+                            citations,
+                            steps=trace,
+                        )
+                    output_payload = {
+                        **payload,
+                        "message_id": message_id,
+                        "citations": citations,
+                        "prompt_preview": _prompt_preview(handle),
+                    }
+                    terminal = True
+                elif event.type in (EventType.RUN_FAILED, EventType.RUN_CANCELLED):
+                    terminal = True
+
+                yield _stream_event(event, payload=output_payload)
+    finally:
+        if handle is not None and not terminal and not handle.done:
+            handle.cancel()
+            await handle.result()
+        if owns_runtime:
+            await active_runtime.stop()

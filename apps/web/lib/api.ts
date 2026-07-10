@@ -1,4 +1,5 @@
 import { clearToken, getToken } from "./auth";
+import type { SearchStrategy } from "./retrieval-config";
 import type {
   ActivityItem,
   Entity,
@@ -164,8 +165,17 @@ export const api = {
   removeBinding: (id: string, bindingId: string) =>
     request<{ ok: boolean }>(`/api/v1/agents/${id}/bindings/${bindingId}`, { method: "DELETE" }),
 
-  listThreads: (id: string, opts?: { archived?: boolean }) =>
-    request<Thread[]>(`/api/v1/agents/${id}/threads${opts?.archived ? "?archived=true" : ""}`),
+  listThreads: (
+    id: string,
+    opts?: { archived?: boolean; limit?: number; offset?: number },
+  ) => {
+    const params = new URLSearchParams();
+    if (opts?.archived) params.set("archived", "true");
+    if (opts?.limit != null) params.set("limit", String(opts.limit));
+    if (opts?.offset) params.set("offset", String(opts.offset));
+    const query = params.toString();
+    return request<Thread[]>(`/api/v1/agents/${id}/threads${query ? `?${query}` : ""}`);
+  },
   updateThread: (id: string, tid: string, b: { title?: string; archived?: boolean }) =>
     request<Thread>(`/api/v1/agents/${id}/threads/${tid}`, {
       method: "PATCH",
@@ -179,11 +189,30 @@ export const api = {
     }),
   listMessages: (id: string, tid: string) =>
     request<Message[]>(`/api/v1/agents/${id}/threads/${tid}/messages`),
+  cancelAgentRun: (id: string, tid: string, runId: string) =>
+    request<{ ok: boolean }>(`/api/v1/agents/${id}/threads/${tid}/runs/${runId}/cancel`, {
+      method: "POST",
+    }),
+  approveAgentTool: (id: string, tid: string, runId: string, toolCallId: string) =>
+    request<{ ok: boolean }>(
+      `/api/v1/agents/${id}/threads/${tid}/runs/${runId}/tool-calls/${toolCallId}/approve`,
+      { method: "POST" },
+    ),
+  rejectAgentTool: (id: string, tid: string, runId: string, toolCallId: string, reason: string) =>
+    request<{ ok: boolean }>(
+      `/api/v1/agents/${id}/threads/${tid}/runs/${runId}/tool-calls/${toolCallId}/reject`,
+      { method: "POST", body: JSON.stringify({ reason }) },
+    ),
   deleteThread: (id: string, tid: string) =>
     request(`/api/v1/agents/${id}/threads/${tid}`, { method: "DELETE" }),
 
   // 搜索
-  globalSearch: (b: { query: string; source_ids?: string[]; top_k?: number; strategy?: string }) =>
+  globalSearch: (b: {
+    query: string;
+    source_ids?: string[];
+    top_k?: number;
+    strategy?: SearchStrategy;
+  }) =>
     request<SearchResponse>("/api/v1/search", { method: "POST", body: JSON.stringify(b) }),
 
   // 引用溯源：分块原文

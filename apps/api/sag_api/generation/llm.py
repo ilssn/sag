@@ -5,12 +5,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field
 
 from openai import AsyncOpenAI
 
+from sag_agent import CancellationToken, ModelChunk, ModelRequest, Usage
+from sag_agent import ToolCall as RuntimeToolCall
 from sag_api.core.config import Settings
 from sag_api.core.errors import ConfigurationError, UpstreamError
 from sag_api.core.logging import get_logger
@@ -18,21 +20,6 @@ from sag_api.core.logging import get_logger
 log = get_logger("generation")
 
 Message = dict
-
-
-@dataclass
-class ToolCall:
-    id: str
-    name: str
-    arguments: dict
-
-
-@dataclass
-class ChatTurn:
-    """一次（非流式）对话轮结果：要么是最终文本，要么是若干工具调用。"""
-
-    content: str | None = None
-    tool_calls: list[ToolCall] = field(default_factory=list)
 
 
 class LLMClient:
@@ -62,26 +49,94 @@ class LLMClient:
         if not self.configured:
             raise ConfigurationError("尚未配置 LLM（SAG_LLM_API_KEY / SAG_LLM_BASE_URL / SAG_LLM_MODEL）")
 
-    async def stream(self, messages: list[Message]) -> AsyncIterator[str]:
+    async def stream_turn(
+        self,
+        request: ModelRequest,
+        cancellation: CancellationToken,
+    ) -> AsyncIterator[ModelChunk]:
+        """Stream one provider turn, including native function calls.
+
+        A direct answer and a tool decision now share one provider request. This is
+        the adapter required by sag_agent.ModelProvider.
+        """
+
         self._ensure_configured()
+        tool_parts: dict[int, dict[str, str]] = {}
+        finish_reason: str | None = None
         try:
             stream = await self._client.chat.completions.create(
                 model=self._settings.llm_model,
-                messages=messages,  # type: ignore[arg-type]
+                messages=[message.to_model_dict() for message in request.messages],  # type: ignore[arg-type]
                 temperature=self._settings.llm_temperature,
                 max_tokens=self._settings.llm_max_tokens,
+                tools=list(request.tools) or None,  # type: ignore[arg-type]
                 stream=True,
                 extra_body=self._extra_body(),
             )
             async for chunk in stream:
+                cancellation.raise_if_cancelled()
+                raw_usage = getattr(chunk, "usage", None)
+                if raw_usage is not None:
+                    prompt_details = getattr(raw_usage, "prompt_tokens_details", None)
+                    completion_details = getattr(raw_usage, "completion_tokens_details", None)
+                    yield ModelChunk(
+                        usage=Usage(
+                            input_tokens=int(getattr(raw_usage, "prompt_tokens", 0) or 0),
+                            output_tokens=int(getattr(raw_usage, "completion_tokens", 0) or 0),
+                            cached_tokens=int(getattr(prompt_details, "cached_tokens", 0) or 0),
+                            reasoning_tokens=int(getattr(completion_details, "reasoning_tokens", 0) or 0),
+                        )
+                    )
                 if not chunk.choices:
                     continue
-                delta = chunk.choices[0].delta
+                choice = chunk.choices[0]
+                finish_reason = choice.finish_reason or finish_reason
+                delta = choice.delta
                 token = getattr(delta, "content", None)
                 if token:
-                    yield token
+                    yield ModelChunk(text_delta=token)
+                for fallback_index, tool_delta in enumerate(getattr(delta, "tool_calls", None) or []):
+                    index = getattr(tool_delta, "index", None)
+                    index = fallback_index if index is None else int(index)
+                    part = tool_parts.setdefault(index, {"id": "", "name": "", "arguments": ""})
+                    if getattr(tool_delta, "id", None):
+                        part["id"] += tool_delta.id
+                    function = getattr(tool_delta, "function", None)
+                    if function is not None:
+                        if getattr(function, "name", None):
+                            part["name"] += function.name
+                        if getattr(function, "arguments", None):
+                            part["arguments"] += function.arguments
+
+            calls: list[RuntimeToolCall] = []
+            for index in sorted(tool_parts):
+                part = tool_parts[index]
+                raw_arguments = part["arguments"] or "{}"
+                parse_error = None
+                arguments: dict = {}
+                try:
+                    candidate = json.loads(raw_arguments)
+                    if isinstance(candidate, dict):
+                        arguments = candidate
+                    else:
+                        parse_error = "tool arguments must decode to an object"
+                except (json.JSONDecodeError, TypeError) as exc:
+                    parse_error = str(exc)
+                calls.append(
+                    RuntimeToolCall(
+                        id=part["id"] or f"tool-{request.turn}-{index}",
+                        name=part["name"],
+                        arguments=arguments,
+                        raw_arguments=raw_arguments,
+                        parse_error=parse_error,
+                    )
+                )
+            if calls or finish_reason:
+                yield ModelChunk(tool_calls=tuple(calls), finish_reason=finish_reason)
+        except asyncio.CancelledError:
+            raise
         except Exception as e:  # noqa: BLE001
-            log.warning("LLM 流式生成失败：%s", e)
+            log.warning("LLM 轮次流式调用失败：%s", e)
             raise UpstreamError(f"生成失败：{e}") from e
 
     async def complete(self, messages: list[Message]) -> str:
@@ -95,34 +150,5 @@ class LLMClient:
                 extra_body=self._extra_body(),
             )
             return resp.choices[0].message.content or ""
-        except Exception as e:  # noqa: BLE001
-            raise UpstreamError(f"生成失败：{e}") from e
-
-    async def chat(self, messages: list[Message], tools: list[dict] | None = None) -> ChatTurn:
-        """非流式对话轮，支持工具调用（native function-calling）。
-
-        返回 ChatTurn：若模型请求调用工具则 `tool_calls` 非空（Agent 循环据此派发），
-        否则 `content` 为最终文本。用于 Agent 循环的「决策」步，最终答案仍走 stream()。
-        """
-        self._ensure_configured()
-        try:
-            resp = await self._client.chat.completions.create(
-                model=self._settings.llm_model,
-                messages=messages,  # type: ignore[arg-type]
-                temperature=self._settings.llm_temperature,
-                max_tokens=self._settings.llm_max_tokens,
-                tools=tools or None,  # type: ignore[arg-type]
-                extra_body=self._extra_body(),
-            )
-            msg = resp.choices[0].message
-            calls: list[ToolCall] = []
-            for tc in getattr(msg, "tool_calls", None) or []:
-                fn = tc.function
-                try:
-                    parsed = json.loads(fn.arguments or "{}")
-                except (json.JSONDecodeError, TypeError):
-                    parsed = {}
-                calls.append(ToolCall(id=tc.id, name=fn.name, arguments=parsed))
-            return ChatTurn(content=msg.content, tool_calls=calls)
         except Exception as e:  # noqa: BLE001
             raise UpstreamError(f"生成失败：{e}") from e

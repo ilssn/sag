@@ -17,6 +17,10 @@ _SYSTEM = {
         "如何作答：\n"
         "- 用了检索就只依据检索到的资料，不编造；检索不到时直说「资料中未提及」，"
         "并说明已试过的角度。\n"
+        "- 只要证据中包含可回答的具体事实，就直接提炼事实，不要以「资料较少」回避，"
+        "不要补充模型记忆中的公开信息，也不要建议用户去别处查询。\n"
+        "- 日期、年份和数字必须以证据原文为准；正文省略年份时只能结合该条资料的发布日期，"
+        "不得凭模型记忆推断。\n"
         "- 证据编号全局递增（跨多轮工具调用连续，如 [4][5]），在关键论断处标注 [序号]，"
         "不要虚构编号；没有调用工具的回答不要带编号。\n"
         "- 简洁、结构化（要点/短段落）。"
@@ -89,7 +93,7 @@ def build_agent_messages(
     language: str = "zh",
     attachments: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """注入灵魂人格的对话提示词（agent-first：无预置资料区，检索由工具按需完成）。"""
+    """注入 Agent 设定（agent-first：无预置资料区，检索由工具按需完成）。"""
     lang = language if language in _SYSTEM else "zh"
     persona = persona or {}
     parts = [persona.get("system_prompt") or f"你是{name}。", _SYSTEM[lang]]

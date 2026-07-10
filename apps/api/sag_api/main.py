@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from sag_agent import AgentRuntime
 from sag_api import __version__
 from sag_api.api.v1 import api_router
 from sag_api.core.config import settings
@@ -57,6 +58,8 @@ async def lifespan(app: FastAPI):
 
     app.state.engine_manager = EngineManager(settings)
     app.state.llm = LLMClient(settings)
+    app.state.agent_runtime = AgentRuntime()
+    await app.state.agent_runtime.start()
     app.state.job_queue = InProcessAsyncQueue(
         SessionLocal, app.state.engine_manager, concurrency=settings.job_concurrency
     )
@@ -84,6 +87,7 @@ async def lifespan(app: FastAPI):
             yield
     finally:
         warmup_task.cancel()
+        await app.state.agent_runtime.stop()
         await app.state.job_queue.stop()
         await app.state.engine_manager.aclose_all()
         await dispose_db()

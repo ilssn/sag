@@ -3,6 +3,20 @@
 import httpx
 import pytest
 
+from sag_agent import ModelChunk
+
+
+class OfflineLLM:
+    @property
+    def configured(self):
+        return True
+
+    async def stream_turn(self, request, cancellation):
+        yield ModelChunk(text_delta="ok", finish_reason="stop")
+
+    async def complete(self, messages):
+        return "摘要"
+
 
 async def _register(c, email):
     r = await c.post("/api/v1/auth/register", json={"email": email, "password": "password123"})
@@ -79,8 +93,7 @@ async def test_default_agent_activity_and_document_file():
             )
             assert back.json()["archived"] is False and back.json()["title"] == "改名后的会话"
 
-            # 图片附件：上传 → 取回一致；非图片 422；ask 携带（离线 LLM 未配 → 400，
-            # 但用户消息已带附件 meta 落库）
+            # 图片附件：上传 → 取回一致；非图片 422；纯图片也可直接发起 Agent run。
             png = bytes.fromhex(
                 "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
                 "0000000d4944415478da63fcffff3f030005fe02fea7568c4a0000000049454e44ae426082"
@@ -96,26 +109,26 @@ async def test_default_agent_activity_and_document_file():
                 "/api/v1/attachments", headers=A, files={"file": ("x.txt", b"nope", "text/plain")}
             )
             assert bad.status_code == 422
+            app.state.llm = OfflineLLM()
             ask = await c.post(
                 f"/api/v1/agents/{a1['id']}/threads/{t['id']}/ask",
                 headers=A,
-                json={"query": "这张图是什么？", "attachments": [aid]},
+                json={"query": "", "attachments": [aid]},
             )
-            # 秒开流语义：HTTP 200，配置错误以 SSE error 事件下发
-            assert ask.status_code == 200 and "configuration_error" in ask.text
+            assert ask.status_code == 200 and "event: run.completed" in ask.text
             msgs = (
                 await c.get(f"/api/v1/agents/{a1['id']}/threads/{t['id']}/messages", headers=A)
             ).json()
-            mine = [m for m in msgs if m["role"] == "user" and m["content"] == "这张图是什么？"]
+            mine = [m for m in msgs if m["role"] == "user" and m["attachments"]]
             assert mine and mine[0]["attachments"][0]["id"] == aid
 
-            # 范围问答参数被接受（离线仍 400=未配 LLM，而非 422）；消息删除端点
+            # 范围问答参数被接受；消息删除端点
             scoped = await c.post(
                 f"/api/v1/agents/{a1['id']}/threads/{t['id']}/ask",
                 headers=A,
                 json={"query": "只查这个源", "source_ids": [src["id"]]},
             )
-            assert scoped.status_code == 200 and "configuration_error" in scoped.text
+            assert scoped.status_code == 200 and "event: run.completed" in scoped.text
             gone_id = mine[0]["id"]
             rd = await c.delete(
                 f"/api/v1/agents/{a1['id']}/threads/{t['id']}/messages/{gone_id}", headers=A

@@ -1,86 +1,110 @@
 "use client";
 
 import * as React from "react";
-import { BookOpenText, Quote } from "lucide-react";
+import { BookOpenText, ChevronDown } from "lucide-react";
 
 import type { Citation } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useDetailPanel } from "@/components/features/detail-panel";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
+function sourceKey(citation: Citation): string {
+  return citation.source_id || citation.source_name || `citation-${citation.n}`;
+}
+
+/** 常驻的紧凑来源入口；详情使用浮层，避免在每条消息下制造额外高度。 */
 export const CitationBlock = React.memo(function CitationBlock({
   citations,
 }: {
   citations: Citation[];
 }) {
-  const [open, setOpen] = React.useState(false);
   const panel = useDetailPanel();
   if (!citations?.length) return null;
 
+  const sourceCount = new Set(citations.map(sourceKey)).size;
+  const referenceCount = citations.length;
+
   return (
-    <div className="mt-3 border-t pt-2.5">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={() => setOpen((v) => !v)}
-            className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            aria-label={`来源 ${citations.length} 条`}
-          >
-            <Quote className="size-3.5" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>来源 · {citations.length}</TooltipContent>
-      </Tooltip>
-      {open && (
-        <div className="mt-2 flex flex-col gap-1.5">
-          {citations.map((c) => {
-            const traceable = Boolean(c.chunk_id && c.source_id);
-            const Card: React.ElementType = traceable ? "button" : "div";
-            return (
-              <Card
-                key={c.n}
-                {...(traceable
-                  ? {
-                      type: "button",
-                      onClick: () =>
-                        panel.open({
-                          kind: "chunk",
-                          sourceId: c.source_id!,
-                          chunkId: c.chunk_id!,
-                          heading: c.heading ?? undefined,
-                          sourceName: c.source_name ?? undefined,
-                        }),
-                      title: "查看原文",
-                    }
-                  : {})}
-                className={cn(
-                  "group/cite flex w-full gap-2.5 rounded-md border bg-muted/50 p-2.5 text-left text-xs",
-                  traceable && "cursor-pointer transition-colors hover:border-border",
-                )}
-              >
-                <span className="grid size-5 shrink-0 place-items-center rounded bg-muted font-mono text-[11px] font-semibold text-foreground">
-                  {c.n}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex flex-wrap items-center gap-1.5">
-                    {c.heading && <span className="font-medium text-foreground">{c.heading}</span>}
-                    {c.source_name && (
-                      <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                        {c.source_name}
-                      </span>
-                    )}
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md bg-muted/70 px-2 text-[11px] font-medium text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={`${sourceCount} 个来源，${referenceCount} 条引用`}
+        >
+          <BookOpenText className="size-3" />
+          <span>{sourceCount} 个来源</span>
+          {referenceCount !== sourceCount && (
+            <span className="font-normal text-muted-foreground/70">· {referenceCount} 条引用</span>
+          )}
+          <ChevronDown className="size-3 opacity-60" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        side="bottom"
+        align="start"
+        className="w-[min(28rem,calc(100vw-2rem))] p-1.5"
+      >
+        <DropdownMenuLabel className="flex items-center justify-between px-2 py-1.5">
+          <span>参考来源</span>
+          <span className="font-normal tabular-nums text-muted-foreground/70">
+            {referenceCount} 条引用
+          </span>
+        </DropdownMenuLabel>
+        {citations.map((citation) => {
+          const traceable = Boolean(citation.chunk_id && citation.source_id);
+          return (
+            <DropdownMenuItem
+              key={citation.n}
+              disabled={!traceable}
+              onSelect={() => {
+                if (!citation.chunk_id || !citation.source_id) return;
+                panel.open({
+                  kind: "chunk",
+                  sourceId: citation.source_id,
+                  chunkId: citation.chunk_id,
+                  heading: citation.heading ?? undefined,
+                  sourceName: citation.source_name ?? undefined,
+                });
+              }}
+              className="group/cite items-start gap-2.5 px-2 py-2.5"
+            >
+              <span className="grid size-5 shrink-0 place-items-center rounded-full bg-muted font-mono text-[10px] font-semibold text-muted-foreground">
+                {citation.n}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="truncate text-xs font-medium text-foreground">
+                    {citation.heading || "资料片段"}
                   </span>
-                  <span className="mt-0.5 line-clamp-3 block text-muted-foreground">{c.snippet}</span>
+                  {citation.source_name && (
+                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                      {citation.source_name}
+                    </span>
+                  )}
                 </span>
-                {traceable && (
-                  <BookOpenText className="mt-0.5 size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/cite:opacity-100" />
+                {citation.snippet && (
+                  <span className="mt-0.5 block max-h-8 overflow-hidden text-[11px] leading-4 text-muted-foreground">
+                    {citation.snippet}
+                  </span>
                 )}
-              </Card>
-            );
-          })}
-        </div>
-      )}
-    </div>
+              </span>
+              <BookOpenText
+                className={cn(
+                  "mt-0.5 size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity",
+                  traceable && "group-hover/cite:opacity-100",
+                )}
+              />
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 });

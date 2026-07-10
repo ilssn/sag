@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
+from sag_agent import AgentRuntime, EventType, RunHandle
 from sag_api.core.db import SessionLocal, get_session
 from sag_api.core.deps import (
+    get_agent_runtime,
     get_current_user,
     get_engine_manager,
     get_llm,
     get_tool_registry,
 )
-from sag_api.core.errors import ApiError
+from sag_api.core.errors import ConfigurationError, ConflictError, NotFoundError
 from sag_api.core.logging import get_logger
 from sag_api.db.models import User
 from sag_api.generation import LLMClient
@@ -29,6 +32,7 @@ from sag_api.schemas.agent import (
     ThreadCreate,
     ThreadOut,
     ThreadUpdate,
+    ToolRejection,
 )
 from sag_api.schemas.common import Ok
 from sag_api.services import agent_domain as svc
@@ -41,6 +45,27 @@ log = get_logger("agents")
 
 def _sse(event: str, payload: dict) -> dict:
     return {"event": event, "data": json.dumps(payload, ensure_ascii=False)}
+
+
+async def _owned_run(
+    session: AsyncSession,
+    runtime: AgentRuntime,
+    *,
+    agent_id: str,
+    thread_id: str,
+    run_id: str,
+) -> RunHandle:
+    agent = await svc.get_agent(session, agent_id)
+    await svc.get_thread(session, agent.id, thread_id)
+    handle = runtime.get_run(run_id)
+    metadata = handle.context.metadata if handle is not None else {}
+    if (
+        handle is None
+        or metadata.get("agent_id") != agent.id
+        or metadata.get("thread_id") != thread_id
+    ):
+        raise NotFoundError("运行不存在或已结束")
+    return handle
 
 
 # ── CRUD ────────────────────────────────────────────────────────────
@@ -144,13 +169,21 @@ async def remove_binding(
 async def list_threads(
     agent_id: str,
     archived: bool = False,
+    limit: int | None = Query(default=None, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     agent = await svc.get_agent(session, agent_id)
     return [
         ThreadOut.model_validate(t)
-        for t in await svc.list_threads(session, agent.id, archived=archived)
+        for t in await svc.list_threads(
+            session,
+            agent.id,
+            archived=archived,
+            limit=limit,
+            offset=offset,
+        )
     ]
 
 
@@ -218,6 +251,77 @@ async def delete_message(
     return Ok(detail="已删除")
 
 
+@router.post("/{agent_id}/threads/{thread_id}/runs/{run_id}/cancel", response_model=Ok)
+async def cancel_run(
+    agent_id: str,
+    thread_id: str,
+    run_id: str,
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+    agent_runtime: AgentRuntime = Depends(get_agent_runtime),
+):
+    handle = await _owned_run(
+        session,
+        agent_runtime,
+        agent_id=agent_id,
+        thread_id=thread_id,
+        run_id=run_id,
+    )
+    handle.cancel()
+    return Ok(detail="已停止")
+
+
+@router.post(
+    "/{agent_id}/threads/{thread_id}/runs/{run_id}/tool-calls/{tool_call_id}/approve",
+    response_model=Ok,
+)
+async def approve_tool_call(
+    agent_id: str,
+    thread_id: str,
+    run_id: str,
+    tool_call_id: str,
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+    agent_runtime: AgentRuntime = Depends(get_agent_runtime),
+):
+    handle = await _owned_run(
+        session,
+        agent_runtime,
+        agent_id=agent_id,
+        thread_id=thread_id,
+        run_id=run_id,
+    )
+    if not handle.approve(tool_call_id):
+        raise ConflictError("工具调用当前不等待审批")
+    return Ok(detail="已允许执行")
+
+
+@router.post(
+    "/{agent_id}/threads/{thread_id}/runs/{run_id}/tool-calls/{tool_call_id}/reject",
+    response_model=Ok,
+)
+async def reject_tool_call(
+    agent_id: str,
+    thread_id: str,
+    run_id: str,
+    tool_call_id: str,
+    body: ToolRejection,
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+    agent_runtime: AgentRuntime = Depends(get_agent_runtime),
+):
+    handle = await _owned_run(
+        session,
+        agent_runtime,
+        agent_id=agent_id,
+        thread_id=thread_id,
+        run_id=run_id,
+    )
+    if not handle.reject(tool_call_id, body.reason):
+        raise ConflictError("工具调用当前不等待审批")
+    return Ok(detail="已拒绝执行")
+
+
 @router.post("/{agent_id}/threads/{thread_id}/ask")
 async def ask(
     agent_id: str,
@@ -228,32 +332,26 @@ async def ask(
     engine_manager: EngineManager = Depends(get_engine_manager),
     llm: LLMClient = Depends(get_llm),
     tool_registry: ToolRegistry = Depends(get_tool_registry),
+    agent_runtime: AgentRuntime = Depends(get_agent_runtime),
 ) -> EventSourceResponse:
     agent = await svc.get_agent(session, agent_id)
     thread = await svc.get_thread(session, agent.id, thread_id)
+    if not llm.configured:
+        raise ConfigurationError("尚未配置 LLM，无法生成回答")
+    plan = await svc.prepare_ask(
+        session,
+        agent=agent,
+        thread=thread,
+        query=body.query,
+        attachments=body.attachments,
+        source_ids=body.source_ids,
+        llm=llm,
+    )
 
     async def event_gen():
-        # 秒开流：先落库/压缩历史（毫秒级），随即进入 agent 循环——
-        # 是否检索由模型决定（寒暄直答；涉库先调用检索工具），事件实时透传
+        last = None
         try:
-            plan = await svc.prepare_ask(
-                session,
-                agent=agent,
-                thread=thread,
-                query=body.query,
-                attachments=body.attachments,
-                source_ids=body.source_ids,
-                llm=llm,
-            )
-        except ApiError as e:
-            yield _sse("error", {"code": e.code, "message": e.message})
-            return
-        if not llm.configured:
-            yield _sse("error", {"code": "configuration_error", "message": "尚未配置 LLM，无法生成回答"})
-            return
-
-        try:
-            async for name, payload in agent_service.generate_stream(
+            async for event in agent_service.generate_stream(
                 SessionLocal,
                 plan=plan,
                 agent=agent,
@@ -261,14 +359,33 @@ async def ask(
                 engine_manager=engine_manager,
                 llm=llm,
                 tool_registry=tool_registry,
+                runtime=agent_runtime,
             ):
-                yield _sse(name, payload)
+                last = event
+                yield _sse(event.type, event.data)
         except Exception as e:  # noqa: BLE001
-            # 最后防线：任何未及之处都以可见的 error 事件收尾，绝不让流无声死亡
             log.exception("ask 流异常终止：%s", e)
+            run_id = last.data.get("run_id", "") if last is not None else ""
+            sequence = int(last.data.get("sequence", 0)) + 1 if last is not None else 0
+            data = {
+                "version": 1,
+                "type": EventType.RUN_FAILED.value,
+                "run_id": run_id,
+                "sequence": sequence,
+                "timestamp": datetime.now(UTC).isoformat(),
+                "turn": 0,
+                "payload": {
+                    "error": {
+                        "code": "stream_error",
+                        "message": f"生成中断：{getattr(e, 'message', None) or e}",
+                        "retryable": True,
+                        "details": {},
+                    }
+                },
+            }
             yield _sse(
-                "error",
-                {"code": "stream_error", "message": f"生成中断：{getattr(e, 'message', None) or e}"},
+                EventType.RUN_FAILED.value,
+                data,
             )
 
     return EventSourceResponse(

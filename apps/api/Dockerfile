@@ -12,6 +12,7 @@ RUN apt-get update \
 # 先装依赖（利于缓存）
 COPY pyproject.toml README.md ./
 COPY sag_api ./sag_api
+COPY sag_agent ./sag_agent
 RUN pip install --upgrade pip && pip install ".[postgres]"
 
 EXPOSE 8000

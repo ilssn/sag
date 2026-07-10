@@ -137,8 +137,21 @@ async def remove_binding(session: AsyncSession, agent: Agent, binding_id: str) -
     await session.commit()
 
 
-async def resolve_sources(session: AsyncSession, agent: Agent) -> list[Source]:
-    """展开信源绑定 → 去重后的信源列表。默认 agent 的知识库 = 全部信源。"""
+async def resolve_sources(
+    session: AsyncSession,
+    agent: Agent,
+    source_ids: list[str] | None = None,
+) -> list[Source]:
+    """解析本轮可见信源。
+
+    显式 `source_ids` 来自输入框的 @ 范围，优先于持久绑定；未指定时，默认 Agent
+    使用全部信源，自定义 Agent 使用自己的 source bindings。
+    """
+    if source_ids:
+        ordered_ids = list(dict.fromkeys(source_ids))
+        rows = await session.execute(select(Source).where(Source.id.in_(ordered_ids)))
+        by_id = {source.id: source for source in rows.scalars().all()}
+        return [by_id[source_id] for source_id in ordered_ids if source_id in by_id]
     if agent.is_default:
         rows = await session.execute(select(Source).order_by(Source.created_at))
         return list(rows.scalars().all())
@@ -164,13 +177,23 @@ async def resolve_mcp_specs(session: AsyncSession, agent: Agent) -> list[tuple[s
 
 # ── 会话 ────────────────────────────────────────────────────────────
 async def list_threads(
-    session: AsyncSession, agent_id: str, *, archived: bool = False
+    session: AsyncSession,
+    agent_id: str,
+    *,
+    archived: bool = False,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[Thread]:
-    rows = await session.execute(
+    statement = (
         select(Thread)
         .where(Thread.agent_id == agent_id, Thread.archived.is_(archived))
-        .order_by(Thread.updated_at.desc())
+        .order_by(Thread.updated_at.desc(), Thread.id.desc())
     )
+    if offset:
+        statement = statement.offset(offset)
+    if limit is not None:
+        statement = statement.limit(limit)
+    rows = await session.execute(statement)
     return list(rows.scalars().all())
 
 
@@ -352,7 +375,7 @@ async def prepare_ask(
     )
     session.add(user_msg)
     if thread.title in _DEFAULT_TITLES:
-        thread.title = query[:40]
+        thread.title = query[:40] or "图片对话"
     await session.commit()
     await session.refresh(user_msg)
 

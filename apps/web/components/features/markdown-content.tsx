@@ -20,6 +20,7 @@ function remarkCitationLinks(enabled: boolean) {
   return () => {
     if (!enabled) return;
     const visit = (node: MdNode) => {
+      if (node.type === "link" || node.type === "code" || node.type === "inlineCode") return;
       if (!node.children) return;
       node.children = node.children.flatMap((child) => {
         if (child.type !== "text" || typeof child.value !== "string") {
@@ -37,7 +38,9 @@ function remarkCitationLinks(enabled: boolean) {
           }
           parts.push({
             type: "link",
-            url: `citation:${match[1]}`,
+            // Hash URLs survive react-markdown's URL sanitizer; the renderer below
+            // replaces them with buttons, so citation clicks never navigate.
+            url: `#citation-${match[1]}`,
             title: null,
             children: [{ type: "text", value: match[1] }],
             data: { hProperties: { "data-citation": match[1] } },
@@ -77,14 +80,16 @@ function MdImage(props: React.ImgHTMLAttributes<HTMLImageElement>) {
   );
 }
 
-export function MarkdownContent({
+export const MarkdownContent = React.memo(function MarkdownContent({
   content,
   citations,
   onCitationClick,
+  streaming = false,
 }: {
   content: string;
   citations?: Citation[];
   onCitationClick?: (citation: Citation) => void;
+  streaming?: boolean;
 }) {
   const citationByNumber = React.useMemo(() => {
     return new Map((citations ?? []).map((c) => [String(c.n), c]));
@@ -95,34 +100,43 @@ export function MarkdownContent({
   );
 
   return (
-    <div className="answer-prose text-foreground">
+    <div
+      className={cn("answer-prose text-foreground", streaming && "answer-prose--streaming")}
+      aria-busy={streaming || undefined}
+    >
       <ReactMarkdown
         remarkPlugins={[remarkGfm, citationPlugin]}
         components={{
-        img: MdImage,
+          img: MdImage,
           a: ({ href, children, ...props }) => {
-            if (href?.startsWith("citation:")) {
-              const n = href.slice("citation:".length);
+            const citationMatch = href?.match(/^#citation-(\d+)$/);
+            if (citationMatch) {
+              const n = citationMatch[1];
               const citation = citationByNumber.get(n);
               return (
                 <button
                   type="button"
                   disabled={!citation}
-                  onClick={() => citation && onCitationClick?.(citation)}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (citation) onCitationClick?.(citation);
+                  }}
                   className={cn(
-                    "mx-0.5 inline-grid size-4 -translate-y-[1px] place-items-center rounded-full text-[10px] font-medium leading-none align-baseline transition-colors",
+                    "relative -top-px mx-0.5 inline-flex size-[18px] items-center justify-center rounded-full bg-muted font-mono text-[10px] font-semibold leading-none text-muted-foreground no-underline outline-none transition-colors align-baseline focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
                     citation
-                      ? "bg-primary/12 text-primary hover:bg-primary/22"
-                      : "cursor-default bg-muted/60 text-muted-foreground/70",
+                      ? "cursor-pointer hover:bg-muted-foreground/20 hover:text-foreground"
+                      : "cursor-default opacity-60",
                   )}
                   aria-label={citation ? `打开来源 ${n}` : `来源 ${n}`}
+                  title={citation?.heading || `来源 ${n}`}
                 >
                   {children}
                 </button>
               );
             }
             return (
-              <a href={href} {...props}>
+              <a href={href} target="_blank" rel="noreferrer" {...props}>
                 {children}
               </a>
             );
@@ -133,4 +147,4 @@ export function MarkdownContent({
       </ReactMarkdown>
     </div>
   );
-}
+});

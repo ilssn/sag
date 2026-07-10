@@ -3,7 +3,7 @@
 设计对齐 `connectors/`：一个「工具」自描述（name + JSON-Schema 参数），
 经注册表登记；Agent 循环把工具 schema 交给 LLM（native function-calling），
 再把 LLM 的 tool_call 派发到对应工具执行。检索只是内置的其中一个工具，
-外部 MCP 工具（第二阶段）适配成同一接口后与内置工具对 Agent 完全一致。
+外部 MCP 工具适配成同一接口后与内置工具对 Agent 完全一致。
 """
 
 from __future__ import annotations

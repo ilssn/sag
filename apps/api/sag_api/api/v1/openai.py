@@ -17,8 +17,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sag_agent import AgentRuntime, EventType
 from sag_api.core.db import SessionLocal, get_session
 from sag_api.core.deps import (
+    get_agent_runtime,
     get_current_user,
     get_engine_manager,
     get_llm,
@@ -72,6 +74,7 @@ async def chat_completions(
     engine_manager: EngineManager = Depends(get_engine_manager),
     llm: LLMClient = Depends(get_llm),
     tool_registry: ToolRegistry = Depends(get_tool_registry),
+    agent_runtime: AgentRuntime = Depends(get_agent_runtime),
 ):
     agent = await svc.get_agent(session, agent_id)
     query, history = _split_query(body.messages)
@@ -94,6 +97,7 @@ async def chat_completions(
             engine_manager=engine_manager,
             llm=llm,
             tool_registry=tool_registry,
+            runtime=agent_runtime,
         )
 
     if body.stream:
@@ -109,11 +113,13 @@ async def chat_completions(
                 return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
             yield chunk({"role": "assistant"})
-            async for name, payload in _events():
-                if name == "token":
-                    yield chunk({"content": payload["text"]})
-                elif name == "error":
-                    yield chunk({"content": f"\n[错误] {payload['message']}"})
+            async for event in _events():
+                payload = event.data["payload"]
+                if event.type == EventType.MESSAGE_DELTA.value:
+                    yield chunk({"content": payload["delta"]})
+                elif event.type in (EventType.RUN_FAILED.value, EventType.RUN_CANCELLED.value):
+                    error = payload.get("error") or {}
+                    yield chunk({"content": f"\n[错误] {error.get('message', '生成失败')}"})
             yield chunk({}, finish="stop")
             yield "data: [DONE]\n\n"
 
@@ -123,13 +129,17 @@ async def chat_completions(
     # 非流式：消费同一事件流，聚合为最终答案
     parts: list[str] = []
     citations = plan.citations
-    async for name, payload in _events():
-        if name == "token":
-            parts.append(payload["text"])
-        elif name == "meta":
-            citations = payload["citations"]
-        elif name == "error":
-            raise UpstreamError(payload["message"])
+    usage: dict = {}
+    async for event in _events():
+        payload = event.data["payload"]
+        if event.type == EventType.MESSAGE_DELTA.value:
+            parts.append(payload["delta"])
+        elif event.type == EventType.RUN_COMPLETED.value:
+            citations = payload.get("citations") or citations
+            usage = payload.get("usage") or {}
+        elif event.type in (EventType.RUN_FAILED.value, EventType.RUN_CANCELLED.value):
+            error = payload.get("error") or {}
+            raise UpstreamError(error.get("message", "生成失败"))
     return {
         "id": cid,
         "object": "chat.completion",
@@ -142,7 +152,11 @@ async def chat_completions(
                 "finish_reason": "stop",
             }
         ],
-        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        "usage": {
+            "prompt_tokens": usage.get("input_tokens", 0),
+            "completion_tokens": usage.get("output_tokens", 0),
+            "total_tokens": usage.get("total_tokens", 0),
+        },
         # sag 扩展：引用溯源（标准客户端忽略未知字段）
         "sag": {"citations": citations, "sources": len(citations)},
     }

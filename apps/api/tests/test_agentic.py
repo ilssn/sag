@@ -18,7 +18,11 @@ class _A:
 def test_default_agent_gets_builtin_tools():
     assert _enabled_tool_names(_A(is_default=True)) == ["search_context", "get_entity"]
     assert _enabled_tool_names(_A(is_default=False)) == []
-    assert _enabled_tool_names(_A(is_default=True, tools=["echo"])) == ["echo"]  # 显式配置优先
+    assert _enabled_tool_names(_A(is_default=True, tools=["echo"])) == [
+        "search_context",
+        "get_entity",
+        "echo",
+    ]
 
 
 def test_estimate_tokens_cjk_aware():

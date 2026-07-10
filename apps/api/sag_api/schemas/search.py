@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 
 class SearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=4000)
-    strategy: str | None = None
+    strategy: Literal["multi", "vector", "atomic"] | None = None
     top_k: int | None = Field(default=None, ge=1, le=50)
 
 
@@ -17,6 +17,7 @@ class GlobalSearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=4000)
     source_ids: list[str] | None = None
     top_k: int | None = Field(default=None, ge=1, le=50)
+    strategy: Literal["multi", "vector", "atomic"] | None = None
 
 
 class SectionOut(BaseModel):

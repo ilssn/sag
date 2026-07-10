@@ -5,7 +5,7 @@ sag 以「可执行的最佳实践」为标准——请先读 [docs/standards/](
 
 ## 环境
 
-- 后端：Python ≥ 3.11（`apps/api`，`pip install -e ".[dev]"`）
+- 后端：Python ≥ 3.11（`apps/api`，内含独立、可抽离的 `sag_agent` Core）
 - 前端：Node ≥ 20（`apps/web`，`npm install`；shadcn CLI 需要 Node 20+）
 
 ## 门禁（不绿不提 · CI 强制）
@@ -14,7 +14,7 @@ sag 以「可执行的最佳实践」为标准——请先读 [docs/standards/](
 以 CI 结果为准。本地预检：
 
 ```bash
-cd apps/api && ruff check sag_api/ tests/ && python -m pytest -q
+cd apps/api && ruff check sag_api/ sag_agent/ tests/ && python -m pytest -q
 cd apps/web && npx tsc --noEmit && npx next build
 ```
 

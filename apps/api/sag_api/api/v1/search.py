@@ -58,7 +58,12 @@ async def global_search(
 
     refs = {s.sag_source_config_id: s for s in sources}
     targets = [(s.sag_source_config_id, s) for s in sources]
-    outcome = await engine_manager.search_many(targets, body.query, top_k=body.top_k)
+    outcome = await engine_manager.search_many(
+        targets,
+        body.query,
+        strategy=body.strategy,
+        top_k=body.top_k,
+    )
 
     def out(s):
         src = refs.get(s.source_config_id or "")

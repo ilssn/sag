@@ -9,6 +9,8 @@ import json
 import httpx
 import pytest
 
+from sag_agent import ModelChunk
+
 
 class DirectLLM:
     """直答桩：决策轮不要工具，流式输出固定 token。"""
@@ -17,14 +19,11 @@ class DirectLLM:
     def configured(self):
         return True
 
-    async def chat(self, messages, tools=None):
-        from sag_api.generation.llm import ChatTurn
-
-        return ChatTurn(content="direct", tool_calls=[])
-
-    async def stream(self, messages):
-        for t in ["你好", "！"]:
-            yield t
+    async def stream_turn(self, request, cancellation):
+        for token in ["你好", "！"]:
+            cancellation.raise_if_cancelled()
+            yield ModelChunk(text_delta=token)
+        yield ModelChunk(finish_reason="stop")
 
     async def complete(self, messages):
         return "摘要"
@@ -39,15 +38,15 @@ async def _register(c, email="exp@t.com"):
 EMPTY = "抱歉，我暂时没有查到相关资料。"
 
 
-async def _make_soul_with_empty_response(c, headers):
-    soul = (
+async def _make_agent_with_empty_response(c, headers):
+    agent = (
         await c.post(
             "/api/v1/agents",
             headers=headers,
             json={"name": "严谨助手", "persona": {"empty_response": EMPTY}},
         )
     ).json()
-    return soul
+    return agent
 
 
 @pytest.mark.asyncio
@@ -59,13 +58,13 @@ async def test_empty_response_injection_and_prompt_preview():
         app.state.llm = DirectLLM()
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
             A = await _register(c)
-            soul = await _make_soul_with_empty_response(c, A)
-            thread = (await c.post(f"/api/v1/agents/{soul['id']}/threads", headers=A, json={})).json()
+            agent = await _make_agent_with_empty_response(c, A)
+            thread = (await c.post(f"/api/v1/agents/{agent['id']}/threads", headers=A, json={})).json()
 
             events: list[tuple[str, dict]] = []
             async with c.stream(
                 "POST",
-                f"/api/v1/agents/{soul['id']}/threads/{thread['id']}/ask",
+                f"/api/v1/agents/{agent['id']}/threads/{thread['id']}/ask",
                 headers=A,
                 json={"query": "公司的报销流程是怎样的？"},
             ) as resp:
@@ -78,17 +77,17 @@ async def test_empty_response_injection_and_prompt_preview():
                         events.append((ev, json.loads(line.split(":", 1)[1].strip())))
 
             kinds = [e for e, _ in events]
-            assert "meta" in kinds and "token" in kinds and "done" in kinds
-            assert "error" not in kinds
-            meta = next(d for e, d in events if e == "meta")
-            assert meta["prompt_preview"]          # prompt 透明
-            assert EMPTY in meta["prompt_preview"]  # 兜底话术已注入系统提示
-            tokens = "".join(d["text"] for e, d in events if e == "token")
+            assert "message.delta" in kinds and "run.completed" in kinds
+            assert "run.failed" not in kinds
+            completed = next(d["payload"] for e, d in events if e == "run.completed")
+            assert completed["prompt_preview"]
+            assert EMPTY in completed["prompt_preview"]
+            tokens = "".join(d["payload"]["delta"] for e, d in events if e == "message.delta")
             assert tokens == "你好！"
 
             # 该轮回答已落库
             msgs = (
-                await c.get(f"/api/v1/agents/{soul['id']}/threads/{thread['id']}/messages", headers=A)
+                await c.get(f"/api/v1/agents/{agent['id']}/threads/{thread['id']}/messages", headers=A)
             ).json()
             assert any(m["content"] == "你好！" and m["role"] == "assistant" for m in msgs)
 
@@ -102,11 +101,11 @@ async def test_openai_compatible_endpoint():
         app.state.llm = DirectLLM()
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
             A = await _register(c, "oai@t.com")
-            soul = await _make_soul_with_empty_response(c, A)
+            agent = await _make_agent_with_empty_response(c, A)
 
             # 非流式：标准 OpenAI ChatCompletion 结构
             r = await c.post(
-                f"/api/v1/openai/{soul['id']}/chat/completions",
+                f"/api/v1/openai/{agent['id']}/chat/completions",
                 headers=A,
                 json={"messages": [{"role": "user", "content": "介绍一下产品定价"}]},
             )
@@ -121,7 +120,7 @@ async def test_openai_compatible_endpoint():
             chunks: list[str] = []
             async with c.stream(
                 "POST",
-                f"/api/v1/openai/{soul['id']}/chat/completions",
+                f"/api/v1/openai/{agent['id']}/chat/completions",
                 headers=A,
                 json={"messages": [{"role": "user", "content": "你好"}], "stream": True},
             ) as resp:
@@ -139,7 +138,7 @@ async def test_openai_compatible_endpoint():
 
             # 缺少 user 消息 → 422
             bad = await c.post(
-                f"/api/v1/openai/{soul['id']}/chat/completions",
+                f"/api/v1/openai/{agent['id']}/chat/completions",
                 headers=A,
                 json={"messages": [{"role": "system", "content": "x"}]},
             )
@@ -147,7 +146,7 @@ async def test_openai_compatible_endpoint():
 
             # 未认证 → 401
             un = await c.post(
-                f"/api/v1/openai/{soul['id']}/chat/completions",
+                f"/api/v1/openai/{agent['id']}/chat/completions",
                 json={"messages": [{"role": "user", "content": "hi"}]},
             )
             assert un.status_code == 401

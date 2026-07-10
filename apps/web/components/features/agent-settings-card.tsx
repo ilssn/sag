@@ -5,9 +5,10 @@ import { Save } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
+import { MAX_AVATAR_CHARS, normalizeAvatar } from "@/lib/avatar";
 import { useApp } from "@/components/features/app-shell";
+import { SettingsRow, SettingsSection } from "@/components/features/settings-section";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
@@ -39,7 +40,7 @@ export function AgentSettingsCard() {
     try {
       await api.updateAgent(agent.id, {
         name: name.trim() || "sag",
-        avatar: avatar.trim() || (name.trim() || "s").slice(0, 1),
+        avatar: normalizeAvatar(avatar) || normalizeAvatar(name).slice(0, 1) || "s",
         persona: { ...agent.persona, greeting: greeting.trim(), system_prompt: systemPrompt },
       });
       toast.success("助手设定已保存（新对话生效）");
@@ -51,51 +52,74 @@ export function AgentSettingsCard() {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>助手</CardTitle>
-        <CardDescription>你的默认助手：知识库即它的全部信源，回答自动带引用。</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={save} className="flex flex-col gap-4">
-          <div className="flex items-end gap-3">
-            <Field className="w-20 shrink-0">
-              <FieldLabel htmlFor="a-avatar">头像</FieldLabel>
-              <Input
-                id="a-avatar"
-                value={avatar}
-                onChange={(e) => setAvatar(e.target.value.slice(0, 2))}
-                className="w-16 text-center"
-              />
+    <form onSubmit={save}>
+      <SettingsSection
+        title="默认助手"
+        description="设置它在新对话中的身份、开场白和回答边界。"
+        footer={
+          <div className="flex justify-end">
+            <Button type="submit" disabled={saving}>
+              {saving ? <Spinner /> : <Save />}
+              {saving ? "保存中…" : "保存更改"}
+            </Button>
+          </div>
+        }
+      >
+        <SettingsRow
+          title="基本信息"
+          description={`头像最多 ${MAX_AVATAR_CHARS} 个字符；名称会显示在对话和侧栏中。`}
+        >
+          <div className="grid gap-4 sm:grid-cols-[12rem_minmax(0,1fr)]">
+            <Field className="min-w-0">
+              <FieldLabel htmlFor="a-avatar">头像字符</FieldLabel>
+              <div className="flex items-center gap-2">
+                <div
+                  className="grid size-9 shrink-0 place-items-center rounded-md border bg-muted text-sm font-medium"
+                  aria-hidden="true"
+                >
+                  {avatar || normalizeAvatar(name).slice(0, 1) || "s"}
+                </div>
+                <Input
+                  id="a-avatar"
+                  value={avatar}
+                  onChange={(e) => setAvatar(normalizeAvatar(e.target.value))}
+                  className="min-w-0 text-center font-mono"
+                  placeholder="AI"
+                />
+              </div>
+              <FieldDescription>支持 @_@、AI、单字或 emoji。</FieldDescription>
             </Field>
-            <Field className="min-w-0 flex-1">
-              <FieldLabel htmlFor="a-name">名字</FieldLabel>
+            <Field className="min-w-0">
+              <FieldLabel htmlFor="a-name">助手名称</FieldLabel>
               <Input id="a-name" value={name} onChange={(e) => setName(e.target.value)} required />
             </Field>
           </div>
+        </SettingsRow>
+        <SettingsRow title="开场白" description="新对话开始时的第一句话。">
           <Field>
-            <FieldLabel htmlFor="a-greet">开场白</FieldLabel>
+            <FieldLabel htmlFor="a-greet" className="sr-only">
+              开场白
+            </FieldLabel>
             <Input id="a-greet" value={greeting} onChange={(e) => setGreeting(e.target.value)} />
           </Field>
+        </SettingsRow>
+        <SettingsRow title="系统提示" description="定义语气、边界和知识使用规则。">
           <Field>
-            <FieldLabel htmlFor="a-sp">系统提示</FieldLabel>
+            <FieldLabel htmlFor="a-sp" className="sr-only">
+              系统提示
+            </FieldLabel>
             <Textarea
               id="a-sp"
-              rows={3}
+              rows={5}
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
               placeholder="你是谁、以什么口吻作答、遵守哪些边界。例如：只依据知识库作答。"
+              className="min-h-32 resize-y"
             />
             <FieldDescription>影响每次回答的行为边界；留空即默认「有据作答」。</FieldDescription>
           </Field>
-          <div>
-            <Button type="submit" disabled={saving}>
-              {saving ? <Spinner /> : <Save />}
-              {saving ? "保存中…" : "保存"}
-            </Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+        </SettingsRow>
+      </SettingsSection>
+    </form>
   );
 }

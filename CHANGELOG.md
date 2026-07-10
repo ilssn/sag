@@ -29,4 +29,4 @@
   知识库双视图、三栏详情（原文预览）、Mac 风窗口形态。
 
 ## v0.2.0 · 个人向 SAG 示范
-- 去多租户、soul→agent、信源即 MCP（HTTP/stdio）+ agent 挂载外部 MCP；品牌定名 sag。
+- 收敛为单用户 Agent 模型；信源即 MCP（HTTP/stdio），Agent 可挂载外部 MCP；品牌统一为 sag。

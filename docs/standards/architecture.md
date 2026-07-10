@@ -3,8 +3,9 @@
 ## 分层与依赖方向（只许向下）
 
 ```
+sag_agent/    独立 Agent Core：运行时、事件、工具、审批、取消、存储端口
 api/v1/        路由：只做 IO / 校验 / 序列化，不写业务
-services/      领域逻辑：纯函数式服务，不 import FastAPI
+services/      领域逻辑与 SDK 宿主适配，不 import FastAPI
 tools/         Agent 工具层：Tool ABC + 注册表；MCP 远端工具适配成同一接口
 mcp/           信源即 MCP：FastMCP server + HTTP 挂载（作用域经 contextvar 注入）
 jobs/          队列抽象 + 进程内 worker（退避重试）
@@ -16,6 +17,8 @@ db/ · core/    模型 / 配置 / 安全 / 错误 / 日志
 **规则**
 - 第三方引擎/SDK 只允许在**一个适配层**出现（`sag/`、`generation/llm.py`、`tools/mcp.py`）。
   换实现 = 改一个目录。
+- `sag_agent` 核心不得 import Web 框架、ORM、模型供应商或 `sag_api`；应用只能通过公开 API 使用。
+- Agent SSE 直接使用 SDK 事件名与 envelope；禁止另造 token/done 等平行状态机。
 - 路由函数体 ≤ 15 行为宜：取依赖 → 调 service → 包装响应。出现 if/for 的业务分支就该下沉。
 - 单例（EngineManager / LLMClient / JobQueue）挂 `app.state`，经 `core/deps.py` 注入；
   服务层通过参数接收，**不得**自行 import 单例。

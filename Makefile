@@ -22,7 +22,7 @@ api: ## 启动后端（本地零依赖 SQLite+LanceDB，热重载）
 web: ## 启动前端（Next dev）
 	cd apps/web && npm run dev
 
-test: ## 运行后端测试
+test: ## 运行后端与 Agent Core 测试
 	cd apps/api && . .venv/bin/activate && pytest -q
 
 build: ## 构建前端产物

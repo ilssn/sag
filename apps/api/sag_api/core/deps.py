@@ -7,6 +7,7 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sag_agent import AgentRuntime
 from sag_api.core.db import get_session
 from sag_api.core.errors import AuthError
 from sag_api.core.security import decode_token
@@ -48,6 +49,10 @@ def get_job_queue(request: Request) -> JobQueue:
 
 def get_llm(request: Request) -> LLMClient:
     return request.app.state.llm
+
+
+def get_agent_runtime(request: Request) -> AgentRuntime:
+    return request.app.state.agent_runtime
 
 
 def get_tool_registry():
