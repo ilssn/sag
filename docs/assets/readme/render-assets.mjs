@@ -19,6 +19,32 @@ for (const [source, output, width] of assets) {
     .toFile(path.join(root, output));
 }
 
+const headerScale = 4;
+const headerLogo = await sharp(path.join(root, "zleap-logo.svg"), { density: 384 })
+  .resize({ width: 220 * headerScale })
+  .png()
+  .toBuffer();
+const headerMascot = await sharp(path.join(root, "zleap-mascot.png"))
+  .resize({ width: 96 * headerScale })
+  .rotate(-8, { background: { r: 0, g: 0, b: 0, alpha: 0 } })
+  .png()
+  .toBuffer();
+
+await sharp({
+  create: {
+    width: 294 * headerScale,
+    height: 188 * headerScale,
+    channels: 4,
+    background: { r: 0, g: 0, b: 0, alpha: 0 },
+  },
+})
+  .composite([
+    { input: headerLogo, left: 0, top: 0 },
+    { input: headerMascot, left: 180 * headerScale, top: 43 * headerScale },
+  ])
+  .png({ compressionLevel: 9, adaptiveFiltering: true })
+  .toFile(path.join(root, "zleap-readme-header.png"));
+
 for (const name of [
   "product-import.png",
   "product-search.png",
