@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from zleap.sag import DataEngine
 from zleap.sag.modules.extract.config import ExtractConfig
@@ -31,10 +31,14 @@ class IncrementalDocumentProcessor:
         source_config_id: str,
         *,
         max_concurrency: int,
+        chunk_max_tokens: int = 1_000,
+        chunk_mode: Literal["standard", "heading_strict"] = "standard",
     ) -> None:
         self._engine = engine
         self._source_config_id = source_config_id
         self._max_concurrency = max(1, min(100, max_concurrency))
+        self._chunk_max_tokens = chunk_max_tokens
+        self._chunk_mode = chunk_mode
 
     async def process(
         self,
@@ -52,7 +56,12 @@ class IncrementalDocumentProcessor:
             if on_stage:
                 await on_stage("loading")
             loaded = await DocumentLoader().load(
-                DocumentLoadConfig(path=str(path), source_config_id=self._source_config_id)
+                DocumentLoadConfig(
+                    path=str(path),
+                    source_config_id=self._source_config_id,
+                    max_tokens=self._chunk_max_tokens,
+                    chunk_mode=self._chunk_mode,
+                )
             )
             current.source_id = getattr(loaded, "source_id", None)
             current.chunk_ids = list(getattr(loaded, "chunk_ids", []) or [])

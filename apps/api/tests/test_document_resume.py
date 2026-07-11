@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -74,6 +75,44 @@ async def test_incremental_processor_pauses_after_inflight_chunks_and_resumes(mo
     assert resumed.event_count == 5
     assert resumed.token_usage == 500
     assert normalized == [["c1", "c2", "c3", "c4", "c5"]]
+
+
+@pytest.mark.asyncio
+async def test_incremental_processor_passes_chunk_settings_to_zleap(monkeypatch):
+    from sag_api.sag import incremental_processor as processor_module
+    from sag_api.sag.dto import ProcessCheckpoint
+    from sag_api.sag.incremental_processor import IncrementalDocumentProcessor
+
+    seen = {}
+
+    class FakeLoader:
+        async def load(self, config):
+            seen["max_tokens"] = config.max_tokens
+            seen["chunk_mode"] = config.chunk_mode
+            return SimpleNamespace(source_id="document-1", chunk_ids=[])
+
+    monkeypatch.setattr(processor_module, "DocumentLoader", FakeLoader)
+    processor = IncrementalDocumentProcessor(
+        object(),
+        "source-config",
+        max_concurrency=2,
+        chunk_max_tokens=1_600,
+        chunk_mode="heading_strict",
+    )
+
+    outcome = await processor.process(
+        "/tmp/book.md",
+        checkpoint=ProcessCheckpoint(),
+        on_checkpoint=lambda value: _append_checkpoint([], value),
+        should_pause=lambda: _return_false(),
+    )
+
+    assert seen == {"max_tokens": 1_600, "chunk_mode": "heading_strict"}
+    assert outcome.source_id == "document-1"
+
+
+async def _return_false():
+    return False
 
 
 async def _append_checkpoint(snapshots, value):

@@ -457,6 +457,8 @@ class EngineManager:
                     source_config_id,
                     max_concurrency=max_concurrency
                     or self._settings.document_extract_concurrency,
+                    chunk_max_tokens=self._settings.document_chunk_max_tokens,
+                    chunk_mode=self._settings.document_chunk_mode,
                 )
                 return await processor.process(
                     path,

@@ -149,6 +149,8 @@ export interface ModelConfig {
   mineru_api_key_set: boolean;
   effective_document_parser: EffectiveDocumentParser;
   document_extract_concurrency: number;
+  document_chunk_max_tokens: number;
+  document_chunk_mode: "standard" | "heading_strict";
   search_strategy: SearchStrategy;
   search_top_k: number;
   sag_language: "zh" | "en";
@@ -172,6 +174,8 @@ export type ModelConfigPatch = Partial<{
   mineru_version: "2.0" | "2.5";
   mineru_api_key: string;
   document_extract_concurrency: number;
+  document_chunk_max_tokens: number;
+  document_chunk_mode: "standard" | "heading_strict";
   search_strategy: SearchStrategy;
   search_top_k: number;
   sag_language: "zh" | "en";

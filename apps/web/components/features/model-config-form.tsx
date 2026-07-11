@@ -21,7 +21,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
 import { Spinner } from "@/components/ui/spinner";
 import { api, ApiError } from "@/lib/api";
-import { SEARCH_STRATEGIES } from "@/lib/retrieval-config";
 import type { ModelConfig, ModelConfigPatch } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -56,14 +55,10 @@ export function ModelConfigForm() {
   const [embDims, setEmbDims] = React.useState("");
   const [documentParser, setDocumentParser] =
     React.useState<ModelConfig["document_parser"]>("auto");
-  const [extractConcurrency, setExtractConcurrency] = React.useState(5);
   const [mineruBaseUrl, setMineruBaseUrl] = React.useState("");
   const [mineruVersion, setMineruVersion] =
     React.useState<ModelConfig["mineru_version"]>("2.5");
   const [mineruKey, setMineruKey] = React.useState("");
-  const [strategy, setStrategy] = React.useState<ModelConfig["search_strategy"]>("vector");
-  const [topK, setTopK] = React.useState(8);
-  const [language, setLanguage] = React.useState<ModelConfig["sag_language"]>("zh");
 
   const hydrate = React.useCallback((config: ModelConfig) => {
     setCfg(config);
@@ -78,12 +73,8 @@ export function ModelConfigForm() {
     setEmbBaseUrl(config.embedding_base_url ?? "");
     setEmbDims(config.embedding_dimensions != null ? String(config.embedding_dimensions) : "");
     setDocumentParser(config.document_parser);
-    setExtractConcurrency(config.document_extract_concurrency ?? 5);
     setMineruBaseUrl(config.mineru_base_url ?? "");
     setMineruVersion(config.mineru_version);
-    setStrategy(config.search_strategy);
-    setTopK(config.search_top_k);
-    setLanguage(config.sag_language);
     setLlmKey("");
     setEmbKey("");
     setMineruKey("");
@@ -118,12 +109,8 @@ export function ModelConfigForm() {
         embedding_base_url: embBaseUrl.trim(),
         embedding_dimensions: embDims.trim() ? Number(embDims) : null,
         document_parser: documentParser,
-        document_extract_concurrency: extractConcurrency,
         mineru_base_url: mineruBaseUrl.trim() || null,
         mineru_version: mineruVersion,
-        search_strategy: strategy,
-        search_top_k: topK,
-        sag_language: language,
       };
       if (llmKey.trim()) patch.llm_api_key = llmKey.trim();
       if (embKey.trim()) patch.embedding_api_key = embKey.trim();
@@ -171,7 +158,7 @@ export function ModelConfigForm() {
 
   if (loadError) {
     return (
-      <SettingsSection title="模型配置" description="生成、向量和检索参数。">
+      <SettingsSection title="模型配置" description="生成、向量和解析模型参数。">
         <div className="p-4 sm:p-5">
           <Alert variant="destructive">
             <AlertTitle>加载失败</AlertTitle>
@@ -194,8 +181,7 @@ export function ModelConfigForm() {
         {[
           ["生成模型", "正在加载模型连接。"],
           ["向量模型", "正在加载向量化配置。"],
-          ["文档解析", "正在加载文件解析配置。"],
-          ["检索", "正在加载检索规则。"],
+          ["解析模型", "正在加载文件解析模型。"],
         ].map(([title, description]) => (
           <SettingsSection key={title} title={title} description={description}>
             <div className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5">
@@ -380,7 +366,7 @@ export function ModelConfigForm() {
       </SettingsSection>
 
       <SettingsSection
-        title="文档解析"
+        title="解析模型"
         description="配置 PDF 等文件的解析方式；MinerU 未配置或解析失败时自动回退 MarkItDown。"
       >
         <SettingsRow title="解析引擎" description="选择默认引擎，并配置可选的 MinerU 服务。">
@@ -428,22 +414,6 @@ export function ModelConfigForm() {
               </Select>
             </Field>
             <Field>
-              <FieldLabel htmlFor="extract-concurrency">单文档抽取并发</FieldLabel>
-              <Input
-                id="extract-concurrency"
-                type="number"
-                min={1}
-                max={50}
-                value={extractConcurrency}
-                onChange={(event) =>
-                  setExtractConcurrency(
-                    Math.min(50, Math.max(1, Number(event.target.value) || 1)),
-                  )
-                }
-              />
-              <FieldDescription>每篇文档同时抽取的分块数，默认 5。</FieldDescription>
-            </Field>
-            <Field>
               <FieldLabel htmlFor="mineru-url">MinerU Base URL</FieldLabel>
               <Input
                 id="mineru-url"
@@ -477,55 +447,6 @@ export function ModelConfigForm() {
                 placeholder={keyPlaceholder(cfg.mineru_api_key_set)}
               />
               <FieldDescription>密钥不会回显，留空保持当前配置不变。</FieldDescription>
-            </Field>
-          </div>
-        </SettingsRow>
-      </SettingsSection>
-
-      <SettingsSection title="检索" description="控制知识召回方式和信息抽取语言。">
-        <SettingsRow
-          title="检索规则"
-          description="快速模式使用向量召回；精确模式增加实体关系扩展与 LLM 精排。"
-        >
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field>
-              <FieldLabel htmlFor="strategy">默认检索模式</FieldLabel>
-              <Select value={strategy} onValueChange={(value) => setStrategy(value as typeof strategy)}>
-                <SelectTrigger id="strategy">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {SEARCH_STRATEGIES.map(({ value, label }) => (
-                    <SelectItem key={value} value={value}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="language">抽取语言</FieldLabel>
-              <Select value={language} onValueChange={(value) => setLanguage(value as typeof language)}>
-                <SelectTrigger id="language">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="zh">中文</SelectItem>
-                  <SelectItem value="en">English</SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field className="sm:col-span-2">
-              <FieldLabel>{`召回条数 · ${topK}`}</FieldLabel>
-              <div className="flex h-9 items-center">
-                <Slider
-                  value={[topK]}
-                  min={1}
-                  max={50}
-                  step={1}
-                  onValueChange={([value]) => setTopK(value)}
-                />
-              </div>
             </Field>
           </div>
         </SettingsRow>
