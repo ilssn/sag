@@ -1,10 +1,11 @@
 # 查询策略
 
 ## 漏斗范式（省 token、准定位）
-1. `list_documents` → 锁定候选文档
-2. `outline(doc)` → 找目标章节的 chunk_id
-3. `get_chunk(chunk_id)` → 只取需要的分块
-4. 拿不准位置 → `search`（语义）或 `grep`（精确）先召回，再 get_chunk
+1. `list_sources` → 确认可访问范围并取得 source_id
+2. `list_documents(source_id)` → 锁定候选文档
+3. `outline(doc)` → 找目标章节的 chunk_id
+4. `search`（语义）或 `grep`（精确）召回证据
+5. `get_chunk(chunk_id)` 或分页 `read` → 只取需要的原文
 
 ## 何时 search vs grep
 - **search**：问句、概念、模糊表述（“报销的审批链是怎样的”）

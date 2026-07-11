@@ -1,8 +1,17 @@
 <p align="center">
-  <img src="docs/assets/readme/zleap-logo.svg" alt="Zleap" width="72" />
+  <img src="docs/assets/readme/zleap-logo.svg" alt="Zleap" width="220" />
 </p>
 
 <h1 align="center">SAG</h1>
+
+<p align="center">
+  <a href="https://arxiv.org/abs/2606.15971"><img alt="Paper" src="https://img.shields.io/badge/paper-arXiv%3A2606.15971-18181b" /></a>
+  <a href="https://pypi.org/project/zleap-sag/"><img alt="PyPI" src="https://img.shields.io/pypi/v/zleap-sag?label=zleap--sag&color=18181b" /></a>
+  <img alt="SAG version" src="https://img.shields.io/badge/SAG-v1.2.2-18181b" />
+  <img alt="Python" src="https://img.shields.io/badge/Python-3.11%2B-3776ab" />
+  <img alt="Node" src="https://img.shields.io/badge/Node-20%2B-339933" />
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-18181b" /></a>
+</p>
 
 <p align="center"><strong>Your last knowledge base application.</strong></p>
 
@@ -17,15 +26,6 @@
 
 <p align="center">
   Event-entity indexing and query-time dynamic hyperedges provide semantic retrieval and relational reasoning in one system, without maintaining two RAG stacks or merging two result sets.
-</p>
-
-<p align="center">
-  <a href="https://arxiv.org/abs/2606.15971"><img alt="Paper" src="https://img.shields.io/badge/paper-arXiv%3A2606.15971-18181b" /></a>
-  <a href="https://pypi.org/project/zleap-sag/"><img alt="PyPI" src="https://img.shields.io/pypi/v/zleap-sag?label=zleap--sag&color=18181b" /></a>
-  <img alt="SAG version" src="https://img.shields.io/badge/SAG-v1.2.2-18181b" />
-  <img alt="Python" src="https://img.shields.io/badge/Python-3.11%2B-3776ab" />
-  <img alt="Node" src="https://img.shields.io/badge/Node-20%2B-339933" />
-  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-18181b" /></a>
 </p>
 
 <p align="center">
@@ -138,15 +138,11 @@ The semantic and structural paths inside SAG are native parts of the SAG pipelin
 
 This makes incremental writes natural: a new chunk adds its own event, entities, and associations without recomputing a global graph.
 
-### Multi-hop retrieval SOTA
+### A new SOTA for RAG
 
 Under the same `BGE-Large-EN-v1.5` embedding and `Qwen3.6-Flash` LLM configuration, SAG reports the best result on **8 of 9 Recall@1/2/5 metrics** across HotpotQA, 2WikiMultiHopQA, and MuSiQue. Its average Recall@2/Recall@5 is **79.30%/88.18%**, compared with HippoRAG 2 at **68.14%/83.28%**.
 
-<p align="center">
-  <img src="docs/assets/readme/sag-benchmark.png" alt="SAG multi-hop retrieval benchmark" width="940" />
-</p>
-
-The exact nine metrics behind the 8/9 claim are below. Bold values are the best result for that dataset and K.
+Full results:
 
 | Dataset | Method | Recall@1 | Recall@2 | Recall@5 |
 | --- | --- | ---: | ---: | ---: |
@@ -159,19 +155,37 @@ The exact nine metrics behind the 8/9 claim are below. Bold values are the best 
 | **Average** | **SAG** | **42.50%** | **79.30%** | **88.18%** |
 | **Average** | HippoRAG 2 | 39.14% | 68.14% | 83.28% |
 
-Evaluation notes:
-
-- Each dataset uses 1,000 questions sampled from its official development split.
-- Recall@K uses the paper's any-hit passage criterion.
-- SAG's only loss among the nine headline metrics is Recall@5 on 2WikiMultiHopQA.
-- On MuSiQue, where questions contain up to four non-skippable hops, SAG reaches 80.04% Recall@5 versus 65.13% for HippoRAG 2.
-- See the [paper](https://arxiv.org/abs/2606.15971) for methodology and limitations, and [SAG-Benchmark](https://github.com/Zleap-AI/SAG-Benchmark) for scripts and the complete Recall@1/2/5/10 results.
+See the [paper](https://arxiv.org/abs/2606.15971) and [SAG-Benchmark](https://github.com/Zleap-AI/SAG-Benchmark) for the full method and reproduction scripts.
 
 ---
 
 <a id="user-guide"></a>
 
 ## User Guide
+
+### Quick start (Docker, recommended)
+
+Requirements: Docker Desktop, or Docker Engine with Compose v2.
+
+```bash
+git clone https://github.com/Zleap-AI/SAG.git
+cd SAG
+docker compose up -d --build
+```
+
+No API key, Python runtime, Node runtime, or external database is required to boot the application. When both services are healthy, open:
+
+- Web application: [http://localhost:3000](http://localhost:3000)
+- API documentation: [http://localhost:8000/docs](http://localhost:8000/docs)
+
+On first launch:
+
+1. Enter your name to create or restore the local identity.
+2. Use the 302.AI quick setup, or open **Settings → Models** and configure any OpenAI-compatible LLM and embedding endpoint.
+3. Create a source, upload documents, and wait until their status is **Ready**.
+4. Search, open the original source, or start a cited conversation.
+
+The UI and services still start without model credentials. Embeddings are required for indexing/vector retrieval; the LLM is required for event extraction, query understanding, and generated answers.
 
 ### Import knowledge
 
@@ -207,29 +221,42 @@ Switch a source from list view to graph view to inspect the events, entities, an
   <img src="docs/assets/readme/product-graph.png" alt="SAG event-entity knowledge graph" width="940" />
 </p>
 
-### Deploy with Docker
+### MCP guide
 
-Requirements: Docker Desktop, or Docker Engine with Compose v2.
+#### Use as an Agent Skill (Claude Code, Codex, and others)
+
+SAG ships an official Skill in [`skills/sag/`](skills/sag/). It teaches an Agent to use eight read-only MCP tools: call `list_sources` to confirm the accessible scope, then follow the `list_documents → outline → search/grep → get_chunk/read` exploration funnel to locate and cite knowledge.
+
+Copy the directory into your Agent's skills directory:
 
 ```bash
-git clone https://github.com/Zleap-AI/SAG.git
-cd SAG
-docker compose up -d --build
+# Claude Code
+cp -R skills/sag ~/.claude/skills/sag-knowledge
+
+# Codex
+cp -R skills/sag ~/.codex/skills/sag-knowledge
 ```
 
-No API key, Python runtime, Node runtime, or external database is required to boot the application. When both services are healthy, open:
+#### Mount MCP directly in an Agent
 
-- Web application: [http://localhost:3000](http://localhost:3000)
-- API documentation: [http://localhost:8000/docs](http://localhost:8000/docs)
+The Skill is optional. In SAG, open **Settings → Integrations → Knowledge MCP**, select HTTP or local command, and copy the complete configuration. The copied HTTP configuration includes the current JWT, exposes all sources by default, and can be scoped with `source_id`.
 
-On first launch:
+<p align="center">
+  <img src="docs/assets/readme/product-mcp.png" alt="SAG Knowledge MCP integration settings" width="940" />
+</p>
 
-1. Enter your name to create or restore the local identity.
-2. Use the 302.AI quick setup, or open **Settings → Models** and configure any OpenAI-compatible LLM and embedding endpoint.
-3. Create a source, upload documents, and wait until their status is **Ready**.
-4. Search, open the original source, or start a cited conversation.
+### Use SAG as a model (OpenAI-compatible)
 
-The UI and services still start without model credentials. Embeddings are required for indexing/vector retrieval; the LLM is required for event extraction, query understanding, and generated answers.
+SAG exposes an OpenAI Chat Completions endpoint with the same retrieval and citation behavior as the built-in chat:
+
+```bash
+curl -s http://localhost:8000/api/v1/openai/<AGENT_ID>/chat/completions \
+  -H "Authorization: Bearer <SAG_JWT>" \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"What is this material about?"}]}'
+```
+
+The response is a standard `chat.completion` with an additional `sag.citations` field; standard clients ignore unknown fields. Set `"stream": true` to receive SSE chunks.
 
 ### Operate and update
 
@@ -431,7 +458,6 @@ Typed results are available from `zleap.sag.results`: `ChunkResult`, `IngestResu
 | UI label | Python strategy | Implementation |
 | --- | --- | --- |
 | Vector | `vector` | Direct vector retrieval over original chunks; skips entity expansion and is the fastest path |
-| Atomic | `atomic` | Retrieves atomic, triple-like facts whose event contains exactly two entities, then uses LLM selection |
 | Graph-enhanced | `multi` | SAG's native multi-entity event retrieval with shared-entity SQL expansion and final selection |
 
 The product label **Graph-enhanced** maps to SAG's `multi` strategy; it does not run a separate GraphRAG implementation. Advanced engine strategies include `multi1`, `hopllm`, and `multi_es`; use them only when their backend/candidate-flow trade-offs are needed.
@@ -513,22 +539,6 @@ curl -s -X POST "$BASE/sources/$SOURCE_ID/search" \
 ```
 
 Document ingestion is processed by the background job queue. Check the returned document status or its job before expecting search results.
-
-Use an Agent through the OpenAI-compatible surface:
-
-```bash
-curl -s -X POST "$BASE/openai/<AGENT_ID>/chat/completions" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "messages":[{"role":"user","content":"Summarize the indexed evidence."}],
-    "stream":false
-  }'
-```
-
-The response follows Chat Completions and adds `sag.citations`; standards-compliant clients can ignore the extra field. Set `stream: true` for SSE.
-
-For MCP, configure a Streamable HTTP server at `http://localhost:8000/mcp/`, add `Authorization: Bearer <SAG_TOKEN>`, and optionally append `?source_id=<SOURCE_ID>` to restrict the scope.
 
 For a frontend served from another origin, add it to `SAG_CORS_ORIGINS`. If the API address changes, rebuild the Web image with the matching `NEXT_PUBLIC_API_BASE`.
 

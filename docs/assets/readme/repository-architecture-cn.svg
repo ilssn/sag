@@ -1,0 +1,120 @@
+<svg width="1800" height="1180" viewBox="0 0 1800 1180" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <pattern id="arch-grid" width="30" height="30" patternUnits="userSpaceOnUse">
+      <circle cx="1.5" cy="1.5" r="1.5" fill="#E9E7EE"/>
+    </pattern>
+    <filter id="arch-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="24" flood-color="#18181B" flood-opacity="0.065"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0 0L10 5L0 10Z" fill="#A1A1AA"/>
+    </marker>
+  </defs>
+
+  <rect width="1800" height="1180" fill="#F7F7F8"/>
+  <rect width="1800" height="1180" fill="url(#arch-grid)" opacity="0.55"/>
+  <rect x="62" y="50" width="1676" height="1080" rx="8" fill="white" stroke="#DDDDE2" filter="url(#arch-shadow)"/>
+
+  <g font-family="Inter, PingFang SC, Noto Sans CJK SC, Microsoft YaHei, Arial, sans-serif" fill="#18181B">
+    <text x="110" y="112" font-size="18" font-weight="700">SAG 仓库 · 系统边界</text>
+    <text x="110" y="170" font-size="42" font-weight="700">一个引擎，三种入口</text>
+    <text x="110" y="208" font-size="20" fill="#64646D">产品、自托管 API 与 Python 引擎都可以独立使用。</text>
+
+    <line x1="110" y1="246" x2="1690" y2="246" stroke="#E2E2E7"/>
+
+    <text x="110" y="286" font-size="15" font-weight="700" fill="#73737C">客户端</text>
+
+    <rect x="110" y="310" width="410" height="114" rx="8" fill="#FAFAFB" stroke="#D8D8DE"/>
+    <rect x="110" y="310" width="8" height="114" fill="#18181B"/>
+    <text x="146" y="352" font-size="22" font-weight="700">SAG Web</text>
+    <text x="146" y="382" font-size="16" fill="#73737C">Next.js 产品界面</text>
+    <text x="146" y="408" font-size="15" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" fill="#52525B">apps/web</text>
+
+    <rect x="695" y="310" width="410" height="114" rx="8" fill="#FAFAFB" stroke="#D8D8DE"/>
+    <rect x="695" y="310" width="8" height="114" fill="#F59E0B"/>
+    <text x="731" y="352" font-size="22" font-weight="700">自定义前端</text>
+    <text x="731" y="382" font-size="16" fill="#73737C">你的 Web、桌面或移动端界面</text>
+    <text x="731" y="408" font-size="15" fill="#52525B">调用自托管 HTTP API</text>
+
+    <rect x="1280" y="310" width="410" height="114" rx="8" fill="#FAFAFB" stroke="#D8D8DE"/>
+    <rect x="1280" y="310" width="8" height="114" fill="#8B5CF6"/>
+    <text x="1316" y="352" font-size="22" font-weight="700">外部 Agent</text>
+    <text x="1316" y="382" font-size="16" fill="#73737C">Claude、Cursor 或其他运行时</text>
+    <text x="1316" y="408" font-size="15" fill="#52525B">OpenAI 兼容 API 或 MCP</text>
+
+    <path d="M315 424V490" fill="none" stroke="#A1A1AA" stroke-width="2" marker-end="url(#arrow)"/>
+    <path d="M900 424V490" fill="none" stroke="#A1A1AA" stroke-width="2" marker-end="url(#arrow)"/>
+    <path d="M1485 424V490" fill="none" stroke="#A1A1AA" stroke-width="2" marker-end="url(#arrow)"/>
+
+    <rect x="165" y="500" width="300" height="54" rx="6" fill="#18181B"/>
+    <text x="250" y="534" font-size="17" font-weight="650" fill="white">HTTP / JSON</text>
+    <rect x="750" y="500" width="300" height="54" rx="6" fill="#18181B"/>
+    <text x="820" y="534" font-size="17" font-weight="650" fill="white">REST / OpenAPI</text>
+    <rect x="1335" y="500" width="300" height="54" rx="6" fill="#18181B"/>
+    <text x="1391" y="534" font-size="17" font-weight="650" fill="white">OpenAI API / MCP</text>
+
+    <path d="M315 554V600" fill="none" stroke="#A1A1AA" stroke-width="2" marker-end="url(#arrow)"/>
+    <path d="M900 554V600" fill="none" stroke="#A1A1AA" stroke-width="2" marker-end="url(#arrow)"/>
+    <path d="M1485 554V600" fill="none" stroke="#A1A1AA" stroke-width="2" marker-end="url(#arrow)"/>
+
+    <rect x="110" y="610" width="1580" height="186" rx="8" fill="white" stroke="#BFC0C7" stroke-width="2"/>
+    <rect x="110" y="610" width="1580" height="48" rx="8" fill="#F4F4F5"/>
+    <path d="M110 650V618Q110 610 118 610H1682Q1690 610 1690 618V650H110Z" fill="#F4F4F5"/>
+    <text x="142" y="641" font-size="18" font-weight="700">SAG API · FastAPI</text>
+    <text x="1506" y="641" font-size="15" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" fill="#64646D">apps/api/sag_api</text>
+
+    <rect x="142" y="681" width="345" height="82" rx="6" fill="#FAFAFB" stroke="#DDDDE2"/>
+    <text x="166" y="713" font-size="17" font-weight="700">信源与文档</text>
+    <text x="166" y="741" font-size="15" fill="#73737C">身份 · 上传 · 任务 · 同步</text>
+
+    <rect x="526" y="681" width="345" height="82" rx="6" fill="#FAFAFB" stroke="#DDDDE2"/>
+    <text x="550" y="713" font-size="17" font-weight="700">检索与图谱</text>
+    <text x="550" y="741" font-size="15" fill="#73737C">检索 · 溯源 · 原文引用</text>
+
+    <rect x="910" y="681" width="345" height="82" rx="6" fill="#FAFAFB" stroke="#DDDDE2"/>
+    <text x="934" y="713" font-size="17" font-weight="700">Agent 与对话</text>
+    <text x="934" y="741" font-size="15" fill="#73737C">会话 · SSE · OpenAI 兼容</text>
+
+    <rect x="1294" y="681" width="364" height="82" rx="6" fill="#FAFAFB" stroke="#DDDDE2"/>
+    <text x="1318" y="713" font-size="17" font-weight="700">文档解析</text>
+    <text x="1318" y="741" font-size="15" fill="#73737C">MarkItDown · MinerU → Markdown</text>
+
+    <path d="M900 796V838" fill="none" stroke="#A1A1AA" stroke-width="2" marker-end="url(#arrow)"/>
+    <path d="M1476 796V820H1220V838" fill="none" stroke="#A1A1AA" stroke-width="2" marker-end="url(#arrow)"/>
+
+    <rect x="230" y="848" width="1340" height="168" rx="8" fill="#FCFCFD" stroke="#18181B" stroke-width="2"/>
+    <rect x="230" y="848" width="1340" height="48" rx="8" fill="#18181B"/>
+    <path d="M230 888V856Q230 848 238 848H1562Q1570 848 1570 856V888H230Z" fill="#18181B"/>
+    <text x="262" y="879" font-size="19" font-weight="700" fill="white">zleap-sag · Python 知识引擎</text>
+    <text x="1345" y="879" font-size="15" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" fill="#D4D4D8">pip install zleap-sag</text>
+
+    <rect x="262" y="920" width="292" height="64" rx="6" fill="white" stroke="#DDDDE2"/>
+    <text x="286" y="947" font-size="17" font-weight="700">导入</text>
+    <text x="286" y="971" font-size="14" fill="#73737C">分块 · 向量化 · 持久化</text>
+
+    <rect x="586" y="920" width="292" height="64" rx="6" fill="#FFF9F0" stroke="#FED7AA"/>
+    <circle cx="614" cy="943" r="7" fill="#F59E0B"/>
+    <text x="634" y="947" font-size="17" font-weight="700">事件抽取</text>
+    <text x="610" y="971" font-size="14" fill="#73737C">完整语义单元</text>
+
+    <rect x="910" y="920" width="292" height="64" rx="6" fill="#F7F4FF" stroke="#DDD6FE"/>
+    <circle cx="938" cy="943" r="7" fill="#8B5CF6"/>
+    <text x="958" y="947" font-size="17" font-weight="700">实体索引</text>
+    <text x="934" y="971" font-size="14" fill="#73737C">查询时连接点</text>
+
+    <rect x="1234" y="920" width="304" height="64" rx="6" fill="white" stroke="#DDDDE2"/>
+    <text x="1258" y="947" font-size="17" font-weight="700">检索</text>
+    <text x="1258" y="971" font-size="14" fill="#73737C">向量 · 原子 · 多跳</text>
+
+    <path d="M650 1016V1050" fill="none" stroke="#A1A1AA" stroke-width="2" marker-end="url(#arrow)"/>
+    <path d="M1150 1016V1050" fill="none" stroke="#A1A1AA" stroke-width="2" marker-end="url(#arrow)"/>
+
+    <rect x="230" y="1060" width="640" height="46" rx="6" fill="#F4F4F5" stroke="#D8D8DE"/>
+    <text x="262" y="1089" font-size="16" font-weight="650">关系型存储</text>
+    <text x="430" y="1089" font-size="14" fill="#73737C">SQLite · PostgreSQL · MySQL · OceanBase</text>
+
+    <rect x="930" y="1060" width="640" height="46" rx="6" fill="#F4F4F5" stroke="#D8D8DE"/>
+    <text x="962" y="1089" font-size="16" font-weight="650">向量存储</text>
+    <text x="1098" y="1089" font-size="14" fill="#73737C">LanceDB · pgvector · Elasticsearch · OceanBase</text>
+  </g>
+</svg>
