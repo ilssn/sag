@@ -1,5 +1,7 @@
 <p align="center">
   <img src="docs/assets/readme/zleap-logo.svg" alt="Zleap" width="220" />
+  &nbsp;&nbsp;&nbsp;
+  <img src="docs/assets/readme/zleap-mascot.png" alt="Zleap astronaut" width="92" />
 </p>
 
 <h1 align="center">SAG</h1>
