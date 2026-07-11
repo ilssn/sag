@@ -68,14 +68,6 @@ Upload a document once. SAG parses it, splits it into chunks, embeds it, extract
 | Agent chat | Multi-turn answers grounded in selected sources, with clickable citations |
 | Integration | Self-hosted REST/OpenAPI, OpenAI-compatible chat, MCP, and the `zleap-sag` Python package |
 
-### Three names, three boundaries
-
-| Name | Meaning |
-| --- | --- |
-| **SAG** | The complete application in this repository: Web UI, API, sources, search, graph, Agent chat, and integrations |
-| **SAG retrieval architecture** | The paper's original event-entity index and query-time dynamic hyperedge method |
-| **`zleap-sag`** | The installable Python engine that implements ingestion, extraction, and retrieval for SAG or another application |
-
 The product is deliberately local-first and single-user. It starts with SQLite and LanceDB, requires no external database, and keeps a clear path to PostgreSQL/pgvector and other production backends.
 
 ---
