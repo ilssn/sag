@@ -3,6 +3,7 @@
 import { AccountSettings } from "@/components/features/account-settings";
 import { AgentSettingsCard } from "@/components/features/agent-settings-card";
 import { AppearanceSettings } from "@/components/features/appearance-settings";
+import { KnowledgeConfigForm } from "@/components/features/knowledge-config-form";
 import { McpSettingsCard } from "@/components/features/mcp-settings-card";
 import { McpServiceSettings } from "@/components/features/mcp-service-settings";
 import { ModelConfigForm } from "@/components/features/model-config-form";
@@ -45,6 +46,10 @@ export default function SettingsPage() {
 
         <TabsContent value="model" className="m-0 animate-fade-in">
           <ModelConfigForm />
+        </TabsContent>
+
+        <TabsContent value="knowledge" className="m-0 animate-fade-in">
+          <KnowledgeConfigForm />
         </TabsContent>
 
         <TabsContent value="integrations" className="m-0 animate-fade-in">

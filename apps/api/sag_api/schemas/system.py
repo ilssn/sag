@@ -18,7 +18,7 @@ class QuickModelSetupRequest(BaseModel):
 
 
 class ModelConfigUpdate(BaseModel):
-    """模型与检索配置的部分更新（未出现的字段保持不变）。
+    """模型与知识库配置的部分更新（未出现的字段保持不变）。
 
     密钥字段留空表示「保持原值」（不清空）；base_url / dimensions 留空表示清除。
     """
@@ -42,6 +42,8 @@ class ModelConfigUpdate(BaseModel):
     mineru_api_key: str | None = Field(default=None, max_length=500)
     mineru_version: Literal["2.0", "2.5"] | None = None
     document_extract_concurrency: int | None = Field(default=None, ge=1, le=50)
+    document_chunk_max_tokens: int | None = Field(default=None, ge=100, le=100_000)
+    document_chunk_mode: Literal["standard", "heading_strict"] | None = None
 
     search_strategy: Literal["multi", "vector", "atomic"] | None = None
     search_top_k: int | None = Field(default=None, ge=1, le=50)
@@ -54,11 +56,18 @@ class ModelConfigUpdate(BaseModel):
             raise ValueError("解析器与 MinerU 版本不能为 null")
         return value
 
-    @field_validator("document_extract_concurrency")
+    @field_validator("document_extract_concurrency", "document_chunk_max_tokens")
     @classmethod
-    def reject_null_extract_concurrency(cls, value: int | None) -> int:
+    def reject_null_document_numbers(cls, value: int | None) -> int:
         if value is None:
-            raise ValueError("文档抽取并发不能为 null")
+            raise ValueError("知识库解析参数不能为 null")
+        return value
+
+    @field_validator("document_chunk_mode")
+    @classmethod
+    def reject_null_chunk_mode(cls, value: str | None) -> str:
+        if value is None:
+            raise ValueError("切片模式不能为 null")
         return value
 
     @field_validator("llm_timeout_ms", "llm_max_retries")

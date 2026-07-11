@@ -1,4 +1,4 @@
-"""运行期模型配置 —— DB 覆盖层叠加在 env 默认（`settings` 单例）之上。
+"""运行期模型与知识库配置 —— DB 覆盖层叠加在 env 默认（`settings` 单例）之上。
 
 单用户本地示范：把「模型与检索」配置存进 `settings` 表（scope=global, key=model_config）。
 启动时与保存后**就地覆盖 `settings` 单例**的相应字段，端点再重建 `LLMClient` / 重置暖引擎，
@@ -40,6 +40,8 @@ _FIELDS = frozenset(
         "mineru_api_key",
         "mineru_version",
         "document_extract_concurrency",
+        "document_chunk_max_tokens",
+        "document_chunk_mode",
         "search_strategy",
         "search_top_k",
         "sag_language",
@@ -65,6 +67,8 @@ QUICK_SETUP_302 = {
     "mineru_base_url": "https://api.302.ai",
     "mineru_version": "2.5",
     "document_extract_concurrency": 5,
+    "document_chunk_max_tokens": 1_000,
+    "document_chunk_mode": "standard",
     "search_strategy": "vector",
     "search_top_k": 8,
     "sag_language": "zh",
@@ -130,6 +134,8 @@ def effective_model_config() -> dict:
         "mineru_version": _settings.mineru_version,
         "mineru_api_key_set": bool(_settings.mineru_api_key),
         "document_extract_concurrency": _settings.document_extract_concurrency,
+        "document_chunk_max_tokens": _settings.document_chunk_max_tokens,
+        "document_chunk_mode": _settings.document_chunk_mode,
         "search_strategy": _settings.search_strategy,
         "search_top_k": _settings.search_top_k,
         "sag_language": _settings.sag_language,
