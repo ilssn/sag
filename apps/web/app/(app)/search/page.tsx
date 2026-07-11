@@ -9,6 +9,7 @@ import {
   FileText,
   Library,
   List,
+  Orbit,
   Search as SearchIcon,
   Sparkles,
   Waypoints,
@@ -39,6 +40,7 @@ const SearchGraph = dynamic(() => import("@/components/features/search-graph"), 
   ssr: false,
   loading: () => <Skeleton className="h-[560px] rounded-lg" />,
 });
+type SearchView = "list" | "graph" | "graph3d";
 
 function mentionTerm(query: string): string | null {
   const at = query.lastIndexOf("@");
@@ -251,7 +253,7 @@ function SearchPageInner() {
   const [hasMoreResults, setHasMoreResults] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [activity, setActivity] = React.useState<ActivityItem[] | null>(null);
-  const [view, setView] = React.useState<"list" | "graph">("list");
+  const [view, setView] = React.useState<SearchView>("list");
   const [lastQuery, setLastQuery] = React.useState("");
   const [strategy, setStrategy] = React.useState<SearchStrategy>(defaultStrategy);
   const [lastStrategy, setLastStrategy] = React.useState<SearchStrategy>(defaultStrategy);
@@ -355,7 +357,7 @@ function SearchPageInner() {
     await searchFor(query, k);
   }
 
-  const graphViewActive = view === "graph" && Boolean(results?.length);
+  const graphViewActive = view !== "list" && Boolean(results?.length);
 
   return (
     <div
@@ -536,7 +538,7 @@ function SearchPageInner() {
         <div
           className={cn(
             "flex w-full flex-col gap-2",
-            view === "graph" && results.length > 0
+            graphViewActive
               ? "mx-auto min-h-0 max-w-[1200px] flex-1"
               : "mx-auto max-w-3xl",
           )}
@@ -565,20 +567,28 @@ function SearchPageInner() {
                 variant="outline"
                 size="sm"
                 value={view}
-                onValueChange={(v) => v && setView(v as typeof view)}
+                onValueChange={(v) => v && setView(v as SearchView)}
                 aria-label="结果视图"
               >
-                <ToggleGroupItem value="list" aria-label="列表视图">
+                <ToggleGroupItem value="list" aria-label="列表视图" title="列表">
                   <List />
                 </ToggleGroupItem>
-                <ToggleGroupItem value="graph" aria-label="图谱视图">
+                <ToggleGroupItem value="graph" aria-label="2D 图谱视图" title="2D 图谱">
                   <Waypoints />
+                </ToggleGroupItem>
+                <ToggleGroupItem value="graph3d" aria-label="3D 图谱视图" title="3D 图谱">
+                  <Orbit />
                 </ToggleGroupItem>
               </ToggleGroup>
             </div>
           </div>
-          {view === "graph" && results.length > 0 ? (
-            <SearchGraph events={results} entities={graphEntities} relations={graphRelations} />
+          {graphViewActive ? (
+            <SearchGraph
+              events={results}
+              entities={graphEntities}
+              relations={graphRelations}
+              mode={view === "graph3d" ? "3d" : "2d"}
+            />
           ) : (
             <>
               <ResultList results={results} />

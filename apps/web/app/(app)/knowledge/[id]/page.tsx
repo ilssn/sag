@@ -9,6 +9,7 @@ import {
   FlaskConical,
   List,
   Network,
+  Orbit,
   Plus,
   RefreshCw,
   Search,
@@ -39,6 +40,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 
 const ACTIVE = ["pending", "loading", "extracting"];
+type ContentView = "list" | "graph" | "graph3d";
 
 export default function SourceDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -46,15 +48,20 @@ export default function SourceDetailPage() {
   const { capabilities } = useApp();
   const [source, setSource] = React.useState<Source | null>(null);
   const [documents, setDocuments] = React.useState<Doc[] | null>(null);
-  const [contentView, setContentView] = React.useState<"list" | "graph">("list");
+  const [contentView, setContentView] = React.useState<ContentView>("list");
+  const graphViewActive = contentView !== "list";
 
   React.useEffect(() => {
-    if (window.localStorage.getItem("sag:source-content-view") === "graph") {
-      setContentView("graph");
+    const saved = window.localStorage.getItem("sag:source-content-view");
+    if (saved === "graph3d2") {
+      setContentView("graph3d");
+      window.localStorage.setItem("sag:source-content-view", "graph3d");
+    } else if (saved === "graph" || saved === "graph3d") {
+      setContentView(saved);
     }
   }, []);
 
-  const changeContentView = (view: "list" | "graph") => {
+  const changeContentView = (view: ContentView) => {
     setContentView(view);
     window.localStorage.setItem("sag:source-content-view", view);
   };
@@ -95,7 +102,7 @@ export default function SourceDetailPage() {
     <div
       className={cn(
         "min-h-full",
-        contentView === "graph" && "flex h-full min-h-0 flex-col overflow-hidden",
+        graphViewActive && "flex h-full min-h-0 flex-col overflow-hidden",
       )}
     >
       <div className="flex shrink-0 flex-wrap items-start justify-between gap-4 border-b px-4 py-5 md:px-6">
@@ -179,7 +186,7 @@ export default function SourceDetailPage() {
       <div
         className={cn(
           "mx-auto flex w-full flex-col gap-4 p-4 transition-[max-width,padding]",
-          contentView === "graph"
+          graphViewActive
             ? "min-h-0 max-w-none flex-1 overflow-hidden md:p-5"
             : "max-w-4xl md:p-6",
         )}
@@ -198,10 +205,14 @@ export default function SourceDetailPage() {
           </Alert>
         )}
 
-        <div className={cn(contentView === "graph" && "flex min-h-0 flex-1 flex-col")}>
+        <div className={cn(graphViewActive && "flex min-h-0 flex-1 flex-col")}>
           <div className="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-3">
             <h2 className="text-sm font-medium text-muted-foreground">
-              {contentView === "list" ? "文档" : "信息源图谱"}{" "}
+              {contentView === "list"
+                ? "文档"
+                : contentView === "graph3d"
+                  ? "3D 图谱"
+                  : "2D 图谱"}{" "}
               {documents ? `（${documents.length}）` : ""}
             </h2>
             <ToggleGroup
@@ -210,18 +221,36 @@ export default function SourceDetailPage() {
               size="sm"
               value={contentView}
               onValueChange={(value) =>
-                value && changeContentView(value as "list" | "graph")
+                value && changeContentView(value as ContentView)
               }
               aria-label="内容展示方式"
-              className="rounded-md bg-card"
+              className="rounded-md bg-card max-sm:w-full"
             >
-              <ToggleGroupItem value="list" className="gap-1.5 px-3" aria-label="列表视图">
+              <ToggleGroupItem
+                value="list"
+                className="gap-1.5 px-3 max-sm:flex-1 max-sm:px-2"
+                aria-label="列表视图"
+              >
                 <List className="size-3.5" />
                 列表
               </ToggleGroupItem>
-              <ToggleGroupItem value="graph" className="gap-1.5 px-3" aria-label="图谱视图">
+              <ToggleGroupItem
+                value="graph"
+                className="gap-1.5 px-3 max-sm:flex-1 max-sm:px-2"
+                aria-label="2D 图谱视图"
+              >
                 <Network className="size-3.5" />
-                图谱
+                <span className="sm:hidden">2D</span>
+                <span className="hidden sm:inline">2D 图谱</span>
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                value="graph3d"
+                className="gap-1.5 px-3 max-sm:flex-1 max-sm:px-2"
+                aria-label="3D 图谱视图"
+              >
+                <Orbit className="size-3.5" />
+                <span className="sm:hidden">3D</span>
+                <span className="hidden sm:inline">3D 图谱</span>
               </ToggleGroupItem>
             </ToggleGroup>
           </div>
@@ -231,10 +260,11 @@ export default function SourceDetailPage() {
                 <Skeleton key={i} className="h-16" />
               ))}
             </div>
-          ) : contentView === "graph" ? (
+          ) : graphViewActive ? (
             <div className="min-h-0 flex-1">
               <SourceGraph
                 source={source}
+                mode={contentView === "graph3d" ? "3d" : "2d"}
                 refreshKey={documents
                   .map((document) => `${document.id}:${document.status}:${document.event_count}`)
                   .join("|")}
