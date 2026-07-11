@@ -259,6 +259,74 @@ async def test_engine_allows_same_source_document_concurrency():
 
 
 @pytest.mark.asyncio
+async def test_document_cleanup_drains_and_blocks_same_source_processing(monkeypatch):
+    """清理派生数据期间不允许同一信源启动新的文档处理。"""
+    from sag_api.core.config import settings
+    from sag_api.sag import document_cleanup
+    from sag_api.sag.engine_manager import EngineManager, _Slot
+
+    class FakeEngine:
+        async def aclose(self):
+            pass
+
+    class Deleted:
+        chunk_ids = ()
+        event_ids = ()
+        relation_ids = ()
+        entity_ids = ()
+
+    cleanup_entered = asyncio.Event()
+    release_cleanup = asyncio.Event()
+
+    async def fake_delete_records(source_config_id, document_source_id):
+        assert (source_config_id, document_source_id) == ("source", "document")
+        cleanup_entered.set()
+        await release_cleanup.wait()
+        return Deleted()
+
+    monkeypatch.setattr(document_cleanup, "delete_document_records", fake_delete_records)
+    manager = EngineManager(settings)
+    slot = _Slot(engine=FakeEngine())
+    manager._slots["source"] = slot
+
+    first_entered = asyncio.Event()
+    release_first = asyncio.Event()
+    second_entered = asyncio.Event()
+    release_second = asyncio.Event()
+
+    async def first_processing():
+        async with manager.use_concurrently("source"):
+            first_entered.set()
+            await release_first.wait()
+
+    async def second_processing():
+        async with manager.use_concurrently("source"):
+            second_entered.set()
+            await release_second.wait()
+
+    first = asyncio.create_task(first_processing())
+    await first_entered.wait()
+    cleanup = asyncio.create_task(manager.delete_document_data("source", "document"))
+    for _ in range(20):
+        if not slot.concurrent_allowed.is_set():
+            break
+        await asyncio.sleep(0)
+    assert slot.concurrent_allowed.is_set() is False
+
+    second = asyncio.create_task(second_processing())
+    release_first.set()
+    await cleanup_entered.wait()
+    await asyncio.sleep(0)
+    assert second_entered.is_set() is False
+
+    release_cleanup.set()
+    await cleanup
+    await asyncio.wait_for(second_entered.wait(), timeout=1)
+    release_second.set()
+    await asyncio.gather(first, second)
+
+
+@pytest.mark.asyncio
 async def test_search_falls_back_to_vector():
     """multi 失败或空结果时自动回退 vector；vector 自身失败不再回退。"""
     from sag_api.core.config import settings

@@ -141,12 +141,14 @@ class _Slot:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     state_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     idle: asyncio.Event = field(default_factory=asyncio.Event)
+    concurrent_allowed: asyncio.Event = field(default_factory=asyncio.Event)
     concurrent_users: int = 0
     last_used: float = field(default_factory=time.monotonic)
     closing: bool = False
 
     def __post_init__(self) -> None:
         self.idle.set()
+        self.concurrent_allowed.set()
 
 
 class _EngineLifecycleGate:
@@ -410,9 +412,13 @@ class EngineManager:
         """取得共享资源但不串行化文档处理；独立 loader/extractor 隔离可变状态。"""
         while True:
             slot = await self._slot(source_config_id, source)
+            # Maintenance waiters must not hold the global lifecycle read gate;
+            # otherwise a configuration reset could be delayed by work that has
+            # not actually started yet.
+            await slot.concurrent_allowed.wait()
             async with self._lifecycle_gate.read():
                 async with slot.state_lock:
-                    if slot.closing:
+                    if slot.closing or not slot.concurrent_allowed.is_set():
                         continue
                     slot.concurrent_users += 1
                     slot.idle.clear()
@@ -429,6 +435,49 @@ class EngineManager:
     async def provision(self, source_config_id: str, source: Source | None = None) -> None:
         """确保该源的引擎 schema 就绪（幂等）。"""
         await self._slot(source_config_id, source)
+
+    async def delete_document_data(
+        self,
+        source_config_id: str,
+        document_source_id: str,
+        *,
+        source: Source | None = None,
+    ) -> None:
+        """删除一篇文档的块、事件、关系及孤立实体派生数据。"""
+        from sag_api.sag.document_cleanup import delete_document_records
+
+        while True:
+            slot = await self._slot(source_config_id, source)
+            async with self._lifecycle_gate.read():
+                await slot.lock.acquire()
+                try:
+                    if slot.closing:
+                        continue
+                    # Searches already share ``slot.lock``. Pause admission of new
+                    # concurrent document processors, then drain processors that
+                    # entered before this maintenance window.
+                    async with slot.state_lock:
+                        slot.concurrent_allowed.clear()
+                    await slot.idle.wait()
+                    with map_sag_errors():
+                        deleted = await delete_document_records(
+                            source_config_id,
+                            document_source_id,
+                        )
+                finally:
+                    async with slot.state_lock:
+                        slot.concurrent_allowed.set()
+                    slot.lock.release()
+                break
+        log.info(
+            "文档派生数据已清理 source_config_id=%s document_source_id=%s chunks=%d events=%d relations=%d entities=%d",
+            source_config_id,
+            document_source_id,
+            len(deleted.chunk_ids),
+            len(deleted.event_ids),
+            len(deleted.relation_ids),
+            len(deleted.entity_ids),
+        )
 
     async def process_document(
         self,

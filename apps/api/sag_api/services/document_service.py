@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from sqlalchemy import case, select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sag_api.core.errors import ConflictError, NotFoundError
@@ -12,6 +12,7 @@ from sag_api.db.base import new_id
 from sag_api.db.models import Document, Job, Source
 from sag_api.enums import DocumentStatus, JobStatus, JobType
 from sag_api.jobs import JobQueue
+from sag_api.sag import EngineManager
 
 
 async def list_documents(session: AsyncSession, source_id: str) -> list[Document]:
@@ -230,20 +231,51 @@ async def delete_document(
     source: Source,
     document_id: str,
     *,
+    engine_manager: EngineManager,
     job_queue: JobQueue | None = None,
 ) -> None:
     document = await get_document(session, source, document_id)
     path = document.storage_path
-    await session.delete(document)
-    await session.execute(
-        update(Source)
-        .where(Source.id == source.id)
-        .values(
-            document_count=case(
-                (Source.document_count > 0, Source.document_count - 1), else_=0
+    sag_source_id = document.sag_source_id
+
+    active_jobs = list(
+        (
+            await session.scalars(
+                select(Job).where(
+                    Job.document_id == document.id,
+                    Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]),
+                )
             )
-        )
+        ).all()
     )
+    for job in active_jobs:
+        job.payload = {**(job.payload or {}), "pause_requested": True}
+        if job.status == JobStatus.QUEUED:
+            job.status = JobStatus.PAUSED
+    if active_jobs:
+        await session.commit()
+
+    if sag_source_id:
+        await engine_manager.delete_document_data(
+            source.sag_source_config_id,
+            sag_source_id,
+            source=source,
+        )
+
+    await session.delete(document)
+    await session.flush()
+    document_count, chunk_count, event_count = (
+        await session.execute(
+            select(
+                func.count(Document.id),
+                func.coalesce(func.sum(Document.chunk_count), 0),
+                func.coalesce(func.sum(Document.event_count), 0),
+            ).where(Document.source_id == source.id)
+        )
+    ).one()
+    source.document_count = int(document_count)
+    source.chunk_count = int(chunk_count)
+    source.event_count = int(event_count)
     await session.commit()
     if path:
         from sag_api.parsing.service import parsed_sidecar_paths
