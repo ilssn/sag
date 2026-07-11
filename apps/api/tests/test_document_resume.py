@@ -111,6 +111,49 @@ async def test_incremental_processor_passes_chunk_settings_to_zleap(monkeypatch)
     assert outcome.source_id == "document-1"
 
 
+@pytest.mark.asyncio
+async def test_extract_chunk_tracks_tokens_from_wrapped_llm_client(monkeypatch):
+    from sag_api.sag import incremental_processor as processor_module
+    from sag_api.sag.incremental_processor import IncrementalDocumentProcessor
+
+    class FakeLeafClient:
+        async def chat(self, messages, **kwargs):
+            return SimpleNamespace(
+                content='{"data": {"items": []}}',
+                usage=SimpleNamespace(total_tokens=321),
+            )
+
+    class FakeRetryClient:
+        def __init__(self):
+            self.client = FakeLeafClient()
+
+        async def chat(self, messages, **kwargs):
+            return await self.client.chat(messages, **kwargs)
+
+    class FakeExtractor:
+        def __init__(self, **kwargs):
+            self.client = FakeRetryClient()
+
+        async def _get_llm_client(self):
+            return self.client
+
+        async def extract(self, config):
+            # zleap-sag 的重试客户端会让结构化输出直接调用内层客户端。
+            await self.client.client.chat([SimpleNamespace(content="西游记")])
+            return [SimpleNamespace(id="event-1")]
+
+    monkeypatch.setattr(processor_module, "EventExtractor", FakeExtractor)
+    engine = SimpleNamespace(
+        _extractor=SimpleNamespace(prompt_manager=object(), model_config={})
+    )
+    processor = IncrementalDocumentProcessor(engine, "source-config", max_concurrency=1)
+
+    event_ids, token_usage = await processor._extract_chunk("chunk-1")
+
+    assert event_ids == ["event-1"]
+    assert token_usage == 321
+
+
 async def _return_false():
     return False
 
