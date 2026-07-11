@@ -17,7 +17,7 @@
   <a href="LICENSE"><img alt="许可" src="https://img.shields.io/badge/license-MIT-18181b" /></a>
 </p>
 
-<p align="center"><strong>你的最后一个知识库应用</strong></p>
+<p align="center"><strong>一个应用，统一你的所有知识</strong></p>
 
 <p align="center">
   把分散的文档与数据变成可搜索、可关联、可追溯的知识，并让 Agent 基于真实来源回答问题。
