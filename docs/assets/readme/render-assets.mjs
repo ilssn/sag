@@ -3,13 +3,12 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const require = createRequire(import.meta.url);
-const sharp = require("sharp");
-
 const root = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(path.join(root, "../../../apps/web/package.json"));
+const sharp = require("sharp");
 const assets = [
-  ["sag-benchmark.svg", "sag-benchmark.png", 3200],
   ["repository-architecture.svg", "repository-architecture.png", 3600],
+  ["repository-architecture-cn.svg", "repository-architecture-cn.png", 3600],
 ];
 
 for (const [source, output, width] of assets) {
@@ -25,6 +24,7 @@ for (const name of [
   "product-search.png",
   "product-chat.png",
   "product-graph.png",
+  "product-mcp.png",
 ]) {
   const source = path.join(root, name);
   const output = path.join(root, `.${name}.normalized`);
