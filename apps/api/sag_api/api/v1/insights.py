@@ -32,9 +32,9 @@ async def entities(
 @router.get("/graph", response_model=SourceGraphOut)
 async def graph(
     source_id: str,
-    document_limit: int = Query(default=16, ge=1, le=40),
-    event_limit: int = Query(default=60, ge=1, le=120),
-    entity_limit: int = Query(default=48, ge=1, le=80),
+    document_limit: int = Query(default=2_000, ge=1, le=10_000),
+    event_limit: int = Query(default=2_000, ge=1, le=10_000),
+    entity_limit: int = Query(default=2_000, ge=1, le=10_000),
     _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     engine_manager: EngineManager = Depends(get_engine_manager),

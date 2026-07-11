@@ -536,13 +536,13 @@ class EngineManager:
         source_ids: list[str],
         *,
         source: Source | None = None,
-        event_limit: int = 60,
-        entity_limit: int = 48,
+        event_limit: int = 2_000,
+        entity_limit: int = 2_000,
     ) -> SourceGraphInfo:
-        """读取一个有界、按文档均衡的事件—实体图谱切片。
+        """按展示预算读取一个按文档均衡的事件—实体图谱。
 
         图谱只读取本次展示文档对应的引擎 source_id。事件使用窗口排名轮询各文档，
-        避免单篇长文占满配额；关联边另设硬上限，防止高基数抽取拖垮响应与浏览器。
+        避免单篇长文占满配额；关联边覆盖优先并限制密度，避免高基数图谱拖垮浏览器。
         """
         await self._slot(source_config_id, source)
         from sqlalchemy import func, select
@@ -620,7 +620,8 @@ class EngineManager:
             if not event_ids:
                 return SourceGraphInfo(events=events, total_entities=total_entities)
 
-            association_limit = min(600, max(240, event_limit * 6, entity_limit * 8))
+            relation_limit = min(12_000, max(300, event_limit * 2, entity_limit * 2))
+            association_limit = min(24_000, relation_limit * 4)
             association_rows = (
                 await s.execute(
                     select(
@@ -671,6 +672,23 @@ class EngineManager:
         ]
         entities.sort(key=lambda entity: (-entity.heat, entity.name, entity.id))
 
+        eligible_rows = [
+            row for row in association_rows if row[1] in selected_entity_ids
+        ]
+        covering_rows = []
+        remaining_rows = []
+        covered_events: set[str] = set()
+        covered_entities: set[str] = set()
+        for row in eligible_rows:
+            event_id, entity_id = row[0], row[1]
+            if event_id not in covered_events or entity_id not in covered_entities:
+                covering_rows.append(row)
+                covered_events.add(event_id)
+                covered_entities.add(entity_id)
+            else:
+                remaining_rows.append(row)
+        selected_rows = [*covering_rows, *remaining_rows][:relation_limit]
+
         associations = [
             GraphAssociationInfo(
                 event_id=event_id,
@@ -678,9 +696,8 @@ class EngineManager:
                 weight=float(weight or 1.0),
                 description=str(description or "")[:240],
             )
-            for event_id, entity_id, weight, description, *_rest in association_rows
-            if entity_id in selected_entity_ids
-        ][:300]
+            for event_id, entity_id, weight, description, *_rest in selected_rows
+        ]
         return SourceGraphInfo(
             events=events,
             entities=entities,

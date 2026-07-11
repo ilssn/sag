@@ -262,8 +262,12 @@ export const api = {
 
   // 实体（图谱增强）
   listEntities: (sid: string) => request<Entity[]>(`/api/v1/sources/${sid}/entities`),
-  getSourceGraph: (sid: string) =>
-    request<SourceGraphResponse>(`/api/v1/sources/${sid}/graph`),
+  getSourceGraph: (sid: string, limit = 2_000, signal?: AbortSignal) =>
+    request<SourceGraphResponse>(
+      `/api/v1/sources/${sid}/graph` +
+        `?document_limit=${limit}&event_limit=${limit}&entity_limit=${limit}`,
+      { signal },
+    ),
 
   // 近期动态（搜索页时间线）
   getActivity: () => request<ActivityItem[]>("/api/v1/activity"),

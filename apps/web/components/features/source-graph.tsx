@@ -47,6 +47,13 @@ import {
   type GraphPoint,
 } from "@/components/features/graph-canvas";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const OrbitalEventEntityGraph = dynamic(
@@ -127,6 +134,9 @@ function GraphNode({ data, selected }: NodeProps) {
 }
 
 const nodeTypes = { sourceGraph: GraphNode };
+const DEFAULT_GRAPH_LIMIT = 2_000;
+const GRAPH_LIMIT_STORAGE_KEY = "sag:source-graph-limit";
+const GRAPH_LIMIT_OPTIONS = [100, 300, 600, 1_000, 2_000, 5_000, 10_000] as const;
 
 function makeNodes(slice: EventEntityGraphSlice, positions: Map<string, GraphPoint>): Node[] {
   const fallback = { x: 0, y: 0 };
@@ -341,6 +351,13 @@ function buildNetwork(
     source: edge.source,
     target: edge.target,
   }));
+  if (simNodes.length > 280) {
+    return {
+      nodes: radialNodes,
+      edges: makeEdges(slice, radialPositions, layout),
+    };
+  }
+
   const simulation = forceSimulation<SimNode>(simNodes)
     .force(
       "link",
@@ -425,17 +442,17 @@ export function EventEntityGraph({
 
   const slice = React.useMemo(() => sliceEventEntityGraph(graph), [graph]);
   const network = React.useMemo(() => buildNetwork(slice, layout), [layout, slice]);
-  const empty = slice.relations.length === 0;
+  const empty = slice.events.length === 0 && slice.entities.length === 0;
   const resolvedEmptyTitle =
     emptyTitle ??
     (graph.documents.length === 0 && graph.events.length === 0
       ? "还没有可展示的文档"
-      : "还没有事件—实体关系");
+      : "还没有可展示的事件或实体");
   const resolvedEmptyDescription =
     emptyDescription ??
     (graph.documents.length === 0 && graph.events.length === 0
       ? "添加文档后，图谱会随解析结果自动出现。"
-      : "只有已建立事件关联的实体会显示在这里。");
+      : "完成文档解析与抽取后，事件和实体会显示在这里。");
 
   return (
     <GraphCanvas
@@ -462,7 +479,9 @@ export function EventEntityGraph({
           >
             {graph.truncated && <AlertTriangle className="size-3 shrink-0" />}
             <span>
-              {slice.events.length} 事件 · {slice.entities.length} 实体 · {slice.relations.length} 关系
+              {slice.events.length}
+              {graph.truncated ? ` / ${graph.counts.events}` : ""} 事件 · {slice.entities.length}
+              {graph.truncated ? ` / ${graph.counts.entities}` : ""} 实体 · {slice.relations.length} 关系
             </span>
           </div>
         </GraphLegend>
@@ -522,13 +541,23 @@ export function SourceGraph({
   const [error, setError] = React.useState("");
   const [refreshVersion, setRefreshVersion] = React.useState(0);
   const [refreshing, setRefreshing] = React.useState(false);
+  const [graphLimit, setGraphLimit] = React.useState(DEFAULT_GRAPH_LIMIT);
+  const [graphLimitReady, setGraphLimitReady] = React.useState(false);
 
   React.useEffect(() => {
+    const saved = Number(window.localStorage.getItem(GRAPH_LIMIT_STORAGE_KEY));
+    if (GRAPH_LIMIT_OPTIONS.some((value) => value === saved)) setGraphLimit(saved);
+    setGraphLimitReady(true);
+  }, []);
+
+  React.useEffect(() => {
+    if (!graphLimitReady) return;
     let alive = true;
+    const controller = new AbortController();
     setError("");
     setRefreshing(Boolean(graph));
     api
-      .getSourceGraph(source.id)
+      .getSourceGraph(source.id, graphLimit, controller.signal)
       .then((response) => {
         if (!alive) return;
         setGraph(response);
@@ -542,10 +571,11 @@ export function SourceGraph({
       });
     return () => {
       alive = false;
+      controller.abort();
     };
     // graph 不能加入依赖；刷新时保留旧画面，避免闪烁。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source.id, refreshKey, refreshVersion]);
+  }, [source.id, refreshKey, refreshVersion, graphLimit, graphLimitReady]);
 
   if (!graph && !error) {
     return (
@@ -580,17 +610,42 @@ export function SourceGraph({
   if (!graph) return null;
 
   const toolbarActions = (
-    <Button
-      variant="outline"
-      size="icon"
-      className="size-8 bg-card/95 shadow-soft backdrop-blur-sm"
-      onClick={() => setRefreshVersion((value) => value + 1)}
-      disabled={refreshing}
-      aria-label="刷新图谱"
-      title="刷新图谱"
-    >
-      <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
-    </Button>
+    <>
+      <Select
+        value={String(graphLimit)}
+        onValueChange={(value) => {
+          const next = Number(value);
+          setGraphLimit(next);
+          window.localStorage.setItem(GRAPH_LIMIT_STORAGE_KEY, String(next));
+        }}
+      >
+        <SelectTrigger
+          aria-label="每类节点显示上限"
+          title="控制事件和实体各自最多显示的数量"
+          className="h-8 w-[6.5rem] bg-card/95 px-2 text-xs shadow-soft backdrop-blur-sm"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {GRAPH_LIMIT_OPTIONS.map((value) => (
+            <SelectItem key={value} value={String(value)}>
+              每类 {value.toLocaleString("zh-CN")}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Button
+        variant="outline"
+        size="icon"
+        className="size-8 bg-card/95 shadow-soft backdrop-blur-sm"
+        onClick={() => setRefreshVersion((value) => value + 1)}
+        disabled={refreshing}
+        aria-label="刷新图谱"
+        title="刷新图谱"
+      >
+        <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
+      </Button>
+    </>
   );
   const onOpenEvent = (event: SourceGraphEvent) => {
     if (!event.chunk_id) return;
@@ -604,7 +659,7 @@ export function SourceGraph({
   };
   const sharedProps = {
     graph,
-    refreshKey: `${refreshKey}-${refreshVersion}`,
+    refreshKey: `${refreshKey}-${refreshVersion}-${graphLimit}`,
     toolbarActions,
     onOpenEvent,
   };

@@ -30,11 +30,11 @@ async def get_source_graph(
     engine_manager: EngineManager,
     source: Source,
     *,
-    document_limit: int = 16,
-    event_limit: int = 60,
-    entity_limit: int = 48,
+    document_limit: int = 2_000,
+    event_limit: int = 2_000,
+    entity_limit: int = 2_000,
 ) -> SourceGraphOut:
-    """拼装 Web 文档与引擎事件/实体，返回一个可安全渲染的图谱切片。"""
+    """拼装 Web 文档与引擎事件/实体，按调用方给出的性能预算返回图谱。"""
     documents = list(
         (
             await session.execute(

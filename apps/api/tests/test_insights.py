@@ -149,8 +149,14 @@ async def test_entity_read_path():
             assert search_graph.entities[0].name == "关羽"
             assert search_graph.associations[0].event_id == search_graph.events[0].id
 
-            # 参数有硬上限，避免调用方绕过服务端性能护栏。
-            invalid = await c.get(f"/api/v1/sources/{sid}/graph?event_limit=121", headers=H)
+            # 图谱允许界面按性能选择更大的展示量，同时保留防止误请求的上限。
+            large = await c.get(
+                f"/api/v1/sources/{sid}/graph"
+                "?document_limit=2000&event_limit=2000&entity_limit=2000",
+                headers=H,
+            )
+            assert large.status_code == 200
+            invalid = await c.get(f"/api/v1/sources/{sid}/graph?event_limit=10001", headers=H)
             assert invalid.status_code == 422
 
             empty_source = (
