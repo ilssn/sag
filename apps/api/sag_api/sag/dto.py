@@ -113,6 +113,9 @@ class ProcessOutcome(BaseModel):
     event_count: int = 0
     chunk_ids: list[str] = []
     event_ids: list[str] = []
+    processed_chunk_ids: list[str] = []
+    token_usage: int = 0
+    paused: bool = False
 
     @classmethod
     def from_results(cls, ingest: Any, extract: Any) -> ProcessOutcome:
@@ -123,3 +126,25 @@ class ProcessOutcome(BaseModel):
             chunk_ids=list(getattr(ingest, "chunk_ids", []) or []),
             event_ids=list(getattr(extract, "event_ids", []) or []),
         )
+
+
+class ProcessCheckpoint(BaseModel):
+    """可持久化到 Job.payload 的文档处理断点。"""
+
+    source_id: str | None = None
+    chunk_ids: list[str] = []
+    processed_chunk_ids: list[str] = []
+    event_count: int = 0
+    event_ids: list[str] = []
+    token_usage: int = 0
+
+    @classmethod
+    def from_payload(cls, payload: dict | None) -> ProcessCheckpoint:
+        value = (payload or {}).get("process_checkpoint")
+        return cls.model_validate(value) if isinstance(value, dict) else cls()
+
+    def merge_payload(self, payload: dict | None) -> dict:
+        return {
+            **(payload or {}),
+            "process_checkpoint": self.model_dump(),
+        }

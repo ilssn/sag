@@ -5,6 +5,23 @@ export function formatBytes(n: number): string {
   return `${(n / Math.pow(1024, i)).toFixed(i ? 1 : 0)} ${units[i]}`;
 }
 
+export function formatTokenCount(n: number): string {
+  const value = Number.isFinite(n) ? Math.max(0, n) : 0;
+  const units: Array<[number, string]> = [
+    [1_000_000_000, "b"],
+    [1_000_000, "m"],
+    [1_000, "k"],
+  ];
+  for (const [threshold, suffix] of units) {
+    if (value >= threshold) {
+      const scaled = value / threshold;
+      const digits = scaled >= 100 ? 0 : 1;
+      return `${scaled.toFixed(digits).replace(/\.0$/, "")}${suffix}`;
+    }
+  }
+  return Math.round(value).toString();
+}
+
 export function relativeTime(iso: string): string {
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return "";

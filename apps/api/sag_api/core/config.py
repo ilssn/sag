@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     upload_dir: str = "./.data/uploads"   # 上传原始文件落盘
     max_upload_mb: int = 25               # 单文件上传上限
     job_concurrency: int = 2              # 后台处理并发
+    document_extract_concurrency: int = Field(default=5, ge=1, le=50)  # 单文档 chunk 抽取并发
     job_max_attempts: int = 3             # 可重试失败的最大尝试次数（含首次）
     engine_cache_size: int = 16           # 引擎槽 LRU 上限（超限逐出最久未用）
     engine_warmup_count: int = 4          # 启动时预热最近使用的信源引擎数

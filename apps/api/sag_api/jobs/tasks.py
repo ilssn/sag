@@ -13,12 +13,15 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sag_api.core.config import settings
+from sag_api.core.db import SessionLocal
 from sag_api.core.errors import NotFoundError
 from sag_api.core.logging import get_logger
 from sag_api.db.models import Document, Job, Source
 from sag_api.enums import DocumentStatus, JobType
+from sag_api.jobs.control import JobPaused
 from sag_api.parsing import prepare_document
 from sag_api.sag import EngineManager
+from sag_api.sag.dto import ProcessCheckpoint
 
 log = get_logger("jobs")
 
@@ -28,52 +31,96 @@ TaskHandler = Callable[[AsyncSession, Job], Awaitable[None]]
 async def process_document(
     session: AsyncSession, job: Job, *, engine_manager: EngineManager, job_queue=None
 ) -> None:
-    """ingest → extract 一篇文档，并推进其状态与计数。"""
+    """解析、入库并按 chunk 并发抽取；每个 chunk 完成即保存断点。"""
     document = await session.get(Document, job.document_id) if job.document_id else None
     if document is None:
         raise NotFoundError("文档不存在")
     source = await session.get(Source, document.source_id)
     if source is None:
         raise NotFoundError("信源不存在")
+    checkpoint = ProcessCheckpoint.from_payload(job.payload)
+
+    async def refresh_payload() -> dict:
+        await session.refresh(job, attribute_names=["payload"])
+        return dict(job.payload or {})
 
     async def on_stage(stage: str) -> None:
         if stage == "loading":
             document.status = DocumentStatus.LOADING
-            job.progress = 0.3
+            document.progress = max(document.progress, 5)
+            job.progress = document.progress / 100
         elif stage == "extracting":
             document.status = DocumentStatus.EXTRACTING
-            job.progress = 0.7
+            completed = len(checkpoint.processed_chunk_ids)
+            total = len(checkpoint.chunk_ids)
+            document.progress = 20 + round(80 * completed / total) if total else 20
+            job.progress = document.progress / 100
         await session.commit()
 
     async def on_parser_state(state: dict) -> None:
         document.status = DocumentStatus.LOADING
-        job.progress = 0.15
-        job.payload = {**(job.payload or {}), "document_parser": state}
+        document.progress = max(document.progress, 10)
+        job.progress = document.progress / 100
+        job.payload = {**(await refresh_payload()), "document_parser": state}
         await session.commit()
 
+    async def on_checkpoint(value: ProcessCheckpoint) -> None:
+        nonlocal checkpoint
+        checkpoint = value
+        job.payload = value.merge_payload(await refresh_payload())
+        document.chunk_count = len(value.chunk_ids)
+        document.event_count = value.event_count
+        document.sag_source_id = value.source_id
+        document.token_usage = value.token_usage
+        total = len(value.chunk_ids)
+        completed = len(value.processed_chunk_ids)
+        document.progress = 20 + round(80 * completed / total) if total else 20
+        job.progress = document.progress / 100
+        await session.commit()
+
+    async def should_pause() -> bool:
+        async with SessionLocal() as control_session:
+            current_job = await control_session.get(Job, job.id)
+            if current_job is None:
+                return True
+            return bool((current_job.payload or {}).get("pause_requested"))
+
     try:
-        prepared = await prepare_document(
-            document.storage_path,
-            settings,
-            state=(job.payload or {}).get("document_parser"),
-            on_state=on_parser_state,
-        )
-        if prepared.fallback_from:
-            log.warning(
-                "文档解析已降级 doc=%s job=%s from=%s to=%s cached=%s error=%s",
-                document.id,
-                getattr(job, "id", None),
-                prepared.fallback_from,
-                prepared.provider,
-                prepared.cached,
-                prepared.fallback_error,
+        prepared = None
+        if not checkpoint.chunk_ids:
+            prepared = await prepare_document(
+                document.storage_path,
+                settings,
+                state=(job.payload or {}).get("document_parser"),
+                on_state=on_parser_state,
             )
+            if prepared.fallback_from:
+                log.warning(
+                    "文档解析已降级 doc=%s job=%s from=%s to=%s cached=%s error=%s",
+                    document.id,
+                    getattr(job, "id", None),
+                    prepared.fallback_from,
+                    prepared.provider,
+                    prepared.cached,
+                    prepared.fallback_error,
+                )
         outcome = await engine_manager.process_document(
             source.sag_source_config_id,
-            prepared.path,
+            str(prepared.path) if prepared is not None else None,
             source=source,
             on_stage=on_stage,
+            checkpoint=checkpoint,
+            on_checkpoint=on_checkpoint,
+            should_pause=should_pause,
+            max_concurrency=settings.document_extract_concurrency,
         )
+        if outcome.paused:
+            document.status = DocumentStatus.PAUSED
+            document.error = None
+            await session.commit()
+            raise JobPaused()
+    except JobPaused:
+        raise
     except Exception as e:  # noqa: BLE001 - 记录到文档后再上抛给 worker
         document.status = DocumentStatus.FAILED
         document.error = getattr(e, "message", None) or str(e)
@@ -84,6 +131,8 @@ async def process_document(
     document.chunk_count = outcome.chunk_count
     document.event_count = outcome.event_count
     document.sag_source_id = outcome.source_id
+    document.progress = 100
+    document.token_usage = outcome.token_usage
     document.error = None
     # 信源聚合计数用原子 SQL 更新，避免并发读改写丢失
     await session.execute(
@@ -96,12 +145,13 @@ async def process_document(
     )
     await session.commit()
     log.info(
-        "文档处理完成 doc=%s parser=%s cached=%s chunks=%d events=%d",
+        "文档处理完成 doc=%s parser=%s cached=%s chunks=%d events=%d tokens=%d",
         document.id,
-        prepared.provider,
-        prepared.cached,
+        prepared.provider if prepared is not None else "checkpoint",
+        prepared.cached if prepared is not None else True,
         outcome.chunk_count,
         outcome.event_count,
+        outcome.token_usage,
     )
 
 
