@@ -5,6 +5,10 @@
 <h1 align="center">SAG</h1>
 
 <p align="center">
+  <a href="README.md">English</a> · <strong>简体中文</strong>
+</p>
+
+<p align="center">
   <a href="https://arxiv.org/abs/2606.15971"><img alt="论文" src="https://img.shields.io/badge/paper-arXiv%3A2606.15971-18181b" /></a>
   <a href="https://pypi.org/project/zleap-sag/"><img alt="PyPI" src="https://img.shields.io/pypi/v/zleap-sag?label=zleap--sag&color=18181b" /></a>
   <img alt="SAG 版本" src="https://img.shields.io/badge/SAG-v1.2.2-18181b" />
@@ -16,26 +20,10 @@
 <p align="center"><strong>你的最后一个知识库应用</strong></p>
 
 <p align="center">
-  开源、本地优先。把分散的文档与网页变成可搜索、可关联、可追溯的知识，并让 Agent 基于真实来源回答问题。
+  把分散的文档与数据变成可搜索、可关联、可追溯的知识，并让 Agent 基于真实来源回答问题。
 </p>
 
-<p align="center">
-  <strong>SAG 不是传统 RAG 与 GraphRAG 的融合，而是一套替代二者的原创检索架构。</strong>
-</p>
-
-<p align="center">
-  它通过 event-entity 索引与查询时动态超边，在一个系统中同时实现语义检索与关系推理，不再需要维护两套 RAG 系统或拼接两路召回结果。
-</p>
-
-<p align="center">
-  <strong>3 个多跳问答基准 · 8/9 项 Recall@K 最佳成绩 · Docker 一键部署</strong>
-</p>
-
-<p align="center"><sub>全新版本发布于 2026 年 7 月 12 日</sub></p>
-
-<p align="center">
-  <a href="README.md">English</a> · <strong>简体中文</strong>
-</p>
+## 目录
 
 <p align="center">
   <a href="#项目介绍">项目介绍</a> ·
@@ -52,7 +40,13 @@
 
 ### 一分钟了解 SAG
 
-SAG 是面向个人与 Agent 的完整知识库应用：
+SAG 不是传统 RAG 与 GraphRAG 的融合，而是一套替代二者的原创检索架构。
+
+它通过 event-entity 索引与查询时动态超边，在一个系统中同时实现语义检索与关系推理，不再需要维护两套 RAG 系统或拼接两路召回结果。
+
+SAG 在 HotpotQA、2WikiMultiHopQA 和 MuSiQue 的 9 项 Recall@1/2/5 指标中取得 8 项最佳成绩，是当前 RAG 领域的新SOTA技术。
+
+本项目是基于 SAG 制作的面向个人与 Agent 的完整知识库应用：
 
 **信源与文档 → 结构化知识 → 检索与原文溯源 → 带引用的 Agent 回答 → 通过 API 或 MCP 复用**
 

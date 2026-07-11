@@ -5,6 +5,10 @@
 <h1 align="center">SAG</h1>
 
 <p align="center">
+  <strong>English</strong> · <a href="README-CN.md">简体中文</a>
+</p>
+
+<p align="center">
   <a href="https://arxiv.org/abs/2606.15971"><img alt="Paper" src="https://img.shields.io/badge/paper-arXiv%3A2606.15971-18181b" /></a>
   <a href="https://pypi.org/project/zleap-sag/"><img alt="PyPI" src="https://img.shields.io/pypi/v/zleap-sag?label=zleap--sag&color=18181b" /></a>
   <img alt="SAG version" src="https://img.shields.io/badge/SAG-v1.2.2-18181b" />
@@ -16,27 +20,10 @@
 <p align="center"><strong>Your last knowledge base application.</strong></p>
 
 <p align="center">
-  Open source and local-first. Turn scattered documents and web pages into knowledge that can be searched,
-  connected, traced to source, and used by an Agent to answer with evidence.
+  Turn scattered documents and data into knowledge that can be searched, connected, traced to source, and used by an Agent to answer with evidence.
 </p>
 
-<p align="center">
-  <strong>SAG is not a fusion of traditional RAG and GraphRAG. It is an original retrieval architecture designed to replace the need to choose between them or operate both.</strong>
-</p>
-
-<p align="center">
-  Event-entity indexing and query-time dynamic hyperedges provide semantic retrieval and relational reasoning in one system, without maintaining two RAG stacks or merging two result sets.
-</p>
-
-<p align="center">
-  <strong>3 multi-hop benchmarks · best on 8/9 Recall@K metrics · Docker one-command deployment</strong>
-</p>
-
-<p align="center"><sub>New edition released July 12, 2026</sub></p>
-
-<p align="center">
-  <strong>English</strong> · <a href="README-CN.md">简体中文</a>
-</p>
+## Contents
 
 <p align="center">
   <a href="#project">Project</a> ·
@@ -53,7 +40,13 @@
 
 ### SAG in one minute
 
-SAG is a complete knowledge base application for individuals and Agents:
+SAG is not a fusion of traditional RAG and GraphRAG. It is an original retrieval architecture that replaces both.
+
+Through event-entity indexing and query-time dynamic hyperedges, SAG delivers semantic retrieval and relational reasoning in one system, without maintaining two RAG systems or merging two retrieval paths.
+
+SAG achieves the best result on 8 of the 9 Recall@1/2/5 metrics across HotpotQA, 2WikiMultiHopQA, and MuSiQue, establishing a new state of the art for RAG.
+
+This project is a complete knowledge base application for individuals and Agents built on SAG:
 
 **sources and documents → structured knowledge → search and source tracing → cited Agent answers → reuse through API or MCP**
 
