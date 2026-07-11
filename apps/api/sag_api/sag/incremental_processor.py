@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any, Literal
 
@@ -22,6 +22,49 @@ from sag_api.sag.dto import ProcessCheckpoint, ProcessOutcome
 CheckpointCallback = Callable[[ProcessCheckpoint], Awaitable[None]]
 PauseCheck = Callable[[], Awaitable[bool]]
 StageCallback = Callable[[str], Awaitable[None]]
+
+
+def _llm_chat_owner(client: Any) -> Any:
+    """找到真正执行 chat 的最内层 zleap-sag 客户端。"""
+    current = client
+    seen: set[int] = set()
+    while id(current) not in seen:
+        seen.add(id(current))
+        nested = getattr(current, "client", None)
+        if nested is None or not callable(getattr(nested, "chat", None)):
+            break
+        current = nested
+    return current
+
+
+def _usage_value(value: Any, field: str) -> int:
+    raw = value.get(field, 0) if isinstance(value, Mapping) else getattr(value, field, 0)
+    try:
+        return int(raw or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _response_token_usage(response: Any) -> int:
+    for value in (
+        response,
+        getattr(response, "usage", None),
+        getattr(response, "usage_metadata", None),
+    ):
+        if value is None:
+            continue
+        total = _usage_value(value, "total_tokens")
+        if total > 0:
+            return total
+        input_tokens = _usage_value(value, "prompt_tokens") or _usage_value(
+            value, "input_tokens"
+        )
+        output_tokens = _usage_value(value, "completion_tokens") or _usage_value(
+            value, "output_tokens"
+        )
+        if input_tokens + output_tokens > 0:
+            return input_tokens + output_tokens
+    return 0
 
 
 class IncrementalDocumentProcessor:
@@ -148,12 +191,13 @@ class IncrementalDocumentProcessor:
 
         token_usage = 0
         client = await extractor._get_llm_client()
-        original_chat = client.chat
+        chat_owner = _llm_chat_owner(client)
+        original_chat = chat_owner.chat
 
         async def tracked_chat(*args: Any, **kwargs: Any):
             nonlocal token_usage
             response = await original_chat(*args, **kwargs)
-            used = int(getattr(response, "total_tokens", 0) or 0)
+            used = _response_token_usage(response)
             if used <= 0:
                 messages = args[0] if args else kwargs.get("messages", [])
                 input_chars = sum(
@@ -170,7 +214,7 @@ class IncrementalDocumentProcessor:
             token_usage += used
             return response
 
-        client.chat = tracked_chat
+        chat_owner.chat = tracked_chat
         try:
             events = await extractor.extract(
                 ExtractConfig(
@@ -180,7 +224,7 @@ class IncrementalDocumentProcessor:
                 )
             )
         finally:
-            client.chat = original_chat
+            chat_owner.chat = original_chat
         return [event.id for event in events], token_usage
 
     async def _normalize_event_ranks(self, chunk_ids: list[str]) -> None:
