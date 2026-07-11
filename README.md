@@ -17,10 +17,10 @@
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-18181b" /></a>
 </p>
 
-<p align="center"><strong>One app for all your knowledge.</strong></p>
+<p align="center"><strong>From now on, this is the only knowledge base app you need.</strong></p>
 
 <p align="center">
-  Turn scattered documents and data into knowledge that can be searched, connected, traced to source, and used by an Agent to answer with evidence.
+  Built on the state-of-the-art SAG architecture, it turns scattered documents and data into knowledge that is searchable, connected, and traceable.
 </p>
 
 ## Contents
