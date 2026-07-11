@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import { type Edge, type Node, type NodeProps } from "@xyflow/react";
 import {
   forceCollide,
@@ -14,7 +15,6 @@ import {
 } from "d3-force";
 import {
   AlertTriangle,
-  CalendarClock,
   FileText,
   Network,
   RefreshCw,
@@ -24,11 +24,19 @@ import {
 } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
-import { formatDate } from "@/lib/format";
 import type { Entity, Source, SourceGraphEvent, SourceGraphResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useDetailPanel } from "@/components/features/detail-panel";
-import { useApp } from "@/components/features/app-shell";
+import {
+  eventEntityNodeId,
+  sliceEventEntityGraph,
+  type EventEntityGraphKind,
+  type EventEntityGraphSlice,
+} from "@/components/features/event-entity-graph-model";
+import {
+  EventEntitySelectionCard,
+  type EventEntitySelection,
+} from "@/components/features/event-entity-selection-card";
 import {
   GRAPH_EDGE_TYPE,
   GraphCanvas,
@@ -41,11 +49,18 @@ import {
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
-type GraphKind = "event" | "entity";
-type Selection =
-  | { kind: "event"; value: SourceGraphEvent }
-  | { kind: "entity"; value: Entity }
-  | null;
+const OrbitalEventEntityGraph = dynamic(
+  () =>
+    import("@/components/features/orbital-graph-3d").then(
+      (module) => module.OrbitalEventEntityGraph,
+    ),
+  {
+    ssr: false,
+    loading: () => <Skeleton className="h-full min-h-[520px]" />,
+  },
+);
+
+type GraphKind = EventEntityGraphKind;
 
 interface GraphNodeData extends Record<string, unknown> {
   kind: GraphKind;
@@ -53,18 +68,6 @@ interface GraphNodeData extends Record<string, unknown> {
   subtitle?: string;
   event?: SourceGraphEvent;
   entity?: Entity;
-}
-
-interface MentionRelation {
-  id: string;
-  eventId: string;
-  entityId: string;
-}
-
-interface GraphSlice {
-  events: SourceGraphEvent[];
-  entities: Entity[];
-  relations: MentionRelation[];
 }
 
 const KIND_META: Record<
@@ -125,49 +128,13 @@ function GraphNode({ data, selected }: NodeProps) {
 
 const nodeTypes = { sourceGraph: GraphNode };
 
-function nodeId(kind: GraphKind, id: string) {
-  return `${kind}:${id}`;
-}
-
-/** 只保留真实的事件—实体关系；孤立事件与孤立实体不进入图谱。 */
-function graphSlice(graph: SourceGraphResponse): GraphSlice {
-  const eventIds = new Set(graph.events.map((event) => event.id));
-  const entityIds = new Set(graph.entities.map((entity) => entity.id));
-  const seen = new Set<string>();
-  const relations: MentionRelation[] = [];
-  graph.relations.forEach((relation) => {
-    if (
-      relation.kind !== "mentions" ||
-      !eventIds.has(relation.source_id) ||
-      !entityIds.has(relation.target_id)
-    ) {
-      return;
-    }
-    const key = `${relation.source_id}:${relation.target_id}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    relations.push({
-      id: `mention:${key}`,
-      eventId: relation.source_id,
-      entityId: relation.target_id,
-    });
-  });
-  const linkedEventIds = new Set(relations.map((relation) => relation.eventId));
-  const linkedEntityIds = new Set(relations.map((relation) => relation.entityId));
-  return {
-    events: graph.events.filter((event) => linkedEventIds.has(event.id)),
-    entities: graph.entities.filter((entity) => linkedEntityIds.has(entity.id)),
-    relations,
-  };
-}
-
-function makeNodes(slice: GraphSlice, positions: Map<string, GraphPoint>): Node[] {
+function makeNodes(slice: EventEntityGraphSlice, positions: Map<string, GraphPoint>): Node[] {
   const fallback = { x: 0, y: 0 };
   return [
     ...slice.events.map((event) => ({
-      id: nodeId("event", event.id),
+      id: eventEntityNodeId("event", event.id),
       type: "sourceGraph",
-      position: positions.get(nodeId("event", event.id)) ?? fallback,
+      position: positions.get(eventEntityNodeId("event", event.id)) ?? fallback,
       data: {
         kind: "event",
         label: event.title,
@@ -176,9 +143,9 @@ function makeNodes(slice: GraphSlice, positions: Map<string, GraphPoint>): Node[
       } satisfies GraphNodeData,
     })),
     ...slice.entities.map((entity) => ({
-      id: nodeId("entity", entity.id),
+      id: eventEntityNodeId("entity", entity.id),
       type: "sourceGraph",
-      position: positions.get(nodeId("entity", entity.id)) ?? fallback,
+      position: positions.get(eventEntityNodeId("entity", entity.id)) ?? fallback,
       data: {
         kind: "entity",
         label: entity.name || "未命名实体",
@@ -190,13 +157,13 @@ function makeNodes(slice: GraphSlice, positions: Map<string, GraphPoint>): Node[
 }
 
 function makeEdges(
-  slice: GraphSlice,
+  slice: EventEntityGraphSlice,
   positions: Map<string, GraphPoint>,
   layout: GraphLayout,
 ): Edge[] {
   return slice.relations.map((relation) => {
-    const source = nodeId("event", relation.eventId);
-    const target = nodeId("entity", relation.entityId);
+    const source = eventEntityNodeId("event", relation.eventId);
+    const target = eventEntityNodeId("entity", relation.entityId);
     const from = positions.get(source) ?? { x: 0, y: 0 };
     const to = positions.get(target) ?? { x: 0, y: 0 };
     return {
@@ -214,19 +181,26 @@ function makeEdges(
   });
 }
 
-function linkedEventPositions(slice: GraphSlice, positions: Map<string, GraphPoint>, entityId: string) {
+function linkedEventPositions(
+  slice: EventEntityGraphSlice,
+  positions: Map<string, GraphPoint>,
+  entityId: string,
+) {
   return slice.relations
     .filter((relation) => relation.entityId === entityId)
-    .map((relation) => positions.get(nodeId("event", relation.eventId)))
+    .map((relation) => positions.get(eventEntityNodeId("event", relation.eventId)))
     .filter((position): position is GraphPoint => Boolean(position));
 }
 
-function buildTreePositions(slice: GraphSlice) {
+function buildTreePositions(slice: EventEntityGraphSlice) {
   const positions = new Map<string, GraphPoint>();
   const eventGap = 260;
   const eventStart = -((slice.events.length - 1) * eventGap) / 2;
   slice.events.forEach((event, index) => {
-    positions.set(nodeId("event", event.id), { x: eventStart + index * eventGap, y: 0 });
+    positions.set(eventEntityNodeId("event", event.id), {
+      x: eventStart + index * eventGap,
+      y: 0,
+    });
   });
 
   const entities = slice.entities
@@ -244,14 +218,15 @@ function buildTreePositions(slice: GraphSlice) {
   entities.forEach(({ entity, desiredX }) => {
     const x = Math.max(desiredX, previousX + 174);
     previousX = x;
-    positions.set(nodeId("entity", entity.id), { x, y: 310 });
+    positions.set(eventEntityNodeId("entity", entity.id), { x, y: 310 });
   });
   if (entities.length > 0) {
-    const first = positions.get(nodeId("entity", entities[0].entity.id))?.x ?? 0;
-    const last = positions.get(nodeId("entity", entities[entities.length - 1].entity.id))?.x ?? 0;
+    const first = positions.get(eventEntityNodeId("entity", entities[0].entity.id))?.x ?? 0;
+    const last =
+      positions.get(eventEntityNodeId("entity", entities[entities.length - 1].entity.id))?.x ?? 0;
     const offset = (first + last) / 2;
     entities.forEach(({ entity }) => {
-      const id = nodeId("entity", entity.id);
+      const id = eventEntityNodeId("entity", entity.id);
       const position = positions.get(id);
       if (position) positions.set(id, { ...position, x: position.x - offset });
     });
@@ -264,7 +239,7 @@ function normalizeAngle(angle: number) {
   return ((angle % tau) + tau) % tau;
 }
 
-function buildRadialPositions(slice: GraphSlice) {
+function buildRadialPositions(slice: EventEntityGraphSlice) {
   const tau = Math.PI * 2;
   const positions = new Map<string, GraphPoint>();
   const eventCount = slice.events.length;
@@ -274,7 +249,7 @@ function buildRadialPositions(slice: GraphSlice) {
   slice.events.forEach((event, index) => {
     const angle = -Math.PI / 2 + (index * tau) / Math.max(eventCount, 1);
     eventAngles.set(event.id, angle);
-    positions.set(nodeId("event", event.id), {
+    positions.set(eventEntityNodeId("event", event.id), {
       x: Math.cos(angle) * eventRadius,
       y: Math.sin(angle) * eventRadius,
     });
@@ -311,7 +286,7 @@ function buildRadialPositions(slice: GraphSlice) {
 
   const entityRadius = Math.max(360, eventRadius + 390);
   entities.forEach(({ entity, angle }) => {
-    positions.set(nodeId("entity", entity.id), {
+    positions.set(eventEntityNodeId("entity", entity.id), {
       x: Math.cos(angle) * entityRadius,
       y: Math.sin(angle) * entityRadius,
     });
@@ -323,7 +298,10 @@ function collisionRadius(kind: GraphKind) {
   return kind === "event" ? 126 : 80;
 }
 
-function buildNetwork(slice: GraphSlice, layout: GraphLayout): { nodes: Node[]; edges: Edge[] } {
+function buildNetwork(
+  slice: EventEntityGraphSlice,
+  layout: GraphLayout,
+): { nodes: Node[]; edges: Edge[] } {
   if (layout === "tree") {
     const positions = buildTreePositions(slice);
     return {
@@ -347,8 +325,8 @@ function buildNetwork(slice: GraphSlice, layout: GraphLayout): { nodes: Node[]; 
   };
   const degree = new Map<string, number>();
   slice.relations.forEach((relation) => {
-    const event = nodeId("event", relation.eventId);
-    const entity = nodeId("entity", relation.entityId);
+    const event = eventEntityNodeId("event", relation.eventId);
+    const entity = eventEntityNodeId("entity", relation.entityId);
     degree.set(event, (degree.get(event) ?? 0) + 1);
     degree.set(entity, (degree.get(entity) ?? 0) + 1);
   });
@@ -410,67 +388,6 @@ function buildNetwork(slice: GraphSlice, layout: GraphLayout): { nodes: Node[]; 
   };
 }
 
-function SelectionCard({
-  selection,
-  onOpenEvent,
-}: {
-  selection: Exclude<Selection, null>;
-  onOpenEvent?: (event: SourceGraphEvent) => void;
-}) {
-  const { timezone } = useApp();
-  if (selection.kind === "entity") {
-    const entity = selection.value;
-    return (
-      <div className="absolute bottom-3 left-14 z-20 w-[min(22rem,calc(100%-5rem))] rounded-lg border bg-card/95 p-3 shadow-lift backdrop-blur-sm">
-        <div className="flex items-center gap-1.5 text-xs font-medium text-violet-700 dark:text-violet-300">
-          <Users className="size-3.5" />
-          {entity.type || "实体"}
-        </div>
-        <div className="mt-1 text-sm font-medium text-foreground">{entity.name}</div>
-        {entity.description && (
-          <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-muted-foreground">
-            {entity.description}
-          </p>
-        )}
-      </div>
-    );
-  }
-
-  const event = selection.value;
-  return (
-    <div className="absolute bottom-3 left-14 z-20 w-[min(25rem,calc(100%-5rem))] rounded-lg border bg-card/95 p-3 shadow-lift backdrop-blur-sm">
-      <div className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-300">
-        <Sparkles className="size-3.5" />
-        {event.category || "事件"}
-      </div>
-      <div className="mt-1 text-sm font-medium text-foreground">{event.title}</div>
-      {event.summary && (
-        <p className="mt-1 line-clamp-3 text-xs leading-relaxed text-muted-foreground">
-          {event.summary}
-        </p>
-      )}
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        {event.start_time && (
-          <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
-            <CalendarClock className="size-3" />
-            {formatDate(event.start_time, timezone)}
-          </span>
-        )}
-        {event.chunk_id && onOpenEvent && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="ml-auto h-7 text-xs"
-            onClick={() => onOpenEvent(event)}
-          >
-            查看原文
-          </Button>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export function EventEntityGraph({
   graph,
   onOpenEvent,
@@ -488,7 +405,7 @@ export function EventEntityGraph({
   emptyDescription?: string;
   flowClassName?: string;
 }) {
-  const [selection, setSelection] = React.useState<Selection>(null);
+  const [selection, setSelection] = React.useState<EventEntitySelection | null>(null);
   const [layout, setLayout] = React.useState<GraphLayout>("force");
 
   React.useEffect(() => {
@@ -506,7 +423,7 @@ export function EventEntityGraph({
 
   React.useEffect(() => setSelection(null), [graph]);
 
-  const slice = React.useMemo(() => graphSlice(graph), [graph]);
+  const slice = React.useMemo(() => sliceEventEntityGraph(graph), [graph]);
   const network = React.useMemo(() => buildNetwork(slice, layout), [layout, slice]);
   const empty = slice.relations.length === 0;
   const resolvedEmptyTitle =
@@ -571,7 +488,9 @@ export function EventEntityGraph({
         }
       }}
     >
-      {selection && <SelectionCard selection={selection} onOpenEvent={onOpenEvent} />}
+      {selection && (
+        <EventEntitySelectionCard selection={selection} onOpenEvent={onOpenEvent} />
+      )}
       {empty && (
         <div className="pointer-events-none absolute inset-x-12 bottom-5 z-10 mx-auto max-w-md rounded-lg border bg-card/95 px-4 py-3 text-center shadow-soft backdrop-blur-sm">
           <div className="flex items-center justify-center gap-1.5 text-xs font-medium text-foreground">
@@ -589,7 +508,15 @@ export function EventEntityGraph({
   );
 }
 
-export function SourceGraph({ source, refreshKey }: { source: Source; refreshKey: string }) {
+export function SourceGraph({
+  source,
+  refreshKey,
+  mode = "2d",
+}: {
+  source: Source;
+  refreshKey: string;
+  mode?: "2d" | "3d";
+}) {
   const { open } = useDetailPanel();
   const [graph, setGraph] = React.useState<SourceGraphResponse | null>(null);
   const [error, setError] = React.useState("");
@@ -652,33 +579,36 @@ export function SourceGraph({ source, refreshKey }: { source: Source; refreshKey
 
   if (!graph) return null;
 
-  return (
-    <EventEntityGraph
-      graph={graph}
-      refreshKey={`${refreshKey}-${refreshVersion}`}
-      toolbarActions={
-        <Button
-          variant="outline"
-          size="icon"
-          className="size-8 bg-card/95 shadow-soft backdrop-blur-sm"
-          onClick={() => setRefreshVersion((value) => value + 1)}
-          disabled={refreshing}
-          aria-label="刷新图谱"
-          title="刷新图谱"
-        >
-          <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
-        </Button>
-      }
-      onOpenEvent={(event) => {
-        if (!event.chunk_id) return;
-        open({
-          kind: "chunk",
-          sourceId: source.id,
-          chunkId: event.chunk_id,
-          heading: event.title,
-          sourceName: source.name,
-        });
-      }}
-    />
+  const toolbarActions = (
+    <Button
+      variant="outline"
+      size="icon"
+      className="size-8 bg-card/95 shadow-soft backdrop-blur-sm"
+      onClick={() => setRefreshVersion((value) => value + 1)}
+      disabled={refreshing}
+      aria-label="刷新图谱"
+      title="刷新图谱"
+    >
+      <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
+    </Button>
   );
+  const onOpenEvent = (event: SourceGraphEvent) => {
+    if (!event.chunk_id) return;
+    open({
+      kind: "chunk",
+      sourceId: source.id,
+      chunkId: event.chunk_id,
+      heading: event.title,
+      sourceName: source.name,
+    });
+  };
+  const sharedProps = {
+    graph,
+    refreshKey: `${refreshKey}-${refreshVersion}`,
+    toolbarActions,
+    onOpenEvent,
+  };
+
+  if (mode === "3d") return <OrbitalEventEntityGraph {...sharedProps} />;
+  return <EventEntityGraph {...sharedProps} />;
 }
