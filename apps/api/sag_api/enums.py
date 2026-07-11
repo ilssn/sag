@@ -44,6 +44,7 @@ class DocumentStatus(StrEnum):
     PENDING = "pending"        # 已登记，待处理
     LOADING = "loading"        # ingest 中（解析 → 分块 → 入库 → 向量）
     EXTRACTING = "extracting"  # extract 中（事件 / 实体抽取）
+    PAUSED = "paused"          # 抽取已暂停，可从 chunk 断点继续
     READY = "ready"            # 处理完成，可检索
     FAILED = "failed"
 
@@ -57,6 +58,7 @@ class JobType(StrEnum):
 class JobStatus(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
+    PAUSED = "paused"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
 

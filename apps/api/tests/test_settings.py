@@ -22,6 +22,7 @@ _RESTORE = (
     "mineru_api_key",
     "mineru_version",
     "timezone",
+    "document_extract_concurrency",
 )
 
 
@@ -143,6 +144,7 @@ async def test_model_config_crud_masking_and_test():
                 assert "llm_api_key" not in body and body["llm_api_key_set"] is False
                 assert "mineru_api_key" not in body and body["mineru_api_key_set"] is False
                 assert body["effective_document_parser"] == "markitdown"
+                assert body["document_extract_concurrency"] == 5
                 assert "search_top_k" in body and "sag_language" in body
 
                 # 连接测试（未配置）→ 立即 ok False，无网络
@@ -199,11 +201,13 @@ async def test_model_config_crud_masking_and_test():
                         "mineru_base_url": "https://mineru.example.test",
                         "mineru_api_key": "sk-mineru-fake",
                         "mineru_version": "2.5",
+                        "document_extract_concurrency": 7,
                     },
                 )
                 parser_config = r.json()["config"]
                 assert parser_config["mineru_api_key_set"] is True
                 assert parser_config["effective_document_parser"] == "mineru"
+                assert parser_config["document_extract_concurrency"] == 7
                 assert "sk-mineru-fake" not in r.text
 
                 # 非法值 → 422（Literal / 越界）
@@ -225,6 +229,20 @@ async def test_model_config_crud_masking_and_test():
                 assert (
                     await c.put(
                         "/api/v1/system/model-config", headers=A, json={"document_parser": None}
+                    )
+                ).status_code == 422
+                assert (
+                    await c.put(
+                        "/api/v1/system/model-config",
+                        headers=A,
+                        json={"document_extract_concurrency": 0},
+                    )
+                ).status_code == 422
+                assert (
+                    await c.put(
+                        "/api/v1/system/model-config",
+                        headers=A,
+                        json={"document_extract_concurrency": None},
                     )
                 ).status_code == 422
     finally:

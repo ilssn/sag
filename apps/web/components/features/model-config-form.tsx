@@ -54,6 +54,7 @@ export function ModelConfigForm() {
   const [embDims, setEmbDims] = React.useState("");
   const [documentParser, setDocumentParser] =
     React.useState<ModelConfig["document_parser"]>("auto");
+  const [extractConcurrency, setExtractConcurrency] = React.useState(5);
   const [mineruBaseUrl, setMineruBaseUrl] = React.useState("");
   const [mineruVersion, setMineruVersion] =
     React.useState<ModelConfig["mineru_version"]>("2.5");
@@ -73,6 +74,7 @@ export function ModelConfigForm() {
     setEmbBaseUrl(config.embedding_base_url ?? "");
     setEmbDims(config.embedding_dimensions != null ? String(config.embedding_dimensions) : "");
     setDocumentParser(config.document_parser);
+    setExtractConcurrency(config.document_extract_concurrency ?? 5);
     setMineruBaseUrl(config.mineru_base_url ?? "");
     setMineruVersion(config.mineru_version);
     setStrategy(config.search_strategy);
@@ -110,6 +112,7 @@ export function ModelConfigForm() {
         embedding_base_url: embBaseUrl.trim(),
         embedding_dimensions: embDims.trim() ? Number(embDims) : null,
         document_parser: documentParser,
+        document_extract_concurrency: extractConcurrency,
         mineru_base_url: mineruBaseUrl.trim() || null,
         mineru_version: mineruVersion,
         search_strategy: strategy,
@@ -385,6 +388,22 @@ export function ModelConfigForm() {
                   <SelectItem value="2.0">2.0</SelectItem>
                 </SelectContent>
               </Select>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="extract-concurrency">单文档抽取并发</FieldLabel>
+              <Input
+                id="extract-concurrency"
+                type="number"
+                min={1}
+                max={50}
+                value={extractConcurrency}
+                onChange={(event) =>
+                  setExtractConcurrency(
+                    Math.min(50, Math.max(1, Number(event.target.value) || 1)),
+                  )
+                }
+              />
+              <FieldDescription>每篇文档同时抽取的分块数，默认 5。</FieldDescription>
             </Field>
             <Field>
               <FieldLabel htmlFor="mineru-url">MinerU Base URL</FieldLabel>

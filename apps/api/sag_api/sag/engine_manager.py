@@ -2,7 +2,8 @@
 
 每个信源（source_config_id）对应一个 `DataEngine` 实例（引擎「一实例一源」的语义）。
 引擎按需构造并缓存；每源一把锁串行化该源上的读写。生命周期读写闸门允许
-已构造引擎跨源并发，但创建、逐出或关闭引擎时会等待所有在途操作结束。
+已构造引擎跨源并发；文档处理使用独立 loader/extractor 同源并发。创建、逐出或
+关闭引擎时会等待所有在途操作结束。
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from sag_api.sag.dto import (
     EntityInfo,
     GraphAssociationInfo,
     GraphEventInfo,
+    ProcessCheckpoint,
     ProcessOutcome,
     RetrievedSection,
     SearchOutcome,
@@ -42,6 +44,7 @@ from sag_api.sag.dto import (
     UniverseTimelineInfo,
 )
 from sag_api.sag.errors import map_sag_errors
+from sag_api.sag.incremental_processor import IncrementalDocumentProcessor
 
 if TYPE_CHECKING:
     from sag_api.db.models import Source
@@ -49,6 +52,8 @@ if TYPE_CHECKING:
 log = get_logger("sag")
 
 StageCallback = Callable[[str], Awaitable[None]]
+CheckpointCallback = Callable[[ProcessCheckpoint], Awaitable[None]]
+PauseCheck = Callable[[], Awaitable[bool]]
 
 
 def _urlsafe_encode(value: bytes) -> str:
@@ -134,8 +139,14 @@ def _utc_time(value: datetime | None) -> datetime | None:
 class _Slot:
     engine: DataEngine
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    state_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    idle: asyncio.Event = field(default_factory=asyncio.Event)
+    concurrent_users: int = 0
     last_used: float = field(default_factory=time.monotonic)
     closing: bool = False
+
+    def __post_init__(self) -> None:
+        self.idle.set()
 
 
 class _EngineLifecycleGate:
@@ -362,7 +373,7 @@ class EngineManager:
             candidates = [
                 (s.last_used, scid)
                 for scid, s in self._slots.items()
-                if scid != keep and not s.lock.locked()
+                if scid != keep and not s.lock.locked() and s.concurrent_users == 0
             ]
             if not candidates:
                 break  # 其余都在忙，暂不逐出
@@ -370,6 +381,7 @@ class EngineManager:
             slot = self._slots.pop(victim)
             slot.closing = True
             try:
+                await slot.idle.wait()
                 async with slot.lock:
                     await slot.engine.aclose()
                 log.info("LRU 逐出引擎 source_config_id=%s（缓存上限 %d）", victim, self._cache_size)
@@ -393,6 +405,27 @@ class EngineManager:
                     slot.lock.release()
                 return
 
+    @asynccontextmanager
+    async def use_concurrently(self, source_config_id: str, source: Source | None = None):
+        """取得共享资源但不串行化文档处理；独立 loader/extractor 隔离可变状态。"""
+        while True:
+            slot = await self._slot(source_config_id, source)
+            async with self._lifecycle_gate.read():
+                async with slot.state_lock:
+                    if slot.closing:
+                        continue
+                    slot.concurrent_users += 1
+                    slot.idle.clear()
+                    slot.last_used = time.monotonic()
+                try:
+                    yield slot.engine
+                finally:
+                    async with slot.state_lock:
+                        slot.concurrent_users -= 1
+                        if slot.concurrent_users == 0:
+                            slot.idle.set()
+                return
+
     async def provision(self, source_config_id: str, source: Source | None = None) -> None:
         """确保该源的引擎 schema 就绪（幂等）。"""
         await self._slot(source_config_id, source)
@@ -400,21 +433,38 @@ class EngineManager:
     async def process_document(
         self,
         source_config_id: str,
-        path: str,
+        path: str | None,
         *,
         source: Source | None = None,
         on_stage: StageCallback | None = None,
+        checkpoint: ProcessCheckpoint | None = None,
+        on_checkpoint: CheckpointCallback | None = None,
+        should_pause: PauseCheck | None = None,
+        max_concurrency: int | None = None,
     ) -> ProcessOutcome:
-        """在同一引擎实例上完成 ingest → extract（extract 复用 ingest 的加载结果）。"""
+        """独立处理一篇文档；同源文档可并行，chunk 完成即保存断点。"""
+
+        async def ignore_checkpoint(_checkpoint: ProcessCheckpoint) -> None:
+            return None
+
+        async def never_pause() -> bool:
+            return False
+
         with map_sag_errors():
-            async with self.use(source_config_id, source) as engine:
-                if on_stage:
-                    await on_stage("loading")
-                ingest = await engine.ingest(str(path))
-                if on_stage:
-                    await on_stage("extracting")
-                extract = await engine.extract()
-        return ProcessOutcome.from_results(ingest, extract)
+            async with self.use_concurrently(source_config_id, source) as engine:
+                processor = IncrementalDocumentProcessor(
+                    engine,
+                    source_config_id,
+                    max_concurrency=max_concurrency
+                    or self._settings.document_extract_concurrency,
+                )
+                return await processor.process(
+                    path,
+                    checkpoint=checkpoint or ProcessCheckpoint(),
+                    on_checkpoint=on_checkpoint or ignore_checkpoint,
+                    should_pause=should_pause or never_pause,
+                    on_stage=on_stage,
+                )
 
     async def _search_raw(
         self,
@@ -2073,6 +2123,7 @@ class EngineManager:
                     return
                 slot.closing = True
                 try:
+                    await slot.idle.wait()
                     async with slot.lock:  # 等待在途操作结束
                         await slot.engine.aclose()
                 except Exception as e:  # noqa: BLE001
@@ -2088,6 +2139,7 @@ class EngineManager:
                 self._slots.clear()
                 for scid, slot in slots:
                     try:
+                        await slot.idle.wait()
                         async with slot.lock:
                             await slot.engine.aclose()
                     except Exception as e:  # noqa: BLE001

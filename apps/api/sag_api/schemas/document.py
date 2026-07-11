@@ -34,6 +34,8 @@ class DocumentOut(BaseModel):
     status: DocumentStatus
     chunk_count: int
     event_count: int
+    progress: int
+    token_usage: int
     error: str | None
     created_at: datetime
     updated_at: datetime

@@ -56,6 +56,7 @@ class ModelConfigUpdate(BaseModel):
     mineru_base_url: str | None = Field(default=None, max_length=500)
     mineru_api_key: str | None = Field(default=None, max_length=500)
     mineru_version: Literal["2.0", "2.5"] | None = None
+    document_extract_concurrency: int | None = Field(default=None, ge=1, le=50)
 
     search_strategy: SearchStrategy | None = None
     search_top_k: int | None = Field(default=None, ge=1, le=50)
@@ -66,4 +67,11 @@ class ModelConfigUpdate(BaseModel):
     def reject_null_parser_fields(cls, value: str | None) -> str:
         if value is None:
             raise ValueError("解析器与 MinerU 版本不能为 null")
+        return value
+
+    @field_validator("document_extract_concurrency")
+    @classmethod
+    def reject_null_extract_concurrency(cls, value: int | None) -> int:
+        if value is None:
+            raise ValueError("文档抽取并发不能为 null")
         return value

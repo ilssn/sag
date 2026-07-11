@@ -226,6 +226,39 @@ async def test_engine_lifecycle_reset_waits_for_inflight_operations():
 
 
 @pytest.mark.asyncio
+async def test_engine_allows_same_source_document_concurrency():
+    """文档处理不再占用每源串行锁，同一信源可同时处理多篇文档。"""
+    from sag_api.core.config import settings
+    from sag_api.sag.engine_manager import EngineManager, _Slot
+
+    class FakeEngine:
+        async def aclose(self):
+            pass
+
+    manager = EngineManager(settings)
+    manager._slots["source"] = _Slot(engine=FakeEngine())
+    entered = 0
+    both_entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def in_flight():
+        nonlocal entered
+        async with manager.use_concurrently("source"):
+            entered += 1
+            if entered == 2:
+                both_entered.set()
+            await release.wait()
+
+    first = asyncio.create_task(in_flight())
+    second = asyncio.create_task(in_flight())
+    await asyncio.wait_for(both_entered.wait(), timeout=1)
+    assert manager._slots["source"].concurrent_users == 2
+    release.set()
+    await asyncio.gather(first, second)
+    assert manager._slots["source"].concurrent_users == 0
+
+
+@pytest.mark.asyncio
 async def test_search_falls_back_to_vector():
     """multi 失败或空结果时自动回退 vector；vector 自身失败不再回退。"""
     from sag_api.core.config import settings

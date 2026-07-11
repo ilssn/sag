@@ -43,6 +43,7 @@ export type DocumentStatus =
   | "pending"
   | "loading"
   | "extracting"
+  | "paused"
   | "ready"
   | "failed";
 
@@ -55,6 +56,8 @@ export interface Doc {
   status: DocumentStatus;
   chunk_count: number;
   event_count: number;
+  progress: number;
+  token_usage: number;
   error: string | null;
   created_at: string;
   updated_at: string;
@@ -143,6 +146,7 @@ export interface ModelConfig {
   mineru_version: "2.0" | "2.5";
   mineru_api_key_set: boolean;
   effective_document_parser: EffectiveDocumentParser;
+  document_extract_concurrency: number;
   search_strategy: SearchStrategy;
   search_top_k: number;
   sag_language: "zh" | "en";
@@ -163,6 +167,7 @@ export type ModelConfigPatch = Partial<{
   mineru_base_url: string | null;
   mineru_version: "2.0" | "2.5";
   mineru_api_key: string;
+  document_extract_concurrency: number;
   search_strategy: SearchStrategy;
   search_top_k: number;
   sag_language: "zh" | "en";

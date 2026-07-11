@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -17,6 +17,7 @@ from sag_api.core.config import settings
 from sag_api.core.errors import ServiceUnavailableError, UpstreamError
 from sag_api.core.logging import get_logger
 from sag_api.enums import JobStatus, JobType
+from sag_api.jobs.control import JobPaused
 from sag_api.jobs.queue import JobQueue
 from sag_api.jobs.tasks import TASK_HANDLERS
 from sag_api.sag import EngineManager
@@ -152,7 +153,9 @@ class InProcessAsyncQueue(JobQueue):
 
         async with self._session_factory() as session:
             job = await session.get(Job, job_id)
-            if job is None:
+            # 队列里可能残留暂停前的 job_id，也可能被重复 enqueue；只有 QUEUED
+            # 才能启动，避免同一任务被两个 worker 同时执行。
+            if job is None or job.status != JobStatus.QUEUED:
                 return
             universe_user_id = (
                 str((job.payload or {}).get("user_id") or "")
@@ -174,12 +177,25 @@ class InProcessAsyncQueue(JobQueue):
             job = await session.get(Job, job_id)
             if job is None or job.status != JobStatus.QUEUED:
                 return
-            job.status = JobStatus.RUNNING
-            job.started_at = _now()
-            job.attempts += 1
-            job.progress = 0.05
-            job.error = None
+            payload = dict(job.payload or {})
+            is_resume = bool(payload.pop("resume_requested", False))
+            claim = await session.execute(
+                update(Job)
+                .where(Job.id == job_id, Job.status == JobStatus.QUEUED)
+                .values(
+                    payload=payload,
+                    status=JobStatus.RUNNING,
+                    started_at=_now(),
+                    finished_at=None,
+                    attempts=job.attempts if is_resume else job.attempts + 1,
+                    progress=job.progress if is_resume else max(job.progress, 0.05),
+                    error=None,
+                )
+            )
             await session.commit()
+            if claim.rowcount != 1:
+                return
+            await session.refresh(job)
 
             handler = TASK_HANDLERS.get(job.type)
             if handler is None:
@@ -195,6 +211,17 @@ class InProcessAsyncQueue(JobQueue):
                 job.progress = 1.0
                 job.finished_at = _now()
                 job.error = None
+            except JobPaused:
+                await session.rollback()
+                job = await session.get(Job, job_id)
+                if job is not None:
+                    payload = dict(job.payload or {})
+                    payload.pop("pause_requested", None)
+                    job.payload = payload
+                    job.status = JobStatus.PAUSED
+                    job.finished_at = None
+                    job.error = None
+                    log.info("任务已暂停 job=%s progress=%.0f%%", job_id, job.progress * 100)
             except Exception as e:  # noqa: BLE001
                 await session.rollback()
                 job = await session.get(Job, job_id)
