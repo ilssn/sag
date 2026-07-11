@@ -114,6 +114,8 @@ export interface ModelConfig {
   llm_context_window: number;
   llm_temperature: number;
   llm_max_tokens: number;
+  llm_timeout_ms: number;
+  llm_max_retries: number;
   llm_api_key_set: boolean;
   embedding_model: string;
   embedding_base_url: string | null;
@@ -137,6 +139,8 @@ export type ModelConfigPatch = Partial<{
   llm_context_window: number;
   llm_temperature: number;
   llm_max_tokens: number;
+  llm_timeout_ms: number;
+  llm_max_retries: number;
   embedding_model: string;
   embedding_base_url: string;
   embedding_api_key: string;

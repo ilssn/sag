@@ -47,6 +47,8 @@ export function ModelConfigForm() {
   const [llmModel, setLlmModel] = React.useState("");
   const [temperature, setTemperature] = React.useState(0.3);
   const [maxTokens, setMaxTokens] = React.useState(2048);
+  const [timeoutMs, setTimeoutMs] = React.useState(60_000);
+  const [maxRetries, setMaxRetries] = React.useState(2);
   const [ctxWindow, setCtxWindow] = React.useState(128000);
   const [embModel, setEmbModel] = React.useState("");
   const [embBaseUrl, setEmbBaseUrl] = React.useState("");
@@ -69,6 +71,8 @@ export function ModelConfigForm() {
     setLlmModel(config.llm_model);
     setTemperature(config.llm_temperature);
     setMaxTokens(config.llm_max_tokens);
+    setTimeoutMs(config.llm_timeout_ms ?? 60_000);
+    setMaxRetries(config.llm_max_retries ?? 2);
     setCtxWindow(config.llm_context_window ?? 128000);
     setEmbModel(config.embedding_model);
     setEmbBaseUrl(config.embedding_base_url ?? "");
@@ -107,6 +111,8 @@ export function ModelConfigForm() {
         llm_model: llmModel.trim(),
         llm_temperature: temperature,
         llm_max_tokens: maxTokens,
+        llm_timeout_ms: timeoutMs,
+        llm_max_retries: maxRetries,
         llm_context_window: ctxWindow,
         embedding_model: embModel.trim(),
         embedding_base_url: embBaseUrl.trim(),
@@ -236,7 +242,7 @@ export function ModelConfigForm() {
           </div>
         </SettingsRow>
 
-        <SettingsRow title="生成参数" description="控制模型、上下文和输出随机性。">
+        <SettingsRow title="生成参数" description="控制模型、上下文与请求策略。">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field>
               <FieldLabel htmlFor="llm-model">模型</FieldLabel>
@@ -286,6 +292,38 @@ export function ModelConfigForm() {
                 />
               </div>
               <FieldDescription>越低越稳定，越高越发散。</FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="llm-timeout">请求超时（毫秒）</FieldLabel>
+              <Input
+                id="llm-timeout"
+                type="number"
+                min={1000}
+                max={600000}
+                step={1000}
+                value={timeoutMs}
+                onChange={(event) =>
+                  setTimeoutMs(
+                    Math.min(600000, Math.max(1000, Number(event.target.value) || 1000)),
+                  )
+                }
+              />
+              <FieldDescription>单次模型请求的等待上限。</FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="llm-retries">重试次数</FieldLabel>
+              <Input
+                id="llm-retries"
+                type="number"
+                min={0}
+                max={10}
+                step={1}
+                value={maxRetries}
+                onChange={(event) =>
+                  setMaxRetries(Math.min(10, Math.max(0, Number(event.target.value) || 0)))
+                }
+              />
+              <FieldDescription>请求失败后自动重试的次数。</FieldDescription>
             </Field>
           </div>
         </SettingsRow>

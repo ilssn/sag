@@ -28,9 +28,8 @@ class LLMClient:
         self._client = AsyncOpenAI(
             api_key=settings.llm_api_key or "not-configured",
             base_url=settings.llm_base_url,
-            # SDK 默认 600s + 重试 2 次 → 网关假死时单步可挂十几分钟；收紧为可配置上界
-            timeout=settings.llm_request_timeout,
-            max_retries=1,
+            timeout=settings.llm_timeout_ms / 1000,
+            max_retries=settings.llm_max_retries,
         )
 
     @property

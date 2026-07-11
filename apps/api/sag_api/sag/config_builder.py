@@ -24,6 +24,8 @@ def build_engine_config(settings: Settings, *, overrides: dict[str, Any] | None 
         api_key=settings.llm_api_key or _PLACEHOLDER,
         model=settings.llm_model,
         base_url=settings.llm_base_url,
+        timeout=max(1, (settings.llm_timeout_ms + 999) // 1000),
+        max_retries=settings.llm_max_retries,
     )
     embedding = EmbeddingConfig(
         model=settings.embedding_model,

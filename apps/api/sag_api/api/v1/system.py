@@ -142,6 +142,8 @@ async def update_model_config(
     engine_fields = {
         "llm_base_url",
         "llm_model",
+        "llm_timeout_ms",
+        "llm_max_retries",
         "embedding_model",
         "embedding_base_url",
         "embedding_dimensions",
@@ -151,7 +153,11 @@ async def update_model_config(
     engine_changed = engine_changed or bool(
         patch.get("llm_api_key") or patch.get("embedding_api_key")
     )
-    if before.get("llm_base_url") != config.get("llm_base_url") or patch.get("llm_api_key"):
+    llm_client_changed = any(
+        before.get(key) != config.get(key)
+        for key in {"llm_base_url", "llm_timeout_ms", "llm_max_retries"}
+    )
+    if llm_client_changed or patch.get("llm_api_key"):
         request.app.state.llm = LLMClient(settings)
     if engine_changed:
         await request.app.state.engine_manager.aclose_all()

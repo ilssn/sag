@@ -1,7 +1,7 @@
 """快速单元测试：无需网络 / 引擎。"""
 
 from sag_api.connectors import registry
-from sag_api.core.config import settings
+from sag_api.core.config import Settings, settings
 from sag_api.core.security import hash_password, verify_password
 from sag_api.enums import ConnectorKind
 from sag_api.generation.prompt import build_agent_messages, build_citations, build_messages
@@ -27,6 +27,31 @@ def test_build_engine_config_zero_infra():
     assert cfg.vector_provider == "lancedb"  # 默认零依赖向量后端
     assert cfg.llm.model == settings.llm_model
     assert cfg.data_dir == settings.data_dir
+
+
+def test_llm_timeout_and_retries_reach_both_clients(monkeypatch):
+    from sag_api.generation import llm as generation_llm
+
+    seen: dict = {}
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+
+    monkeypatch.setattr(generation_llm, "AsyncOpenAI", FakeAsyncOpenAI)
+    configured = Settings(
+        _env_file=None,
+        llm_timeout_ms=45_000,
+        llm_max_retries=3,
+    )
+
+    generation_llm.LLMClient(configured)
+    assert seen["timeout"] == 45
+    assert seen["max_retries"] == 3
+
+    engine = build_engine_config(configured)
+    assert engine.llm.timeout == 45
+    assert engine.llm.max_retries == 3
 
 
 def test_retrieved_section_from_dict():
