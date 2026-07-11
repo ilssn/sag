@@ -67,14 +67,6 @@ SAG 是面向个人与 Agent 的完整知识库应用：
 | Agent 对话 | 基于指定信源进行多轮问答，并提供可点击引用 |
 | 对外集成 | 自托管 REST/OpenAPI、OpenAI 兼容接口、MCP 与 `zleap-sag` Python 包 |
 
-### 三个名称，三个边界
-
-| 名称 | 含义 |
-| --- | --- |
-| **SAG** | 本仓库交付的完整应用，包括 Web、API、信源、检索、图谱、Agent 对话与集成能力 |
-| **SAG 检索架构** | 论文提出的原创 event-entity 索引与查询时动态超边方法 |
-| **`zleap-sag`** | 实现导入、抽取和检索能力的 Python 引擎，可用于 SAG，也可嵌入其他应用 |
-
 产品默认面向本地单用户场景。它使用 SQLite 与 LanceDB 即可启动，不依赖外部数据库，同时保留迁移至 PostgreSQL/pgvector 等生产后端的路径。
 
 ---
