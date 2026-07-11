@@ -56,6 +56,7 @@ async def test_entity_read_path():
                 Entity,
                 EntityType,
                 EventEntity,
+                SourceChunk,
                 SourceConfig,
                 SourceEvent,
             )
@@ -100,6 +101,19 @@ async def test_entity_read_path():
                 )
                 s.add(ev)
                 await s.flush()
+                event_id = ev.id
+                entity_id = ent.id
+                s.add(
+                    SourceChunk(
+                        id="chunk-1",
+                        source_config_id=scid,
+                        source_type="ARTICLE",
+                        source_id="d1",
+                        article_id="d1",
+                        heading="三国演义",
+                        content="关羽过五关斩六将。",
+                    )
+                )
                 s.add(EventEntity(id=uuid.uuid4().hex, event_id=ev.id, entity_id=ent.id, weight=1.0))
                 await s.commit()
 
@@ -158,6 +172,22 @@ async def test_entity_read_path():
             assert large.status_code == 200
             invalid = await c.get(f"/api/v1/sources/{sid}/graph?event_limit=10001", headers=H)
             assert invalid.status_code == 422
+
+            # 删除文档必须同步清理统计与引擎中的块、事件及孤立实体。
+            deleted = await c.delete(
+                f"/api/v1/sources/{sid}/documents/{document_id}",
+                headers=H,
+            )
+            assert deleted.status_code == 200
+            source_after_delete = (await c.get(f"/api/v1/sources/{sid}", headers=H)).json()
+            assert source_after_delete["document_count"] == 0
+            assert source_after_delete["chunk_count"] == 0
+            assert source_after_delete["event_count"] == 0
+            async with sf() as s:
+                assert await s.get(Article, "d1") is None
+                assert await s.get(SourceChunk, "chunk-1") is None
+                assert await s.get(SourceEvent, event_id) is None
+                assert await s.get(Entity, entity_id) is None
 
             empty_source = (
                 await c.post("/api/v1/sources", headers=H, json={"name": "空信源"})

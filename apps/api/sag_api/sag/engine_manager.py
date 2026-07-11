@@ -151,6 +151,34 @@ class EngineManager:
         """确保该源的引擎 schema 就绪（幂等）。"""
         await self._slot(source_config_id, source)
 
+    async def delete_document_data(
+        self,
+        source_config_id: str,
+        document_source_id: str,
+        *,
+        source: Source | None = None,
+    ) -> None:
+        """删除一篇文档的块、事件、关系及孤立实体派生数据。"""
+        from sag_api.sag.document_cleanup import delete_document_records
+
+        slot = await self._slot(source_config_id, source)
+        await slot.idle.wait()
+        async with slot.lock:
+            with map_sag_errors():
+                deleted = await delete_document_records(
+                    source_config_id,
+                    document_source_id,
+                )
+        log.info(
+            "文档派生数据已清理 source_config_id=%s document_source_id=%s chunks=%d events=%d relations=%d entities=%d",
+            source_config_id,
+            document_source_id,
+            len(deleted.chunk_ids),
+            len(deleted.event_ids),
+            len(deleted.relation_ids),
+            len(deleted.entity_ids),
+        )
+
     async def process_document(
         self,
         source_config_id: str,
