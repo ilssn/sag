@@ -262,7 +262,7 @@ export const api = {
 
   // 实体（图谱增强）
   listEntities: (sid: string) => request<Entity[]>(`/api/v1/sources/${sid}/entities`),
-  getSourceGraph: (sid: string, limit = 2_000, signal?: AbortSignal) =>
+  getSourceGraph: (sid: string, limit = 1_000, signal?: AbortSignal) =>
     request<SourceGraphResponse>(
       `/api/v1/sources/${sid}/graph` +
         `?document_limit=${limit}&event_limit=${limit}&entity_limit=${limit}`,

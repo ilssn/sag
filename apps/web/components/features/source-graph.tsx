@@ -134,7 +134,7 @@ function GraphNode({ data, selected }: NodeProps) {
 }
 
 const nodeTypes = { sourceGraph: GraphNode };
-const DEFAULT_GRAPH_LIMIT = 2_000;
+const DEFAULT_GRAPH_LIMIT = 1_000;
 const GRAPH_LIMIT_STORAGE_KEY = "sag:source-graph-limit";
 const GRAPH_LIMIT_OPTIONS = [100, 300, 600, 1_000, 2_000, 5_000, 10_000] as const;
 

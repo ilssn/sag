@@ -536,8 +536,8 @@ class EngineManager:
         source_ids: list[str],
         *,
         source: Source | None = None,
-        event_limit: int = 2_000,
-        entity_limit: int = 2_000,
+        event_limit: int = 1_000,
+        entity_limit: int = 1_000,
     ) -> SourceGraphInfo:
         """按展示预算读取一个按文档均衡的事件—实体图谱。
 
