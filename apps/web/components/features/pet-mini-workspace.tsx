@@ -13,6 +13,7 @@ import {
   Loader2,
   Maximize2,
   MessageSquarePlus,
+  Search,
   X,
 } from "lucide-react";
 
@@ -618,6 +619,12 @@ export function PetMiniWorkspace({
     openMiniWorkspace(section);
   };
 
+  const returnToSearchHome = () => {
+    setAnswerHistoryOpen(false);
+    setDetailTrail([]);
+    if (workspaceSection !== "search") openMiniWorkspace("search");
+  };
+
   const expand = () => {
     if (workspaceSection === "search") {
       const query = searchWorkspace.contentView === "results"
@@ -731,6 +738,17 @@ export function PetMiniWorkspace({
                     ? detailTarget.citation.heading || detailTarget.citation.source_name || "引用详情"
                     : "星点详情")}
             </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              onClick={returnToSearchHome}
+              aria-label="返回搜索首页"
+              title="返回搜索首页"
+            >
+              <Search className="size-3.5" />
+            </Button>
           </>
         ) : (
           <>
