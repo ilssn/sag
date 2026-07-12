@@ -25,7 +25,6 @@ octx create ./.octx-workspace \
 - `--version 1.1.0`：发布后续 Release。
 - `--derive`：从展开的外部 Package 创建派生 Asset。
 - `--capability NAME=VERSION`：可重复传入 Capability 声明。
-- `--profile NAME=VERSION`：可重复传入 Profile 声明。
 - `--from SOURCE` / `--in-place`：互斥的输入模式。
 - `--yes`：非交互环境明确确认 `--in-place` 修改计划。
 

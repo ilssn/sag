@@ -29,22 +29,27 @@ _SUPPORTED_DECLARATION_VERSION = re.compile(r"^0\.1$")
 _RFC3339_UTC = re.compile(
     r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]+)?Z$"
 )
-_KNOWN_CAPABILITIES = ("chunks", "events", "entities", "vectors")
+_KNOWN_CAPABILITIES = ("sag-structured", "vectors")
 _STANDARD_PATHS = {
-    "data/chunks.jsonl": "chunks",
-    "data/events.jsonl": "events",
-    "relations/chunk-events.jsonl": "events",
-    "data/entities.jsonl": "entities",
-    "relations/event-entities.jsonl": "entities",
+    "data/chunks.jsonl": "sag-structured",
+    "data/events.jsonl": "sag-structured",
+    "relations/chunk-events.jsonl": "sag-structured",
+    "data/entities.jsonl": "sag-structured",
+    "relations/event-entities.jsonl": "sag-structured",
     "vectors/config.json": "vectors",
     "vectors/chunks.arrow": "vectors",
     "vectors/events.arrow": "vectors",
     "vectors/entities.arrow": "vectors",
 }
 _REQUIRED_PATHS = {
-    "chunks": ("data/chunks.jsonl",),
-    "events": ("data/events.jsonl", "relations/chunk-events.jsonl"),
-    "entities": ("data/entities.jsonl", "relations/event-entities.jsonl"),
+    "sag-structured": (
+        "data/chunks.jsonl",
+        "data/events.jsonl",
+        "data/entities.jsonl",
+        "relations/chunk-events.jsonl",
+        "relations/event-entities.jsonl",
+    ),
+    "vectors": ("vectors/config.json",),
 }
 _RECORD_SCHEMAS = {
     "chunks": ("data/chunks.jsonl", "chunk.schema.json"),
@@ -153,8 +158,6 @@ def _manifest_schema_issues(manifest: dict[str, Any], collector: _Collector) -> 
         layer = "format"
         if len(parts) >= 2 and parts[0] == "capabilities" and isinstance(parts[1], str):
             layer = f"cap:{parts[1]}"
-        elif len(parts) >= 2 and parts[0] == "profiles" and isinstance(parts[1], str):
-            layer = f"profile:{parts[1]}"
         location = ".".join(str(part) for part in parts)
         message = f"{location}: {error.message}" if location else error.message
         collector.add(layer, "OCTX_SCHEMA_VALIDATION", message, path="manifest.json")
@@ -227,7 +230,7 @@ def _validate_format(
     package: OctxPackage,
     collector: _Collector,
     records: _Records,
-) -> tuple[set[str], dict[str, Any], dict[str, Any], bool, bool]:
+) -> tuple[set[str], dict[str, Any], bool, bool]:
     manifest = package.manifest
     _manifest_schema_issues(manifest, collector)
     release = manifest.get("release") if isinstance(manifest.get("release"), dict) else {}
@@ -394,8 +397,7 @@ def _validate_format(
                 continue
             if _add_identity(records, collector, "format", document_id, f"document {path}", path=path):
                 records.documents[document_id] = path
-    profiles = manifest.get("profiles") if isinstance(manifest.get("profiles"), dict) else {}
-    return integrity_paths, capabilities, profiles, hashes_ok, format_supported
+    return integrity_paths, capabilities, hashes_ok, format_supported
 
 
 def _require_paths(
@@ -446,7 +448,7 @@ def _records_with_schema(
 
 
 def _validate_chunks(package: OctxPackage, collector: _Collector, records: _Records) -> None:
-    layer = "cap:chunks"
+    layer = "cap:sag-structured"
     seen_ordinals: set[tuple[str, int]] = set()
     for line, chunk in _records_with_schema(package, "chunks", collector, layer):
         identifier = chunk["id"]
@@ -479,7 +481,7 @@ def _validate_chunks(package: OctxPackage, collector: _Collector, records: _Reco
 
 
 def _validate_events(package: OctxPackage, collector: _Collector, records: _Records) -> None:
-    layer = "cap:events"
+    layer = "cap:sag-structured"
     event_lines: dict[str, int] = {}
     for line, event in _records_with_schema(package, "events", collector, layer):
         identifier = event["id"]
@@ -584,7 +586,7 @@ def _validate_events(package: OctxPackage, collector: _Collector, records: _Reco
 
 
 def _validate_entities(package: OctxPackage, collector: _Collector, records: _Records) -> None:
-    layer = "cap:entities"
+    layer = "cap:sag-structured"
     for line, entity in _records_with_schema(package, "entities", collector, layer):
         identifier = entity["id"]
         if not _add_identity(records, collector, layer, identifier, "entity", path="data/entities.jsonl", line=line):
@@ -697,7 +699,6 @@ def _validate_vectors(
     package: OctxPackage,
     collector: _Collector,
     records: _Records,
-    valid_targets: dict[str, bool],
     integrity_paths: set[str],
 ) -> bool:
     layer = "cap:vectors"
@@ -758,14 +759,6 @@ def _validate_vectors(
                 layer,
                 "OCTX_CAPABILITY_FILE_UNTRUSTED",
                 f"{path} did not pass OCTX integrity checks",
-                path=path,
-            )
-            continue
-        if not valid_targets.get(target, False):
-            collector.add(
-                layer,
-                "OCTX_VECTOR_TARGET_DEPENDENCY",
-                f"{path} requires a valid {target}/0.1 capability",
                 path=path,
             )
             continue
@@ -860,14 +853,14 @@ def _validate_vectors(
     return True
 
 
-def _validate_profile(records: _Records, collector: _Collector) -> None:
-    layer = "profile:sag-structured"
+def _validate_sag_coverage(records: _Records, collector: _Collector) -> None:
+    layer = "cap:sag-structured"
     chunks_by_document = {chunk["document_id"] for chunk in records.chunks.values()}
     for identifier, path in records.documents.items():
         if identifier not in chunks_by_document:
             collector.add(
                 layer,
-                "OCTX_PROFILE_DOCUMENT_WITHOUT_CHUNK",
+                "OCTX_SAG_DOCUMENT_WITHOUT_CHUNK",
                 "every Concept Document must have at least one Chunk",
                 path=path,
                 record_id=identifier,
@@ -876,7 +869,7 @@ def _validate_profile(records: _Records, collector: _Collector) -> None:
     for identifier in records.chunks.keys() - chunks_with_events:
         collector.add(
             layer,
-            "OCTX_PROFILE_CHUNK_WITHOUT_EVENT",
+            "OCTX_SAG_CHUNK_WITHOUT_EVENT",
             "every Chunk must have at least one Event",
             path="relations/chunk-events.jsonl",
             record_id=identifier,
@@ -885,7 +878,7 @@ def _validate_profile(records: _Records, collector: _Collector) -> None:
     for identifier in records.events.keys() - events_with_entities:
         collector.add(
             layer,
-            "OCTX_PROFILE_EVENT_WITHOUT_ENTITY",
+            "OCTX_SAG_EVENT_WITHOUT_ENTITY",
             "every Event must have at least one Entity",
             path="relations/event-entities.jsonl",
             record_id=identifier,
@@ -956,7 +949,7 @@ def validate_octx(
 
     collector = _Collector(max_issues=max_issues or selected_limits.max_issues)
     records = _Records()
-    integrity_paths, capability_declarations, profile_declarations, integrity_ok, format_supported = _validate_format(
+    integrity_paths, capability_declarations, integrity_ok, format_supported = _validate_format(
         package, collector, records
     )
     format_valid = "format" not in collector.invalid
@@ -1009,35 +1002,25 @@ def validate_octx(
             supported_capabilities[name] = _require_paths(name, package, integrity_paths, collector)
             fully_validated_capabilities[name] = True
 
-    if "chunks" in supported_capabilities:
-        if supported_capabilities["chunks"]:
+    if "sag-structured" in supported_capabilities:
+        if supported_capabilities["sag-structured"]:
             _validate_chunks(package, collector, records)
-        supported_capabilities["chunks"] = "cap:chunks" not in collector.invalid
-    if "events" in supported_capabilities:
-        if not supported_capabilities.get("chunks", False):
-            collector.add("cap:events", "OCTX_CAPABILITY_DEPENDENCY_INVALID", "events requires valid chunks/0.1")
-        if supported_capabilities["events"]:
             _validate_events(package, collector, records)
-        supported_capabilities["events"] = "cap:events" not in collector.invalid
-    if "entities" in supported_capabilities:
-        if not supported_capabilities.get("events", False):
-            collector.add("cap:entities", "OCTX_CAPABILITY_DEPENDENCY_INVALID", "entities requires valid events/0.1")
-        if supported_capabilities["entities"]:
             _validate_entities(package, collector, records)
-        supported_capabilities["entities"] = "cap:entities" not in collector.invalid
+            _validate_sag_coverage(records, collector)
+        supported_capabilities["sag-structured"] = "cap:sag-structured" not in collector.invalid
     if "vectors" in supported_capabilities:
         if not supported_capabilities["vectors"]:
             pass
-        elif "vectors/config.json" not in integrity_paths:
+        elif not supported_capabilities.get("sag-structured", False):
             collector.add(
                 "cap:vectors",
-                "OCTX_CAPABILITY_FILE_UNTRUSTED",
-                "vectors/config.json did not pass OCTX integrity checks",
-                path="vectors/config.json",
+                "OCTX_CAPABILITY_DEPENDENCY_INVALID",
+                "vectors/0.1 requires a valid sag-structured/0.1 capability",
             )
         else:
             fully_validated_capabilities["vectors"] = _validate_vectors(
-                package, collector, records, supported_capabilities, integrity_paths
+                package, collector, records, integrity_paths
             )
         supported_capabilities["vectors"] = "cap:vectors" not in collector.invalid
 
@@ -1053,55 +1036,6 @@ def validate_octx(
             fully_validated=fully_validated,
         )
 
-    profile_results: dict[str, LayerResult] = {}
-    for name, declaration in profile_declarations.items():
-        version = _version(declaration)
-        layer = f"profile:{name}"
-        if not _valid_declaration(declaration):
-            collector.add(
-                layer,
-                "OCTX_PROFILE_DECLARATION_INVALID",
-                f"profile {name} must declare a major.minor version",
-            )
-            profile_results[name] = _layer_result(
-                collector,
-                layer,
-                declared=True,
-                version=version,
-            )
-            continue
-        if name != "sag-structured" or _SUPPORTED_DECLARATION_VERSION.fullmatch(version or "") is None:
-            collector.add(
-                layer,
-                "OCTX_PROFILE_UNSUPPORTED",
-                f"profile {name}/{version or '?'} is not supported by this implementation",
-                severity="warning",
-            )
-            profile_results[name] = _layer_result(
-                collector,
-                layer,
-                declared=True,
-                version=version,
-                valid=None,
-                fully_validated=False,
-            )
-            continue
-        required = ("chunks", "events", "entities")
-        if not all(supported_capabilities.get(capability, False) for capability in required):
-            collector.add(
-                layer,
-                "OCTX_PROFILE_DEPENDENCY_INVALID",
-                "sag-structured requires valid chunks, events, and entities capabilities",
-            )
-        else:
-            _validate_profile(records, collector)
-        profile_results[name] = _layer_result(
-            collector,
-            layer,
-            declared=True,
-            version=version,
-        )
-
     format_result = _layer_result(
         collector,
         "format",
@@ -1112,6 +1046,5 @@ def validate_octx(
     return ValidationReport(
         format=format_result,
         capabilities=capability_results,
-        profiles=profile_results,
         issues=tuple(collector.issues),
     )

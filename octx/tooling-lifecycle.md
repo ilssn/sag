@@ -175,7 +175,7 @@ report = validate_octx(package_or_source)
 
 完整性错误不能被用户确认绕过。
 
-## 5. 导入 SAG
+## 5. 将 OCTX 导入 SAG
 
 ### 5.1 公共入口
 
@@ -248,28 +248,26 @@ validated
 - `ready`：当前消费者需要的检索能力全部可用。
 - `degraded`：部分索引失败，OCTX 文档继续可用并可重试。
 
-仅含 Markdown 或部分 Capability 的有效 Package 是正常输入。安装后自动从第一个缺失层开始补建，不要求错误确认。
+仅含 Markdown、未声明 `sag-structured` 的有效 Package 是正常输入。安装后可以在本地生成完整 SAG 结构，不要求错误确认。
 
 已声明但无效的数据不同：必须先展示验证错误，由用户明确选择是否放弃该结构并重建。
 
-`sag-structured` 是 Package Profile；`ready` 是 Installation 状态，两者不能混用。
+`sag-structured` 是 Package Capability；`ready` 是 Installation 状态，两者不能混用。
 
 ## 8. 本地重建
 
 重建结果附着于 Installation，不写回原 Package：
 
-| 首个无效或缺失层 | 重建范围 |
+| 无效或缺失内容 | 重建范围 |
 | --- | --- |
-| chunks | chunks、events、entities、相关 vectors |
-| events | events、entities、相关 vectors |
-| entities | entities、相关 vectors |
+| SAG 结构中任一层 | chunks、events、entities、关系及相关 vectors |
 | vectors 目标 | 对应完整目标 |
 
-无效层不做单条记录补丁，也不混用该层的新旧抽取结果。已验证上游可以复用。
+无效 SAG 结构不做单条记录补丁，也不混用新旧抽取结果；向量无效时只重建对应完整目标。
 
 OCTX 格式无效时不得安装原 Asset。用户可以明确提取可读 Markdown，使用新的 Asset 和文档身份创建 Derived Asset。
 
-## 9. 导出 SAG
+## 9. 从 SAG 导出 OCTX
 
 ```python
 result = export_octx(source_or_asset, output, version=...)

@@ -422,7 +422,6 @@ def test_ready_unknown_layers_can_only_be_repacked_losslessly(markdown_source: P
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["x-future"] = {"preserve": [1, 2, 3]}
     manifest["capabilities"] = {"future-index": {"version": "1.0", "x-mode": "exact"}}
-    manifest["profiles"] = {"future-profile": {"version": "1.0"}}
     manifest["files"].append(
         {
             "path": extension_path,

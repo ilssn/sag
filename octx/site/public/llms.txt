@@ -5,7 +5,7 @@
 - [Introduction](/docs/introduction/)
 - [What is SAG?](/docs/sag/)
 - [OCTX v0.1](/docs/specification/)
-- [SAG-structured Profile 0.1](/docs/sag-structured/)
+- [SAG-structured Capability 0.1](/docs/sag-structured/)
 - [Tooling and lifecycle](/docs/tooling/)
 - [Python API overview](/api/)
 - [create_octx()](/api/create-octx/)

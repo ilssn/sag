@@ -92,24 +92,20 @@ class LayerResult:
 class ValidationReport:
     format: LayerResult
     capabilities: Mapping[str, LayerResult] = field(default_factory=dict)
-    profiles: Mapping[str, LayerResult] = field(default_factory=dict)
     issues: tuple[ValidationIssue, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "capabilities", MappingProxyType(dict(self.capabilities)))
-        object.__setattr__(self, "profiles", MappingProxyType(dict(self.profiles)))
 
     @property
     def valid(self) -> bool:
         if self.format.valid is not True:
             return False
-        return all(layer.valid is not False for layer in (*self.capabilities.values(), *self.profiles.values()))
+        return all(layer.valid is not False for layer in self.capabilities.values())
 
     @property
     def fully_validated(self) -> bool:
-        return self.format.fully_validated and all(
-            layer.fully_validated for layer in (*self.capabilities.values(), *self.profiles.values())
-        )
+        return self.format.fully_validated and all(layer.fully_validated for layer in self.capabilities.values())
 
     @property
     def issue_codes(self) -> frozenset[str]:
@@ -121,7 +117,6 @@ class ValidationReport:
             "fully_validated": self.fully_validated,
             "format": self.format.to_dict(),
             "capabilities": {name: result.to_dict() for name, result in self.capabilities.items()},
-            "profiles": {name: result.to_dict() for name, result in self.profiles.items()},
             "issues": [issue.to_dict() for issue in self.issues],
         }
 

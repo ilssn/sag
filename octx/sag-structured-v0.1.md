@@ -1,46 +1,42 @@
-# SAG-structured Profile 0.1
+# SAG-structured Capability 0.1
 
-> 状态：v0.1 设计基线。本文定义 OCTX `sag-structured/0.1` Profile 及其标准数据能力。
+> 状态：v0.1 设计基线。本文定义 OCTX `sag-structured/0.1` Capability 及其完整数据约束。
 
 **第一次接触 SAG？** [先阅读 SAG 介绍](sag.md)，了解 SAG 应用、检索架构和 `zleap-sag` 的区别。
 
 ## 1. 目的
 
-`sag-structured` 表示 Package 已显式携带完整、可验证、可直接映射到 SAG 结构层的 `document → chunk → event → entity` 数据。它不是对文件存在情况的猜测，也不是本地索引是否已经 `ready` 的状态。
+`sag-structured` 表示 Package 已显式携带完整、可验证、可直接映射到 SAG 结构层的 `document → chunk → event → entity` 数据。它是一项整体 Capability，不把 chunks、events 和 entities 拆成三个声明，也不是本地索引是否已经 `ready` 的状态。
 
 声明方式：
 
 ```json
 {
   "capabilities": {
-    "chunks": {"version": "0.1"},
-    "events": {"version": "0.1"},
-    "entities": {"version": "0.1"}
-  },
-  "profiles": {
     "sag-structured": {"version": "0.1"}
   }
 }
 ```
 
-vectors 对该 Profile 保持可选。
+vectors 对该 Capability 保持可选；携带向量时再声明 `vectors/0.1`。
 
-## 2. 依赖链
+## 2. 包含内容
 
 ```text
-OCTX
-  -> chunks/0.1
-    -> events/0.1
-      -> entities/0.1
+OCTX + sag-structured/0.1
+  -> chunks
+  -> events
+  -> entities
+  -> chunk-event relations
+  -> event-entity relations
 
-vectors/0.1 -> 依赖实际向量目标对应的记录能力
+vectors/0.1 -> 依赖 sag-structured/0.1
 ```
 
-- `chunks/0.1` 可以单独声明。
-- `events/0.1` 必须同时声明 `chunks/0.1`。
-- `entities/0.1` 必须同时声明 `events/0.1`。
-- relations 不单独声明 Capability。
-- Capability 齐全也不能自动推导 `sag-structured`；Profile 必须出现在 manifest 并通过专门校验。
+- 五个结构文件必须作为一个整体出现并通过校验。
+- chunks、events、entities 和 relations 不再各自声明 Capability。
+- `sag-structured` 必须出现在 manifest 中，不能仅根据文件存在情况自动推断。
+- `vectors/0.1` 是独立可选 Capability，但只能引用有效的 `sag-structured/0.1` 记录。
 
 ## 3. Chunks 0.1
 
@@ -162,7 +158,7 @@ Event-Entity relation：
 
 ## 6. SAG-structured 完整覆盖
 
-除各 Capability 自身有效外，Profile 还要求整条链没有孤立记录：
+`sag-structured/0.1` 要求整条链没有孤立记录：
 
 1. 每篇 Concept Document 至少有一个 Chunk。
 2. 每个 Chunk 至少出现在一条 Chunk-Event relation 中。
@@ -170,9 +166,9 @@ Event-Entity relation：
 4. 每个 Event 至少出现在一条 Event-Entity relation 中。
 5. 每个 Entity 至少出现在一条 Event-Entity relation 中。
 
-任何一项不满足都会使 `sag-structured/0.1` 无效。独立通过校验的 OCTX 格式或较低层 Capability 仍可以保持有效。
+任何一项不满足都会使整个 `sag-structured/0.1` Capability 无效。OCTX 格式本身仍可以保持有效，但不存在可被单独认定有效的 chunks、events 或 entities 子能力。
 
-Profile 不接受以下合成回退：
+该 Capability 不接受以下合成回退：
 
 - 把 Document 临时冒充 Chunk。
 - 把 Chunk 临时冒充 Event。
@@ -227,7 +223,7 @@ vector: fixed_size_list<float32>[dimension] non-null
 
 ## 8. 校验失败与重建
 
-标准 JSONL 中任一记录出现以下问题时，对应 Capability 无效：
+标准 JSONL 中任一记录出现以下问题时，整个 `sag-structured/0.1` Capability 无效：
 
 - 缺少必填字段。
 - 字段类型或值不符合 schema。
@@ -240,25 +236,23 @@ vector: fixed_size_list<float32>[dimension] non-null
 
 处理规则：
 
-- OCTX 格式有效、Capability 缺失：正常安装，自动从第一个缺失层开始后台生成。
-- OCTX 格式有效、已声明 Capability 无效：报告错误；只有用户明确选择后，才放弃无效结构并本地重建。
-- 声明 `sag-structured` 但 Profile 无效：禁止直接导入原结构层，也不能静默移除 Profile。
+- OCTX 格式有效、未声明 `sag-structured`：正常安装，可以从 Markdown 在本地生成完整结构。
+- OCTX 格式有效、已声明 `sag-structured` 但无效：报告错误；禁止导入原结构层，也不能静默移除声明。只有用户明确选择后，才放弃整套结构并本地重建。
+- `vectors/0.1` 无效：保留有效知识与 SAG 结构，只重建对应向量。
 - OCTX 格式无效：禁止安装原 Asset。
 
-重建不做单条补丁，而是从首个无效层起覆盖该层及所有下游：
+重建不做单条补丁。SAG 结构中任一层无效时重建整套结构；向量无效时只重建对应目标：
 
-| 首个无效层 | 保留 | 重建 |
+| 无效内容 | 保留 | 重建 |
 | --- | --- | --- |
-| chunks | OCTX 文档 | chunks、events、entities、相关 vectors |
-| events | OCTX 文档、chunks | events、entities、相关 vectors |
-| entities | OCTX 文档、chunks、events | entities、相关 vectors |
+| SAG 结构中任一层 | OCTX 文档 | chunks、events、entities、关系及相关 vectors |
 | 某一 vectors 目标 | 全部有效知识与结构 | 该目标向量文件 |
 
 本地重建结果属于 Installation，不会修改或反向证明原 Package 有效。重新传播增强结果时必须创建派生 Asset 和新 Package。
 
-## 9. Profile 与 ready
+## 9. Capability 与 ready
 
-`sag-structured` 是 Package 的静态、可验证声明；`ready` 是某个消费者本地 Installation 的运行状态。
+`sag-structured` 是 Package 的静态、可验证 Capability；`ready` 是某个消费者本地 Installation 的运行状态。
 
 - 有效 sag-structured Package 可能因为向量不兼容而仍需本地 indexing。
 - 仅含 OCTX 文档的 Package 可以在本地补建完成后进入 ready，但原 Package 不因此变成 sag-structured。
@@ -266,7 +260,7 @@ vector: fixed_size_list<float32>[dimension] non-null
 
 ## 10. 导出
 
-`zleap-sag export_octx()` 默认只在完整覆盖约束全部满足时写入结构层并声明 `sag-structured/0.1`。
+`zleap-sag export_octx()` 默认只在完整覆盖约束全部满足时写入结构层，并在 `capabilities` 中声明 `sag-structured/0.1`。
 
 - 半成品结构层不得进入 Package。
 - 用户可以显式 `documents_only=True` 只导出 Markdown。

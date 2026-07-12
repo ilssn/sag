@@ -22,8 +22,7 @@ from conftest import (
 from octx import create_octx, open_octx, validate_octx
 from octx.errors import OctxValidationError
 
-CAPABILITIES = {"chunks": "0.1", "events": "0.1", "entities": "0.1"}
-PROFILES = {"sag-structured": "0.1"}
+CAPABILITIES = {"sag-structured": "0.1"}
 
 
 def _workspace(tmp_path: Path) -> Path:
@@ -53,11 +52,10 @@ def _valid_structured_package(tmp_path: Path) -> Path:
         version="1.1.0",
         output=tmp_path / "structured.octx",
         capabilities=CAPABILITIES,
-        profiles=PROFILES,
     ).output
 
 
-def test_valid_sag_structured_profile_and_typed_iterators(tmp_path: Path) -> None:
+def test_valid_sag_structured_capability_and_typed_iterators(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     _write_structure(workspace)
     result = create_octx(
@@ -65,15 +63,13 @@ def test_valid_sag_structured_profile_and_typed_iterators(tmp_path: Path) -> Non
         version="1.1.0",
         output=tmp_path / "structured.octx",
         capabilities=CAPABILITIES,
-        profiles=PROFILES,
     )
 
     assert result.report.valid
-    assert result.report.capabilities["chunks"].valid
-    assert result.report.capabilities["events"].valid
-    assert result.report.capabilities["entities"].valid
-    assert result.report.profiles["sag-structured"].valid
+    assert result.report.capabilities["sag-structured"].valid
     package = open_octx(result.output)
+    assert package.manifest["capabilities"] == {"sag-structured": {"version": "0.1"}}
+    assert "profiles" not in package.manifest
     assert [record["id"] for record in package.iter_chunks()] == [CHUNK_ID]
     assert [record["id"] for record in package.iter_events()] == [EVENT_ID]
     assert [record["id"] for record in package.iter_entities()] == [ENTITY_ID]
@@ -81,7 +77,7 @@ def test_valid_sag_structured_profile_and_typed_iterators(tmp_path: Path) -> Non
     assert list(package.iter_event_entities()) == [{"event_id": EVENT_ID, "entity_id": ENTITY_ID}]
 
 
-def test_profile_rejects_an_orphan_chunk_without_invalidating_format(tmp_path: Path) -> None:
+def test_sag_structured_rejects_an_orphan_chunk_without_invalidating_format(tmp_path: Path) -> None:
     package = _valid_structured_package(tmp_path)
     chunks = [
         {"id": CHUNK_ID, "document_id": DOC_ID, "ordinal": 0, "text": "One"},
@@ -89,16 +85,15 @@ def test_profile_rejects_an_orphan_chunk_without_invalidating_format(tmp_path: P
     ]
     mutated = mutate_and_rehash(
         package,
-        tmp_path / "invalid-profile.octx",
+        tmp_path / "invalid-sag-structured.octx",
         {"data/chunks.jsonl": "".join(json.dumps(row) + "\n" for row in chunks).encode()},
     )
 
     report = validate_octx(mutated)
     assert report.format.valid
-    assert report.capabilities["events"].valid
-    assert not report.profiles["sag-structured"].valid
+    assert not report.capabilities["sag-structured"].valid
     assert not report.valid
-    assert "OCTX_PROFILE_CHUNK_WITHOUT_EVENT" in report.issue_codes
+    assert "OCTX_SAG_CHUNK_WITHOUT_EVENT" in report.issue_codes
 
 
 def test_event_cycles_invalidate_events_and_downstream_layers(tmp_path: Path) -> None:
@@ -122,9 +117,7 @@ def test_event_cycles_invalidate_events_and_downstream_layers(tmp_path: Path) ->
 
     report = validate_octx(mutated)
     assert report.format.valid
-    assert not report.capabilities["events"].valid
-    assert not report.capabilities["entities"].valid
-    assert not report.profiles["sag-structured"].valid
+    assert not report.capabilities["sag-structured"].valid
     assert "OCTX_EVENT_HIERARCHY_CYCLE" in report.issue_codes
 
 
@@ -155,7 +148,6 @@ def test_vectors_use_arrow_file_schema_and_exact_coverage(tmp_path: Path) -> Non
         version="1.1.0",
         output=tmp_path / "vectors.octx",
         capabilities={**CAPABILITIES, "vectors": "0.1"},
-        profiles=PROFILES,
     )
     assert result.report.capabilities["vectors"].valid
     vector_table = open_octx(result.output).read_vector_table("chunks")
@@ -172,7 +164,7 @@ def test_jsonl_duplicate_keys_invalidate_the_capability(tmp_path: Path) -> None:
     )
     report = validate_octx(mutated)
     assert report.format.valid
-    assert not report.capabilities["chunks"].valid
+    assert not report.capabilities["sag-structured"].valid
     assert "OCTX_JSON_DUPLICATE_KEY" in report.issue_codes
 
 
@@ -191,8 +183,8 @@ def test_invalid_format_blocks_all_structured_payload_parsing(tmp_path: Path) ->
     report = validate_octx(invalid)
 
     assert not report.format.valid
-    assert report.capabilities["chunks"].valid is False
-    assert not report.capabilities["chunks"].fully_validated
+    assert report.capabilities["sag-structured"].valid is False
+    assert not report.capabilities["sag-structured"].fully_validated
     assert "OCTX_CAPABILITY_DEPENDENCY_INVALID" in report.issue_codes
     assert "OCTX_JSON_INVALID" not in report.issue_codes
 
@@ -213,7 +205,7 @@ def test_unsupported_format_version_blocks_structured_payload_parsing(tmp_path: 
 
     assert not report.format.valid
     assert not report.format.fully_validated
-    assert report.capabilities["chunks"].valid is False
+    assert report.capabilities["sag-structured"].valid is False
     assert "OCTX_FORMAT_VERSION_UNSUPPORTED" in report.issue_codes
     assert "OCTX_JSON_INVALID" not in report.issue_codes
 
@@ -231,7 +223,7 @@ def test_format_integrity_failure_blocks_structured_payload_parsing(tmp_path: Pa
     report = validate_octx(tampered)
 
     assert not report.format.valid
-    assert report.capabilities["chunks"].valid is False
+    assert report.capabilities["sag-structured"].valid is False
     assert "OCTX_FILE_DIGEST_MISMATCH" in report.issue_codes
     assert "OCTX_JSON_INVALID" not in report.issue_codes
 
@@ -255,7 +247,7 @@ def test_jsonl_lexical_errors_invalidate_the_whole_capability(tmp_path: Path, co
     invalid = mutate_and_rehash(package, tmp_path / "lexical.octx", {"data/chunks.jsonl": content})
     report = validate_octx(invalid)
     assert report.format.valid
-    assert not report.capabilities["chunks"].valid
+    assert not report.capabilities["sag-structured"].valid
     assert code in report.issue_codes
 
 
@@ -267,7 +259,7 @@ def test_event_without_a_chunk_source_is_invalid(tmp_path: Path) -> None:
         {"relations/chunk-events.jsonl": b""},
     )
     report = validate_octx(invalid)
-    assert not report.capabilities["events"].valid
+    assert not report.capabilities["sag-structured"].valid
     assert "OCTX_EVENT_WITHOUT_CHUNK" in report.issue_codes
 
 
@@ -295,7 +287,6 @@ def test_event_entity_weight_accepts_an_arbitrarily_large_json_integer(tmp_path:
         version="1.1.0",
         output=tmp_path / "large-integer-weight.octx",
         capabilities=CAPABILITIES,
-        profiles=PROFILES,
     )
 
     assert result.report.valid
@@ -317,7 +308,7 @@ def test_event_entity_weight_rejects_nonfinite_json_constants(tmp_path: Path, li
     report = validate_octx(invalid)
 
     assert report.format.valid
-    assert report.capabilities["entities"].valid is False
+    assert report.capabilities["sag-structured"].valid is False
     assert "OCTX_JSON_INVALID" in report.issue_codes
 
 
@@ -339,7 +330,7 @@ def test_event_rejects_nonportable_source_and_local_fields(tmp_path: Path, field
     report = validate_octx(invalid)
 
     assert report.format.valid
-    assert report.capabilities["events"].valid is False
+    assert report.capabilities["sag-structured"].valid is False
     assert "OCTX_SCHEMA_VALIDATION" in report.issue_codes
 
 
@@ -359,7 +350,7 @@ def test_entity_rejects_normalized_database_and_vector_fields(tmp_path: Path, fi
     report = validate_octx(invalid)
 
     assert report.format.valid
-    assert report.capabilities["entities"].valid is False
+    assert report.capabilities["sag-structured"].valid is False
     assert "OCTX_SCHEMA_VALIDATION" in report.issue_codes
 
 
@@ -395,15 +386,15 @@ def test_record_ids_are_unique_across_structured_types(tmp_path: Path) -> None:
         },
     )
     report = validate_octx(invalid)
-    assert not report.capabilities["events"].valid
+    assert not report.capabilities["sag-structured"].valid
     assert "OCTX_ID_DUPLICATE" in report.issue_codes
 
 
 def test_create_never_publishes_invalid_declared_structure_and_can_retry_failed_release(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
-    write_jsonl(
-        workspace / "data/chunks.jsonl",
-        [{"id": CHUNK_ID, "document_id": DOC_ID, "ordinal": -1, "text": "invalid"}],
+    _write_structure(
+        workspace,
+        chunks=[{"id": CHUNK_ID, "document_id": DOC_ID, "ordinal": -1, "text": "invalid"}],
     )
     output = tmp_path / "invalid.octx"
     with pytest.raises(OctxValidationError):
@@ -411,7 +402,7 @@ def test_create_never_publishes_invalid_declared_structure_and_can_retry_failed_
             workspace,
             version="1.1.0",
             output=output,
-            capabilities={"chunks": "0.1"},
+            capabilities=CAPABILITIES,
         )
     assert not output.exists()
     state = json.loads((workspace / ".octx/state.json").read_text(encoding="utf-8"))
@@ -425,7 +416,7 @@ def test_create_never_publishes_invalid_declared_structure_and_can_retry_failed_
         workspace,
         version="1.1.0",
         output=output,
-        capabilities={"chunks": "0.1"},
+        capabilities=CAPABILITIES,
     )
     assert result.report.valid
     assert result.asset_id == open_octx(tmp_path / "base.octx").manifest["asset"]["id"]

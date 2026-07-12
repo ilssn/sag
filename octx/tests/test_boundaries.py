@@ -11,8 +11,7 @@ from conftest import CHUNK_2_ID, CHUNK_ID, DOC_ID, ENTITY_ID, EVENT_ID, concept_
 from octx import ArchiveLimits, create_octx, open_octx, unpack_octx, validate_octx
 from octx.errors import OctxIntegrityError, OctxResourceLimitError, OctxSecurityError, OutputExistsError
 
-CAPABILITIES = {"chunks": "0.1", "events": "0.1", "entities": "0.1"}
-PROFILES = {"sag-structured": "0.1"}
+CAPABILITIES = {"sag-structured": "0.1"}
 
 
 def _base_package(tmp_path: Path) -> Path:
@@ -53,39 +52,35 @@ def _structured_package(tmp_path: Path) -> Path:
         version="1.1.0",
         output=tmp_path / "structured.octx",
         capabilities=CAPABILITIES,
-        profiles=PROFILES,
     ).output
 
 
-def test_unrecognized_capability_and_profile_versions_are_not_interpreted(tmp_path: Path) -> None:
+def test_unrecognized_capability_versions_are_not_interpreted(tmp_path: Path) -> None:
     package = _structured_package(tmp_path)
 
     def use_next_minor(manifest: dict) -> None:
         for declaration in manifest["capabilities"].values():
             declaration["version"] = "0.2"
-        manifest["profiles"]["sag-structured"]["version"] = "0.2"
 
     unsupported = repack(package, tmp_path / "unsupported-declarations.octx", mutate_manifest=use_next_minor)
     report = validate_octx(unsupported)
 
     assert report.format.valid
     assert all(layer.valid is None for layer in report.capabilities.values())
-    assert report.profiles["sag-structured"].valid is None
     assert report.valid
     assert not report.fully_validated
 
 
 @pytest.mark.parametrize(
-    ("section", "name", "declaration", "issue_code"),
+    ("name", "declaration", "issue_code"),
     [
-        ("capabilities", "chunks", {"version": "1"}, "OCTX_CAPABILITY_DECLARATION_INVALID"),
-        ("capabilities", "chunks", {"version": "00.1"}, "OCTX_CAPABILITY_DECLARATION_INVALID"),
-        ("profiles", "sag-structured", {"version": 1}, "OCTX_PROFILE_DECLARATION_INVALID"),
+        ("sag-structured", {"version": "1"}, "OCTX_CAPABILITY_DECLARATION_INVALID"),
+        ("sag-structured", {"version": "00.1"}, "OCTX_CAPABILITY_DECLARATION_INVALID"),
+        ("vectors", {"version": 1}, "OCTX_CAPABILITY_DECLARATION_INVALID"),
     ],
 )
 def test_invalid_declaration_schema_only_invalidates_its_layer(
     tmp_path: Path,
-    section: str,
     name: str,
     declaration: dict,
     issue_code: str,
@@ -93,11 +88,11 @@ def test_invalid_declaration_schema_only_invalidates_its_layer(
     package = _structured_package(tmp_path)
 
     def break_declaration(manifest: dict) -> None:
-        manifest[section][name] = declaration
+        manifest["capabilities"][name] = declaration
 
-    invalid = repack(package, tmp_path / f"invalid-{section}.octx", mutate_manifest=break_declaration)
+    invalid = repack(package, tmp_path / f"invalid-{name}.octx", mutate_manifest=break_declaration)
     report = validate_octx(invalid)
-    layer = report.capabilities[name] if section == "capabilities" else report.profiles[name]
+    layer = report.capabilities[name]
 
     assert report.format.valid
     assert layer.valid is False
@@ -105,11 +100,11 @@ def test_invalid_declaration_schema_only_invalidates_its_layer(
     assert "OCTX_SCHEMA_VALIDATION" in {issue.code for issue in layer.issues}
 
 
-def test_events_without_chunks_declaration_leave_format_valid_but_invalidate_events(tmp_path: Path) -> None:
+def test_sag_structured_requires_all_structure_files(tmp_path: Path) -> None:
     package = _base_package(tmp_path)
 
-    def declare_events_only(manifest: dict) -> None:
-        manifest["capabilities"] = {"events": {"version": "0.1"}}
+    def declare_partial_structure(manifest: dict) -> None:
+        manifest["capabilities"] = {"sag-structured": {"version": "0.1"}}
         manifest["files"].extend(
             [
                 {"path": "data/events.jsonl", "sha256": "0" * 64},
@@ -121,14 +116,14 @@ def test_events_without_chunks_declaration_leave_format_valid_but_invalidate_eve
         package,
         tmp_path / "events-without-chunks.octx",
         replacements={"data/events.jsonl": b"", "relations/chunk-events.jsonl": b""},
-        mutate_manifest=declare_events_only,
+        mutate_manifest=declare_partial_structure,
     )
     report = validate_octx(invalid)
 
     assert report.format.valid
-    assert report.capabilities["events"].valid is False
-    assert "OCTX_CAPABILITY_DEPENDENCY_INVALID" in {
-        issue.code for issue in report.capabilities["events"].issues
+    assert report.capabilities["sag-structured"].valid is False
+    assert "OCTX_CAPABILITY_FILE_REQUIRED" in {
+        issue.code for issue in report.capabilities["sag-structured"].issues
     }
 
 
@@ -168,8 +163,8 @@ def test_jsonl_record_limit_invalidates_only_the_affected_capability(tmp_path: P
     report = validate_octx(limited, limits=ArchiveLimits(max_jsonl_records=1))
 
     assert report.format.valid
-    assert report.capabilities["chunks"].valid is False
-    assert "OCTX_RESOURCE_LIMIT" in {issue.code for issue in report.capabilities["chunks"].issues}
+    assert report.capabilities["sag-structured"].valid is False
+    assert "OCTX_RESOURCE_LIMIT" in {issue.code for issue in report.capabilities["sag-structured"].issues}
 
 
 def _deep_event_id(index: int) -> str:

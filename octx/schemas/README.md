@@ -28,4 +28,4 @@ JSON Schema 只负责单个 JSON object 的结构约束。以下内容必须由 
 规范来源：
 
 - [OCTX v0.1](../spec-v0.1.md)
-- [SAG-structured Profile 0.1](../sag-structured-v0.1.md)
+- [SAG-structured Capability 0.1](../sag-structured-v0.1.md)

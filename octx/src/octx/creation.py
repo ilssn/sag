@@ -610,7 +610,6 @@ def _manifest(
     version: str,
     created_at: str,
     capabilities: dict[str, Any] | None,
-    profiles: dict[str, Any] | None,
     derived_from: dict[str, str] | None,
     payloads: list[tuple[str, Path]],
     limits: ArchiveLimits,
@@ -645,10 +644,6 @@ def _manifest(
         manifest["capabilities"] = capabilities
     else:
         manifest.pop("capabilities", None)
-    if profiles:
-        manifest["profiles"] = profiles
-    else:
-        manifest.pop("profiles", None)
     existing_files = (
         {
             entry.get("path"): entry
@@ -795,7 +790,6 @@ def _external_repack(
     name: str | None,
     version: str | None,
     capabilities: Mapping[str, str | Mapping[str, Any]] | None,
-    profiles: Mapping[str, str | Mapping[str, Any]] | None,
     limits: ArchiveLimits,
 ) -> CreateResult:
     asset = manifest.get("asset") if isinstance(manifest.get("asset"), dict) else {}
@@ -805,7 +799,6 @@ def _external_repack(
     release_version = release.get("version")
     created_at = release.get("created_at")
     declared_capabilities = _declarations(capabilities, manifest.get("capabilities"))
-    declared_profiles = _declarations(profiles, manifest.get("profiles"))
     if not all(isinstance(value, str) for value in (asset_id, asset_name, release_version, created_at)):
         raise OctxFormatError("external Package manifest has an invalid identity", path="manifest.json")
     if name is not None and name != asset_name:
@@ -824,7 +817,6 @@ def _external_repack(
             version=release_version,
             created_at=created_at,
             capabilities=declared_capabilities,
-            profiles=declared_profiles,
             derived_from=None,
             payloads=payloads,
             limits=limits,
@@ -873,7 +865,6 @@ def create_octx(
     confirm_in_place: bool = False,
     derive: bool = False,
     capabilities: Mapping[str, str | Mapping[str, Any]] | None = None,
-    profiles: Mapping[str, str | Mapping[str, Any]] | None = None,
     limits: ArchiveLimits | None = None,
 ) -> CreateResult:
     if source is not None and in_place:
@@ -903,7 +894,6 @@ def create_octx(
             name=name,
             version=version,
             capabilities=capabilities,
-            profiles=profiles,
             limits=selected_limits,
         )
     if derive and (existing is None or state_exists):
@@ -964,7 +954,6 @@ def create_octx(
         if _semver_key(selected_version) <= _semver_key(highest):
             raise ReleaseVersionError(f"new Release version must be higher than {highest}")
     declared_capabilities = _declarations(capabilities, existing.get("capabilities") if existing else None)
-    declared_profiles = _declarations(profiles, existing.get("profiles") if existing else None)
     if existing and not derivation_pending:
         existing_asset = existing.get("asset") if isinstance(existing.get("asset"), dict) else {}
         if existing_asset.get("id") not in {None, asset_id}:
@@ -992,8 +981,6 @@ def create_octx(
     if not preserve_unknown:
         if capabilities is None:
             declared_capabilities = _inherited_declarations(declared_capabilities)
-        if profiles is None:
-            declared_profiles = _inherited_declarations(declared_profiles)
     moves: list[tuple[Path, Path]] = []
     if in_place:
         moves, changes = _in_place_changes(workspace_path, selected_limits)
@@ -1033,7 +1020,6 @@ def create_octx(
             version=selected_version,
             created_at=created_at,
             capabilities=declared_capabilities,
-            profiles=declared_profiles,
             derived_from=derived_from,
             payloads=payloads,
             limits=selected_limits,

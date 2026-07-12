@@ -127,8 +127,7 @@ def _valid_vector_package(tmp_path: Path) -> Path:
         workspace,
         version="1.1.0",
         output=tmp_path / "vectors.octx",
-        capabilities={"chunks": "0.1", "events": "0.1", "entities": "0.1", "vectors": "0.1"},
-        profiles={"sag-structured": "0.1"},
+        capabilities={"sag-structured": "0.1", "vectors": "0.1"},
     ).output
 
 
@@ -151,8 +150,7 @@ def test_vector_target_must_exactly_cover_all_target_records(tmp_path: Path) -> 
         },
     )
     report = validate_octx(invalid)
-    assert report.capabilities["chunks"].valid
-    assert report.profiles["sag-structured"].valid
+    assert report.capabilities["sag-structured"].valid
     assert not report.capabilities["vectors"].valid
     assert "OCTX_VECTOR_COVERAGE" in report.issue_codes
 
@@ -257,9 +255,9 @@ def test_vectors_require_a_valid_target_capability(tmp_path: Path) -> None:
 
     report = validate_octx(invalid)
 
-    assert report.capabilities["chunks"].valid is False
+    assert report.capabilities["sag-structured"].valid is False
     assert report.capabilities["vectors"].valid is False
-    assert "OCTX_VECTOR_TARGET_DEPENDENCY" in report.issue_codes
+    assert "OCTX_CAPABILITY_DEPENDENCY_INVALID" in report.issue_codes
 
 
 def test_duplicate_arrow_column_names_return_an_invalid_report(tmp_path: Path) -> None:

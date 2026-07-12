@@ -16,7 +16,6 @@ def create_octx(
     confirm_in_place: bool = False,
     derive: bool = False,
     capabilities: Mapping[str, str | Mapping[str, Any]] | None = None,
-    profiles: Mapping[str, str | Mapping[str, Any]] | None = None,
     limits: ArchiveLimits | None = None,
 ) -> CreateResult
 ```
@@ -33,8 +32,7 @@ def create_octx(
 | `in_place` | 将 workspace 根目录中的 Markdown 整理进 `knowledge/`。 |
 | `confirm_in_place` | 明确确认 `in_place` 将执行的移动和 frontmatter 补全。 |
 | `derive` | 从展开的外部 Package 创建新 Asset，并记录 `asset.derived_from`。 |
-| `capabilities` | 显式声明能力，例如 `{"chunks": "0.1"}`；不会根据文件自动推断。 |
-| `profiles` | 显式声明 Profile，例如 `{"sag-structured": "0.1"}`。 |
+| `capabilities` | 显式声明能力，例如 `{"sag-structured": "0.1"}`；不会根据文件自动推断。 |
 | `limits` | 创建和校验期间使用的资源上限。 |
 
 ## 首次创建
@@ -72,7 +70,7 @@ result = create_octx(
 
 ## 声明 SAG-structured
 
-声明 Capability 或 Profile 不会自动生成数据。对应 JSONL、关系和向量文件必须已经存在于 workspace，并满足完整覆盖约束。
+声明 Capability 不会自动生成数据。`sag-structured` 要求全部 JSONL 和关系文件已经存在于 workspace，并满足完整覆盖约束。
 
 ```python
 result = create_octx(
@@ -80,12 +78,9 @@ result = create_octx(
     version="2.0.0",
     output="./product-guide-2.0.0.octx",
     capabilities={
-        "chunks": "0.1",
-        "events": "0.1",
-        "entities": "0.1",
+        "sag-structured": "0.1",
         "vectors": "0.1",
     },
-    profiles={"sag-structured": "0.1"},
 )
 ```
 

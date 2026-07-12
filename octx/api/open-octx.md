@@ -28,7 +28,7 @@ def open_octx(
 
 ## 它不会做什么
 
-`open_octx()` 不会完整校验文件摘要、JSON Schema、Capability、Profile、关系覆盖或向量内容，也不会写入源文件。
+`open_octx()` 不会完整校验文件摘要、JSON Schema、Capability、关系覆盖或向量内容，也不会写入源文件。
 
 处理外部输入时，应继续调用 [`validate_octx()`](./validate-octx.md)：
 

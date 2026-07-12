@@ -41,7 +41,6 @@
 | `fully_validated` | 是否理解并完整验证了全部声明层。 |
 | `format` | OCTX 格式的 `LayerResult`。 |
 | `capabilities` | Capability 名称到 `LayerResult` 的只读映射。 |
-| `profiles` | Profile 名称到 `LayerResult` 的只读映射。 |
 | `issues` | 全部 `ValidationIssue`。 |
 | `issue_codes` | 报告中错误码的只读集合。 |
 

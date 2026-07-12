@@ -172,14 +172,14 @@ def test_issue_limit_never_hides_an_invalid_layer(tmp_path: Path) -> None:
     def mutate(manifest: dict) -> None:
         manifest["capabilities"] = {
             "future-index": {"version": "1.0"},
-            "chunks": {"version": "0.1"},
+            "sag-structured": {"version": "0.1"},
         }
 
     limited = repack(package, tmp_path / "limited.octx", mutate_manifest=mutate)
     report = validate_octx(limited, max_issues=1)
 
     assert len(report.issues) == 1
-    assert report.capabilities["chunks"].valid is False
+    assert report.capabilities["sag-structured"].valid is False
     assert not report.valid
 
 
@@ -192,12 +192,12 @@ def test_declared_missing_capability_file_does_not_invalidate_format(tmp_path: P
     package = _base_package(tmp_path)
 
     def mutate(manifest: dict) -> None:
-        manifest["capabilities"] = {"chunks": {"version": "0.1"}}
+        manifest["capabilities"] = {"sag-structured": {"version": "0.1"}}
 
     missing = repack(package, tmp_path / "missing-chunks.octx", mutate_manifest=mutate)
     report = validate_octx(missing)
     assert report.format.valid
-    assert not report.capabilities["chunks"].valid
+    assert not report.capabilities["sag-structured"].valid
     assert not report.valid
     assert "OCTX_CAPABILITY_FILE_REQUIRED" in report.issue_codes
 

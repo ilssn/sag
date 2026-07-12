@@ -37,10 +37,13 @@ def test_cli_create_inspect_validate_and_unpack(tmp_path: Path) -> None:
     inspection = json.loads(inspected.stdout)
     assert inspection["asset"]["name"] == "Guide"
     assert inspection["validation_performed"] is False
+    assert "profiles" not in inspection
 
     validated = _run("validate", str(output), "--json")
     assert validated.returncode == 0, validated.stderr
-    assert json.loads(validated.stdout)["valid"] is True
+    validation = json.loads(validated.stdout)
+    assert validation["valid"] is True
+    assert "profiles" not in validation
 
     destination = tmp_path / "unpacked"
     unpacked = _run("unpack", str(output), str(destination))

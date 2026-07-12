@@ -12,7 +12,7 @@ OCTX 负责：
 - OKF 兼容知识文档。
 - 规范 payload 文件清单。
 - 逻辑内容完整性。
-- Capability、Profile、版本和扩展边界。
+- Capability、版本和扩展边界。
 
 OCTX 不负责搜索、排序、Agent 协议、数据库映射或索引运行时。
 
@@ -20,13 +20,12 @@ OCTX 不负责搜索、排序、Agent 协议、数据库映射或索引运行时
 
 ## 2. 一致性分层
 
-OCTX 使用三个独立层次：
+OCTX 使用两个独立层次：
 
 1. **OCTX 格式**：所有实现都必须理解的 manifest、知识文档、身份、版本和完整性。
 2. **Capability**：Package 实际携带的一种版本化标准数据能力。
-3. **Profile**：面向特定用途、需要额外一致性约束的显式能力组合。
 
-Capability 不能自动推导 Profile。未知 Capability 不阻止消费者读取有效 OCTX Package；消费者也不能声称满足自己无法验证的 Profile。
+`sag-structured/0.1` 是一个完整 Capability，整体包含 chunks、events、entities 和两类关系。未知 Capability 不阻止消费者读取有效 OCTX Package；消费者也不能声称支持自己无法完整验证的 Capability。
 
 ## 3. Package 与目录结构
 
@@ -40,12 +39,12 @@ example.octx
 │   ├── log.md                      # 可选 OKF 日志
 │   └── **/*.md                     # 至少一篇 Concept Document
 ├── data/
-│   ├── chunks.jsonl                # chunks/0.1
-│   ├── events.jsonl                # events/0.1
-│   └── entities.jsonl              # entities/0.1
+│   ├── chunks.jsonl                # sag-structured/0.1
+│   ├── events.jsonl                # sag-structured/0.1
+│   └── entities.jsonl              # sag-structured/0.1
 ├── relations/
-│   ├── chunk-events.jsonl          # events/0.1
-│   └── event-entities.jsonl        # entities/0.1
+│   ├── chunk-events.jsonl          # sag-structured/0.1
+│   └── event-entities.jsonl        # sag-structured/0.1
 ├── vectors/
 │   ├── config.json                 # vectors/0.1
 │   ├── chunks.arrow
@@ -109,7 +108,7 @@ example.octx
 | `asset.id` | 规范小写 UUIDv7 |
 | `asset.name` | 非空字符串 |
 | `release.version` | SemVer 2.0.0 |
-| `release.created_at` | OCTX UTC 时间 Profile：`YYYY-MM-DDTHH:MM:SS[.fraction]Z`；秒为 `00` 到 `59`，不接受闰秒 `:60` |
+| `release.created_at` | OCTX UTC 时间格式：`YYYY-MM-DDTHH:MM:SS[.fraction]Z`；秒为 `00` 到 `59`，不接受闰秒 `:60` |
 | `release.package_digest` | `sha256:` 加 64 位小写十六进制 |
 | `files` | 非空数组，每项只要求 `path` 与 `sha256` |
 
@@ -129,18 +128,13 @@ example.octx
 
 ### 5.3 可选声明
 
-`capabilities` 和 `profiles` 都是以名称为 key、值为版本对象的 JSON object：
+`capabilities` 是以名称为 key、值为版本对象的 JSON object：
 
 ```json
 {
   "capabilities": {
-    "chunks": {"version": "0.1"},
-    "events": {"version": "0.1"},
-    "entities": {"version": "0.1"},
+    "sag-structured": {"version": "0.1"},
     "vectors": {"version": "0.1"}
-  },
-  "profiles": {
-    "sag-structured": {"version": "0.1"}
   }
 }
 ```
@@ -157,7 +151,7 @@ example.octx
 }
 ```
 
-支持当前 OCTX 格式版本的消费者必须允许未知可选字段、读取已知字段，并在无损重写 Package 时保留未知字段。未知字段不能改变已知字段语义或单独满足 Capability / Profile。
+支持当前 OCTX 格式版本的消费者必须允许未知可选字段、读取已知字段，并在无损重写 Package 时保留未知字段。未知字段不能改变已知字段语义或单独满足 Capability。
 
 这里的保留义务只适用于逻辑内容完全相同的无损重封装。创建新 Release 或 Derived Asset 时，旧工具不得把自己不理解的签名、证明或其他未知 manifest 字段自动带入新身份；这些字段必须由理解其语义的生产者重新生成或显式声明。
 
@@ -197,12 +191,10 @@ octx:
 
 | Capability | 必需文件 | 依赖 |
 | --- | --- | --- |
-| `chunks/0.1` | `data/chunks.jsonl` | OCTX 格式 |
-| `events/0.1` | `data/events.jsonl`, `relations/chunk-events.jsonl` | `chunks/0.1` |
-| `entities/0.1` | `data/entities.jsonl`, `relations/event-entities.jsonl` | `events/0.1` |
-| `vectors/0.1` | `vectors/config.json` 和至少一个标准 `.arrow` 文件 | 对应目标记录能力 |
+| `sag-structured/0.1` | 三个 `data/*.jsonl` 文件和两个 `relations/*.jsonl` 文件 | OCTX 格式 |
+| `vectors/0.1` | `vectors/config.json` 和至少一个标准 `.arrow` 文件 | `sag-structured/0.1` |
 
-relations 不是独立 Capability。标准路径出现时必须与对应 Capability 声明一致；生产者私有数据放入 `extensions/`，不能占用或重新解释标准路径。
+chunks、events、entities 和 relations 不单独声明 Capability。任一 SAG 结构标准路径出现时，必须声明完整的 `sag-structured/0.1`，并同时提供全部五个结构文件。生产者私有数据放入 `extensions/`，不能占用或重新解释标准路径。
 
 每个 Package 中每类 v0.1 标准 JSONL 文件至多一份，不按文档拆分或分片。未来分片必须使用新的 Capability 版本。
 
@@ -255,7 +247,6 @@ OCTX 分别版本化：
 
 - `format_version`：OCTX 格式版本，`major.minor`。
 - Capability version：每项 Capability 独立的 `major.minor`。
-- Profile version：每个 Profile 独立的 `major.minor`。
 - `release.version`：知识资产内容版本，使用 SemVer。
 
 在 `1.0` 发布前，`0.x` 的每个 minor 都可以调整必需行为或字段语义，消费者必须显式支持准确版本。进入 `1.x` 后，同一 major 的新 minor 只能增加可选内容或澄清语义，并保持向后兼容。
@@ -264,7 +255,6 @@ OCTX 分别版本化：
 
 - 支持 OCTX `0.1` 的消费者读取已知内容并保留未知可选字段。
 - 未知 Capability 不阻止 OCTX 文档读取。
-- Profile 依赖未知内容时不得宣称 Profile 有效。
 - 不支持的 OCTX 格式版本必须明确拒绝，不能猜测解释。
 
 ## 12. 私有扩展
@@ -281,7 +271,7 @@ extensions/<reverse-domain-namespace>/<major.minor>/...
 extensions/com.zleap.sag/1.0/data.jsonl
 ```
 
-扩展文件必须列入 `manifest.files` 并参与 Package Digest。未知消费者可以忽略扩展语义，但无损 round-trip 时必须逐字节保留。私有扩展不能代替标准 Capability 或 Profile。
+扩展文件必须列入 `manifest.files` 并参与 Package Digest。未知消费者可以忽略扩展语义，但无损 round-trip 时必须逐字节保留。私有扩展不能代替标准 Capability。
 
 ## 13. OCTX 校验结果
 

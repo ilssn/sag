@@ -68,18 +68,8 @@
       "type": "object",
       "minProperties": 1,
       "properties": {
-        "chunks": {"$ref": "#/$defs/versionDeclaration"},
-        "events": {"$ref": "#/$defs/versionDeclaration"},
-        "entities": {"$ref": "#/$defs/versionDeclaration"},
+        "sag-structured": {"$ref": "#/$defs/versionDeclaration"},
         "vectors": {"$ref": "#/$defs/versionDeclaration"}
-      },
-      "additionalProperties": {"$ref": "#/$defs/versionDeclaration"}
-    },
-    "profiles": {
-      "type": "object",
-      "minProperties": 1,
-      "properties": {
-        "sag-structured": {"$ref": "#/$defs/versionDeclaration"}
       },
       "additionalProperties": {"$ref": "#/$defs/versionDeclaration"}
     },

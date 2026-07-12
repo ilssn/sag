@@ -66,7 +66,6 @@ def _parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
     create.add_argument("--name")
     create.add_argument("--version")
     create.add_argument("--capability", action="append", metavar="NAME=VERSION")
-    create.add_argument("--profile", action="append", metavar="NAME=VERSION")
     create.add_argument("-o", "--output", required=True)
     create.add_argument("--json", action="store_true")
 
@@ -94,7 +93,6 @@ def _create(args: argparse.Namespace) -> int:
         "name": args.name,
         "version": args.version,
         "capabilities": _declarations(args.capability),
-        "profiles": _declarations(args.profile),
         "output": args.output,
     }
     try:
@@ -126,14 +124,12 @@ def _inspection(source: str) -> dict[str, Any]:
         asset = manifest.get("asset")
         release = manifest.get("release")
         capabilities = manifest.get("capabilities")
-        profiles = manifest.get("profiles")
         return {
             "format": manifest.get("format"),
             "format_version": manifest.get("format_version"),
             "asset": asset if isinstance(asset, dict) else {},
             "release": release if isinstance(release, dict) else {},
             "capabilities": capabilities if isinstance(capabilities, dict) else {},
-            "profiles": profiles if isinstance(profiles, dict) else {},
             "files": len(package.files),
             "documents": sum(1 for path in package.files if is_concept_path(path)),
             "validation_performed": False,

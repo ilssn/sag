@@ -178,15 +178,15 @@ export default function HomePage() {
           <p>开始构建</p>
           <h2>创建、打开、校验，然后导入。</h2>
           <span>
-            通用 <code>octx</code> 包保持厂商中立；
-            <Link className="home-doc-link" href="/docs/sag">
-              <code>zleap-sag</code>
-            </Link>{" "}
-            在同一读取层之上提供
+            通用 <code>octx</code> 包负责创建、打开与校验；以
             <Link className="home-doc-link" href="/docs/sag">
               SAG
             </Link>
-            导入与导出。
+            为例，
+            <Link className="home-doc-link" href="/docs/sag">
+              <code>zleap-sag</code>
+            </Link>{" "}
+            可以把 <code>.octx</code> 导入检索系统，也可以将系统中的上下文导出为 <code>.octx</code>。
           </span>
         </div>
         <div className="code-columns">
@@ -204,7 +204,7 @@ export default function HomePage() {
             <div className="code-column-heading">
               <strong>02</strong>
               <span>
-                <b>导入检索系统</b>
+                <b>导入 OCTX</b>
                 <small>
                   <Link className="home-doc-link" href="/docs/sag">
                     zleap-sag adapter

@@ -1,6 +1,6 @@
 # `validate_octx()`
 
-`validate_octx()` 完整校验 OCTX 格式、当前实现认识的 Capability 和 Profile，并返回 [`ValidationReport`](./models-and-limits.md)。它是处理外部或不可信 Package 的首选入口。
+`validate_octx()` 完整校验 OCTX 格式和当前实现认识的 Capability，并返回 [`ValidationReport`](./models-and-limits.md)。它是处理外部或不可信 Package 的首选入口。
 
 ## 函数签名
 
@@ -53,7 +53,7 @@ OCTX 格式校验包括容器安全、manifest Schema、身份、版本、文件
 
 声明结构层后，还会校验：
 
-- chunks、events、entities 的 JSON Schema 与 UUIDv7。
+- `sag-structured` 中 chunks、events、entities 的 JSON Schema 与 UUIDv7。
 - chunk-event、event-entity 引用及层级关系。
 - SAG-structured 的完整覆盖约束。
 - Arrow schema、RecordBatch、维度、数值类型、目标覆盖和资源边界。
