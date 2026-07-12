@@ -254,7 +254,7 @@ export default function HomePage() {
         <div>
           <p>OPEN BY DESIGN</p>
           <h2>上下文不应该被锁在一个数据库里。</h2>
-          <span>从 OCTX Core v1 开始，创建第一份可传播的上下文资产。</span>
+          <span>从 Open Context v1 开始，创建第一份可传播的上下文资产。</span>
         </div>
         <Link className="primary-button" href="/docs/core">
           阅读规范 <ArrowRight size={17} aria-hidden="true" />
