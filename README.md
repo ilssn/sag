@@ -206,6 +206,10 @@ Switch a source from list view to graph view to inspect the events, entities, an
   <img src="docs/assets/readme/product-graph.png" alt="SAG event-entity knowledge graph" width="940" />
 </p>
 
+<p align="center">
+  <img src="docs/assets/readme/product-graph-3d.png" alt="SAG event-entity 3D knowledge graph" width="940" />
+</p>
+
 ### MCP guide
 
 #### Use as an Agent Skill (Claude Code, Codex, and others)
