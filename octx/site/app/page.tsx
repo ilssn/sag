@@ -126,25 +126,6 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="meaning-section sag-intro-section">
-        <div className="meaning-intro">
-          <p>首个实现者</p>
-          <h2>SAG 是什么？</h2>
-        </div>
-        <div className="meaning-copy">
-          <p>
-            SAG 是一套面向个人与 Agent 的开源知识库应用，也是一套原创检索架构。它通过 Event-Entity
-            索引与查询时动态超边，在一条检索管线中提供语义检索、关系推理和原文溯源。
-          </p>
-          <p>
-            SAG 负责生成、检索和使用知识；Open Context 负责让文档及其结构离开 SAG 后，仍然可以被验证、传播和复用。
-          </p>
-          <Link className="sag-doc-link" href="/docs/sag">
-            了解 SAG 与 OCTX 的关系 <ArrowRight size={16} aria-hidden="true" />
-          </Link>
-        </div>
-      </section>
-
       <section className="principles-band">
         <div className="section-heading compact">
           <p>开放标准的边界</p>

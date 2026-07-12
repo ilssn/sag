@@ -828,26 +828,8 @@ button {
   line-height: 1.9;
 }
 
-.meaning-copy p:last-of-type {
+.meaning-copy p:last-child {
   margin-bottom: 0;
-  color: var(--ink);
-}
-
-.sag-intro-section {
-  background: var(--surface);
-}
-
-.sag-doc-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  margin-top: 26px;
-  color: var(--green);
-  font-size: 14px;
-  font-weight: 760;
-}
-
-.sag-doc-link:hover {
   color: var(--ink);
 }
 

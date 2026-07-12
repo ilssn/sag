@@ -2,7 +2,7 @@
 
 > 状态：v0.1 设计基线。本文定义 OCTX `sag-structured/0.1` Profile 及其标准数据能力。
 
-SAG 是一套知识库应用及原创检索架构；`zleap-sag` 是其 Python 引擎。不了解这些名称时，先阅读 [SAG 是什么？](sag.md)。
+**第一次接触 SAG？** [先阅读 SAG 介绍](sag.md)，了解 SAG 应用、检索架构和 `zleap-sag` 的区别。
 
 ## 1. 目的
 

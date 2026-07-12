@@ -18,11 +18,6 @@ export const DOC_NAV: NavGroup[] = [
         href: "/docs/introduction",
         description: "格式定位、核心价值与阅读入口",
       },
-      {
-        title: "SAG 是什么？",
-        href: "/docs/sag",
-        description: "应用、检索架构与 OCTX 的关系",
-      },
     ],
   },
   {
@@ -34,14 +29,24 @@ export const DOC_NAV: NavGroup[] = [
         description: "容器、manifest、身份与完整性",
       },
       {
-        title: "SAG-structured",
-        href: "/docs/sag-structured",
-        description: "Chunk、Event、Entity、关系与向量",
-      },
-      {
         title: "Machine Schemas",
         href: "/docs/schemas",
         description: "JSON Schema 2020-12",
+      },
+    ],
+  },
+  {
+    title: "SAG",
+    items: [
+      {
+        title: "SAG 是什么？",
+        href: "/docs/sag",
+        description: "应用、检索架构与 OCTX 的关系",
+      },
+      {
+        title: "SAG-structured",
+        href: "/docs/sag-structured",
+        description: "Chunk、Event、Entity、关系与向量",
       },
     ],
   },
