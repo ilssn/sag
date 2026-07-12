@@ -547,8 +547,6 @@ Set real `SAG_CORS_ORIGINS` and `NEXT_PUBLIC_API_BASE` values before server depl
 ## Contributing and License
 
 - Contribution workflow: [CONTRIBUTING.md](CONTRIBUTING.md)
-- Architecture documentation: [docs/architecture.md](docs/architecture.md)
-- Engineering standards: [docs/standards/](docs/standards/README.md)
 - Python engine: [`zleap-sag` on PyPI](https://pypi.org/project/zleap-sag/)
 - Paper reproduction: [Zleap-AI/SAG-Benchmark](https://github.com/Zleap-AI/SAG-Benchmark)
 
