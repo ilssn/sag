@@ -48,7 +48,7 @@ chunk_events = package.iter_chunk_events()
 event_entities = package.iter_event_entities()
 ```
 
-也可以通过 `iter_jsonl(path)` 读取其他已声明 JSONL。调用前应确认对应 Capability 已声明且 [`validate_octx()`](./validate-octx.md) 已验证通过。
+也可以通过 `iter_jsonl(path)` 读取其他已声明 JSONL。调用前应确认对应 Capability 已声明且 [`validate_octx()`](./open-octx.md) 已验证通过。
 
 ## 读取向量
 

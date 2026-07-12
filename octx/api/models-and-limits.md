@@ -33,7 +33,7 @@
 
 ## `ValidationReport`
 
-[`validate_octx()`](./validate-octx.md) 返回：
+[`validate_octx()`](./open-octx.md) 返回：
 
 | 字段 | 作用 |
 | --- | --- |
