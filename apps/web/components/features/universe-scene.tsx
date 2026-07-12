@@ -973,6 +973,41 @@ class UniverseForceSceneEngine {
       (candidate) => candidate.kind === "source" && candidate.sourceId === sourceId,
     );
     if (!node) return;
+    const concreteNodes = [...this.nodes.values()].filter(
+      (candidate) =>
+        candidate.kind !== "source"
+        && candidate.sourceId === sourceId
+        && candidate.sceneNode.state === "active"
+        && Number.isFinite(candidate.x)
+        && Number.isFinite(candidate.y)
+        && Number.isFinite(candidate.z),
+    );
+    if (concreteNodes.length) {
+      const bounds = new THREE.Box3();
+      concreteNodes.forEach((candidate) => {
+        const padding = candidate.kind === "event" ? 22 : 12;
+        bounds.expandByPoint(new THREE.Vector3(
+          candidate.x - padding,
+          candidate.y - padding,
+          candidate.z - padding,
+        ));
+        bounds.expandByPoint(new THREE.Vector3(
+          candidate.x + padding,
+          candidate.y + padding,
+          candidate.z + padding,
+        ));
+      });
+      const center = bounds.getCenter(new THREE.Vector3());
+      const size = bounds.getSize(new THREE.Vector3());
+      const camera = this.graph.camera() as THREE.PerspectiveCamera;
+      const halfFov = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+      const aspect = Math.max(0.4, this.host.clientWidth / Math.max(1, this.host.clientHeight));
+      const distanceY = size.y / Math.max(0.01, 2 * halfFov);
+      const distanceX = size.x / Math.max(0.01, 2 * halfFov * aspect);
+      const distance = Math.max(178, distanceX, distanceY, size.z * 1.32) * 1.08;
+      this.moveCamera(center, distance, 620);
+      return;
+    }
     this.moveCamera(
       new THREE.Vector3(node.x, node.y, node.z),
       Math.max(250, node.sceneNode.radius * 3.25),
@@ -1812,6 +1847,7 @@ class UniverseForceSceneEngine {
       !this.nebulaPoints
       || !this.interactive
       || this.reducedMotion
+      || this.reportedViewSourceId
       || document.visibilityState !== "visible"
     ) return 0;
     return THREE.MathUtils.clamp((0.52 - this.visualDetailMix) / 0.22, 0, 1);
@@ -2742,8 +2778,9 @@ class UniverseForceSceneEngine {
   private wakeRendering(settleMs = 1800) {
     if (this.paused) return;
     if (!this.renderingAwake) {
-      this.graph.resumeAnimation();
+      // resumeAnimation synchronously emits a controls change, so arm the guard first.
       this.renderingAwake = true;
+      this.graph.resumeAnimation();
     }
     this.host.dataset.universeRenderer = "active";
     if (this.sleepTimer !== null) window.clearTimeout(this.sleepTimer);
@@ -2784,11 +2821,9 @@ class UniverseForceSceneEngine {
   };
 
   private handleControlsChange = () => {
-    this.wakeRendering(1100);
     this.updateVisualLayout(performance.now());
     this.updateLabels(performance.now(), true);
     this.evaluateLod(performance.now());
-    this.startLoop(this.policy.lod_debounce_ms + 160);
   };
 
   private handlePointerMove = (event: PointerEvent) => {

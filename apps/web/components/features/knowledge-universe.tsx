@@ -1071,6 +1071,7 @@ export function KnowledgeUniverse({
       setMoreHint("正在沿时间轴显现最近事件与关联实体");
       try {
         while (!state.done && state.pages < state.targetPages) {
+          const firstPage = state.pages === 0;
           const page = await api.universeTimeline(
             {
               epoch,
@@ -1104,6 +1105,16 @@ export function KnowledgeUniverse({
           state.cursor = page.page.next_cursor;
           state.done = !page.page.has_more || !page.page.next_cursor;
           refreshLoadProgress();
+          if (firstPage && page.nodes.length) {
+            const focusEpoch = epoch;
+            cameraFrameRef.current = window.requestAnimationFrame(() => {
+              cameraFrameRef.current = null;
+              focusTimerRef.current = window.setTimeout(() => {
+                focusTimerRef.current = null;
+                if (epochRef.current === focusEpoch) graphRef.current?.focusSource(sourceId);
+              }, reducedMotion ? 40 : 720);
+            });
+          }
           if (!searchActivationRef.current) {
             setSummary({
               query: source?.label ?? "知识时间轴",
@@ -1130,7 +1141,15 @@ export function KnowledgeUniverse({
         if (timelineAbortRef.current === controller) timelineAbortRef.current = null;
       }
     },
-    [manifest, mobile, recordLoadedContent, refreshLoadProgress, sourceById, stageTo],
+    [
+      manifest,
+      mobile,
+      recordLoadedContent,
+      reducedMotion,
+      refreshLoadProgress,
+      sourceById,
+      stageTo,
+    ],
   );
 
   const activatePartition = React.useCallback(
