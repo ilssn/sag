@@ -15,9 +15,12 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from typing import Annotated, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+from sag_api.enums import SearchStrategy, normalize_search_strategy
 
 
 class Settings(BaseSettings):
@@ -35,6 +38,8 @@ class Settings(BaseSettings):
     debug: bool = True
     secret_key: str = "dev-insecure-secret-change-me-in-production-0123456789"
     access_token_expire_minutes: int = 60 * 24 * 7  # 7 天
+    # 业务展示时区；数据库与 API 时间戳始终使用 UTC。
+    timezone: str = "Asia/Shanghai"
     # NoDecode 让逗号分隔值先进入下方 validator，避免 settings 源强制按 JSON 解码。
     cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:3000"]
@@ -103,15 +108,20 @@ class Settings(BaseSettings):
     mineru_result_max_mb: int = 100
 
     # ── 检索默认 ────────────────────────────────────────────────────────
-    search_strategy: Literal["multi", "vector", "atomic"] = "multi"
+    search_strategy: SearchStrategy = "vector"
     search_top_k: int = 8
-    # multi（图谱增强）含查询侧 LLM 往返：给每个信源设时限，超时/失败/空结果自动回退 vector
+    # 全库检索先选有界信源候选；@ 显式范围同样受此硬上限保护。
+    search_source_candidate_limit: int = Field(default=16, ge=1, le=256)
+    search_source_concurrency: int = Field(default=4, ge=1, le=32)
+    # 精确模式（multi）含查询侧 LLM 往返；超时/失败/空结果自动回退快速模式（vector）。
     search_source_timeout: float = 12.0
     search_fallback_vector: bool = True
 
     # ── Agent 循环 ──────────────────────────────────────────────────────
     agent_max_steps: int = 6              # 工具调用最大轮数（多轮检索的上界）
     history_keep_recent: int = 8          # 历史压缩时原文保留的最近消息数
+    # 只装载最近有界窗口；更旧对话应进入滚动摘要，不做全表回放。
+    history_load_limit: int = Field(default=200, ge=1, le=1000)
 
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -125,6 +135,22 @@ class Settings(BaseSettings):
                 return json.loads(v)
             return [o.strip() for o in v.split(",") if o.strip()]
         return v
+
+    @field_validator("search_strategy", mode="before")
+    @classmethod
+    def _normalize_legacy_search_strategy(cls, value: object) -> object:
+        # 兼容升级前的环境变量；公开 API 已不再接受 atomic。
+        return normalize_search_strategy(value) if isinstance(value, str) else value
+
+    @field_validator("timezone")
+    @classmethod
+    def _validate_timezone(cls, value: str) -> str:
+        normalized = value.strip()
+        try:
+            ZoneInfo(normalized)
+        except (ZoneInfoNotFoundError, ValueError) as error:
+            raise ValueError("timezone 必须是有效的 IANA 时区") from error
+        return normalized
 
     @property
     def llm_configured(self) -> bool:

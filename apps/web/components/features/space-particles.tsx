@@ -6,15 +6,14 @@ import Particles, { ParticlesProvider } from "@tsparticles/react";
 import { loadSlim } from "@tsparticles/slim";
 import { useTheme } from "next-themes";
 
-const BASE_PARTICLE_COUNT = 86;
-const STAR_DENSITY_MULTIPLIER = 5;
+const BASE_PARTICLE_COUNT = 96;
 
 function createParticleOptions(dark: boolean): ISourceOptions {
   return {
     autoPlay: true,
     background: { color: { value: "transparent" } },
-    detectRetina: true,
-    fpsLimit: 45,
+    detectRetina: false,
+    fpsLimit: 24,
     fullScreen: { enable: false },
     pauseOnBlur: true,
     pauseOnOutsideViewport: true,
@@ -29,18 +28,18 @@ function createParticleOptions(dark: boolean): ISourceOptions {
         enable: true,
         outModes: { default: "out" },
         random: true,
-        speed: { min: 0.025, max: 0.11 },
+        speed: { min: 0.012, max: 0.045 },
         straight: false,
       },
       number: {
         density: { enable: true, height: 800, width: 1200 },
-        value: BASE_PARTICLE_COUNT * STAR_DENSITY_MULTIPLIER,
+        value: BASE_PARTICLE_COUNT,
       },
       opacity: {
         animation: {
           destroy: "none",
-          enable: true,
-          speed: 0.22,
+          enable: false,
+          speed: 0,
           startValue: "random",
           sync: false,
         },
@@ -50,8 +49,8 @@ function createParticleOptions(dark: boolean): ISourceOptions {
       size: {
         animation: {
           destroy: "none",
-          enable: true,
-          speed: 0.16,
+          enable: false,
+          speed: 0,
           startValue: "random",
           sync: false,
         },

@@ -19,5 +19,22 @@ export const THEME_OPTIONS = [
   { value: "system", label: "跟随系统", icon: Monitor },
 ] as const;
 
+export const TIMEZONE_OPTIONS = [
+  { value: "Asia/Shanghai", label: "北京时间 · Asia/Shanghai" },
+  { value: "UTC", label: "协调世界时 · UTC" },
+  { value: "Asia/Hong_Kong", label: "香港 · Asia/Hong_Kong" },
+  { value: "Asia/Singapore", label: "新加坡 · Asia/Singapore" },
+  { value: "Asia/Tokyo", label: "东京 · Asia/Tokyo" },
+  { value: "Asia/Seoul", label: "首尔 · Asia/Seoul" },
+  { value: "Asia/Dubai", label: "迪拜 · Asia/Dubai" },
+  { value: "Europe/London", label: "伦敦 · Europe/London" },
+  { value: "Europe/Berlin", label: "柏林 · Europe/Berlin" },
+  { value: "America/New_York", label: "纽约 · America/New_York" },
+  { value: "America/Chicago", label: "芝加哥 · America/Chicago" },
+  { value: "America/Denver", label: "丹佛 · America/Denver" },
+  { value: "America/Los_Angeles", label: "洛杉矶 · America/Los_Angeles" },
+  { value: "Australia/Sydney", label: "悉尼 · Australia/Sydney" },
+] as const;
+
 export const ARCHIVED_THREADS_PAGE_SIZE = 5;
 export const SIDEBAR_THREADS_PAGE_SIZE = 6;
