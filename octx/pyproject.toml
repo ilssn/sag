@@ -54,6 +54,7 @@ include = [
   "/GLOSSARY.md",
   "/LICENSE",
   "/api",
+  "/sag.md",
   "/sag-structured-v0.1.md",
   "/spec-v0.1.md",
   "/tooling-lifecycle.md",

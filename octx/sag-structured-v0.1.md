@@ -2,6 +2,8 @@
 
 > 状态：v0.1 设计基线。本文定义 OCTX `sag-structured/0.1` Profile 及其标准数据能力。
 
+SAG 是一套知识库应用及原创检索架构；`zleap-sag` 是其 Python 引擎。不了解这些名称时，先阅读 [SAG 是什么？](sag.md)。
+
 ## 1. 目的
 
 `sag-structured` 表示 Package 已显式携带完整、可验证、可直接映射到 SAG 结构层的 `document → chunk → event → entity` 数据。它不是对文件存在情况的猜测，也不是本地索引是否已经 `ready` 的状态。

@@ -9,6 +9,7 @@ import { CodeBlock } from "@/components/code-block";
 
 const DOC_LINKS: Record<string, string> = {
   "README.md": "/docs/introduction",
+  "sag.md": "/docs/sag",
   "spec-v0.1.md": "/docs/specification",
   "sag-structured-v0.1.md": "/docs/sag-structured",
   "tooling-lifecycle.md": "/docs/tooling",

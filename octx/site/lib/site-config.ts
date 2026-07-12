@@ -18,6 +18,11 @@ export const DOC_NAV: NavGroup[] = [
         href: "/docs/introduction",
         description: "格式定位、核心价值与阅读入口",
       },
+      {
+        title: "SAG 是什么？",
+        href: "/docs/sag",
+        description: "应用、检索架构与 OCTX 的关系",
+      },
     ],
   },
   {

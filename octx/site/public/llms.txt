@@ -3,6 +3,7 @@
 > Portable, verifiable context assets for people, agents, and knowledge systems.
 
 - [Introduction](/docs/introduction/)
+- [What is SAG?](/docs/sag/)
 - [OCTX v0.1](/docs/specification/)
 - [SAG-structured Profile 0.1](/docs/sag-structured/)
 - [Tooling and lifecycle](/docs/tooling/)

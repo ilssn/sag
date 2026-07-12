@@ -16,6 +16,7 @@ await cp(path.join(contentRoot, "schemas", "0.1"), path.join(publicRoot, "schema
 
 const documents = [
   ["Introduction", "README.md", "/docs/introduction/"],
+  ["What is SAG?", "sag.md", "/docs/sag/"],
   ["OCTX v0.1", "spec-v0.1.md", "/docs/specification/"],
   ["SAG-structured Profile 0.1", "sag-structured-v0.1.md", "/docs/sag-structured/"],
   ["Tooling and lifecycle", "tooling-lifecycle.md", "/docs/tooling/"],

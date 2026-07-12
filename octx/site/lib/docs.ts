@@ -37,6 +37,15 @@ const DOCUMENTS = [
     file: "README.md",
   },
   {
+    slug: "sag",
+    title: "SAG 是什么？",
+    description: "了解 SAG 应用、检索架构、zleap-sag 及其与 Open Context 的关系。",
+    group: "开始",
+    section: "docs",
+    href: "/docs/sag",
+    file: "sag.md",
+  },
+  {
     slug: "specification",
     title: "OCTX v0.1 规范",
     description: "容器、manifest、知识文档、身份、摘要、版本和扩展规则。",

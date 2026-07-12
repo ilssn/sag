@@ -14,7 +14,9 @@ export function SiteFooter() {
         <a href="/schemas/0.1/manifest.schema.json">Schema</a>
         <a href="/llms.txt">llms.txt</a>
       </nav>
-      <p>由 SAG 首先实现，为所有知识系统保持开放。</p>
+      <p>
+        由 <Link href="/docs/sag">SAG</Link> 首先实现，为所有知识系统保持开放。
+      </p>
     </footer>
   );
 }

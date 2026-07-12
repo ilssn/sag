@@ -2,16 +2,17 @@
 
 Open Context（简称 OCTX）是一种建立在 Google Open Knowledge Format（OKF）之上的开放上下文标准。它把可读 Markdown、稳定身份、版本、完整性信息及可选的 chunks、events、entities、关系和向量封装为可传播的 `.octx` Package。
 
-Open Context 由 SAG 首先实现，但规范和参考工具不依赖 SAG、`zleap-sag`、特定数据库或向量后端。
+Open Context 由 [SAG](sag.md) 首先实现，但规范和参考工具不依赖 SAG、`zleap-sag`、特定数据库或向量后端。
 
 ## 阅读顺序
 
 1. **OCTX v0.1 规范**（`spec-v0.1.md`）：容器、manifest、知识文档、身份、摘要、版本和扩展规则。
-2. **SAG-structured v0.1 Profile**（`sag-structured-v0.1.md`）：chunks、events、entities、关系、向量和完整覆盖约束。
-3. **工具与生命周期**（`tooling-lifecycle.md`）：create/open/validate/import/export、Asset/Release/Installation 和冲突处理。
-4. **Python API**（`api/overview.md`）：按功能拆分的创建、读取、校验、安全解包和 CLI 文档。
-5. **机器可读 Schema**（`schemas/README.md`）：JSON Schema Draft 2020-12 与语义校验边界。
-6. **领域词汇表**（`GLOSSARY.md`）：OCTX、SAG 和 zleap-sag 的统一术语。
+2. **SAG 是什么**（`sag.md`）：SAG 应用、检索架构、`zleap-sag` 及其与 OCTX 的关系。
+3. **SAG-structured v0.1 Profile**（`sag-structured-v0.1.md`）：chunks、events、entities、关系、向量和完整覆盖约束。
+4. **工具与生命周期**（`tooling-lifecycle.md`）：create/open/validate/import/export、Asset/Release/Installation 和冲突处理。
+5. **Python API**（`api/overview.md`）：按功能拆分的创建、读取、校验、安全解包和 CLI 文档。
+6. **机器可读 Schema**（`schemas/README.md`）：JSON Schema Draft 2020-12 与语义校验边界。
+7. **领域词汇表**（`GLOSSARY.md`）：OCTX、SAG 和 zleap-sag 的统一术语。
 
 ## Python 快速开始
 
