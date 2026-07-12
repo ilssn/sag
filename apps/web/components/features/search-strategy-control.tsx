@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronDown, ListFilter, Network, ScanSearch } from "lucide-react";
+import { Check, ChevronDown, Sparkles, Zap } from "lucide-react";
 
 import {
   DropdownMenu,
@@ -17,9 +17,8 @@ import {
 } from "@/lib/retrieval-config";
 
 const STRATEGY_ICONS = {
-  multi: Network,
-  vector: ScanSearch,
-  atomic: ListFilter,
+  vector: Zap,
+  multi: Sparkles,
 } as const;
 
 export function SearchStrategyControl({

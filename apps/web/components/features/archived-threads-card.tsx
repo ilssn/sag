@@ -26,7 +26,7 @@ import type { Thread } from "@/lib/types";
 
 /** 归档会话 —— 最近优先、按页加载，并支持恢复或彻底删除。 */
 export function ArchivedThreadsCard() {
-  const { agent, refreshThreads } = useApp();
+  const { agent, refreshThreads, timezone } = useApp();
   const [rows, setRows] = React.useState<Thread[]>([]);
   const [initialLoading, setInitialLoading] = React.useState(true);
   const [loadingMore, setLoadingMore] = React.useState(false);
@@ -38,7 +38,8 @@ export function ArchivedThreadsCard() {
   const loadPage = React.useCallback(
     async (offset: number, append: boolean) => {
       if (!agent) return;
-      append ? setLoadingMore(true) : setInitialLoading(true);
+      if (append) setLoadingMore(true);
+      else setInitialLoading(true);
       setLoadError(null);
 
       try {
@@ -57,7 +58,8 @@ export function ArchivedThreadsCard() {
       } catch (error) {
         setLoadError(error instanceof ApiError ? error.message : "无法加载归档会话");
       } finally {
-        append ? setLoadingMore(false) : setInitialLoading(false);
+        if (append) setLoadingMore(false);
+        else setInitialLoading(false);
       }
     },
     [agent],
@@ -178,7 +180,7 @@ export function ArchivedThreadsCard() {
                       {thread.title}
                     </div>
                     <div className="mt-0.5 text-xs tabular-nums text-muted-foreground">
-                      {relativeTime(thread.updated_at)}
+                      {relativeTime(thread.updated_at, timezone)}
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">

@@ -11,10 +11,12 @@ import { relativeTime } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EditSourceDialog } from "@/components/features/edit-source-dialog";
+import { useApp } from "@/components/features/app-shell";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 export function SourceCard({ source, onChanged }: { source: Source; onChanged?: () => void }) {
   const [confirmDelete, setConfirmDelete] = React.useState(false);
+  const { timezone } = useApp();
 
   async function deleteSource() {
     try {
@@ -53,7 +55,7 @@ export function SourceCard({ source, onChanged }: { source: Source; onChanged?: 
             <Network className="size-3.5" />
             {source.event_count} 事件
           </span>
-          <span className="ml-auto">{relativeTime(source.updated_at)}</span>
+          <span className="ml-auto">{relativeTime(source.updated_at, timezone)}</span>
         </div>
       </Link>
 

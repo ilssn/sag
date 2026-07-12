@@ -899,20 +899,20 @@ export function SearchPanel({
             aria-label="搜索内容面板"
           >
             <ToggleGroupItem
-              value="activity"
-              className="gap-1.5 px-3"
-              disabled={search.busy}
-            >
-              <List className="size-3.5" />
-              最近动态
-            </ToggleGroupItem>
-            <ToggleGroupItem
               value="history"
               className="gap-1.5 px-3"
               disabled={search.busy}
             >
               <History className="size-3.5" />
               查询历史
+            </ToggleGroupItem>
+            <ToggleGroupItem
+              value="activity"
+              className="gap-1.5 px-3"
+              disabled={search.busy}
+            >
+              <List className="size-3.5" />
+              最近动态
             </ToggleGroupItem>
           </ToggleGroup>
         </div>

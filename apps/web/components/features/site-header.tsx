@@ -2,9 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Expand, Shrink, TriangleAlert } from "lucide-react";
+import { Expand, Minimize2, Shrink, TriangleAlert } from "lucide-react";
 
 import { PRODUCT_NAME } from "@/lib/branding";
+import {
+  workspaceSectionDefinition,
+  workspaceSectionFromPathname,
+} from "@/lib/workspace";
 import { useApp } from "@/components/features/app-shell";
 import { ThemeToggle } from "@/components/features/theme-toggle";
 import {
@@ -20,21 +24,16 @@ import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
-const SECTION: Record<string, string> = {
-  "/chat": "对话",
-  "/search": "搜索",
-  "/knowledge": "知识",
-  "/settings": "设置",
-};
-
 function sectionLabel(pathname: string): string {
-  const key = Object.keys(SECTION).find((k) => pathname === k || pathname.startsWith(k + "/"));
-  return key ? SECTION[key] : PRODUCT_NAME;
+  const workspaceSection = workspaceSectionFromPathname(pathname);
+  if (workspaceSection) return workspaceSectionDefinition(workspaceSection).label;
+  if (pathname === "/settings" || pathname.startsWith("/settings/")) return "设置";
+  return PRODUCT_NAME;
 }
 
 export function SiteHeader() {
   const pathname = usePathname();
-  const { capabilities, windowMode, toggleWindowMode } = useApp();
+  const { capabilities, windowMode, toggleWindowMode, minimizeWorkspace } = useApp();
   const label = sectionLabel(pathname);
   const windowed = windowMode === "window";
 
@@ -68,6 +67,20 @@ export function SiteHeader() {
         )}
 
         <ThemeToggle />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="hidden size-8 md:inline-flex"
+              onClick={minimizeWorkspace}
+              aria-label="收起为迷你工作台"
+            >
+              <Minimize2 />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">收起工作台</TooltipContent>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

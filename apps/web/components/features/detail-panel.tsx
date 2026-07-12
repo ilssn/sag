@@ -19,17 +19,18 @@ import type { Doc } from "@/lib/types";
 import { formatBytes, relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { MarkdownContent } from "@/components/features/markdown-content";
+import { useApp } from "@/components/features/app-shell";
 import { DocStatusBadge } from "@/components/features/status-badge";
 import { Button } from "@/components/ui/button";
 import type { ImperativePanelHandle } from "react-resizable-panels";
 
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@/components/ui/resizable";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -463,26 +464,31 @@ function DocumentPreview({ doc }: { doc: Doc }) {
   );
 }
 
-function DocumentView({
-  target,
+export function DocumentDetailContent({
+  sourceId,
+  documentId,
+  compact = false,
 }: {
-  target: Extract<DetailTarget, { kind: "document" }>;
+  sourceId: string;
+  documentId: string;
+  compact?: boolean;
 }) {
   const [doc, setDoc] = React.useState<Doc | null>(null);
   const [error, setError] = React.useState("");
+  const { timezone } = useApp();
 
   React.useEffect(() => {
     let alive = true;
     setDoc(null);
     setError("");
     api
-      .getDocument(target.sourceId, target.documentId)
+      .getDocument(sourceId, documentId)
       .then((d) => alive && setDoc(d))
       .catch((e) => alive && setError(e instanceof ApiError ? e.message : "文档加载失败"));
     return () => {
       alive = false;
     };
-  }, [target]);
+  }, [documentId, sourceId]);
 
   if (error) {
     return <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>;
@@ -496,34 +502,52 @@ function DocumentView({
     );
   }
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
-      <div className="flex flex-col gap-2">
-        <h3 className="break-all font-display text-base font-medium">{doc.filename}</h3>
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <DocStatusBadge status={doc.status} />
-          <span>{formatBytes(doc.size_bytes)}</span>
-          <span>·</span>
-          <span>{doc.chunk_count} 分块</span>
-          <span>·</span>
-          <span>{doc.event_count} 事件</span>
-          <span>·</span>
-          <span>{relativeTime(doc.created_at)}</span>
+    <TooltipProvider delayDuration={300}>
+      <div className={cn("flex min-h-0 flex-1 flex-col", compact ? "gap-3" : "gap-4")}>
+        <div className="flex flex-col gap-2">
+          <h3
+            className={cn(
+              "break-all font-display font-medium",
+              compact ? "text-sm" : "text-base",
+            )}
+          >
+            {doc.filename}
+          </h3>
+          <div
+            className={cn(
+              "flex flex-wrap items-center gap-2 text-muted-foreground",
+              compact ? "text-[11px]" : "text-xs",
+            )}
+          >
+            <DocStatusBadge status={doc.status} />
+            <span>{formatBytes(doc.size_bytes)}</span>
+            <span>·</span>
+            <span>{doc.chunk_count} 分块</span>
+            <span>·</span>
+            <span>{doc.event_count} 事件</span>
+            <span>·</span>
+            <span>{relativeTime(doc.created_at, timezone)}</span>
+          </div>
+          {doc.error && (
+            <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {doc.error}
+            </p>
+          )}
         </div>
-        {doc.error && (
-          <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            {doc.error}
-          </p>
-        )}
+        <DocumentPreview doc={doc} />
       </div>
-      <DocumentPreview doc={doc} />
-    </div>
+    </TooltipProvider>
   );
 }
 
 // ── 面板外壳 ─────────────────────────────────────────────────────────
 
 function PanelBody({ target }: { target: DetailTarget }) {
-  return target.kind === "chunk" ? <ChunkView target={target} /> : <DocumentView target={target} />;
+  return target.kind === "chunk" ? (
+    <ChunkView target={target} />
+  ) : (
+    <DocumentDetailContent sourceId={target.sourceId} documentId={target.documentId} />
+  );
 }
 
 function panelTitle(target: DetailTarget): string {
