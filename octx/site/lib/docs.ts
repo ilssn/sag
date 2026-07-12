@@ -146,8 +146,8 @@ const DOCUMENTS = [
   },
   {
     slug: "open-octx",
-    title: "打开与校验",
-    description: "使用 open_octx() 安全打开 Package，并用 validate_octx() 完成规范校验。",
+    title: "open_octx()",
+    description: "安全打开 OCTX Package 并返回只读 OctxPackage。",
     group: "核心函数",
     section: "api",
     href: "/api/open-octx",
@@ -156,7 +156,7 @@ const DOCUMENTS = [
   {
     slug: "validate-octx",
     title: "validate_octx()",
-    description: "旧文档地址；validate_octx() 已合并到“打开与校验”。",
+    description: "完整校验 OCTX Package，并以结构化报告返回错误和警告。",
     group: "核心函数",
     section: "api",
     href: "/api/validate-octx",

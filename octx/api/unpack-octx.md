@@ -35,7 +35,7 @@ print(destination)
 
 解包流程会：
 
-1. 调用 [`validate_octx()`](./open-octx.md)，拒绝无效 OCTX Package 或已知无效层。
+1. 调用 [`validate_octx()`](./validate-octx.md)，拒绝无效 OCTX Package 或已知无效层。
 2. 检查目标路径的符号链接、平台路径别名和大小写碰撞。
 3. 只复制 `manifest.json` 和 `manifest.files` 声明的 payload。
 4. 复制过程中重新计算每个 payload 的 SHA-256，防止校验后源发生变化。

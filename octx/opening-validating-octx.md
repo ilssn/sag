@@ -34,7 +34,7 @@ report = validate_octx(package_or_source)
 - 分别给出 OCTX 格式和 Capabilities 的有效性。
 - 生成结构化问题列表。
 
-任何 import 实现都必须在自身事务中确保验证成功，不能相信调用方之前运行过 validate。完整接口见 [`打开与校验 API`](api/open-octx.md)。
+任何 import 实现都必须在自身事务中确保验证成功，不能相信调用方之前运行过 validate。完整接口见 [`validate_octx()` API](api/validate-octx.md)。
 
 ## 错误报告
 

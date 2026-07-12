@@ -112,9 +112,14 @@ export const API_NAV: NavGroup[] = [
         description: "创建 Package 与发布 Release",
       },
       {
-        title: "打开与校验",
+        title: "open_octx()",
         href: "/api/open-octx",
-        description: "open_octx() 与 validate_octx()",
+        description: "安全打开只读 Package",
+      },
+      {
+        title: "validate_octx()",
+        href: "/api/validate-octx",
+        description: "完整校验并返回报告",
       },
       {
         title: "unpack_octx()",

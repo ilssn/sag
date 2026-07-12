@@ -1,6 +1,6 @@
 # `ValidationReport`
 
-`ValidationReport` 是 [`validate_octx()`](./open-octx.md) 返回的不可变校验报告。普通格式、摘要或结构错误会记录在报告中，不需要调用方解析异常文本。
+`ValidationReport` 是 [`validate_octx()`](./validate-octx.md) 返回的不可变校验报告。普通格式、摘要或结构错误会记录在报告中，不需要调用方解析异常文本。
 
 ## 获取对象
 

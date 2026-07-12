@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | `octx create` | 创建 Package 或发布新 Release。 | [`create_octx()`](./create-octx.md) |
 | `octx inspect` | 只读取 manifest 摘要，不做完整校验。 | [`open_octx()`](./open-octx.md) |
-| `octx validate` | 完整校验并输出结果。 | [`validate_octx()`](./open-octx.md) |
+| `octx validate` | 完整校验并输出结果。 | [`validate_octx()`](./validate-octx.md) |
 | `octx unpack` | 校验后安全展开。 | [`unpack_octx()`](./unpack-octx.md) |
 
 ## 创建

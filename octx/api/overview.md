@@ -21,7 +21,8 @@ python -m pip install "octx[vectors]"
 | API | 用途 |
 | --- | --- |
 | [`create_octx()`](./create-octx.md) | 从 Markdown 或已有 workspace 创建不可变 `.octx` Package，或发布后续 Release。 |
-| [`open_octx()` / `validate_octx()`](./open-octx.md) | 安全打开 ZIP 或展开目录，并完整校验 OCTX 格式与已知 Capability。 |
+| [`open_octx()`](./open-octx.md) | 安全打开 ZIP 或展开目录，得到只读 `OctxPackage`。 |
+| [`validate_octx()`](./validate-octx.md) | 完整校验 OCTX 格式与已知 Capability，返回结构化报告。 |
 | [`unpack_octx()`](./unpack-octx.md) | 校验通过后，将 manifest 和已声明 payload 安全展开到目录。 |
 | [`OctxPackage`](./octx-package.md) | 读取 manifest、Markdown、JSONL 结构层和 Arrow 向量。 |
 | [`CreateResult`](./create-result.md) | `create_octx()` 成功后的路径、身份、版本、摘要与校验结果。 |

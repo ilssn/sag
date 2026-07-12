@@ -22,7 +22,7 @@ limits = ArchiveLimits(
 report = validate_octx("upload.octx", limits=limits)
 ```
 
-同一个对象可以传给 [`create_octx()`](./create-octx.md)、[`open_octx()` 与 `validate_octx()`](./open-octx.md)，以及 [`unpack_octx()`](./unpack-octx.md)。
+同一个对象可以传给 [`create_octx()`](./create-octx.md)、[`open_octx()`](./open-octx.md)、[`validate_octx()`](./validate-octx.md)，以及 [`unpack_octx()`](./unpack-octx.md)。
 
 ## 可配置字段
 

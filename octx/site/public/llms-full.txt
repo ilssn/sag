@@ -901,7 +901,7 @@ report = validate_octx(package_or_source)
 - 分别给出 OCTX 格式和 Capabilities 的有效性。
 - 生成结构化问题列表。
 
-任何 import 实现都必须在自身事务中确保验证成功，不能相信调用方之前运行过 validate。完整接口见 [`打开与校验 API`](api/open-octx.md)。
+任何 import 实现都必须在自身事务中确保验证成功，不能相信调用方之前运行过 validate。完整接口见 [`validate_octx()` API](api/validate-octx.md)。
 
 ## 错误报告
 
@@ -1103,7 +1103,8 @@ python -m pip install "octx[vectors]"
 | API | 用途 |
 | --- | --- |
 | [`create_octx()`](./create-octx.md) | 从 Markdown 或已有 workspace 创建不可变 `.octx` Package，或发布后续 Release。 |
-| [`open_octx()` / `validate_octx()`](./open-octx.md) | 安全打开 ZIP 或展开目录，并完整校验 OCTX 格式与已知 Capability。 |
+| [`open_octx()`](./open-octx.md) | 安全打开 ZIP 或展开目录，得到只读 `OctxPackage`。 |
+| [`validate_octx()`](./validate-octx.md) | 完整校验 OCTX 格式与已知 Capability，返回结构化报告。 |
 | [`unpack_octx()`](./unpack-octx.md) | 校验通过后，将 manifest 和已声明 payload 安全展开到目录。 |
 | [`OctxPackage`](./octx-package.md) | 读取 manifest、Markdown、JSONL 结构层和 Arrow 向量。 |
 | [`CreateResult`](./create-result.md) | `create_octx()` 成功后的路径、身份、版本、摘要与校验结果。 |
@@ -1261,37 +1262,13 @@ derived = create_octx(
 
 ---
 
-# Opening and validating
+# open_octx()
 
-# 打开与校验
+# `open_octx()`
 
-`open_octx()` 和 `validate_octx()` 是同一读取流程的两个阶段：前者安全打开 Package 并返回只读 [`OctxPackage`](./octx-package.md)，后者完成规范校验并返回 [`ValidationReport`](./validation-report.md)。
+`open_octx()` 安全打开 `.octx` ZIP/ZIP64 文件或已经展开的 OCTX 目录，并返回只读 [`OctxPackage`](./octx-package.md)。
 
-这两个函数的文档放在一起，因为处理外部 OCTX 时通常会连续使用它们。Python API 仍保留两个函数，因为它们返回不同对象，调用方也可以只执行需要的阶段。
-
-## 推荐流程
-
-处理外部或不可信 Package 时，先校验，再打开读取：
-
-```python
-from octx import open_octx, validate_octx
-
-report = validate_octx("asset.octx")
-if not (report.valid and report.fully_validated):
-    raise ValueError(report.to_dict())
-
-with open_octx("asset.octx") as package:
-    for document in package.iter_documents():
-        print(document.path, document.metadata["title"])
-```
-
-`open_octx()` 成功只表示容器可以安全打开，不表示 Package 已经通过完整的 OCTX 规范校验。
-
-## `open_octx()`
-
-安全打开 `.octx` ZIP/ZIP64 文件或已经展开的 OCTX 目录，并返回只读 `OctxPackage`。
-
-### 函数签名
+## 函数签名
 
 ```python
 def open_octx(
@@ -1306,16 +1283,32 @@ def open_octx(
 | `source` | `.octx` 文件或展开目录。符号链接、特殊文件和危险归档路径会被拒绝。 |
 | `limits` | 容器扫描和后续读取使用的 [`ArchiveLimits`](./archive-limits.md)。 |
 
-### 打开阶段会做什么
+## 它会做什么
+
+打开阶段会：
 
 - 扫描全部 ZIP 或目录条目，包括 manifest 未列出的条目。
 - 拒绝路径穿越、符号链接、加密条目、不支持的压缩方法和 local/central header 差异。
 - 限制条目数、单文件大小、总解压大小和压缩比。
 - 读取并解析 `manifest.json`，建立只读 payload 视图。
 
-它不会完整校验文件摘要、JSON Schema、Capability、关系覆盖或向量内容，也不会写入源文件。
+## 它不会做什么
 
-### 生命周期
+`open_octx()` 当前不会完整校验文件摘要、JSON Schema、Capability、关系覆盖或向量内容，也不会写入源文件。
+
+需要完整校验时调用 [`validate_octx()`](./validate-octx.md)：
+
+```python
+from octx import open_octx, validate_octx
+
+with open_octx("asset.octx") as package:
+    report = validate_octx(package)
+    if not report.valid:
+        raise ValueError(report.to_dict())
+    print(package.manifest["asset"])
+```
+
+## 生命周期
 
 推荐使用 `with`，确保持续打开的文件描述符和 ZIP reader 被关闭：
 
@@ -1326,7 +1319,7 @@ with open_octx("asset.octx") as package:
 
 也可以显式调用 `package.close()`。关闭后继续读取会抛出 `ValueError`。
 
-### 失败方式
+## 失败方式
 
 容器无法安全打开时会抛出 `OctxOpenError` 的子类，例如：
 
@@ -1336,11 +1329,15 @@ with open_octx("asset.octx") as package:
 
 需要把不可信格式错误转换为报告而不是异常时，直接使用 `validate_octx(path)`。
 
-## `validate_octx()`
+---
 
-完整校验 OCTX 格式和当前实现认识的 Capability，并返回 `ValidationReport`。它是处理外部或不可信 Package 的首选入口。
+# validate_octx()
 
-### 函数签名
+# `validate_octx()`
+
+`validate_octx()` 完整校验 OCTX 格式和当前实现认识的 Capability，并返回 [`ValidationReport`](./validation-report.md)。它是处理外部或不可信 Package 的校验入口。
+
+## 函数签名
 
 ```python
 def validate_octx(
@@ -1354,10 +1351,10 @@ def validate_octx(
 | 参数 | 作用 |
 | --- | --- |
 | `package_or_source` | `.octx` 路径、展开目录或已经打开的 `OctxPackage`。 |
-| `limits` | 本次打开和校验使用的资源上限。传入不同限制时会重新打开源。 |
+| `limits` | 本次打开和校验使用的 [`ArchiveLimits`](./archive-limits.md)。传入不同限制时会重新打开源。 |
 | `max_issues` | 报告中最多保留的问题数，必须为正数。 |
 
-### 基本用法
+## 基本用法
 
 ```python
 from octx import validate_octx
@@ -1371,16 +1368,21 @@ if not report.valid:
 
 对普通容器、格式和规范错误，函数返回 `valid=False` 的报告，而不是让调用流程因异常中断。
 
-### `valid` 与 `fully_validated`
+## `valid` 与 `fully_validated`
 
 - `report.valid`：OCTX 格式有效，并且所有已识别且已执行的声明层都没有失败。
 - `report.fully_validated`：当前安装理解并完整验证了全部声明层。
 
-因此，一个带未知可选 Capability 的 Package 可以是 `valid=True`、`fully_validated=False`。发布或高信任导入通常应同时要求两者为 `True`。
+因此，一个带未知可选 Capability 的 Package 可以是 `valid=True`、`fully_validated=False`。发布或高信任导入通常应同时要求两者为 `True`：
+
+```python
+if not (report.valid and report.fully_validated):
+    reject(report.to_dict())
+```
 
 没有安装 `octx[vectors]` 时，vectors 层会产生 warning，并使 `fully_validated=False`，但不会伪装成已经验证通过。
 
-### 校验范围
+## 校验范围
 
 OCTX 格式校验包括容器安全、manifest Schema、身份、版本、文件清单、逐文件 SHA-256、Package Digest、Markdown/OKF frontmatter 和 Document ID。
 
@@ -1393,9 +1395,11 @@ OCTX 格式校验包括容器安全、manifest Schema、身份、版本、文件
 
 完整性失败时，不会继续解析对应的不可信结构 payload。
 
-### 已打开 Package 的所有权
+## 已打开 Package 的所有权
 
 ```python
+from octx import open_octx, validate_octx
+
 with open_octx("asset.octx") as package:
     report = validate_octx(package)
     # package 仍由调用方持有，可继续读取。
@@ -1446,7 +1450,7 @@ print(destination)
 
 解包流程会：
 
-1. 调用 [`validate_octx()`](./open-octx.md)，拒绝无效 OCTX Package 或已知无效层。
+1. 调用 [`validate_octx()`](./validate-octx.md)，拒绝无效 OCTX Package 或已知无效层。
 2. 检查目标路径的符号链接、平台路径别名和大小写碰撞。
 3. 只复制 `manifest.json` 和 `manifest.files` 声明的 payload。
 4. 复制过程中重新计算每个 payload 的 SHA-256，防止校验后源发生变化。
@@ -1516,7 +1520,7 @@ chunk_events = package.iter_chunk_events()
 event_entities = package.iter_event_entities()
 ```
 
-也可以通过 `iter_jsonl(path)` 读取其他已声明 JSONL。调用前应确认对应 Capability 已声明且 [`validate_octx()`](./open-octx.md) 已验证通过。
+也可以通过 `iter_jsonl(path)` 读取其他已声明 JSONL。调用前应确认对应 Capability 已声明且 [`validate_octx()`](./validate-octx.md) 已验证通过。
 
 ## 读取向量
 
@@ -1622,7 +1626,7 @@ with open_octx("product-guide.octx") as package:
 
 # `ValidationReport`
 
-`ValidationReport` 是 [`validate_octx()`](./open-octx.md) 返回的不可变校验报告。普通格式、摘要或结构错误会记录在报告中，不需要调用方解析异常文本。
+`ValidationReport` 是 [`validate_octx()`](./validate-octx.md) 返回的不可变校验报告。普通格式、摘要或结构错误会记录在报告中，不需要调用方解析异常文本。
 
 ## 获取对象
 
@@ -1683,7 +1687,7 @@ limits = ArchiveLimits(
 report = validate_octx("upload.octx", limits=limits)
 ```
 
-同一个对象可以传给 [`create_octx()`](./create-octx.md)、[`open_octx()` 与 `validate_octx()`](./open-octx.md)，以及 [`unpack_octx()`](./unpack-octx.md)。
+同一个对象可以传给 [`create_octx()`](./create-octx.md)、[`open_octx()`](./open-octx.md)、[`validate_octx()`](./validate-octx.md)，以及 [`unpack_octx()`](./unpack-octx.md)。
 
 ## 可配置字段
 
@@ -1721,7 +1725,7 @@ report = validate_octx("upload.octx", limits=limits)
 | --- | --- | --- |
 | `octx create` | 创建 Package 或发布新 Release。 | [`create_octx()`](./create-octx.md) |
 | `octx inspect` | 只读取 manifest 摘要，不做完整校验。 | [`open_octx()`](./open-octx.md) |
-| `octx validate` | 完整校验并输出结果。 | [`validate_octx()`](./open-octx.md) |
+| `octx validate` | 完整校验并输出结果。 | [`validate_octx()`](./validate-octx.md) |
 | `octx unpack` | 校验后安全展开。 | [`unpack_octx()`](./unpack-octx.md) |
 
 ## 创建
@@ -1834,7 +1838,7 @@ except OctxValidationError as error:
 
 ## 校验不是异常流
 
-处理不可信输入时，优先直接调用 [`validate_octx()`](./open-octx.md)。普通 ZIP、格式、摘要和结构错误会转换为 `valid=False` 的报告：
+处理不可信输入时，优先直接调用 [`validate_octx()`](./validate-octx.md)。普通 ZIP、格式、摘要和结构错误会转换为 `valid=False` 的报告：
 
 ```python
 report = validate_octx("upload.octx")

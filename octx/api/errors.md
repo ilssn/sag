@@ -53,7 +53,7 @@ except OctxValidationError as error:
 
 ## 校验不是异常流
 
-处理不可信输入时，优先直接调用 [`validate_octx()`](./open-octx.md)。普通 ZIP、格式、摘要和结构错误会转换为 `valid=False` 的报告：
+处理不可信输入时，优先直接调用 [`validate_octx()`](./validate-octx.md)。普通 ZIP、格式、摘要和结构错误会转换为 `valid=False` 的报告：
 
 ```python
 report = validate_octx("upload.octx")
