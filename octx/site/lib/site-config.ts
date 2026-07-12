@@ -132,9 +132,24 @@ export const API_NAV: NavGroup[] = [
         description: "读取 Markdown、JSONL 与向量",
       },
       {
-        title: "数据类型与资源限制",
-        href: "/api/models-and-limits",
-        description: "结果对象、报告与 ArchiveLimits",
+        title: "CreateResult",
+        href: "/api/create-result",
+        description: "创建与发布结果",
+      },
+      {
+        title: "Document",
+        href: "/api/document",
+        description: "Markdown 文档视图",
+      },
+      {
+        title: "ValidationReport",
+        href: "/api/validation-report",
+        description: "结构化校验报告",
+      },
+      {
+        title: "ArchiveLimits",
+        href: "/api/archive-limits",
+        description: "资源安全上限",
       },
     ],
   },

@@ -34,7 +34,7 @@ with open_octx("asset.octx") as package:
         print(document.body)
 ```
 
-每个 [`Document`](./models-and-limits.md) 包含路径、只读 frontmatter、去除 frontmatter 后的 Markdown body 和原始字节。
+每个 [`Document`](./document.md) 包含路径、只读 frontmatter、去除 frontmatter 后的 Markdown body 和原始字节。
 
 ## 读取结构化数据
 

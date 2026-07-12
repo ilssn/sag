@@ -40,7 +40,7 @@ except OctxError as error:
     raise
 ```
 
-`OctxValidationError.report` 保存完整 `ValidationReport`：
+`OctxValidationError.report` 保存完整 [`ValidationReport`](./validation-report.md)：
 
 ```python
 from octx import OctxValidationError, unpack_octx

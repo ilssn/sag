@@ -1,6 +1,6 @@
 # 打开与校验
 
-`open_octx()` 和 `validate_octx()` 是同一读取流程的两个阶段：前者安全打开 Package 并返回只读 [`OctxPackage`](./octx-package.md)，后者完成规范校验并返回 [`ValidationReport`](./models-and-limits.md)。
+`open_octx()` 和 `validate_octx()` 是同一读取流程的两个阶段：前者安全打开 Package 并返回只读 [`OctxPackage`](./octx-package.md)，后者完成规范校验并返回 [`ValidationReport`](./validation-report.md)。
 
 这两个函数的文档放在一起，因为处理外部 OCTX 时通常会连续使用它们。Python API 仍保留两个函数，因为它们返回不同对象，调用方也可以只执行需要的阶段。
 
@@ -39,7 +39,7 @@ def open_octx(
 | 参数 | 作用 |
 | --- | --- |
 | `source` | `.octx` 文件或展开目录。符号链接、特殊文件和危险归档路径会被拒绝。 |
-| `limits` | 容器扫描和后续读取使用的 [`ArchiveLimits`](./models-and-limits.md)。 |
+| `limits` | 容器扫描和后续读取使用的 [`ArchiveLimits`](./archive-limits.md)。 |
 
 ### 打开阶段会做什么
 

@@ -17,7 +17,7 @@ def unpack_octx(
 | --- | --- |
 | `package_or_source` | `.octx` 路径、展开目录或已打开的 `OctxPackage`。 |
 | `destination` | 目标目录；必须不存在或为空，且不能是文件系统根目录。 |
-| `limits` | 打开、校验和复制期间的资源上限。 |
+| `limits` | 打开、校验和复制期间的 [`ArchiveLimits`](./archive-limits.md)。 |
 
 ## 基本用法
 

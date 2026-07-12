@@ -24,7 +24,10 @@ python -m pip install "octx[vectors]"
 | [`open_octx()` / `validate_octx()`](./open-octx.md) | 安全打开 ZIP 或展开目录，并完整校验 OCTX 格式与已知 Capability。 |
 | [`unpack_octx()`](./unpack-octx.md) | 校验通过后，将 manifest 和已声明 payload 安全展开到目录。 |
 | [`OctxPackage`](./octx-package.md) | 读取 manifest、Markdown、JSONL 结构层和 Arrow 向量。 |
-| [数据类型与资源限制](./models-and-limits.md) | `CreateResult`、`ValidationReport`、`Document`、`ArchiveLimits` 等类型。 |
+| [`CreateResult`](./create-result.md) | `create_octx()` 成功后的路径、身份、版本、摘要与校验结果。 |
+| [`Document`](./document.md) | Package 中 Markdown 文档的只读视图。 |
+| [`ValidationReport`](./validation-report.md) | OCTX 格式与 Capability 的结构化校验报告。 |
+| [`ArchiveLimits`](./archive-limits.md) | 创建、打开、校验和解包使用的资源安全上限。 |
 | [CLI](./cli.md) | `octx create / inspect / validate / unpack` 命令。 |
 | [错误处理](./errors.md) | 公开异常、错误码和推荐处理方式。 |
 

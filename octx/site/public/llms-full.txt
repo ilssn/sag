@@ -1106,7 +1106,10 @@ python -m pip install "octx[vectors]"
 | [`open_octx()` / `validate_octx()`](./open-octx.md) | 安全打开 ZIP 或展开目录，并完整校验 OCTX 格式与已知 Capability。 |
 | [`unpack_octx()`](./unpack-octx.md) | 校验通过后，将 manifest 和已声明 payload 安全展开到目录。 |
 | [`OctxPackage`](./octx-package.md) | 读取 manifest、Markdown、JSONL 结构层和 Arrow 向量。 |
-| [数据类型与资源限制](./models-and-limits.md) | `CreateResult`、`ValidationReport`、`Document`、`ArchiveLimits` 等类型。 |
+| [`CreateResult`](./create-result.md) | `create_octx()` 成功后的路径、身份、版本、摘要与校验结果。 |
+| [`Document`](./document.md) | Package 中 Markdown 文档的只读视图。 |
+| [`ValidationReport`](./validation-report.md) | OCTX 格式与 Capability 的结构化校验报告。 |
+| [`ArchiveLimits`](./archive-limits.md) | 创建、打开、校验和解包使用的资源安全上限。 |
 | [CLI](./cli.md) | `octx create / inspect / validate / unpack` 命令。 |
 | [错误处理](./errors.md) | 公开异常、错误码和推荐处理方式。 |
 
@@ -1180,7 +1183,7 @@ def create_octx(
 | `version` | Release 的 SemVer。首次默认 `1.0.0`；内容改变后必须提高版本。 |
 | `derive` | 从展开的外部 Package 创建新 Asset，并记录 `asset.derived_from`。 |
 | `capabilities` | 显式声明能力，例如 `{"sag-structured": "0.1"}`；不会根据文件自动推断。 |
-| `limits` | 创建和校验期间使用的资源上限。 |
+| `limits` | 创建和校验期间使用的 [`ArchiveLimits`](./archive-limits.md)。 |
 
 `source` 始终采用复制语义。`create_octx()` 不会移动、重命名或改写源目录中的文件。
 
@@ -1252,7 +1255,7 @@ derived = create_octx(
 
 ## 返回值
 
-返回 [`CreateResult`](./models-and-limits.md)，包含输出路径、workspace、Asset ID、Release 版本、创建时间、Package Digest、Document ID 映射和完整 `ValidationReport`。
+返回 [`CreateResult`](./create-result.md)，包含输出路径、workspace、Asset ID、Release 版本、创建时间、Package Digest、Document ID 映射和完整 [`ValidationReport`](./validation-report.md)。
 
 创建失败时不会发布半成品到 `output`。常见异常包括 `ReleaseVersionError`、`DerivationRequired`、`OutputExistsError` 和 `OctxValidationError`。
 
@@ -1262,7 +1265,7 @@ derived = create_octx(
 
 # 打开与校验
 
-`open_octx()` 和 `validate_octx()` 是同一读取流程的两个阶段：前者安全打开 Package 并返回只读 [`OctxPackage`](./octx-package.md)，后者完成规范校验并返回 [`ValidationReport`](./models-and-limits.md)。
+`open_octx()` 和 `validate_octx()` 是同一读取流程的两个阶段：前者安全打开 Package 并返回只读 [`OctxPackage`](./octx-package.md)，后者完成规范校验并返回 [`ValidationReport`](./validation-report.md)。
 
 这两个函数的文档放在一起，因为处理外部 OCTX 时通常会连续使用它们。Python API 仍保留两个函数，因为它们返回不同对象，调用方也可以只执行需要的阶段。
 
@@ -1301,7 +1304,7 @@ def open_octx(
 | 参数 | 作用 |
 | --- | --- |
 | `source` | `.octx` 文件或展开目录。符号链接、特殊文件和危险归档路径会被拒绝。 |
-| `limits` | 容器扫描和后续读取使用的 [`ArchiveLimits`](./models-and-limits.md)。 |
+| `limits` | 容器扫描和后续读取使用的 [`ArchiveLimits`](./archive-limits.md)。 |
 
 ### 打开阶段会做什么
 
@@ -1425,7 +1428,7 @@ def unpack_octx(
 | --- | --- |
 | `package_or_source` | `.octx` 路径、展开目录或已打开的 `OctxPackage`。 |
 | `destination` | 目标目录；必须不存在或为空，且不能是文件系统根目录。 |
-| `limits` | 打开、校验和复制期间的资源上限。 |
+| `limits` | 打开、校验和复制期间的 [`ArchiveLimits`](./archive-limits.md)。 |
 
 ## 基本用法
 
@@ -1499,7 +1502,7 @@ with open_octx("asset.octx") as package:
         print(document.body)
 ```
 
-每个 [`Document`](./models-and-limits.md) 包含路径、只读 frontmatter、去除 frontmatter 后的 Markdown body 和原始字节。
+每个 [`Document`](./document.md) 包含路径、只读 frontmatter、去除 frontmatter 后的 Markdown body 和原始字节。
 
 ## 读取结构化数据
 
@@ -1536,15 +1539,28 @@ Package 打开后会保留源文件或目录身份。每次读取都会确认源
 
 ---
 
-# Data types and limits
+# CreateResult
 
-# 数据类型与资源限制
+# `CreateResult`
 
-`octx` 使用不可变 dataclass 表达创建结果、文档和校验报告。映射字段会转换为只读视图，所有类型都可以从顶层 `octx` 导入。
+`CreateResult` 是 [`create_octx()`](./create-octx.md) 成功后返回的不可变结果对象。它集中提供已发布 Package 的路径、身份、版本、摘要和校验报告。
 
-## `CreateResult`
+## 获取对象
 
-[`create_octx()`](./create-octx.md) 成功后返回：
+```python
+from octx import create_octx
+
+result = create_octx(
+    "./.octx-workspace",
+    source="./knowledge",
+    name="Product Guide",
+    output="./product-guide.octx",
+)
+```
+
+只有 Package 完整构建、校验并发布成功后才会返回 `CreateResult`。
+
+## 字段
 
 | 字段 | 作用 |
 | --- | --- |
@@ -1555,14 +1571,39 @@ Package 打开后会保留源文件或目录身份。每次读取都会确认源
 | `created_at` | Release 创建时间。 |
 | `package_digest` | `sha256:` Package Digest。 |
 | `document_ids` | `knowledge/...md` 到 Document UUIDv7 的只读映射。 |
-| `report` | 发布前完成的 `ValidationReport`。 |
+| `report` | 发布前完成的 [`ValidationReport`](./validation-report.md)。 |
 | `status` | 固定为 `"ready"`。 |
 
-`result.to_dict()` 返回 JSON 可序列化结构。
+## 序列化
 
-## `Document`
+`result.to_dict()` 返回 JSON 可序列化结构，适合 CLI、日志或 API 响应：
 
-[`OctxPackage.iter_documents()`](./octx-package.md) 产生：
+```python
+payload = result.to_dict()
+print(payload["asset_id"], payload["package_digest"])
+```
+
+---
+
+# Document
+
+# `Document`
+
+`Document` 是从 OCTX Package 读取一篇知识文档时得到的不可变视图。它同时保留解析后的 Markdown 内容和 manifest 摘要对应的原始字节。
+
+## 获取对象
+
+[`OctxPackage.iter_documents()`](./octx-package.md) 按 Package 路径顺序产生 `Document`：
+
+```python
+from octx import open_octx
+
+with open_octx("product-guide.octx") as package:
+    for document in package.iter_documents():
+        print(document.path, document.metadata.get("title"))
+```
+
+## 字段
 
 | 字段 | 作用 |
 | --- | --- |
@@ -1571,24 +1612,58 @@ Package 打开后会保留源文件或目录身份。每次读取都会确认源
 | `body` | 去掉 frontmatter 和可选 UTF-8 BOM 后的 Markdown。 |
 | `raw` | manifest 摘要对应的原始字节。 |
 
-## `ValidationReport`
+## 读取边界
 
-[`validate_octx()`](./open-octx.md) 返回：
+`Document` 只负责读取，不会把修改写回 Package。需要保留原始内容或重新计算摘要时使用 `raw`；需要展示、检索或解析正文时使用 `body` 和 `metadata`。
+
+---
+
+# ValidationReport
+
+# `ValidationReport`
+
+`ValidationReport` 是 [`validate_octx()`](./open-octx.md) 返回的不可变校验报告。普通格式、摘要或结构错误会记录在报告中，不需要调用方解析异常文本。
+
+## 获取对象
+
+```python
+from octx import validate_octx
+
+report = validate_octx("product-guide.octx")
+
+if not (report.valid and report.fully_validated):
+    for issue in report.issues:
+        print(issue.severity, issue.code, issue.path, issue.message)
+```
+
+## 字段
 
 | 字段 | 作用 |
 | --- | --- |
 | `valid` | OCTX 格式和所有已执行的已知层是否有效。 |
-| `fully_validated` | 是否理解并完整验证了全部声明层。 |
+| `fully_validated` | 当前安装是否理解并完整验证了全部声明层。 |
 | `format` | OCTX 格式的 `LayerResult`。 |
 | `capabilities` | Capability 名称到 `LayerResult` 的只读映射。 |
 | `issues` | 全部 `ValidationIssue`。 |
 | `issue_codes` | 报告中错误码的只读集合。 |
 
-`LayerResult` 包含 `declared`、`valid`、`version`、`fully_validated` 和该层的 `issues`。`ValidationIssue` 包含 `code`、`severity`、`message`，以及可选的 `path`、`line`、`record_id`。
+## 相关对象
 
-## `ArchiveLimits`
+`LayerResult` 包含 `declared`、`valid`、`version`、`fully_validated` 和该层的 `issues`。
 
-所有主要入口都接受 `ArchiveLimits`：
+`ValidationIssue` 包含 `code`、`severity`、`message`，以及可选的 `path`、`line`、`record_id`。
+
+发布或高信任导入通常应同时要求 `valid` 和 `fully_validated` 为 `True`。使用 `report.to_dict()` 可以得到 JSON 可序列化结构。
+
+---
+
+# ArchiveLimits
+
+# `ArchiveLimits`
+
+`ArchiveLimits` 定义 OCTX 创建、打开、校验和安全解包时允许使用的资源预算。所有主要入口都接受这个不可变配置对象。
+
+## 基本用法
 
 ```python
 from octx import ArchiveLimits, validate_octx
@@ -1608,7 +1683,9 @@ limits = ArchiveLimits(
 report = validate_octx("upload.octx", limits=limits)
 ```
 
-可配置字段：
+同一个对象可以传给 [`create_octx()`](./create-octx.md)、[`open_octx()` 与 `validate_octx()`](./open-octx.md)，以及 [`unpack_octx()`](./unpack-octx.md)。
+
+## 可配置字段
 
 | 字段 | 默认值 | 限制对象 |
 | --- | ---: | --- |
@@ -1626,7 +1703,9 @@ report = validate_octx("upload.octx", limits=limits)
 | `max_arrow_values` | 100,000,000 | Arrow 向量总标量数。 |
 | `max_issues` | 1,000 | 校验报告问题数。 |
 
-所有限制必须为正数。服务端处理上传内容时，应根据可用内存、磁盘和请求预算设置更小的值。
+## 使用原则
+
+所有限制必须为正数。服务端处理上传内容时，应根据可用内存、磁盘和请求预算设置更小的值；不要直接把默认值理解为业务系统必须接受的规模。
 
 ---
 
@@ -1742,7 +1821,7 @@ except OctxError as error:
     raise
 ```
 
-`OctxValidationError.report` 保存完整 `ValidationReport`：
+`OctxValidationError.report` 保存完整 [`ValidationReport`](./validation-report.md)：
 
 ```python
 from octx import OctxValidationError, unpack_octx

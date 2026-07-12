@@ -29,7 +29,7 @@ def create_octx(
 | `version` | Release 的 SemVer。首次默认 `1.0.0`；内容改变后必须提高版本。 |
 | `derive` | 从展开的外部 Package 创建新 Asset，并记录 `asset.derived_from`。 |
 | `capabilities` | 显式声明能力，例如 `{"sag-structured": "0.1"}`；不会根据文件自动推断。 |
-| `limits` | 创建和校验期间使用的资源上限。 |
+| `limits` | 创建和校验期间使用的 [`ArchiveLimits`](./archive-limits.md)。 |
 
 `source` 始终采用复制语义。`create_octx()` 不会移动、重命名或改写源目录中的文件。
 
@@ -101,6 +101,6 @@ derived = create_octx(
 
 ## 返回值
 
-返回 [`CreateResult`](./models-and-limits.md)，包含输出路径、workspace、Asset ID、Release 版本、创建时间、Package Digest、Document ID 映射和完整 `ValidationReport`。
+返回 [`CreateResult`](./create-result.md)，包含输出路径、workspace、Asset ID、Release 版本、创建时间、Package Digest、Document ID 映射和完整 [`ValidationReport`](./validation-report.md)。
 
 创建失败时不会发布半成品到 `output`。常见异常包括 `ReleaseVersionError`、`DerivationRequired`、`OutputExistsError` 和 `OctxValidationError`。
