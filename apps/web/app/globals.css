@@ -2952,6 +2952,7 @@
     --universe-card-eyebrow-opacity: 1;
     --universe-card-summary-opacity: 1;
     --universe-card-summary-y: 0px;
+    --universe-label-connector-length: 10px;
     display: flex;
     width: 216px;
     height: 78px;
@@ -2982,7 +2983,7 @@
   .sag-universe-node-label::before {
     position: absolute;
     top: 50%;
-    width: 10px;
+    width: var(--universe-label-connector-length);
     height: 1px;
     background: rgb(244 201 95 / 0.42);
     content: "";
@@ -3000,7 +3001,7 @@
   .sag-universe-node-label[data-side="bottom"]::before {
     left: 50%;
     width: 1px;
-    height: 10px;
+    height: var(--universe-label-connector-length);
   }
 
   .sag-universe-node-label[data-side="top"]::before {

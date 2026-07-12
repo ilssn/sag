@@ -582,17 +582,17 @@ class UniverseForceSceneEngine {
     } | undefined;
     charge?.strength?.((node: ForceNode) => {
       if (node.kind === "source") return -70;
-      if (node.kind === "event") return -34;
-      return -18;
+      if (node.kind === "event") return -42;
+      return -24;
     });
-    charge?.distanceMax?.(190);
+    charge?.distanceMax?.(240);
 
     const linkForce = this.graph.d3Force("link") as {
       distance?: (value: number | ((link: ForceLink) => number)) => unknown;
       strength?: (value: number | ((link: ForceLink) => number)) => unknown;
     } | undefined;
-    linkForce?.distance?.((link: ForceLink) => 28 + (1 - link.sceneLink.weight) * 18);
-    linkForce?.strength?.((link: ForceLink) => 0.18 + link.sceneLink.weight * 0.18);
+    linkForce?.distance?.((link: ForceLink) => 36 + (1 - link.sceneLink.weight) * 22);
+    linkForce?.strength?.((link: ForceLink) => 0.15 + link.sceneLink.weight * 0.18);
     this.graph.d3Force("center", null);
     this.graph.d3Force("source-cluster", this.makeClusterForce());
 
@@ -2211,6 +2211,39 @@ class UniverseForceSceneEngine {
         sourceBeaconSize,
         "center",
       );
+      const nodeLabelGaps = compact
+        ? [labelGap, labelGap + 18, labelGap + 36]
+        : [labelGap];
+      const nodeCandidates = nodeLabelGaps.flatMap((gap) => [
+        makeRect(
+          screen.x + gap,
+          screen.y - labelHeight / 2,
+          labelWidth,
+          labelHeight,
+          "right",
+        ),
+        makeRect(
+          screen.x - labelWidth - gap,
+          screen.y - labelHeight / 2,
+          labelWidth,
+          labelHeight,
+          "left",
+        ),
+        makeRect(
+          screen.x - labelWidth / 2,
+          screen.y + gap,
+          labelWidth,
+          labelHeight,
+          "bottom",
+        ),
+        makeRect(
+          screen.x - labelWidth / 2,
+          screen.y - labelHeight - gap,
+          labelWidth,
+          labelHeight,
+          "top",
+        ),
+      ]);
       const candidates: LabelRect[] = label.kind === "source"
         ? sourceHovered
           ? [
@@ -2237,36 +2270,7 @@ class UniverseForceSceneEngine {
               ),
             ]
           : [sourceMarkerRect]
-        : [
-            makeRect(
-              screen.x + labelGap,
-              screen.y - labelHeight / 2,
-              labelWidth,
-              labelHeight,
-              "right",
-            ),
-            makeRect(
-              screen.x - labelWidth - labelGap,
-              screen.y - labelHeight / 2,
-              labelWidth,
-              labelHeight,
-              "left",
-            ),
-            makeRect(
-              screen.x - labelWidth / 2,
-              screen.y + labelGap,
-              labelWidth,
-              labelHeight,
-              "bottom",
-            ),
-            makeRect(
-              screen.x - labelWidth / 2,
-              screen.y - labelHeight - labelGap,
-              labelWidth,
-              labelHeight,
-              "top",
-            ),
-          ];
+        : nodeCandidates;
       if (label.kind === "node" && screen.x >= width / 2) {
         [candidates[0], candidates[1]] = [candidates[1], candidates[0]];
       }
@@ -2322,6 +2326,17 @@ class UniverseForceSceneEngine {
         label.element.style.transformOrigin = "center";
         label.element.style.transform = `translate3d(${screen.x}px, ${screen.y}px, 0) translate(-50%, -50%)`;
       } else {
+        const connectorLength = rect.side === "right"
+          ? rect.left - screen.x
+          : rect.side === "left"
+            ? screen.x - rect.right
+            : rect.side === "bottom"
+              ? rect.top - screen.y
+              : screen.y - rect.bottom;
+        label.element.style.setProperty(
+          "--universe-label-connector-length",
+          `${Math.max(10, connectorLength).toFixed(1)}px`,
+        );
         let translateX = rect.left;
         let translateY = rect.top;
         if (rect.side === "right") {
