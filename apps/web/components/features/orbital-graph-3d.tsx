@@ -1234,7 +1234,7 @@ export function OrbitalEventEntityGraph({
 
       <div ref={mountRef} className="absolute inset-0" />
 
-      <div className="pointer-events-none absolute left-3 top-24 z-10 max-w-[calc(100%-1.5rem)] rounded-md border border-white/10 bg-[#0b1020]/85 px-2.5 py-2 text-white/70 shadow-lg backdrop-blur-md sm:top-14">
+      <div className="pointer-events-none absolute left-3 top-24 z-10 max-w-[calc(100%-1.5rem)] rounded-md border border-white/10 bg-[#0b1020]/85 px-2.5 py-2 text-white/70 shadow-lg backdrop-blur-md sm:top-3">
         <div className="flex flex-wrap gap-x-3 gap-y-1.5">
           <span className="inline-flex items-center gap-1.5 text-[10px]">
             <span

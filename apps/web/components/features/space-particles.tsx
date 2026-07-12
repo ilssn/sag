@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import type { ISourceOptions } from "@tsparticles/engine";
+import type { Container, ISourceOptions } from "@tsparticles/engine";
 import Particles, { ParticlesProvider } from "@tsparticles/react";
 import { loadSlim } from "@tsparticles/slim";
 import { useTheme } from "next-themes";
@@ -66,6 +66,19 @@ export function SpaceParticles() {
   const { resolvedTheme } = useTheme();
   const dark = resolvedTheme === "dark";
   const options = React.useMemo(() => createParticleOptions(dark), [dark]);
+  const mountedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const handleParticlesLoaded = React.useCallback((container?: Container) => {
+    // 初始化晚于卸载时，tsparticles 会把兜底 canvas 追加到 body。
+    if (!mountedRef.current) container?.destroy();
+  }, []);
 
   return (
     <ParticlesProvider init={loadSlim}>
@@ -74,6 +87,7 @@ export function SpaceParticles() {
         id={`sag-space-${id}`}
         className="sag-space-particles"
         options={options}
+        particlesLoaded={handleParticlesLoaded}
       />
     </ParticlesProvider>
   );
