@@ -58,6 +58,10 @@ include = [
   "/sag-structured-v0.1.md",
   "/spec-v0.1.md",
   "/tooling-lifecycle.md",
+  "/creating-octx.md",
+  "/opening-validating-octx.md",
+  "/importing-octx.md",
+  "/exporting-octx.md",
   "/pyproject.toml",
 ]
 exclude = ["/site"]

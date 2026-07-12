@@ -54,9 +54,29 @@ export const DOC_NAV: NavGroup[] = [
     title: "构建与集成",
     items: [
       {
-        title: "工具与生命周期",
+        title: "工具链概览",
         href: "/docs/tooling",
-        description: "Create、Open、Validate、Import、Export",
+        description: "分层与核心领域对象",
+      },
+      {
+        title: "创建 OCTX",
+        href: "/docs/creating-octx",
+        description: "首次创建与 Release",
+      },
+      {
+        title: "打开与校验",
+        href: "/docs/opening-validating-octx",
+        description: "安全读取与完整校验",
+      },
+      {
+        title: "导入与安装",
+        href: "/docs/importing-octx",
+        description: "导入、升级、冲突与重建",
+      },
+      {
+        title: "导出与配置",
+        href: "/docs/exporting-octx",
+        description: "导出与本地配置边界",
       },
     ],
   },

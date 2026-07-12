@@ -2,36 +2,6 @@
 
 本文统一 OCTX 及其与 SAG、zleap-sag 集成时使用的领域语言。
 
-## SAG 相关术语
-
-**知识库应用（Knowledge Base Application）**:
-用户直接使用的完整产品，包含知识导入、组织、检索、溯源、对话与复用能力。SAG 的品牌表达是“你的最后一个知识库应用”。
-_Avoid_: 用“知识库”单独指代完整产品
-
-**知识库（Knowledge Base）**:
-知识库应用内由信源、文档及其结构化索引组成的知识集合，不等同于应用本身。
-_Avoid_: 应用、产品
-
-**SAG**:
-用户直接使用的完整知识库应用，也是本仓库交付的产品。
-_Avoid_: 用 SAG 单独指代论文方法或 Python 包
-
-**SAG 检索架构（SAG Retrieval Architecture）**:
-SAG 论文原创提出的 event-entity 索引与查询时动态超边检索方法。它不是传统 RAG 与 GraphRAG 的组合、封装或双路召回。
-_Avoid_: SAG 应用、zleap-sag、RAG 与 GraphRAG 的融合方案
-
-**统一检索管线（Unified Retrieval Pipeline）**:
-SAG 检索架构以原创的 event-entity 索引和执行机制，同时提供语义相似性检索与关系推理能力，替代在传统 RAG 与 GraphRAG 之间选型或部署两套系统再拼接结果的做法。
-_Avoid_: 双 RAG、传统 RAG 与 GraphRAG 的融合或末端拼接
-
-**zleap-sag**:
-实现 SAG 检索架构并向其他应用提供导入、抽取和检索能力的 Python 引擎。它依赖独立 `octx` 参考包，重新导出通用的 OCTX create/open/validate 入口，并提供 `.octx` 与 SAG 之间的 import/export 适配。
-_Avoid_: SAG 应用
-
-**SAG 自托管 API（SAG Self-hosted API）**:
-SAG 应用随 FastAPI 后端提供的 HTTP、OpenAI 兼容和 MCP 接口。开发者在自己的服务器上运行 SAG 后使用这些接口连接自定义前端或外部 Agent；它不是由项目方托管的公共云 API。
-_Avoid_: zleap-sag Python API、公共云 API
-
 ## OCTX 术语
 
 **OCTX 格式（OCTX Format）**:
@@ -129,3 +99,33 @@ _Avoid_: 摘要、event、原始文件
 **向量配置（Vector Configuration）**:
 保存在 `vectors/config.json`、由必填 `model` 和可选 `revision` 组成的向量来源标识。OCTX v0.1 每个 Package 最多一套配置，所有随包 Arrow 文件共用；维度从 Arrow 读取，数值类型固定为 float32，距离算法和归一化由消费者本地决定。
 _Avoid_: API 地址、密钥、供应商连接配置、多模型配置集合
+
+## SAG 相关术语
+
+**知识库应用（Knowledge Base Application）**:
+用户直接使用的完整产品，包含知识导入、组织、检索、溯源、对话与复用能力。SAG 的品牌表达是“你的最后一个知识库应用”。
+_Avoid_: 用“知识库”单独指代完整产品
+
+**知识库（Knowledge Base）**:
+知识库应用内由信源、文档及其结构化索引组成的知识集合，不等同于应用本身。
+_Avoid_: 应用、产品
+
+**SAG**:
+用户直接使用的完整知识库应用，也是本仓库交付的产品。
+_Avoid_: 用 SAG 单独指代论文方法或 Python 包
+
+**SAG 检索架构（SAG Retrieval Architecture）**:
+SAG 论文原创提出的 event-entity 索引与查询时动态超边检索方法。它不是传统 RAG 与 GraphRAG 的组合、封装或双路召回。
+_Avoid_: SAG 应用、zleap-sag、RAG 与 GraphRAG 的融合方案
+
+**统一检索管线（Unified Retrieval Pipeline）**:
+SAG 检索架构以原创的 event-entity 索引和执行机制，同时提供语义相似性检索与关系推理能力，替代在传统 RAG 与 GraphRAG 之间选型或部署两套系统再拼接结果的做法。
+_Avoid_: 双 RAG、传统 RAG 与 GraphRAG 的融合或末端拼接
+
+**zleap-sag**:
+实现 SAG 检索架构并向其他应用提供导入、抽取和检索能力的 Python 引擎。它依赖独立 `octx` 参考包，重新导出通用的 OCTX create/open/validate 入口，并提供 `.octx` 与 SAG 之间的 import/export 适配。
+_Avoid_: SAG 应用
+
+**SAG 自托管 API（SAG Self-hosted API）**:
+SAG 应用随 FastAPI 后端提供的 HTTP、OpenAI 兼容和 MCP 接口。开发者在自己的服务器上运行 SAG 后使用这些接口连接自定义前端或外部 Agent；它不是由项目方托管的公共云 API。
+_Avoid_: zleap-sag Python API、公共云 API
