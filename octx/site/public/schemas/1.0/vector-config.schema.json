@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OCTX Vector Configuration 1.0",
+  "type": "object",
+  "required": ["model"],
+  "properties": {
+    "model": {
+      "type": "string",
+      "minLength": 1
+    },
+    "revision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "api_key": false,
+    "api_url": false,
+    "base_url": false,
+    "endpoint": false,
+    "token": false,
+    "secret": false,
+    "password": false,
+    "credentials": false,
+    "auth": false,
+    "headers": false,
+    "distance": false,
+    "distance_metric": false,
+    "metric": false,
+    "normalize": false,
+    "normalization": false
+  },
+  "additionalProperties": true
+}

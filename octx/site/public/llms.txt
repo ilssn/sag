@@ -1,0 +1,11 @@
+# OCTX documentation
+
+> Open Context Asset Format: portable, verifiable context assets for people, agents, and knowledge systems.
+
+- [Introduction](/docs/introduction/)
+- [OCTX Core v1](/docs/core/)
+- [SAG-structured Profile 1.0](/docs/sag-structured/)
+- [Tooling and lifecycle](/docs/tooling/)
+- [Python API](/api/)
+- [Glossary](/docs/glossary/)
+- [JSON Schemas](/docs/schemas/)

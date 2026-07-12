@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OCTX Manifest 1.0",
+  "type": "object",
+  "required": [
+    "format",
+    "format_version",
+    "asset",
+    "release",
+    "files"
+  ],
+  "properties": {
+    "format": {
+      "const": "octx"
+    },
+    "format_version": {
+      "type": "string",
+      "pattern": "^1\\.(?:0|[1-9][0-9]*)$"
+    },
+    "asset": {
+      "type": "object",
+      "required": ["id", "name"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "derived_from": {
+          "type": "object",
+          "required": ["asset_id", "version", "package_digest"],
+          "properties": {
+            "asset_id": {
+              "$ref": "#/$defs/uuidv7"
+            },
+            "version": {
+              "$ref": "#/$defs/semver"
+            },
+            "package_digest": {
+              "$ref": "#/$defs/packageDigest"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "release": {
+      "type": "object",
+      "required": ["version", "created_at", "package_digest"],
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/semver"
+        },
+        "created_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]+)?Z$"
+        },
+        "package_digest": {
+          "$ref": "#/$defs/packageDigest"
+        }
+      },
+      "additionalProperties": true
+    },
+    "capabilities": {
+      "type": "object",
+      "minProperties": 1,
+      "properties": {
+        "chunks": {"$ref": "#/$defs/versionDeclaration"},
+        "events": {"$ref": "#/$defs/versionDeclaration"},
+        "entities": {"$ref": "#/$defs/versionDeclaration"},
+        "vectors": {"$ref": "#/$defs/versionDeclaration"}
+      },
+      "additionalProperties": {"$ref": "#/$defs/versionDeclaration"}
+    },
+    "profiles": {
+      "type": "object",
+      "minProperties": 1,
+      "properties": {
+        "sag-structured": {"$ref": "#/$defs/versionDeclaration"}
+      },
+      "additionalProperties": {"$ref": "#/$defs/versionDeclaration"}
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "uuidv7": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$"
+    },
+    "packageDigest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "versionDeclaration": {
+      "type": "object",
+      "required": ["version"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

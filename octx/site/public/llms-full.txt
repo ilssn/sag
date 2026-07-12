@@ -1,0 +1,1485 @@
+# OCTX complete documentation
+
+---
+
+# Introduction
+
+# OCTX
+
+OCTX（Open Context Asset Format）是一种建立在 Google Open Knowledge Format（OKF）之上的开放上下文资产格式。它把可读 Markdown、稳定身份、版本、完整性信息及可选的 chunks、events、entities、关系和向量封装为可传播的 `.octx` Package。
+
+OCTX 由 SAG 首先实现，但规范和参考工具不依赖 SAG、`zleap-sag`、特定数据库或向量后端。
+
+## 阅读顺序
+
+1. **OCTX Core v1 规范**（`spec-v1.md`）：容器、manifest、知识文档、身份、摘要、版本和扩展规则。
+2. **SAG-structured v1 Profile**（`sag-structured-v1.md`）：chunks、events、entities、关系、向量和完整覆盖约束。
+3. **工具与生命周期**（`tooling-lifecycle.md`）：create/open/validate/import/export、Asset/Release/Installation 和冲突处理。
+4. **Python API**（`python-api.md`）：安装、创建、读取、校验、安全解包和 CLI。
+5. **机器可读 Schema**（`schemas/README.md`）：JSON Schema Draft 2020-12 与语义校验边界。
+6. **领域词汇表**（`GLOSSARY.md`）：OCTX、SAG 和 zleap-sag 的统一术语。
+
+## Python 快速开始
+
+需要 Python 3.11 或更高版本：
+
+```bash
+python -m pip install octx
+```
+
+从 Markdown 目录创建 Package，然后打开并校验：
+
+```python
+from octx import create_octx, open_octx, validate_octx
+
+result = create_octx(
+    "./.octx-workspace",
+    source="./knowledge",
+    name="Product Guide",
+    output="./product-guide.octx",
+)
+
+with open_octx(result.output) as package:
+    for document in package.iter_documents():
+        print(document.path, document.metadata["title"])
+
+report = validate_octx(result.output)
+assert report.valid
+```
+
+`source` 不会被修改。持续使用同一个 workspace，可以保留 Asset、Document 和 Release 的稳定身份。向量读取需要安装 `octx[vectors]`。完整接口见 `python-api.md`。
+
+展开的外部 Package 未修改时可以无损重新封装；修改或增强后，使用 `create_octx(..., derive=True)` 创建带 `asset.derived_from` 的新 Asset，避免冒充原发布者的后续版本。
+
+## CLI 快速开始
+
+```bash
+octx create ./.octx-workspace --from ./knowledge --name "Product Guide" -o ./product-guide.octx
+octx inspect ./product-guide.octx
+octx validate ./product-guide.octx
+octx unpack ./product-guide.octx ./product-guide-expanded
+```
+
+`inspect` 只读取摘要，不代替完整校验。`validate` 有效时退出 `0`，无效时退出 `1`；所有命令都支持 `--json`。
+
+## 官网与文档站
+
+独立网站位于 `site/`。它直接发布本目录中的完整规范、Python API、Schema 和词汇表，不依赖 SAG 项目的应用代码。
+
+## v1 核心
+
+- 发布文件扩展名是 `.octx`，外层使用 ZIP / ZIP64。
+- 每个 Package 至少包含一篇 OKF Concept Markdown。
+- OKF 是 OCTX 的知识内容子集；OCTX 增加资产身份、Release、摘要和可选派生数据。
+- Core 可以只有 Markdown，不要求预先生成 chunks、events、entities 或 vectors。
+- `sag-structured/1.0` 是显式 Profile，不能根据文件存在情况自动推断。
+- `.octx` 是不可变完整快照，不是数据库备份、增量包或同步协议。
+- OCTX 不定义搜索 API、召回算法、Agent 协议或向量数据库。
+
+## 参考实现边界
+
+独立 `octx` 包提供：
+
+- `create_octx()`
+- `open_octx()`
+- `validate_octx()`
+- `unpack_octx()`
+- `octx create / inspect / validate / unpack`
+
+`zleap-sag` 依赖并重新导出这些入口，同时增加：
+
+- `import_octx()`
+- `export_octx()`
+
+其他知识系统可以直接使用 `octx` 并实现自己的适配层。
+
+---
+
+# OCTX Core v1
+
+# OCTX Core v1 规范
+
+> 状态：v1 设计基线。本文定义 OCTX Core 的规范行为；[机器可读 JSON Schema](schemas/README.md)、规范样例和一致性测试应与本文保持一致。
+
+## 1. 范围
+
+OCTX（Open Context Asset Format）把一个可版本化知识资产发布为不可变、自包含、可校验的 Package。Package 可以只包含人和 Agent 可直接阅读的 OKF Markdown，也可以声明标准 Capability 携带派生结构与向量。
+
+OCTX Core 负责：
+
+- Package、Asset 和 Release 身份。
+- OKF 兼容知识文档。
+- 规范 payload 文件清单。
+- 逻辑内容完整性。
+- Capability、Profile、版本和扩展边界。
+
+OCTX Core 不负责搜索、排序、Agent 协议、数据库映射或索引运行时。
+
+本文中的“必须”“不得”“可以”分别表示规范要求、规范禁止和实现可选行为。
+
+## 2. 一致性分层
+
+OCTX 使用三个独立层次：
+
+1. **Core**：所有实现都必须理解的 manifest、知识文档、身份、版本和完整性。
+2. **Capability**：Package 实际携带的一种版本化标准数据能力。
+3. **Profile**：面向特定用途、需要额外一致性约束的显式能力组合。
+
+Capability 不能自动推导 Profile。未知 Capability 不阻止消费者读取有效 Core；消费者也不能声称满足自己无法验证的 Profile。
+
+## 3. Package 与目录结构
+
+`.octx` 是下面逻辑目录树的 ZIP / ZIP64 表示：
+
+```text
+example.octx
+├── manifest.json
+├── knowledge/
+│   ├── index.md                    # 可选 OKF 导航
+│   ├── log.md                      # 可选 OKF 日志
+│   └── **/*.md                     # 至少一篇 Concept Document
+├── data/
+│   ├── chunks.jsonl                # chunks/1.0
+│   ├── events.jsonl                # events/1.0
+│   └── entities.jsonl              # entities/1.0
+├── relations/
+│   ├── chunk-events.jsonl          # events/1.0
+│   └── event-entities.jsonl        # entities/1.0
+├── vectors/
+│   ├── config.json                 # vectors/1.0
+│   ├── chunks.arrow
+│   ├── events.arrow
+│   └── entities.arrow
+└── extensions/
+    └── <namespace>/<major.minor>/...
+```
+
+只有实际需要的可选目录和文件才出现。空 `data/`、`relations/`、`vectors/` 或 `extensions/` 目录没有规范意义。
+
+同一逻辑树也可以作为 OCTX Working Directory 存在。工作目录可编辑；发布后的 `.octx` Package 不可变。
+
+## 4. ZIP 与路径
+
+发布文件必须满足：
+
+- ZIP 文件名使用 UTF-8，逻辑路径采用 Unicode NFC。
+- 路径使用 POSIX `/` 分隔符并区分大小写。
+- 只允许相对文件路径；禁止绝对路径、空路径段、`.`、`..`、反斜杠和 NUL。
+- 规范化后重复的路径无效。
+- 只接受普通文件；目录条目可以忽略。
+- 禁止软链接、硬链接、设备节点和其他特殊文件。
+- 禁止加密条目。
+- v1 只要求消费者支持 ZIP STORE 和 DEFLATE；ZIP64 必须可用于大型 Package。
+
+解包器必须在写入前校验目标路径，并检测目标文件系统上的名称冲突，不能覆盖目录外文件或已有不相关文件。消费者必须设置单文件大小、总展开大小、条目数量和压缩比等本地资源上限。
+
+## 5. Manifest
+
+`manifest.json` 是 UTF-8 JSON object。最小 Core manifest：
+
+```json
+{
+  "format": "octx",
+  "format_version": "1.0",
+  "asset": {
+    "id": "019c1234-5678-7abc-8def-0123456789ab",
+    "name": "SAG Technical Research"
+  },
+  "release": {
+    "version": "1.0.0",
+    "created_at": "2026-07-12T10:00:00Z",
+    "package_digest": "sha256:..."
+  },
+  "files": [
+    {
+      "path": "knowledge/sag.md",
+      "sha256": "..."
+    }
+  ]
+}
+```
+
+### 5.1 必填字段
+
+| 字段 | 约束 |
+| --- | --- |
+| `format` | 固定为 `octx` |
+| `format_version` | Core schema 版本，v1 为 `1.0` |
+| `asset.id` | 规范小写 UUIDv7 |
+| `asset.name` | 非空字符串 |
+| `release.version` | SemVer 2.0.0 |
+| `release.created_at` | OCTX UTC 时间 Profile：`YYYY-MM-DDTHH:MM:SS[.fraction]Z`；秒为 `00` 到 `59`，不接受闰秒 `:60` |
+| `release.package_digest` | `sha256:` 加 64 位小写十六进制 |
+| `files` | 非空数组，每项只要求 `path` 与 `sha256` |
+
+`files` 必须至少包含一篇 `knowledge/` 下非 `index.md`、非 `log.md` 的 Concept Document。
+
+### 5.2 文件清单
+
+- `files[].path` 在规范化后必须唯一。
+- `files[].sha256` 是文件原始字节的 SHA-256，保存为 64 位小写十六进制，不带前缀。
+- `manifest.json` 不列入 `files`，避免摘要自引用。
+- 每个已声明标准 Capability 的必需文件都必须列入 `files`。
+- 清单文件缺失、摘要失配或同一路径重复时 Package 无效。
+- 安全但未列入 `files` 的普通 ZIP 文件被忽略，不导入、不解包、不计入 Package Digest，重打包时不保留。
+- 未列入清单的危险路径、链接、特殊文件或加密条目仍然必须拒绝。
+
+`files` 定义完整规范 payload，而不是 ZIP 中所有无关附加字节。
+
+### 5.3 可选声明
+
+`capabilities` 和 `profiles` 都是以名称为 key、值为版本对象的 JSON object：
+
+```json
+{
+  "capabilities": {
+    "chunks": {"version": "1.0"},
+    "events": {"version": "1.0"},
+    "entities": {"version": "1.0"},
+    "vectors": {"version": "1.0"}
+  },
+  "profiles": {
+    "sag-structured": {"version": "1.0"}
+  }
+}
+```
+
+没有声明时省略字段，不写空数组或布尔标记。
+
+派生 Asset 可以在 `asset.derived_from` 保存直接来源：
+
+```json
+{
+  "asset_id": "019c1234-5678-7abc-8def-0123456789ab",
+  "version": "1.0.0",
+  "package_digest": "sha256:..."
+}
+```
+
+支持当前 major 的消费者必须允许未知可选字段、读取已知字段，并在无损重写 Package 时保留未知字段。未知字段不能改变已知字段语义或单独满足 Capability / Profile。
+
+这里的保留义务只适用于逻辑内容完全相同的无损重封装。创建新 Release 或 Derived Asset 时，旧工具不得把自己不理解的签名、证明或其他未知 manifest 字段自动带入新身份；这些字段必须由理解其语义的生产者重新生成或显式声明。
+
+JSON object 中出现重复 key 属于校验错误。
+
+## 6. Knowledge Documents
+
+`knowledge/` 必须符合 [Google Open Knowledge Format v0.1](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)。
+
+每篇非保留 Concept Document 必须：
+
+- 是 UTF-8 Markdown。
+- 具有可解析 YAML frontmatter。
+- 具有非空 OKF `type`。
+- 在 `octx` 命名空间中具有唯一 `document_id`。
+
+```markdown
+---
+type: Reference
+title: OCTX Overview
+octx:
+  document_id: 019c1234-5678-7abc-8def-0123456789ab
+---
+
+# OCTX Overview
+
+正文。
+```
+
+`octx.document_id` 是规范小写 UUIDv7，在同一 Asset 的后续 Release 中保持稳定。移动或重命名文档不改变 ID；复制为新的独立文档时生成新 ID。
+
+`index.md` 和 `log.md` 是 OKF 保留文件，不是 OCTX Knowledge Document，不要求 `octx.document_id`。它们仍必须遵守 OKF 对应结构。
+
+路径继续承担 OKF 导航和 Markdown 链接语义；`document_id` 承担 OCTX 跨版本身份和派生记录引用。两者不能互相替代。
+
+## 7. 标准 Capability 注册表
+
+| Capability | 必需文件 | 依赖 |
+| --- | --- | --- |
+| `chunks/1.0` | `data/chunks.jsonl` | Core |
+| `events/1.0` | `data/events.jsonl`, `relations/chunk-events.jsonl` | `chunks/1.0` |
+| `entities/1.0` | `data/entities.jsonl`, `relations/event-entities.jsonl` | `events/1.0` |
+| `vectors/1.0` | `vectors/config.json` 和至少一个标准 `.arrow` 文件 | 对应目标记录能力 |
+
+relations 不是独立 Capability。标准路径出现时必须与对应 Capability 声明一致；生产者私有数据放入 `extensions/`，不能占用或重新解释标准路径。
+
+每个 Package 中每类 v1 标准 JSONL 文件至多一份，不按文档拆分或分片。未来分片必须使用新的 Capability 版本。
+
+## 8. 编码
+
+- `manifest.json`、其他 JSON 和 JSONL 使用 UTF-8，不使用 BOM。
+- JSONL 每个非空逻辑行必须是一个完整 JSON object；空行无效，文件末尾换行可选。
+- Markdown 使用 UTF-8。生产者应不写 BOM；读取器必须接受一个位于文件开头的可选 UTF-8 BOM，并在 Markdown 和 YAML frontmatter 解析前移除它。
+- YAML 必须使用安全解析模式，不执行自定义对象构造。YAML anchor 和 alias 均不允许，以避免别名展开造成资源放大。
+- 向量使用 Apache Arrow IPC file format；具体 schema 由 vectors Capability 定义。
+
+逐文件 SHA-256 对原始文件字节计算，因此换行、JSON 空白或字段顺序变化会产生新的文件摘要。消费者不能在验证前自动格式化 payload。
+
+## 9. 身份
+
+OCTX 为以下对象分配 UUIDv7：
+
+- Asset
+- Knowledge Document
+- Chunk
+- Event
+- Entity
+
+编码统一为小写、带连字符的 UUID 字符串，不加 `urn:uuid:`、花括号或类型前缀。Release 不另设 UUID，由 `asset.id + release.version + package_digest` 确认。
+
+记录 ID 表示语义身份，摘要表示内容。不能用文本、名称或文件摘要替代记录 ID。
+
+## 10. Package Digest
+
+逐文件摘要与 Package Digest 分工如下：
+
+- `files[].sha256` 定位并验证具体 payload 文件。
+- `release.package_digest` 确认 manifest 语义与整棵规范 payload 清单。
+
+计算步骤：
+
+1. 重新计算并验证 `manifest.files` 中每个文件的 SHA-256。
+2. 复制完整 manifest，移除 `release.package_digest`。
+3. 按规范化 `path` 的 UTF-8 字节升序排列计算副本中的 `files`。
+4. 使用 RFC 8785 JSON Canonicalization Scheme（JCS）编码整个计算副本。
+5. 对结果计算 SHA-256，保存为 `sha256:<lowercase-hex>`。
+
+文件字节不重复拼接进第 5 步，因为逐文件摘要已经提交其内容。ZIP 压缩方法、条目顺序、时间戳和安全但未列入清单的附加文件不影响 Package Digest。
+
+声明摘要与计算结果不一致是不可绕过的完整性失败，不属于可确认的 Release 冲突。
+
+## 11. 版本
+
+OCTX 分别版本化：
+
+- `format_version`：Core schema，`major.minor`。
+- Capability version：每项 Capability 独立的 `major.minor`。
+- Profile version：每个 Profile 独立的 `major.minor`。
+- `release.version`：知识资产内容版本，使用 SemVer。
+
+同一 schema major 的新 minor 只能增加可选内容或澄清语义，必须向后兼容。需要新增必需行为、改变已有字段语义或删除既有内容时升级 major。
+
+消费者行为：
+
+- 支持 Core `1.x` 的消费者读取同 major 的已知内容并保留未知可选字段。
+- 未知 Capability 不阻止 Core 读取。
+- Profile 依赖未知内容时不得宣称 Profile 有效。
+- 不支持的 Core major 必须明确拒绝，不能猜测解释。
+
+## 12. 私有扩展
+
+私有扩展路径为：
+
+```text
+extensions/<reverse-domain-namespace>/<major.minor>/...
+```
+
+例如：
+
+```text
+extensions/com.zleap.sag/1.0/data.jsonl
+```
+
+扩展文件必须列入 `manifest.files` 并参与 Package Digest。未知消费者可以忽略扩展语义，但无损 round-trip 时必须逐字节保留。私有扩展不能代替标准 Capability 或 Profile。
+
+## 13. Core 校验结果
+
+以下任一情况使 Core 无效：
+
+- manifest 缺失、无法解析或缺少必填字段。
+- `format` / `format_version` 不受支持。
+- 没有任何 Concept Document。
+- Concept frontmatter、`type` 或 `octx.document_id` 无效。
+- Asset 或文档 ID 重复或编码不规范。
+- 清单文件缺失、路径非法、逐文件摘要或 Package Digest 失配。
+- ZIP 安全规则被违反。
+
+Core 无效时不得安装为原 Asset。工具可以在用户明确选择后提取仍可读取的 Markdown，并使用新的 Asset 和文档身份创建派生资产。
+
+## 14. 非目标
+
+OCTX v1 不定义：
+
+- 数据库快照或数据库主键。
+- 增量同步、删除标记、实时更新或远程 payload。
+- PDF、DOCX、图片、网页快照等转换前附件。
+- 数字签名、发布者身份或可信根。
+- 加密 ZIP。
+- 搜索 API、召回算法、排序分数、Agent 协议或结果格式。
+
+---
+
+# SAG-structured Profile 1.0
+
+# SAG-structured Profile 1.0
+
+> 状态：v1 设计基线。本文定义 OCTX `sag-structured/1.0` Profile 及其标准数据能力。
+
+## 1. 目的
+
+`sag-structured` 表示 Package 已显式携带完整、可验证、可直接映射到 SAG 结构层的 `document → chunk → event → entity` 数据。它不是对文件存在情况的猜测，也不是本地索引是否已经 `ready` 的状态。
+
+声明方式：
+
+```json
+{
+  "capabilities": {
+    "chunks": {"version": "1.0"},
+    "events": {"version": "1.0"},
+    "entities": {"version": "1.0"}
+  },
+  "profiles": {
+    "sag-structured": {"version": "1.0"}
+  }
+}
+```
+
+vectors 对该 Profile 保持可选。
+
+## 2. 依赖链
+
+```text
+OCTX Core
+  -> chunks/1.0
+    -> events/1.0
+      -> entities/1.0
+
+vectors/1.0 -> 依赖实际向量目标对应的记录能力
+```
+
+- `chunks/1.0` 可以单独声明。
+- `events/1.0` 必须同时声明 `chunks/1.0`。
+- `entities/1.0` 必须同时声明 `events/1.0`。
+- relations 不单独声明 Capability。
+- Capability 齐全也不能自动推导 `sag-structured`；Profile 必须出现在 manifest 并通过专门校验。
+
+## 3. Chunks 1.0
+
+文件：`data/chunks.jsonl`
+
+每行是一个 JSON object：
+
+```json
+{
+  "id": "019c2222-2222-7222-8222-222222222222",
+  "document_id": "019c1234-5678-7abc-8def-0123456789ab",
+  "ordinal": 0,
+  "text": "第一个 chunk"
+}
+```
+
+| 字段 | 必填 | 约束 |
+| --- | --- | --- |
+| `id` | 是 | 规范小写 UUIDv7，在 Package 中唯一 |
+| `document_id` | 是 | 引用一篇有效 Concept Document 的 `octx.document_id` |
+| `ordinal` | 是 | 非负整数，表示文档内顺序 |
+| `text` | 是 | 非空完整 Chunk 文本，不是摘要或预览 |
+
+同一 `document_id` 内 `ordinal` 必须唯一；允许存在间隔，消费者按数值升序恢复顺序。JSONL 物理行号不表达 Chunk 顺序。
+
+v1 使用 `document_id + ordinal` 作为标准来源定位，不同时规定页码、字符偏移或标题路径。额外定位可以作为未知可选字段保存，但不能替代必填字段。
+
+## 4. Events 1.0
+
+文件：
+
+- `data/events.jsonl`
+- `relations/chunk-events.jsonl`
+
+Event：
+
+```json
+{
+  "id": "019c4444-4444-7444-8444-444444444444",
+  "title": "过五关斩六将",
+  "content": "关羽护送二嫂寻兄途中连续闯关。"
+}
+```
+
+| 字段 | 必填 | 约束 |
+| --- | --- | --- |
+| `id` | 是 | 规范小写 UUIDv7，在 Package 中唯一 |
+| `title` | 是 | 非空、可独立展示的 Event 标题 |
+| `content` | 是 | 非空、脱离 Chunk 仍可理解的完整 Event 表达 |
+| `summary` | 否 | 字符串 |
+| `category` | 否 | 字符串，OCTX 不规定词表 |
+| `parent_id` | 条件 | 子 Event 必填，引用同文件 Event |
+| `level` | 条件 | 子 Event 必填的正整数 |
+
+顶层 Event 同时省略 `parent_id` 和 `level`，按 level 0 处理。子 Event 必须同时提供两者，且 `level = parent.level + 1`。父子关系不得成环。
+
+Event 不内嵌 `chunk_id`、references 或本地 `rank`。所有来源只由 `chunk-events.jsonl` 表达。
+
+Chunk-Event relation：
+
+```json
+{
+  "chunk_id": "019c2222-2222-7222-8222-222222222222",
+  "event_id": "019c4444-4444-7444-8444-444444444444"
+}
+```
+
+- 两端引用必须存在。
+- `(chunk_id, event_id)` 是关系身份，在文件中不得重复。
+- 每个 Event 必须至少关联一个 Chunk。
+- 一个 Chunk 可以关联一个或多个 Events。
+- 没有细粒度分块但需要发布 Events 时，生产者必须创建覆盖整篇文档的真实全文 Chunk。
+
+## 5. Entities 1.0
+
+文件：
+
+- `data/entities.jsonl`
+- `relations/event-entities.jsonl`
+
+Entity：
+
+```json
+{
+  "id": "019c5555-5555-7555-8555-555555555555",
+  "name": "关羽",
+  "type": "person"
+}
+```
+
+| 字段 | 必填 | 约束 |
+| --- | --- | --- |
+| `id` | 是 | 规范小写 UUIDv7，在 Package 中唯一 |
+| `name` | 是 | 非空规范名称 |
+| `type` | 是 | 非空字符串，大小写和词表不受 OCTX 限制 |
+| `description` | 否 | 字符串 |
+
+`normalized_name`、数据库 `entity_type_id` 和本地索引字段不进入 OCTX。消费者必须保留生产者原始 `type`，可以本地映射，但不能因未知类型拒绝 Package。
+
+Event-Entity relation：
+
+```json
+{
+  "event_id": "019c4444-4444-7444-8444-444444444444",
+  "entity_id": "019c5555-5555-7555-8555-555555555555",
+  "weight": 1.0,
+  "description": "事件的主要人物"
+}
+```
+
+| 字段 | 必填 | 约束 |
+| --- | --- | --- |
+| `event_id` | 是 | 引用现有 Event |
+| `entity_id` | 是 | 引用现有 Entity |
+| `weight` | 否 | 有限 JSON number；v1 不规定全局量纲或范围 |
+| `description` | 否 | 文本关系说明 |
+
+`(event_id, entity_id)` 是关系身份，在文件中不得重复。每个 Entity 必须至少被一个 Event 引用。
+
+## 6. SAG-structured 完整覆盖
+
+除各 Capability 自身有效外，Profile 还要求整条链没有孤立记录：
+
+1. 每篇 Concept Document 至少有一个 Chunk。
+2. 每个 Chunk 至少出现在一条 Chunk-Event relation 中。
+3. 每个 Event 至少出现在一条 Chunk-Event relation 中。
+4. 每个 Event 至少出现在一条 Event-Entity relation 中。
+5. 每个 Entity 至少出现在一条 Event-Entity relation 中。
+
+任何一项不满足都会使 `sag-structured/1.0` 无效。独立通过校验的 Core 或较低层 Capability 仍可以保持有效。
+
+Profile 不接受以下合成回退：
+
+- 把 Document 临时冒充 Chunk。
+- 把 Chunk 临时冒充 Event。
+- 生成只为通过 schema 而存在的 synthetic record。
+- 用上一级文本复制填充缺失层。
+
+缺失层必须通过真实分块或抽取流程生成。
+
+## 7. Vectors 1.0
+
+配置：`vectors/config.json`
+
+```json
+{
+  "model": "example/embedding-model",
+  "revision": "optional-revision"
+}
+```
+
+- `model` 是必填非空字符串。
+- `revision` 是可选非空字符串。
+- Package 最多一套配置，所有随包 Arrow 文件共用。
+- 不保存 API 地址、密钥、服务端点、距离度量或归一化设置。
+
+标准目标文件：
+
+- `vectors/chunks.arrow`
+- `vectors/events.arrow`
+- `vectors/entities.arrow`
+
+Package 可以只携带其中一部分目标，但每个出现的目标文件必须完整覆盖对应 JSONL 的全部记录，不能只保存部分向量。
+
+Arrow IPC file 至少包含：
+
+```text
+record_id: utf8 non-null
+vector: fixed_size_list<float32>[dimension] non-null
+```
+
+要求：
+
+- `record_id` 唯一，恰好覆盖目标记录 ID。
+- 不得引用不存在的记录。
+- `dimension` 是正整数，同一文件一致。
+- vector 元素不得为 null、`NaN` 或正负无穷。
+- 消费者可以忽略附加列，但附加列不能替代必需列。
+- vectors 1.0 不使用 Arrow IPC body compression，避免在资源上限生效前产生不可控的解压分配。
+
+向量参与逐文件摘要和 Package Digest。只重新生成向量也会产生新的 Release；知识和结构未变化时保留原记录 ID。
+
+本地查询模型与 `model + revision` 不兼容时，消费者丢弃随包向量并完整重建对应目标，不得截断、填充或混用。
+
+## 8. 校验失败与重建
+
+标准 JSONL 中任一记录出现以下问题时，对应 Capability 无效：
+
+- 缺少必填字段。
+- 字段类型或值不符合 schema。
+- ID 重复。
+- 引用不存在。
+- 关系组合重复。
+- 层级成环或 level 不一致。
+
+导入器不得静默跳过坏记录。
+
+处理规则：
+
+- Core 有效、Capability 缺失：正常安装，自动从第一个缺失层开始后台生成。
+- Core 有效、已声明 Capability 无效：报告错误；只有用户明确选择后，才放弃无效结构并本地重建。
+- 声明 `sag-structured` 但 Profile 无效：禁止直接导入原结构层，也不能静默移除 Profile。
+- Core 无效：禁止安装原 Asset。
+
+重建不做单条补丁，而是从首个无效层起覆盖该层及所有下游：
+
+| 首个无效层 | 保留 | 重建 |
+| --- | --- | --- |
+| chunks | Core | chunks、events、entities、相关 vectors |
+| events | Core、chunks | events、entities、相关 vectors |
+| entities | Core、chunks、events | entities、相关 vectors |
+| 某一 vectors 目标 | 全部有效知识与结构 | 该目标向量文件 |
+
+本地重建结果属于 Installation，不会修改或反向证明原 Package 有效。重新传播增强结果时必须创建派生 Asset 和新 Package。
+
+## 9. Profile 与 ready
+
+`sag-structured` 是 Package 的静态、可验证声明；`ready` 是某个消费者本地 Installation 的运行状态。
+
+- 有效 sag-structured Package 可能因为向量不兼容而仍需本地 indexing。
+- 纯 Core Package 可以在本地补建完成后进入 ready，但原 Package 不因此变成 sag-structured。
+- Agent 检索只能在当前 Installation 所需索引实际 ready 后启用。
+
+## 10. 导出
+
+`zleap-sag export_octx()` 默认只在完整覆盖约束全部满足时写入结构层并声明 `sag-structured/1.0`。
+
+- 半成品结构层不得进入 Package。
+- 用户可以显式 `core_only=True` 只导出 Markdown。
+- vectors 可选，但实际写入的每个目标必须完整。
+- 导入后本地增强的内容重新导出时，必须创建带 `asset.derived_from` 的新 Asset。
+
+---
+
+# Tooling and lifecycle
+
+# OCTX 工具与生命周期
+
+> 状态：v1 设计基线。本文定义参考工具、zleap-sag 适配层及 Asset、Release、Package、Installation 的行为边界。
+
+## 1. 分层
+
+```text
+独立 octx 包
+  -> create_octx
+  -> open_octx
+  -> validate_octx
+  -> CLI create / inspect / validate / unpack
+
+zleap-sag
+  -> 依赖并重新导出 octx 公共入口
+  -> import_octx
+  -> export_octx
+  -> 缺失结构生成与 SAG 索引物化
+
+SAG 应用
+  -> 预览、确认、安装、升级、回滚和资产管理 UI
+```
+
+`octx` 不依赖 SAG 数据库。其他知识系统可以直接依赖 `octx`，实现自己的 import/export 适配器。
+
+## 2. 领域对象
+
+### Asset
+
+跨多个 Release 延续的知识资产。首次创建时生成并持久化 `asset_id`，之后不得因重新打包而改变。
+
+### Release
+
+Asset 的一个 SemVer 发布版本。构建状态属于生产者本地记录：
+
+```text
+building -> ready
+         -> failed
+```
+
+失败不会删除 Asset；同一 Asset 可以修复后再次创建 Release。
+
+### Package
+
+某个 ready Release 的不可变逻辑快照。由 `asset_id + version + package_digest` 精确确认，可以表示为目录或 `.octx` ZIP。
+
+### Installation
+
+某个 Package 在本地知识系统中的安装状态。它可以附带本地生成的结构、向量和产品配置，但不能改写原 Package。
+
+### Derived Asset
+
+从外部 Package 修改、恢复或增强后形成的新知识资产。它获得新的 `asset_id`，并通过 `asset.derived_from` 记录直接来源。
+
+## 3. 创建
+
+### 3.1 公共入口
+
+创建侧只暴露一个高层 Python 入口：
+
+```python
+result = create_octx(...)
+```
+
+CLI 只暴露一个主命令：
+
+```text
+octx create <workspace> --from <markdown-dir> --name <asset-name> -o <file.octx>
+octx create <directory> --in-place --name <asset-name> -o <file.octx>
+octx create <workspace> --version <semver> -o <file.octx>
+octx create <expanded-external-package> --derive -o <derived.octx>
+```
+
+首次身份建立和 Release 打包是内部阶段，不要求调用者组合 `init + pack` 两个函数。
+
+### 3.2 首次创建
+
+默认 `--from` 流程：
+
+1. 创建新的 OCTX Working Directory。
+2. 把源目录 Markdown 按相对路径复制到 `knowledge/`，不修改源文件。
+3. 对普通 Concept Document 补齐最小 OKF/OCTX frontmatter。
+4. 生成并持久化 Asset UUIDv7。
+5. 为每篇 Concept Document 生成稳定 UUIDv7。
+6. 构建并验证首个 Release。
+7. 原子写出 `.octx`。
+
+最小 frontmatter 补全：
+
+- 缺失 `type`：写入通用 `Document`。
+- 缺失 `title`：优先使用第一个 H1，否则使用文件名。
+- 缺失 `octx.document_id`：生成 UUIDv7。
+- 已有字段和值不覆盖。
+- YAML 无法安全解析时报告错误，不猜测重写。
+- `index.md` 和 `log.md` 不生成文档 ID。
+
+如果普通 Markdown 来源中恰好存在不符合 OKF 导航/日志结构的 `index.md` 或 `log.md`，create 必须提示其为保留文件并要求用户重命名或修正，不能静默把它当作 Concept Document，也不能擅自改名破坏链接。
+
+`--in-place` 允许改造原目录。工具必须先显示将移动和修改的文件，并由用户明确选择；它不能成为默认路径。
+
+目标已经存在 Asset 身份时，create 必须复用，不能重新初始化或覆盖 ID。
+
+展开的外部 Package 没有本地 producer state。内容未变化时，create 可以无损重新封装同一逻辑 Package，但不能借此续发原 Asset；内容发生修改或增强时，必须显式 `--derive`，生成新的 Asset ID，并把原 Package 三元组写入 `asset.derived_from`。
+
+无损重封装逐字保留未知 manifest 字段。新 Release 和 Derived Asset 则重新生成当前工具理解的 Core manifest、Release 与文件清单，不继承来源中的未知签名、证明或文件级断言；需要这些字段时，必须交给理解其语义的生产者重新声明。
+
+### 3.3 Release 版本保护
+
+- 首个 Release 未指定版本时使用 `1.0.0`。
+- 相同内容可以重建同一版本 Package，Package Digest 保持不变。
+- 内容或参与摘要的 manifest 信息变化时，必须使用更高 SemVer。
+- 参考 create 工具不提供生成“同 Asset、同版本、不同摘要”的普通强制参数。
+- 构建先写临时文件，完整验证成功后再原子替换目标输出。
+- 如果发布输出已经落盘、但本地状态仍停留在 `building`，下次创建仍以 workspace 中已发布 manifest 的版本与摘要作为不可变基线，不允许复用同一版本发布不同内容。
+
+## 4. 打开与校验
+
+### 4.1 `open_octx()`
+
+```python
+package = open_octx(source)
+```
+
+职责：
+
+- 打开 `.octx` 或 OCTX Working Directory。
+- 执行容器、路径和基础资源安全检查。
+- 解析 manifest。
+- 返回只读 Package Reader。
+- 流式遍历 Documents、JSONL records、relations 和 vectors。
+
+`open_octx()` 不写数据库，也不表示所有 schema、摘要和关系已经通过完整校验。
+
+### 4.2 `validate_octx()`
+
+```python
+report = validate_octx(package_or_source)
+```
+
+职责：
+
+- 校验 Core 与格式版本。
+- 校验规范路径、文件清单和逐文件 SHA-256。
+- 重新计算 Package Digest。
+- 校验 JSON Schema 与 Arrow schema。
+- 校验 ID 唯一性、引用、关系和层级。
+- 分别给出 Core、Capabilities 和 Profiles 的有效性。
+- 生成结构化问题列表和可选安装计划信息。
+
+任何 import 实现都必须在自身事务中确保验证成功，不能相信调用方之前运行过 validate。
+
+### 4.3 错误报告
+
+普通 schema 与关系问题尽量一次返回。每项至少包含：
+
+```json
+{
+  "code": "OCTX_EVENT_MISSING_CONTENT",
+  "severity": "error",
+  "path": "data/events.jsonl",
+  "line": 18,
+  "record_id": "optional-uuid",
+  "message": "event.content is required"
+}
+```
+
+`line` 和 `record_id` 只在适用时出现。实现可以设置普通错误数量上限。
+
+以下问题立即停止读取相关可疑内容：
+
+- 路径穿越或目标逃逸。
+- 链接、特殊文件或加密条目。
+- 条目数量、大小或压缩比超限。
+- 文件摘要或 Package Digest 失配。
+
+完整性错误不能被用户确认绕过。
+
+## 5. 导入 SAG
+
+### 5.1 公共入口
+
+```python
+result = import_octx(source, options=...)
+```
+
+`import_octx()` 属于 `zleap-sag`，不属于通用 OCTX Core。
+
+### 5.2 安装计划
+
+普通有效 Package 在调用方显式执行 import 后直接安装，不再增加一次确认。
+
+以下计划需要明确确认：
+
+- 同 Asset、同版本、不同 Package Digest 的 Release 冲突。
+- 安装低于当前版本的显式回滚。
+- 放弃已声明但无效的结构层，只安装 Core 并重建。
+- 从无效 Core 提取可读 Markdown 并创建派生 Asset。
+
+交互式 CLI 可以询问。Python API 不弹出交互，而是返回：
+
+```text
+confirmation_required + structured installation plan
+```
+
+调用方携带对应明确选项再次执行。
+
+### 5.3 原子安装
+
+1. 完整验证输入。
+2. 在隔离 staging 中建立 Asset、Release、Installation 与 SAG Source 映射。
+3. 写入有效 Core 和可以复用的结构/向量。
+4. 校验本地映射完整性。
+5. 单事务提交或原子切换。
+6. 失败时清理 staging，原有 Installation 保持不变。
+
+`open_octx()`、`validate_octx()` 和 `inspect` 永远不触发这些写入。
+
+## 6. 重复、升级、冲突与回滚
+
+| 输入情况 | 行为 |
+| --- | --- |
+| `package_digest` 已安装 | 幂等返回，不创建第二份内容 |
+| 新 `asset_id` | 创建新 Asset、Installation 和 SAG Source |
+| 相同 Asset、更高版本 | 用户发起 import 后原子升级现有 Installation |
+| 相同 Asset、较低版本 | 只允许明确回滚 |
+| 相同 Asset + version + digest | 同一 Release，幂等 |
+| 相同 Asset + version、不同 digest，且两个包都有效 | `release_conflict`，必须确认 |
+| 单个包声明 digest 与计算结果不符 | 完整性失败，拒绝安装 |
+
+冲突确认只切换当前 Installation 指向的新 Package。旧 Package、摘要和安装历史继续保留。
+
+升级时保留本地 Source ID、显示名称、标签、收藏、权限和 Agent 绑定等产品配置；OCTX 管理的 Documents、Chunks、Events、Entities、relations 和 vectors 使用新 Release 快照整体替换。
+
+历史保存期限和存储清理由消费者本地策略决定，不改变 Package 身份。
+
+## 7. 安装与索引生命周期
+
+```text
+validated
+  -> installed
+  -> indexing
+  -> ready
+       or degraded
+```
+
+- `installed`：有效 Core 已原子安装，可以浏览。
+- `indexing`：后台生成缺失或不兼容的结构/向量。
+- `ready`：当前消费者需要的检索能力全部可用。
+- `degraded`：部分索引失败，Core 继续可用并可重试。
+
+有效 Core-only 或部分 Capability Package 是正常输入。安装后自动从第一个缺失层开始补建，不要求错误确认。
+
+已声明但无效的数据不同：必须先展示验证错误，由用户明确选择是否放弃该结构并重建。
+
+`sag-structured` 是 Package Profile；`ready` 是 Installation 状态，两者不能混用。
+
+## 8. 本地重建
+
+重建结果附着于 Installation，不写回原 Package：
+
+| 首个无效或缺失层 | 重建范围 |
+| --- | --- |
+| chunks | chunks、events、entities、相关 vectors |
+| events | events、entities、相关 vectors |
+| entities | entities、相关 vectors |
+| vectors 目标 | 对应完整目标 |
+
+无效层不做单条记录补丁，也不混用该层的新旧抽取结果。已验证上游可以复用。
+
+Core 本身无效时不得安装原 Asset。用户可以明确提取可读 Markdown，使用新的 Asset 和文档身份创建 Derived Asset。
+
+## 9. 导出 SAG
+
+```python
+result = export_octx(source_or_asset, output, version=...)
+```
+
+默认行为：
+
+- 本地创建工作资产沿用其 `asset_id`。
+- 只有 chunks、events、entities 和两层关系完整时才导出结构并声明 `sag-structured`。
+- 结构半成品不进入 Package。
+- 每个导出的向量目标必须完整；不完整目标省略。
+- `core_only=True` 可以只导出 Markdown。
+
+导入 Package 后生成的本地增强数据如果需要重新传播，必须先创建新的 Derived Asset，并记录：
+
+```json
+{
+  "asset_id": "source-asset-uuid",
+  "version": "source-version",
+  "package_digest": "sha256:source-digest"
+}
+```
+
+外部导入资产始终保持只读、可验证和可升级。
+
+## 10. 本地配置边界
+
+以下信息属于 Installation 或产品本地状态，不写回 OCTX Package：
+
+- SAG Source ID 和数据库主键。
+- Agent 绑定、收藏、权限和本地标签。
+- 向量数据库、索引参数、距离度量和归一化策略。
+- API 地址、密钥和供应商连接配置。
+- 本地实体对齐和检索缓存。
+- indexing / ready / degraded 状态。
+
+Package 只保存可交换资产事实与明确声明的派生 payload。
+
+---
+
+# Python API
+
+# OCTX Python API
+
+`octx` 是 OCTX 格式的独立 Python 参考实现。它负责创建、打开、校验和安全解包 `.octx` Package，不依赖 SAG、数据库或检索后端。
+
+## 安装
+
+需要 Python 3.11 或更高版本：
+
+```bash
+python -m pip install octx
+```
+
+读取或校验 Arrow 向量文件时，安装 `vectors` extra：
+
+```bash
+python -m pip install "octx[vectors]"
+```
+
+## 最小流程
+
+假设 `knowledge/` 中至少有一篇 Markdown：
+
+```text
+knowledge/
+└── guide.md
+```
+
+创建、打开并校验 Package：
+
+```python
+from octx import create_octx, open_octx, validate_octx
+
+result = create_octx(
+    "./.octx-workspace",
+    source="./knowledge",
+    name="Product Guide",
+    output="./product-guide.octx",
+)
+
+with open_octx(result.output) as package:
+    for document in package.iter_documents():
+        print(document.path, document.metadata["title"])
+
+report = validate_octx(result.output)
+assert report.valid
+assert report.fully_validated
+```
+
+`source` 不会被修改。`workspace` 保存稳定的 Asset、Document 和 Release 身份，后续发布同一资产时应继续使用同一个 workspace。
+
+## `create_octx()`
+
+```python
+def create_octx(
+    workspace: os.PathLike[str] | str,
+    *,
+    output: os.PathLike[str] | str,
+    source: os.PathLike[str] | str | None = None,
+    name: str | None = None,
+    version: str | None = None,
+    in_place: bool = False,
+    confirm_in_place: bool = False,
+    derive: bool = False,
+    capabilities: Mapping[str, str | Mapping[str, Any]] | None = None,
+    profiles: Mapping[str, str | Mapping[str, Any]] | None = None,
+    limits: ArchiveLimits | None = None,
+) -> CreateResult
+```
+
+主要参数：
+
+| 参数 | 含义 |
+| --- | --- |
+| `workspace` | 可重复使用的 OCTX 工作目录，包含 `knowledge/`、`manifest.json` 和本地状态。 |
+| `output` | 要发布的不可变 `.octx` 文件。已有不同内容时不会覆盖。 |
+| `source` | 要复制进 workspace 的 Markdown 目录。与 `in_place` 互斥。 |
+| `name` | 首次创建 Asset 时必填；后续默认复用已保存的名称。 |
+| `version` | Release 的 SemVer；首次默认 `1.0.0`。内容改变时必须提高版本。 |
+| `in_place` | 把 workspace 根目录中的 Markdown 整理进 `knowledge/`。 |
+| `confirm_in_place` | 明确允许 `in_place` 产生的移动和 frontmatter 补全。 |
+| `derive` | 从展开的外部 Package 显式创建新 Asset，并记录 `asset.derived_from`。 |
+| `capabilities` | 显式声明能力，例如 `{"chunks": "1.0"}`。不会根据文件自动推断。 |
+| `profiles` | 显式声明 Profile，例如 `{"sag-structured": "1.0"}`。 |
+| `limits` | 自定义读取和校验资源上限，默认使用 `ArchiveLimits()`。 |
+
+`CreateResult` 提供 `output`、`workspace`、`asset_id`、`version`、`created_at`、`package_digest`、`document_ids`、`report` 和固定为 `ready` 的 `status`。可用 `result.to_dict()` 获得 JSON 可序列化结果。
+
+创建过程会先生成临时包并完整校验，只有通过校验后才会发布到 `output`。同一版本、同一逻辑内容可以稳定重建；同一版本的内容发生变化时会抛出 `ReleaseVersionError`。
+
+展开的外部 Package 默认是只读发布内容。内容未变化时可以无损重新封装为同一 Package，且不会创建本地 producer state。修改或增强后再发布时必须显式派生：
+
+```python
+derived = create_octx(
+    "./external-expanded",
+    derive=True,
+    output="./derived.octx",
+)
+```
+
+派生结果使用新的 `asset_id`，首个 Release 默认从 `1.0.0` 开始，并记录直接来源的 Asset ID、版本和 Package Digest。
+
+无损重新封装会保留当前工具不认识的 manifest 字段。新 Release 或派生 Asset 会重新生成 Core manifest、Release 和文件清单，不会自动继承来源中的未知签名、证明或文件级断言；这些字段需要由理解其语义的生产者重新声明。
+
+### 在现有 workspace 发布新版本
+
+```python
+from octx import create_octx
+
+result = create_octx(
+    "./.octx-workspace",
+    version="1.1.0",
+    output="./product-guide-1.1.0.octx",
+)
+```
+
+### 声明 SAG-structured
+
+声明 Profile 不会替你生成结构化数据。对应 JSONL 和关系文件必须已经存在于 workspace 中并满足完整覆盖约束。
+
+```python
+result = create_octx(
+    "./.octx-workspace",
+    version="2.0.0",
+    output="./product-guide-2.0.0.octx",
+    capabilities={
+        "chunks": "1.0",
+        "events": "1.0",
+        "entities": "1.0",
+    },
+    profiles={"sag-structured": "1.0"},
+)
+```
+
+## `open_octx()`
+
+```python
+def open_octx(
+    source: os.PathLike[str] | str,
+    *,
+    limits: ArchiveLimits | None = None,
+) -> OctxPackage
+```
+
+`source` 可以是 `.octx` ZIP 文件，也可以是已经展开的 OCTX 工作目录。`open_octx()` 会安全扫描容器、限制资源用量并读取 manifest，但不会执行完整的 Core、Capability 或 Profile 校验，也不会写入源文件。
+
+因此，打开成功不等于 Package 已通过规范校验。处理不可信输入时，应继续调用 `validate_octx()`。
+
+```python
+from octx import open_octx, validate_octx
+
+with open_octx("asset.octx") as package:
+    report = validate_octx(package)
+    if not report.valid:
+        raise ValueError(report.to_dict())
+    manifest = package.manifest
+```
+
+## `OctxPackage` 读取器
+
+`OctxPackage` 是只读视图，也支持 `with` 上下文管理器。调用 `close()` 后不能继续读取。
+
+常用属性：
+
+| 属性 | 类型 | 含义 |
+| --- | --- | --- |
+| `source` | `Path` | Package 文件或工作目录。 |
+| `source_kind` | `str` | `"zip"` 或 `"directory"`。 |
+| `manifest` | `dict` | manifest 的独立副本。 |
+| `files` | `tuple[str, ...]` | manifest 中声明的 payload 路径。 |
+| `available_paths` | `frozenset[str]` | 容器中实际可见的全部安全路径。 |
+
+通用读取方法：
+
+```python
+with open_octx("asset.octx") as package:
+    raw = package.read_payload("knowledge/guide.md")
+
+    with package.open_payload("knowledge/guide.md") as stream:
+        first_bytes = stream.read(128)
+
+    for document in package.iter_documents():
+        print(document.path)
+        print(document.metadata)
+        print(document.body)
+```
+
+`open_payload()` 和 `read_payload()` 只允许访问 manifest `files` 中声明的 payload。`Document` 包含 `path`、只读 `metadata`、Markdown `body` 和原始 `raw` 字节。
+
+SAG 结构层读取器：
+
+```python
+chunks = package.iter_chunks()
+events = package.iter_events()
+entities = package.iter_entities()
+chunk_events = package.iter_chunk_events()
+event_entities = package.iter_event_entities()
+```
+
+这些方法逐条产生 JSON object；也可以通过 `iter_jsonl(path)` 读取其他已声明的 JSONL payload。调用前应确认对应 Capability 已声明并通过校验。
+
+向量读取需要安装 `octx[vectors]`：
+
+```python
+table = package.read_vector_table("chunks")
+
+for batch in package.iter_vector_batches("events"):
+    consume(batch)
+```
+
+`target` 只能是 `"chunks"`、`"events"` 或 `"entities"`。
+
+## `validate_octx()`
+
+```python
+def validate_octx(
+    package_or_source: OctxPackage | os.PathLike[str] | str,
+    *,
+    limits: ArchiveLimits | None = None,
+    max_issues: int | None = None,
+) -> ValidationReport
+```
+
+可以直接传入文件路径、工作目录或已经打开的 `OctxPackage`。即使容器无法打开，函数也会返回无效报告，而不是把普通格式错误作为控制流抛出。
+
+```python
+report = validate_octx("asset.octx")
+
+if not report.valid:
+    for issue in report.issues:
+        print(issue.severity, issue.code, issue.path, issue.message)
+```
+
+`ValidationReport` 的主要字段：
+
+| 字段 | 含义 |
+| --- | --- |
+| `valid` | Core 有效，且所有已识别的声明层都没有验证失败。 |
+| `fully_validated` | 当前实现理解并完整验证了全部声明层。 |
+| `core` | OCTX Core 的 `LayerResult`。 |
+| `capabilities` | 按名称索引的 Capability 校验结果。 |
+| `profiles` | 按名称索引的 Profile 校验结果。 |
+| `issues` | 所有 `ValidationIssue`，包含 `code`、`severity`、`message` 及可选位置。 |
+| `issue_codes` | 报告内全部问题代码的只读集合。 |
+
+未知的 Capability、未知的 Profile，或未安装 `vectors` extra 时无法完成的 Arrow 校验，会产生 warning，并使 `fully_validated` 为 `False`；只要 Core 和所有已完成校验的已识别层有效，`valid` 仍可为 `True`。发布前应同时检查 `report.valid` 和 `report.fully_validated`。使用 `report.to_dict()` 可生成适合日志或 API 响应的结构化数据。
+
+## `unpack_octx()`
+
+```python
+def unpack_octx(
+    package_or_source: OctxPackage | os.PathLike[str] | str,
+    destination: os.PathLike[str] | str,
+    *,
+    limits: ArchiveLimits | None = None,
+) -> Path
+```
+
+解包前会校验 Core 完整性和当前实现能够验证的声明层，只写入 manifest 和 manifest 声明的 payload。未知层或未安装的可选校验器不会阻止安全解包，但调用方可以先检查 `report.fully_validated` 决定是否接受。目标目录必须不存在或为空；已验证层无效时会抛出 `OctxValidationError`。
+
+```python
+from octx import unpack_octx
+
+destination = unpack_octx("asset.octx", "./asset-expanded")
+print(destination)
+```
+
+不要对不可信 `.octx` 文件直接使用通用 ZIP `extractall()`；应使用 `unpack_octx()`。
+
+## 资源限制
+
+所有入口都接受 `ArchiveLimits`。需要更严格的服务端边界时，可以覆盖默认值：
+
+```python
+from octx import ArchiveLimits, validate_octx
+
+limits = ArchiveLimits(
+    max_entries=2_000,
+    max_file_size=64 * 1024 * 1024,
+    max_total_uncompressed=256 * 1024 * 1024,
+    max_jsonl_line_size=2 * 1024 * 1024,
+    max_jsonl_records=100_000,
+    max_arrow_batches=10_000,
+    max_arrow_rows=1_000_000,
+    max_arrow_values=20_000_000,
+)
+
+report = validate_octx("upload.octx", limits=limits, max_issues=100)
+```
+
+`ArchiveLimits` 还可以限制压缩比、JSON/YAML 深度、Arrow 维度和问题数量。Arrow IPC 会先检查消息边界和 schema，再按 record batch 解码；OCTX vectors 1.0 不接受 Arrow body compression。
+
+## CLI
+
+安装包后可直接使用 `octx`：
+
+```bash
+# 从 Markdown 目录创建 Package
+octx create ./.octx-workspace \
+  --from ./knowledge \
+  --name "Product Guide" \
+  --output ./product-guide.octx
+
+# 只读取摘要，不做完整校验
+octx inspect ./product-guide.octx
+
+# 完整校验
+octx validate ./product-guide.octx
+
+# 校验通过后安全解包
+octx unpack ./product-guide.octx ./product-guide-expanded
+```
+
+四个子命令都支持 `--json`。`create` 还支持 `--version`、`--derive`、可重复的 `--capability NAME=VERSION`、可重复的 `--profile NAME=VERSION`，以及互斥的 `--from SOURCE` / `--in-place`。非交互环境使用 `--in-place` 时还要显式传入 `--yes`。
+
+`validate` 在有效时退出 `0`、无效时退出 `1`；命令用法或输入错误退出 `2`。
+
+## 错误处理
+
+公开异常都继承自 `OctxError`。常见边界可以这样处理：
+
+```python
+from octx import OctxError, OutputExistsError, ReleaseVersionError
+
+try:
+    result = create_octx(...)
+except OutputExistsError:
+    # output 已经包含另一份不可变 Package
+    raise
+except ReleaseVersionError:
+    # 内容变化后仍沿用了旧版本，或版本发生回退
+    raise
+except OctxError:
+    # 其他 OCTX 格式、完整性、安全或资源限制错误
+    raise
+```
+
+`validate_octx()` 适合把不可信输入转换为结构化报告；`open_octx()`、`create_octx()` 和 `unpack_octx()` 则会在无法完成操作时抛出异常。
+
+---
+
+# Glossary
+
+# OCTX 领域词汇表
+
+本文统一 OCTX 及其与 SAG、zleap-sag 集成时使用的领域语言。
+
+## SAG 相关术语
+
+**知识库应用（Knowledge Base Application）**:
+用户直接使用的完整产品，包含知识导入、组织、检索、溯源、对话与复用能力。SAG 的品牌表达是“你的最后一个知识库应用”。
+_Avoid_: 用“知识库”单独指代完整产品
+
+**知识库（Knowledge Base）**:
+知识库应用内由信源、文档及其结构化索引组成的知识集合，不等同于应用本身。
+_Avoid_: 应用、产品
+
+**SAG**:
+用户直接使用的完整知识库应用，也是本仓库交付的产品。
+_Avoid_: 用 SAG 单独指代论文方法或 Python 包
+
+**SAG 检索架构（SAG Retrieval Architecture）**:
+SAG 论文原创提出的 event-entity 索引与查询时动态超边检索方法。它不是传统 RAG 与 GraphRAG 的组合、封装或双路召回。
+_Avoid_: SAG 应用、zleap-sag、RAG 与 GraphRAG 的融合方案
+
+**统一检索管线（Unified Retrieval Pipeline）**:
+SAG 检索架构以原创的 event-entity 索引和执行机制，同时提供语义相似性检索与关系推理能力，替代在传统 RAG 与 GraphRAG 之间选型或部署两套系统再拼接结果的做法。
+_Avoid_: 双 RAG、传统 RAG 与 GraphRAG 的融合或末端拼接
+
+**zleap-sag**:
+实现 SAG 检索架构并向其他应用提供导入、抽取和检索能力的 Python 引擎。它依赖独立 `octx` 参考包，重新导出通用的 OCTX create/open/validate 入口，并增加 SAG 专属 import/export 适配。
+_Avoid_: SAG 应用
+
+**SAG 自托管 API（SAG Self-hosted API）**:
+SAG 应用随 FastAPI 后端提供的 HTTP、OpenAI 兼容和 MCP 接口。开发者在自己的服务器上运行 SAG 后使用这些接口连接自定义前端或外部 Agent；它不是由项目方托管的公共云 API。
+_Avoid_: zleap-sag Python API、公共云 API
+
+## OCTX 术语
+
+**OCTX 格式（OCTX Format）**:
+全称 Open Context Asset Format，发布文件扩展名为 `.octx`。它是建立在 OKF 知识内容之上的开放、厂商中立上下文资产封装与派生数据标准，增加身份、版本、完整性、安装语义及可选索引层；SAG 与 zleap-sag 是生产者和消费者，但不是使用前提。OCTX 不定义搜索 API、召回算法或 Agent 协议。
+_Avoid_: OKF 竞争格式、SAG 专有格式、数据库备份格式、zleap-sag 存储格式
+
+**OCTX 参考工具链（OCTX Reference Tooling）**:
+独立于任何知识系统的规范实现，负责 OCTX 的 create、open/inspect、validate 和 unpack，并提供 JSON Schema Draft 2020-12、固定 Arrow schema、规范样例与一致性测试。公开创建入口统一处理首次身份建立和后续 Release，读取类入口不写知识数据库。数据库映射、内容抽取和索引构建由各系统自己的适配层负责。
+_Avoid_: zleap-sag、SAG 导入器、知识抽取引擎
+
+**OCTX Core**:
+所有合规 OCTX 实现都必须支持的最小互操作层，由至少一篇 OKF 兼容 Markdown 知识文档和 OCTX 资产封装组成。普通 OKF bundle 可以无损封装为 Core，但在缺少 manifest、稳定身份和摘要时还不是完整 OCTX Package；只有扩展或派生数据而没有知识文档的 Package 无效。
+_Avoid_: SAG Profile、可选能力集合、最小 SAG 数据库
+
+**知识文档（OCTX Knowledge Document / OKF Concept）**:
+OCTX Core 中一篇符合 OKF Concept 约定的 Markdown 文件，是 v1 唯一正式 Document，也是人和 Agent 可以直接阅读、链接和维护的知识单元。OKF 保留的 `index.md` 与 `log.md` 是导航和日志文件，不属于 Knowledge Document。文档路径负责 OKF 导航，frontmatter 中的 `octx.document_id` 负责跨版本及派生数据引用；转换前 PDF、DOCX 等不进入 OCTX v1。
+_Avoid_: 转换前 PDF、chunk、event、数据库行
+
+**OCTX Frontmatter 命名空间（`octx`）**:
+知识文档 YAML frontmatter 中专门保存 OCTX 扩展字段的对象。v1 在其中定义 `document_id`，避免把通用的 `document_id` 直接放入 OKF 的共享顶层字段空间。
+_Avoid_: 顶层 `document_id`、`octx_id`、生产者私有字段集合
+
+**OCTX 能力层（OCTX Capability）**:
+在 Core 之上增加一种标准数据能力的版本化模块，例如 chunks、events、entities 或 vectors。manifest 以 capability 名称为 key 并只声明版本；文件路径与依赖由规范固定。关系文件随 events 或 entities 提供，不构成独立 capability。
+_Avoid_: 私有字段集合、OCTX Profile、数据库插件
+
+**OCTX 私有扩展数据（OCTX Private Extension Data）**:
+保存在 `extensions/<反向域名命名空间>/<major.minor>/...` 中、尚未进入 OCTX 标准的数据，例如 `extensions/com.zleap.sag/1.0/data.jsonl`。文件必须列入 manifest 并参与 Package Digest；未知消费者可以忽略其语义，但 round-trip 时必须保留。私有扩展不能代替标准 Capability 或 Profile。
+_Avoid_: 未列入 manifest 的附加文件、标准能力、SAG-structured 数据
+
+**未知可选字段（Unknown Optional Field）**:
+受支持 major 版本内、当前消费者尚不认识的 manifest、JSON 或 JSONL 字段。它不导致校验失败，重写 Package 时应被保留；但不能改变已知字段语义，也不能用来满足 Capability 或 Profile。
+_Avoid_: 缺失的必填字段、未知 Capability、major 版本不兼容
+
+**OCTX Profile**:
+面向特定用途定义的一组能力要求和一致性约束。Profile 必须由 manifest 显式声明并通过校验，不能仅根据 capabilities 自动推导。SAG-structured Profile 要求显式、完整且相互一致的 chunk-event-entity 数据；声明失实时禁止导入结构层，但 Core 有效时可由用户明确选择只安装 Markdown 并重新生成。
+_Avoid_: OCTX Core、厂商私有格式、产品配置预设
+
+**SAG 结构数据（SAG-structured Data）**:
+满足 SAG-structured Profile 的显式 chunks、events、entities 及关系集合，可以被兼容 SAG 消费者直接导入结构层。它要求每篇 Concept Document 有 Chunk、每个 Chunk 有 Event、每个 Event 有 Entity、每个 Entity 被 Event 使用，不允许孤立记录；缺失层必须通过真实分块或抽取流程生成，不能用上一级内容进行合成回退。
+_Avoid_: 纯 OCTX Core、本地回退视图、未完成索引
+
+**OCTX 实体（OCTX Entity）**:
+OCTX Asset 内由生产者识别出的一个语义实体，而不是一次文字出现。每条记录必须有 `id`、`name` 和非空 `type`，`description` 可选；OCTX 不规定类型词表或命名格式。同一实体可关联多个 Events，并在同一 Asset 后续 Release 中保持 `entity_id`。`normalized_name` 属于消费者本地索引，不进入 OCTX，独立 Assets 中的同名实体也不自动合并。
+_Avoid_: 实体提及、全局唯一实体、按名称自动合并的记录
+
+**OCTX Event**:
+从一个或多个显式 Chunks 中提取、可以脱离原 Chunk 独立理解的完整事件表达。每条 Event 必须有 `id`、`title` 和 `content`，并只通过 `chunk-events.jsonl` 记录来源。顶层省略层级字段并视为 level 0；子 Event 同时保存 `parent_id` 和 `level`。
+_Avoid_: Chunk 摘要、只有标题的标签、内嵌 `chunk_id` 的关系副本
+
+**OCTX 关系记录（OCTX Relation Record）**:
+在 JSONL 中以两端逻辑 ID 表达的一条有向关系。关系本身没有 UUID，两端 ID 的组合就是身份且在对应文件内必须唯一；event-entity 关系可以附带 `weight` 和 `description`。
+_Avoid_: 数据库关联表主键、重复边、关系创建时间
+
+**OCTX ID**:
+OCTX 对 Asset、Knowledge Document、Chunk、Event 和 Entity 使用的 UUIDv7 身份，以小写、带连字符的规范 UUID 字符串保存，不加类型前缀。知识文档使用 `octx.document_id`，派生记录使用各自的 `id`。ID 表示对象身份，内容摘要负责内容判等，两者不能互相替代。
+_Avoid_: 数据库自增主键、内容摘要、带类型前缀的私有 ID
+
+**OCTX 资产（OCTX Asset）**:
+跨多个发布版本延续的可传播知识资产，由稳定的资产身份标识。一个 OCTX 资产可以先后产生多个 OCTX 知识包。
+_Avoid_: OCTX 知识包、SAG 信源、数据库记录集合
+
+**OCTX 发布版（OCTX Release）**:
+OCTX 资产的一次有版本发布，记录知识包从构建到可用或失败的生命周期。一个成功发布版对应一个由内容摘要唯一确认的 OCTX 知识包。
+_Avoid_: OCTX 资产、OCTX 知识包、导出任务
+
+**发布版冲突（Release Conflict）**:
+两个分别通过完整性校验的 OCTX Package 声明相同 `asset_id + release.version`，但具有不同 `package_digest`。导入方必须提示并要求确认；确认只切换当前 Installation，两个不可变 Package 及安装历史都要保留。单个 Package 的声明摘要与计算结果不一致是完整性失败，不是 Release 冲突。
+_Avoid_: 静默覆盖、删除旧 Package、把冲突摘要视为同一内容
+
+**OCTX 工作目录（OCTX Working Directory）**:
+OCTX 逻辑目录树的可编辑形态，供人、Agent 和版本控制系统维护知识内容。它封装为 `.octx` 后成为便于分发的发布文件，但两种形态共享同一逻辑内容结构。
+_Avoid_: OCTX 发布版、临时解压缓存、数据库目录
+
+**OCTX 知识包（OCTX Package）**:
+OCTX 资产某一版本的不可变知识快照，可以包含一篇或多篇文档，并保留可溯源证据与派生知识。它可独立分发、验证并导入，默认形成一个新信源。
+_Avoid_: OCTX 资产、单篇文档包、数据库快照、SAG 信源
+
+**逻辑内容摘要（Package Digest）**:
+在验证 `manifest.files` 的逐文件 SHA-256 后，对移除自身摘要、按路径排列 files 并执行 JCS 的 manifest 计算副本进行 SHA-256 得到的不可变摘要。它确认某个发布版的准确内容，不受 ZIP 压缩等级、条目顺序、归档工具或安全但未列入清单的附加文件影响。
+_Avoid_: ZIP 文件摘要、版本号、数字签名
+
+**归档摘要（Archive Digest）**:
+对某一次 `.octx` ZIP 文件的原始字节计算的传输校验值。同一逻辑知识包重新压缩后可以具有不同归档摘要。
+_Avoid_: Package Digest、资产身份
+
+**派生资产（Derived Asset）**:
+以已有 OCTX 发布版或无效 Package 中仍可读取的 Markdown 为起点、但拥有新资产身份的可编辑知识资产。它通过 `asset.derived_from` 记录直接来源的资产 ID、版本和 Package Digest，却不再冒充原发布者资产的后续版本；从无效 Core 恢复时还必须为文档生成新的有效身份。本地增强后的导入资产一旦重新导出，也必须先成为派生资产。
+_Avoid_: 原资产的新版本、原地修改的知识包、无来源副本
+
+**OCTX 安装（OCTX Installation）**:
+一个 OCTX 发布版在本地知识系统中经过校验并成为可用知识集合的状态。在 SAG 中，它表现为托管信源；升级安装是把本地集合原子切换到该资产的新发布版，不是修改已有知识包。有效 Core 或部分 Capability 安装后会自动补建缺失索引，缺失结构本身不属于安装错误。
+_Avoid_: OCTX 知识包、导入任务、解压目录
+
+**本地重建数据（Locally Rebuilt Data）**:
+当 Package 缺少结构层、结构层无效或向量不兼容时，消费者从有效 Core Markdown 或已验证的上游层重新生成并附着于当前 Installation 的 chunk、event、entity、关系或向量。重建从首个无效 Capability 起覆盖该层及全部下游，不做单条修补或新旧混用。它不修改原 Package，也不能让原 Package 的无效 Capability 或 Profile 变为有效。
+_Avoid_: 原 Package payload、修正后的 Release、静默跳过坏记录
+
+**原文块（Source Chunk）**:
+文档经过解析和分块后保留的完整原文证据单元，是 SAG 检索结果与引用最终返回的内容边界。OCTX Core 可以不携带原文块；一旦声明 chunks capability，就必须保留完整块内容，event、entity 或摘要不能替代它。
+_Avoid_: 摘要、event、原始文件
+
+**向量配置（Vector Configuration）**:
+保存在 `vectors/config.json`、由必填 `model` 和可选 `revision` 组成的向量来源标识。OCTX v1 每个 Package 最多一套配置，所有随包 Arrow 文件共用；维度从 Arrow 读取，数值类型固定为 float32，距离算法和归一化由消费者本地决定。
+_Avoid_: API 地址、密钥、供应商连接配置、多模型配置集合

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OCTX Event-Entity Relation 1.0",
+  "type": "object",
+  "required": ["event_id", "entity_id"],
+  "properties": {
+    "event_id": {
+      "$ref": "#/$defs/uuidv7"
+    },
+    "entity_id": {
+      "$ref": "#/$defs/uuidv7"
+    },
+    "weight": {
+      "type": "number"
+    },
+    "description": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "uuidv7": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    }
+  }
+}

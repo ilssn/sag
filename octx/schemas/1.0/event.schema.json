@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OCTX Event 1.0",
+  "type": "object",
+  "required": ["id", "title", "content"],
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/uuidv7"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "content": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": "string"
+    },
+    "category": {
+      "type": "string"
+    },
+    "parent_id": {
+      "$ref": "#/$defs/uuidv7"
+    },
+    "level": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "chunk_id": false,
+    "references": false,
+    "rank": false
+  },
+  "oneOf": [
+    {
+      "not": {
+        "anyOf": [
+          {"required": ["parent_id"]},
+          {"required": ["level"]}
+        ]
+      }
+    },
+    {
+      "required": ["parent_id", "level"]
+    }
+  ],
+  "additionalProperties": true,
+  "$defs": {
+    "uuidv7": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    }
+  }
+}
