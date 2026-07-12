@@ -18,7 +18,7 @@ const documents = [
   ["Introduction", "README.md", "/docs/introduction/"],
   ["What is SAG?", "sag.md", "/docs/sag/"],
   ["OCTX v0.1", "spec-v0.1.md", "/docs/specification/"],
-  ["SAG-structured Capability 0.1", "sag-structured-v0.1.md", "/docs/sag-structured/"],
+  ["SAG-structured Capability v0.1", "sag-structured-v0.1.md", "/docs/sag-structured/"],
   ["Tooling overview", "tooling-lifecycle.md", "/docs/tooling/"],
   ["Creating OCTX", "creating-octx.md", "/docs/creating-octx/"],
   ["Opening and validating OCTX", "opening-validating-octx.md", "/docs/opening-validating-octx/"],

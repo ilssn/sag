@@ -65,7 +65,7 @@ const DOCUMENTS = [
   },
   {
     slug: "sag-structured",
-    title: "SAG-structured Capability 0.1",
+    title: "SAG-structured Capability v0.1",
     description: "Chunks、Events、Entities、关系、向量和完整覆盖约束。",
     group: "SAG",
     section: "docs",

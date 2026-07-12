@@ -460,9 +460,9 @@ OCTX v0.1 不定义：
 
 ---
 
-# SAG-structured Capability 0.1
+# SAG-structured Capability v0.1
 
-# SAG-structured Capability 0.1
+# SAG-structured Capability v0.1
 
 > 状态：v0.1 设计基线。本文定义 OCTX `sag-structured/0.1` Capability 及其完整数据约束。
 
@@ -502,7 +502,7 @@ vectors/0.1 -> 依赖 sag-structured/0.1
 - `sag-structured` 必须出现在 manifest 中，不能仅根据文件存在情况自动推断。
 - `vectors/0.1` 是独立可选 Capability，但只能引用有效的 `sag-structured/0.1` 记录。
 
-## 3. Chunks 0.1
+## 3. Chunks v0.1
 
 文件：`data/chunks.jsonl`
 
@@ -528,7 +528,7 @@ vectors/0.1 -> 依赖 sag-structured/0.1
 
 v0.1 使用 `document_id + ordinal` 作为标准来源定位，不同时规定页码、字符偏移或标题路径。额外定位可以作为未知可选字段保存，但不能替代必填字段。
 
-## 4. Events 0.1
+## 4. Events v0.1
 
 文件：
 
@@ -574,7 +574,7 @@ Chunk-Event relation：
 - 一个 Chunk 可以关联一个或多个 Events。
 - 没有细粒度分块但需要发布 Events 时，生产者必须创建覆盖整篇文档的真实全文 Chunk。
 
-## 5. Entities 0.1
+## 5. Entities v0.1
 
 文件：
 
@@ -641,7 +641,7 @@ Event-Entity relation：
 
 缺失层必须通过真实分块或抽取流程生成。
 
-## 7. Vectors 0.1
+## 7. Vectors v0.1
 
 配置：`vectors/config.json`
 
@@ -679,7 +679,7 @@ vector: fixed_size_list<float32>[dimension] non-null
 - `dimension` 是正整数，同一文件一致。
 - vector 元素不得为 null、`NaN` 或正负无穷。
 - 消费者可以忽略附加列，但附加列不能替代必需列。
-- vectors 0.1 不使用 Arrow IPC body compression，避免在资源上限生效前产生不可控的解压分配。
+- vectors v0.1 不使用 Arrow IPC body compression，避免在资源上限生效前产生不可控的解压分配。
 
 向量参与逐文件摘要和 Package Digest。只重新生成向量也会产生新的 Release；知识和结构未变化时保留原记录 ID。
 

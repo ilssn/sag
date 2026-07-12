@@ -5,7 +5,7 @@
 - [Introduction](/docs/introduction/)
 - [What is SAG?](/docs/sag/)
 - [OCTX v0.1](/docs/specification/)
-- [SAG-structured Capability 0.1](/docs/sag-structured/)
+- [SAG-structured Capability v0.1](/docs/sag-structured/)
 - [Tooling overview](/docs/tooling/)
 - [Creating OCTX](/docs/creating-octx/)
 - [Opening and validating OCTX](/docs/opening-validating-octx/)
