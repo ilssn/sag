@@ -26,13 +26,18 @@ import type {
   Citation,
   SearchEvent,
   SearchResponse,
+  UniverseGraphPatch,
   UniverseNodeDetail,
   UniverseRelation,
 } from "@/lib/types";
 import {
+  UNIVERSE_ASK_EVENT,
   UNIVERSE_DETAIL_EVENT,
+  UNIVERSE_PATCH_EVENT,
   dispatchUniverseFocus,
+  takePendingUniverseAsk,
   takePendingUniverseDetail,
+  type UniverseAskTarget,
   type UniverseDetailTarget,
 } from "@/lib/universe-events";
 import { cn } from "@/lib/utils";
@@ -208,6 +213,43 @@ function detailFromSearchResult(
   };
 }
 
+function detailFromGraphPatch(
+  patch: UniverseGraphPatch | null,
+  target: UniverseDetailTarget,
+): WorkspaceUniverseDetail | null {
+  if (
+    !patch
+    || patch.anchor.id !== target.id
+    || patch.anchor.kind !== target.kind
+    || patch.anchor.source_id !== target.source_id
+  ) return null;
+  return {
+    id: patch.anchor.id,
+    kind: patch.anchor.kind,
+    source_id: patch.anchor.source_id,
+    source_name: "本地知识库",
+    label: patch.anchor.label || "知识星点",
+    description: patch.anchor.description || "",
+    category: patch.anchor.category || "",
+    start_time: patch.anchor.start_time ?? null,
+    evidence: null,
+    related_nodes: patch.nodes.map((node) => ({
+      id: node.id,
+      kind: node.kind,
+      source_id: node.source_id,
+      label: node.label,
+      description: node.description,
+      chunk_id: node.chunk_id,
+      importance: node.importance,
+    })),
+    relations: patch.relations,
+  };
+}
+
+function universeDetailKey(kind: "event" | "entity", id: string, sourceId: string) {
+  return `${sourceId}:${kind}:${id}`;
+}
+
 export function PetMiniWorkspace({
   character,
   panelClassName,
@@ -237,14 +279,21 @@ export function PetMiniWorkspace({
   const [answerSessionId, setAnswerSessionId] = React.useState<string | null>(null);
   const answerSnapshot = useConversationSession(answerSessionId);
   const [answerHistoryOpen, setAnswerHistoryOpen] = React.useState(false);
+  const [answerDraft, setAnswerDraft] = React.useState<{
+    id: number;
+    text: string;
+  } | null>(null);
   const [detailTrail, setDetailTrail] = React.useState<MiniDetailTarget[]>([]);
   const [detail, setDetail] = React.useState<WorkspaceUniverseDetail | null>(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
   const [detailError, setDetailError] = React.useState("");
+  const detailTargetRef = React.useRef<MiniDetailTarget | null>(null);
+  const detailPatchRef = React.useRef(new Map<string, UniverseGraphPatch>());
   const [panelSize, setPanelSize] = React.useState<MiniPanelSize>(DEFAULT_MINI_PANEL_SIZE);
   const observedRouteThreadRef = React.useRef<string | null>(null);
   const panelRef = React.useRef<HTMLDivElement>(null);
   const detailTarget = detailTrail[detailTrail.length - 1] ?? null;
+  detailTargetRef.current = detailTarget;
   const miniPanelStorageKey = `sag:mini-workspace-size:${user?.id ?? "local"}`;
   const answerRun = answerSnapshot?.run ?? null;
   const answerBusy = answerRun !== null;
@@ -429,9 +478,57 @@ export function PetMiniWorkspace({
       const target = (event as CustomEvent<UniverseDetailTarget>).detail;
       if (target) openDetail(target);
     };
+    const onPatch = (event: Event) => {
+      const patch = (event as CustomEvent<UniverseGraphPatch>).detail;
+      if (!patch) return;
+      const patchKey = universeDetailKey(
+        patch.anchor.kind,
+        patch.anchor.id,
+        patch.anchor.source_id,
+      );
+      detailPatchRef.current.set(patchKey, patch);
+      while (detailPatchRef.current.size > 24) {
+        const oldest = detailPatchRef.current.keys().next().value;
+        if (typeof oldest !== "string") break;
+        detailPatchRef.current.delete(oldest);
+      }
+      const target = detailTargetRef.current;
+      if (!target || target.kind === "citation" || target.kind === "document") return;
+      const patchDetail = detailFromGraphPatch(patch, target);
+      if (!patchDetail) return;
+      setDetail((current) => current
+        ? {
+            ...current,
+            related_nodes: patchDetail.related_nodes,
+            relations: patchDetail.relations,
+          }
+        : patchDetail);
+    };
     window.addEventListener(UNIVERSE_DETAIL_EVENT, onDetail);
-    return () => window.removeEventListener(UNIVERSE_DETAIL_EVENT, onDetail);
+    window.addEventListener(UNIVERSE_PATCH_EVENT, onPatch);
+    return () => {
+      window.removeEventListener(UNIVERSE_DETAIL_EVENT, onDetail);
+      window.removeEventListener(UNIVERSE_PATCH_EVENT, onPatch);
+    };
   }, [openDetail]);
+
+  React.useEffect(() => {
+    const openAsk = (target: UniverseAskTarget) => {
+      setAnswerHistoryOpen(false);
+      setDetailTrail([]);
+      setAnswerDraft({ id: target.request_id, text: target.prompt });
+      openMiniWorkspace("answer");
+    };
+    const pending = takePendingUniverseAsk();
+    if (pending) openAsk(pending);
+    const onAsk = (event: Event) => {
+      const target = (event as CustomEvent<UniverseAskTarget>).detail;
+      takePendingUniverseAsk();
+      if (target) openAsk(target);
+    };
+    window.addEventListener(UNIVERSE_ASK_EVENT, onAsk);
+    return () => window.removeEventListener(UNIVERSE_ASK_EVENT, onAsk);
+  }, [openMiniWorkspace]);
 
   React.useEffect(() => {
     if (!detailTarget) {
@@ -454,17 +551,29 @@ export function PetMiniWorkspace({
       .universeNode(detailTarget.kind, detailTarget.id, detailTarget.source_id)
       .then((value) => {
         if (alive) {
+          const patchFallback = detailFromGraphPatch(
+            detailPatchRef.current.get(
+              universeDetailKey(detailTarget.kind, detailTarget.id, detailTarget.source_id),
+            ) ?? null,
+            detailTarget,
+          );
           setDetail({
             ...value,
-            related_nodes: fallback?.related_nodes ?? [],
-            relations: fallback?.relations ?? [],
+            related_nodes: patchFallback?.related_nodes ?? fallback?.related_nodes ?? [],
+            relations: patchFallback?.relations ?? fallback?.relations ?? [],
           });
         }
       })
       .catch((reason) => {
         if (!alive) return;
-        if (fallback) {
-          setDetail(fallback);
+        const patchFallback = detailFromGraphPatch(
+          detailPatchRef.current.get(
+            universeDetailKey(detailTarget.kind, detailTarget.id, detailTarget.source_id),
+          ) ?? null,
+          detailTarget,
+        );
+        if (patchFallback || fallback) {
+          setDetail(patchFallback ?? fallback);
           return;
         }
         setDetailError(reason instanceof ApiError ? reason.message : "星点详情加载失败");
@@ -933,6 +1042,7 @@ export function PetMiniWorkspace({
                   "这份资料的关键结论是什么？",
                   "帮我梳理其中的时间线",
                 ]}
+                draftPrompt={answerDraft}
                 placeholder={`向 ${answerIdentity.name} 发送消息，输入 @ 指定知识库`}
                 onCitationClick={openAnswerCitation}
                 onToolMatchClick={openAnswerToolMatch}

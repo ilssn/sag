@@ -183,7 +183,8 @@ async def delete_(
     document_id: str,
     _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
+    job_queue: JobQueue = Depends(get_job_queue),
 ) -> Ok:
     source = await get_source(session, source_id)
-    await delete_document(session, source, document_id)
+    await delete_document(session, source, document_id, job_queue=job_queue)
     return Ok(detail="文档已删除")

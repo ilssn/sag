@@ -315,15 +315,24 @@
     opacity: 0.82;
   }
 
-  .sag-space-moon {
+  .sag-space-moon-orbit {
     position: absolute;
     right: -4.5%;
     top: 6.5%;
     z-index: 0;
     width: clamp(170px, 14vw, 280px);
     aspect-ratio: 1;
-    overflow: hidden;
     pointer-events: none;
+    transform-origin: 72% 18%;
+    will-change: transform, opacity;
+  }
+
+  .sag-space-moon {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
     border: 1px solid var(--space-moon-edge);
     border-radius: 50%;
     background:
@@ -2618,6 +2627,7 @@
     .bg-space-field::after,
     .sag-space-dust,
     .sag-space-meteor,
+    .sag-space-moon-orbit,
     .sag-space-moon,
     .sag-space-sparkle,
     .sag-full-loader__avatar,
@@ -2643,6 +2653,473 @@
 
     .sag-space-meteor {
       opacity: 0;
+    }
+  }
+
+  .sag-knowledge-universe {
+    isolation: isolate;
+  }
+
+  .sag-universe-graph {
+    z-index: 0;
+  }
+
+  .sag-universe-graph canvas {
+    outline: none;
+  }
+
+  .sag-universe-label-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    overflow: hidden;
+    pointer-events: none;
+    contain: layout style;
+  }
+
+  .sag-nebula-label,
+  .sag-universe-node-label {
+    position: absolute;
+    left: 0;
+    top: 0;
+    box-sizing: border-box;
+    letter-spacing: 0;
+    will-change: transform, opacity;
+    transition: opacity 180ms ease, filter 180ms ease;
+  }
+
+  .sag-nebula-label,
+  .sag-universe-node-label {
+    appearance: none;
+    margin: 0;
+    font: inherit;
+    pointer-events: auto;
+    cursor: pointer;
+  }
+
+  [data-universe-dragging-id]:not([data-universe-dragging-id=""])
+    :is(.sag-nebula-label, .sag-universe-node-label) {
+    pointer-events: none;
+  }
+
+  .sag-nebula-label:focus-visible,
+  .sag-universe-node-label:focus-visible {
+    outline: 2px solid hsl(var(--ring) / 0.72);
+    outline-offset: 3px;
+  }
+
+  @keyframes sag-nebula-beacon-breathe {
+    0%,
+    100% {
+      opacity: 0.34;
+      transform: scale(0.72);
+    }
+
+    48% {
+      opacity: 0.84;
+      transform: scale(1.08);
+    }
+  }
+
+  @keyframes sag-nebula-beacon-orbit {
+    from {
+      transform: translate(-50%, -50%) rotate(0deg);
+    }
+
+    to {
+      transform: translate(-50%, -50%) rotate(360deg);
+    }
+  }
+
+  @keyframes sag-nebula-beacon-ring {
+    0%,
+    100% {
+      opacity: 0.34;
+      transform: translate(-50%, -50%) scale(0.72);
+    }
+
+    48% {
+      opacity: 0.84;
+      transform: translate(-50%, -50%) scale(1.08);
+    }
+  }
+
+  @keyframes sag-nebula-beacon-glint {
+    0%,
+    62%,
+    100% {
+      filter: brightness(0.94);
+    }
+
+    70% {
+      filter: brightness(1.32);
+    }
+  }
+
+  .sag-nebula-label {
+    --nebula-color: rgb(72 157 174);
+    --nebula-phase: -1.4s;
+    display: flex;
+    width: 48px;
+    height: 48px;
+    padding: 0;
+    align-items: center;
+    justify-content: center;
+    overflow: visible;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: hsl(var(--foreground) / 0.88);
+    text-align: left;
+    text-shadow: none;
+    transition:
+      opacity 220ms ease,
+      filter 220ms ease;
+  }
+
+  .sag-nebula-label::before {
+    position: absolute;
+    inset: 7px;
+    border-radius: inherit;
+    animation: sag-nebula-beacon-breathe 3.4s ease-in-out infinite;
+    animation-delay: var(--nebula-phase);
+    background: radial-gradient(
+      circle,
+      color-mix(in srgb, var(--nebula-color), transparent 70%) 0%,
+      color-mix(in srgb, var(--nebula-color), transparent 88%) 48%,
+      transparent 72%
+    );
+    content: "";
+    filter: blur(2.5px);
+    pointer-events: none;
+  }
+
+  .sag-nebula-label__marker {
+    position: relative;
+    z-index: 2;
+    width: 12px;
+    height: 12px;
+    flex: 0 0 auto;
+    animation: sag-nebula-beacon-glint 4.8s ease-in-out infinite;
+    animation-delay: var(--nebula-phase);
+    border: 1px solid color-mix(in srgb, var(--nebula-color), white 48%);
+    border-radius: 999px;
+    background: var(--nebula-color);
+    box-shadow:
+      0 0 0 4px color-mix(in srgb, var(--nebula-color), transparent 88%),
+      0 0 16px color-mix(in srgb, var(--nebula-color), transparent 38%),
+      inset 0 0 4px rgb(255 255 255 / 0.74);
+    transition:
+      transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 220ms ease;
+  }
+
+  .sag-nebula-label__marker::before,
+  .sag-nebula-label__marker::after {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    border-radius: 999px;
+    content: "";
+    pointer-events: none;
+  }
+
+  .sag-nebula-label__marker::before {
+    width: 26px;
+    height: 26px;
+    animation: sag-nebula-beacon-ring 3.4s ease-in-out infinite;
+    animation-delay: var(--nebula-phase);
+    border: 1px solid color-mix(in srgb, var(--nebula-color), transparent 56%);
+    box-shadow: 0 0 12px color-mix(in srgb, var(--nebula-color), transparent 66%);
+    transform: translate(-50%, -50%);
+  }
+
+  .sag-nebula-label__marker::after {
+    width: 34px;
+    height: 34px;
+    animation: sag-nebula-beacon-orbit 7.2s linear infinite;
+    animation-delay: var(--nebula-phase);
+    border: 1px solid transparent;
+    border-left-color: color-mix(in srgb, var(--nebula-color), transparent 54%);
+    border-top-color: color-mix(in srgb, var(--nebula-color), transparent 76%);
+    box-shadow: inset 0 0 8px color-mix(in srgb, var(--nebula-color), transparent 88%);
+    transform: translate(-50%, -50%);
+    transform-origin: center;
+  }
+
+  .sag-nebula-label > span:last-child {
+    position: absolute;
+    left: calc(50% + 30px);
+    top: 50%;
+    z-index: 3;
+    width: 154px;
+    min-width: 0;
+    padding: 7px 10px;
+    border: 1px solid hsl(var(--border) / 0.62);
+    border-radius: 7px;
+    opacity: 0;
+    background: hsl(var(--background) / 0.86);
+    box-shadow:
+      inset 2px 0 0 color-mix(in srgb, var(--nebula-color), transparent 28%),
+      0 10px 30px rgb(15 23 42 / 0.1),
+      0 2px 8px rgb(15 23 42 / 0.06);
+    backdrop-filter: blur(14px) saturate(1.08);
+    pointer-events: none;
+    transform: translate3d(-5px, -50%, 0) scale(0.97);
+    transform-origin: left center;
+    transition:
+      opacity 180ms ease,
+      transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .sag-nebula-label[data-side="left"] > span:last-child {
+    left: auto;
+    right: calc(50% + 30px);
+    transform: translate3d(5px, -50%, 0) scale(0.97);
+    transform-origin: right center;
+  }
+
+  .sag-nebula-label[data-side="bottom"] > span:last-child {
+    left: 50%;
+    top: calc(50% + 30px);
+    transform: translate3d(-50%, -5px, 0) scale(0.97);
+    transform-origin: center top;
+  }
+
+  .sag-nebula-label[data-hovered="true"] > span:last-child,
+  .sag-nebula-label:focus-visible > span:last-child {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate3d(0, -50%, 0) scale(1);
+  }
+
+  .sag-nebula-label[data-side="bottom"][data-hovered="true"] > span:last-child,
+  .sag-nebula-label[data-side="bottom"]:focus-visible > span:last-child {
+    transform: translate3d(-50%, 0, 0) scale(1);
+  }
+
+  .sag-nebula-label[data-hovered="true"] .sag-nebula-label__marker,
+  .sag-nebula-label:focus-visible .sag-nebula-label__marker {
+    transform: scale(1.16);
+    box-shadow:
+      0 0 0 6px color-mix(in srgb, var(--nebula-color), transparent 86%),
+      0 0 24px color-mix(in srgb, var(--nebula-color), transparent 24%),
+      inset 0 0 4px rgb(255 255 255 / 0.82);
+  }
+
+  .sag-nebula-label strong,
+  .sag-nebula-label small {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sag-nebula-label strong {
+    max-width: 134px;
+    font-size: 12px;
+    font-weight: 590;
+    line-height: 16px;
+  }
+
+  .sag-nebula-label small {
+    margin-top: 2px;
+    color: hsl(var(--muted-foreground) / 0.84);
+    font-size: 10px;
+    line-height: 13px;
+  }
+
+  .sag-nebula-label[data-highlighted="true"] {
+    --nebula-color: rgb(207 151 37);
+  }
+
+  .sag-nebula-label[data-highlighted="true"] .sag-nebula-label__marker {
+    border-color: rgb(255 237 176 / 0.88);
+    background: rgb(244 201 95 / 0.92);
+    box-shadow:
+      0 0 0 5px rgb(244 201 95 / 0.1),
+      0 0 18px rgb(244 201 95 / 0.58);
+  }
+
+  [data-universe-reduced-motion="true"] .sag-nebula-label::before,
+  [data-universe-reduced-motion="true"] .sag-nebula-label__marker,
+  [data-universe-reduced-motion="true"] .sag-nebula-label__marker::before,
+  [data-universe-reduced-motion="true"] .sag-nebula-label__marker::after {
+    animation: none;
+  }
+
+  .sag-universe-node-label {
+    display: flex;
+    width: 216px;
+    height: 78px;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    padding: 9px 10px 9px 13px;
+    overflow: visible;
+    border: 1px solid hsl(var(--border) / 0.58);
+    border-radius: 6px;
+    background: hsl(var(--background) / 0.82);
+    box-shadow:
+      inset 2px 0 0 rgb(244 201 95 / 0.72),
+      0 8px 26px rgb(0 0 0 / 0.1),
+      0 0 18px rgb(244 201 95 / 0.045);
+    color: hsl(var(--foreground) / 0.94);
+    text-align: left;
+    backdrop-filter: blur(12px) saturate(118%);
+    transition:
+      width 160ms ease,
+      height 160ms ease,
+      border-color 160ms ease,
+      background-color 160ms ease,
+      box-shadow 160ms ease,
+      opacity 160ms ease;
+  }
+
+  .sag-universe-node-label::before {
+    position: absolute;
+    top: 50%;
+    width: 10px;
+    height: 1px;
+    background: rgb(244 201 95 / 0.42);
+    content: "";
+  }
+
+  .sag-universe-node-label[data-side="right"]::before {
+    right: 100%;
+  }
+
+  .sag-universe-node-label[data-side="left"]::before {
+    left: 100%;
+  }
+
+  .sag-universe-node-label[data-side="top"]::before,
+  .sag-universe-node-label[data-side="bottom"]::before {
+    left: 50%;
+    width: 1px;
+    height: 10px;
+  }
+
+  .sag-universe-node-label[data-side="top"]::before {
+    top: 100%;
+  }
+
+  .sag-universe-node-label[data-side="bottom"]::before {
+    top: auto;
+    bottom: 100%;
+  }
+
+  .sag-universe-node-label[data-kind="entity"] {
+    box-shadow:
+      inset 2px 0 0 rgb(116 215 232 / 0.76),
+      0 8px 26px rgb(0 0 0 / 0.1),
+      0 0 18px rgb(116 215 232 / 0.05);
+  }
+
+  .sag-universe-node-label[data-kind="entity"]::before {
+    background: rgb(116 215 232 / 0.44);
+  }
+
+  .sag-universe-node-label[data-expanded="true"] {
+    width: 244px;
+    height: 94px;
+    border-color: hsl(var(--foreground) / 0.22);
+    background: hsl(var(--background) / 0.94);
+    box-shadow:
+      inset 2px 0 0 rgb(244 201 95 / 0.9),
+      0 12px 34px rgb(0 0 0 / 0.14),
+      0 0 24px rgb(244 201 95 / 0.07);
+  }
+
+  .sag-universe-node-label[data-kind="entity"][data-expanded="true"] {
+    box-shadow:
+      inset 2px 0 0 rgb(116 215 232 / 0.92),
+      0 12px 34px rgb(0 0 0 / 0.14),
+      0 0 24px rgb(116 215 232 / 0.08);
+  }
+
+  .sag-universe-node-label__eyebrow {
+    display: flex;
+    min-height: 12px;
+    align-items: center;
+    gap: 5px;
+    overflow: hidden;
+    color: hsl(var(--muted-foreground) / 0.82);
+    font-size: 9px;
+    line-height: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sag-universe-node-label__eyebrow > span:last-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .sag-universe-node-label__marker {
+    width: 4px;
+    height: 4px;
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: rgb(244 201 95 / 0.96);
+    box-shadow: 0 0 8px rgb(244 201 95 / 0.5);
+  }
+
+  .sag-universe-node-label[data-kind="entity"] .sag-universe-node-label__marker {
+    background: rgb(116 215 232 / 0.96);
+    box-shadow: 0 0 8px rgb(116 215 232 / 0.48);
+  }
+
+  .sag-universe-node-label strong {
+    display: -webkit-box;
+    margin-top: 3px;
+    overflow: hidden;
+    font-size: 11px;
+    font-weight: 590;
+    line-height: 15px;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+  }
+
+  .sag-universe-node-label p {
+    display: -webkit-box;
+    margin-top: 3px;
+    overflow: hidden;
+    color: hsl(var(--muted-foreground) / 0.8);
+    font-size: 9px;
+    line-height: 13px;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .sag-universe-node-label[data-expanded="true"] p {
+    -webkit-line-clamp: 3;
+  }
+
+  @media (max-width: 767px) {
+    .sag-nebula-label {
+      width: 44px;
+      height: 44px;
+      min-height: 44px;
+    }
+
+    .sag-nebula-label > span:last-child {
+      width: 138px;
+    }
+
+    .sag-nebula-label small {
+      display: none;
+    }
+
+    .sag-universe-node-label {
+      width: 184px;
+      height: 70px;
+      padding: 8px 9px 8px 11px;
+    }
+
+    .sag-universe-node-label[data-expanded="true"] {
+      width: 204px;
+      height: 82px;
     }
   }
 

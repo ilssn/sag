@@ -2,6 +2,8 @@
 const nextConfig = {
   reactStrictMode: true,
   output: "standalone",
+  // Keep development HMR artifacts isolated from `next build` output.
+  distDir: process.env.NODE_ENV === "development" ? ".next-dev" : ".next",
   eslint: { ignoreDuringBuilds: true },
   async redirects() {
     // v0.3 客户端形态：旧路由 → 新 IA

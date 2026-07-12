@@ -840,7 +840,10 @@ export function Pet({
 
   function onPointerMove(event: React.PointerEvent) {
     const drag = dragRef.current;
-    if (!drag) return;
+    if (!drag) {
+      showCommands();
+      return;
+    }
     if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 4) return;
     drag.moved = true;
     suppressClickRef.current = true;

@@ -25,6 +25,7 @@ import type {
   UniverseManifest,
   UniverseActivationSeed,
   UniverseGraphPatch,
+  UniverseTimelineSlice,
   UniverseNodeDetail,
   BackgroundJob,
   ExplorationDetail,
@@ -324,6 +325,18 @@ export const api = {
     before?: string | null;
   }, signal?: AbortSignal) =>
     request<UniverseActivationSeed>("/api/v1/universe/activate", {
+      method: "POST",
+      body: JSON.stringify(body),
+      signal,
+    }),
+  universeTimeline: (body: {
+    epoch: number;
+    source_id: string;
+    limit?: number;
+    entities_per_event?: number;
+    cursor?: string | null;
+  }, signal?: AbortSignal) =>
+    request<UniverseTimelineSlice>("/api/v1/universe/timeline", {
       method: "POST",
       body: JSON.stringify(body),
       signal,

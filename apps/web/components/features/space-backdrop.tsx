@@ -2,7 +2,19 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
-import { useReducedMotion } from "motion/react";
+import {
+  motion,
+  useMotionValue,
+  useReducedMotion,
+  useSpring,
+  useTransform,
+} from "motion/react";
+
+import {
+  UNIVERSE_VIEW_EVENT,
+  readUniverseView,
+  type UniverseViewState,
+} from "@/lib/universe-events";
 
 const SpaceParticles = dynamic(
   () => import("@/components/features/space-particles").then((module) => module.SpaceParticles),
@@ -32,7 +44,38 @@ const SPARKLES = [
 
 export function SpaceBackdrop() {
   const reducedMotion = useReducedMotion();
+  const initialViewRef = React.useRef(readUniverseView());
+  const backdropRef = React.useRef<HTMLDivElement>(null);
   const cursorMeteorRef = React.useRef<HTMLSpanElement>(null);
+  const viewProgress = useMotionValue(initialViewRef.current.progress);
+  const springProgress = useSpring(viewProgress, {
+    stiffness: 92,
+    damping: 23,
+    mass: 1.05,
+    restDelta: 0.001,
+  });
+  const renderedProgress = reducedMotion ? viewProgress : springProgress;
+  const moonX = useTransform(renderedProgress, [0, 0.55, 1], ["0%", "22%", "68%"]);
+  const moonY = useTransform(renderedProgress, [0, 0.55, 1], ["0%", "-14%", "-52%"]);
+  const moonScale = useTransform(renderedProgress, [0, 0.55, 1], [1, 0.96, 0.82]);
+  const moonRotate = useTransform(renderedProgress, [0, 0.55, 1], [0, 2.5, 7]);
+  const moonOpacity = useTransform(renderedProgress, [0, 0.55, 1], [1, 0.58, 0.015]);
+
+  React.useEffect(() => {
+    const applyView = (view: UniverseViewState) => {
+      viewProgress.set(view.progress);
+      if (!backdropRef.current) return;
+      backdropRef.current.dataset.universeView = view.mode;
+      backdropRef.current.dataset.universeViewProgress = view.progress.toFixed(2);
+    };
+    const handleView = (event: Event) => {
+      const view = (event as CustomEvent<UniverseViewState>).detail;
+      if (view) applyView(view);
+    };
+    applyView(readUniverseView());
+    window.addEventListener(UNIVERSE_VIEW_EVENT, handleView);
+    return () => window.removeEventListener(UNIVERSE_VIEW_EVENT, handleView);
+  }, [viewProgress]);
 
   React.useEffect(() => {
     if (reducedMotion || !cursorMeteorRef.current) return;
@@ -93,23 +136,40 @@ export function SpaceBackdrop() {
   }, [reducedMotion]);
 
   return (
-    <div className="sag-space-sparkles" aria-hidden>
+    <div
+      ref={backdropRef}
+      className="sag-space-sparkles"
+      data-universe-view={initialViewRef.current.mode}
+      data-universe-view-progress={initialViewRef.current.progress.toFixed(2)}
+      aria-hidden
+    >
       {!reducedMotion && <SpaceParticles />}
       {!reducedMotion && (
         <span ref={cursorMeteorRef} className="sag-space-cursor-meteor" data-active="false" />
       )}
-      <span className="sag-space-moon">
-        <span className="sag-space-moon__crater sag-space-moon__crater--one" />
-        <span className="sag-space-moon__crater sag-space-moon__crater--two" />
-        <span className="sag-space-moon__crater sag-space-moon__crater--three" />
-        <span className="sag-space-moon__crater sag-space-moon__crater--four" />
-        <span className="sag-space-moon__crater sag-space-moon__crater--five" />
-        <span className="sag-space-moon__crater sag-space-moon__crater--six" />
-        <span className="sag-space-moon__crater sag-space-moon__crater--seven" />
-        <span className="sag-space-moon__crater sag-space-moon__crater--eight" />
-        <span className="sag-space-moon__crater sag-space-moon__crater--nine" />
-        <span className="sag-space-moon__crater sag-space-moon__crater--ten" />
-      </span>
+      <motion.span
+        className="sag-space-moon-orbit"
+        style={{
+          x: moonX,
+          y: moonY,
+          scale: moonScale,
+          rotate: moonRotate,
+          opacity: moonOpacity,
+        }}
+      >
+        <span className="sag-space-moon">
+          <span className="sag-space-moon__crater sag-space-moon__crater--one" />
+          <span className="sag-space-moon__crater sag-space-moon__crater--two" />
+          <span className="sag-space-moon__crater sag-space-moon__crater--three" />
+          <span className="sag-space-moon__crater sag-space-moon__crater--four" />
+          <span className="sag-space-moon__crater sag-space-moon__crater--five" />
+          <span className="sag-space-moon__crater sag-space-moon__crater--six" />
+          <span className="sag-space-moon__crater sag-space-moon__crater--seven" />
+          <span className="sag-space-moon__crater sag-space-moon__crater--eight" />
+          <span className="sag-space-moon__crater sag-space-moon__crater--nine" />
+          <span className="sag-space-moon__crater sag-space-moon__crater--ten" />
+        </span>
+      </motion.span>
       <span className="sag-space-dust" />
       <span className="sag-space-meteor sag-space-meteor--one" />
       <span className="sag-space-meteor sag-space-meteor--two" />

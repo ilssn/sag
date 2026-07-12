@@ -197,9 +197,49 @@ async def global_search(
             source_name=src.name if src else None,
         )
 
+    section_outputs = [out(s) for s in outcome.sections]
+    summary = await synthesize_search_answer(
+        outcome.query,
+        outcome.sections,
+        llm=llm,
+    )
+    exploration_id = None
+    if body.save_exploration:
+        from sag_api.services.universe_service import save_exploration
+
+        event_outputs = [item.model_dump(mode="json") for item in graph_fields["events"]]
+        entity_outputs = [item.model_dump(mode="json") for item in graph_fields["entities"]]
+        relation_outputs = [item.model_dump(mode="json") for item in graph_fields["relations"]]
+        section_refs = [
+            {
+                "n": index,
+                "chunk_id": item.chunk_id,
+                "heading": item.heading,
+                "score": item.score,
+                "source_id": item.source_id,
+                "source_name": item.source_name,
+            }
+            for index, item in enumerate(section_outputs, 1)
+        ]
+        exploration, _step = await save_exploration(
+            session,
+            user_id=_user.id,
+            query=outcome.query,
+            source_ids=[source.id for source in sources],
+            summary=summary,
+            events=event_outputs,
+            entities=entity_outputs,
+            relations=relation_outputs,
+            evidence=section_refs,
+        )
+        exploration_id = exploration.id
+
     return SearchResponse(
         query=outcome.query,
-        sections=[out(s) for s in outcome.sections],
+        sections=section_outputs,
         **graph_fields,
+        source_hits=_source_hits(graph_fields["events"]),
+        summary=summary,
+        exploration_id=exploration_id,
         stats=outcome.stats,
     )

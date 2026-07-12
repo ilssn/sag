@@ -51,6 +51,7 @@ class DocumentStatus(StrEnum):
 class JobType(StrEnum):
     PROCESS_DOCUMENT = "process_document"
     SYNC_SOURCE = "sync_source"
+    INDEX_UNIVERSE = "index_universe"
 
 
 class JobStatus(StrEnum):

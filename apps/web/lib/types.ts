@@ -393,8 +393,10 @@ export interface UniverseManifest {
 
 export interface UniversePolicy {
   source_limit: number;
-  event_page_size: number;
-  event_page_max: number;
+  entity_page_size: number;
+  entity_page_max: number;
+  timeline_event_page_size: number;
+  timeline_entities_per_event: number;
   auto_page_limit: number;
   lod_orbit_px: number;
   lod_near_px: number;
@@ -448,7 +450,9 @@ export interface UniverseActivationNode {
   description?: string;
   category?: string;
   chunk_id?: string | null;
+  start_time?: string | null;
   importance?: number;
+  related_count?: number;
   citation_numbers?: number[];
   state?: "latent" | "active";
 }
@@ -471,6 +475,7 @@ export interface UniversePatchNode {
   chunk_id: string | null;
   start_time: string | null;
   importance: number;
+  related_count: number;
   state: "latent" | "active";
 }
 
@@ -491,8 +496,22 @@ export interface UniverseActivationSeed {
   epoch: number;
   source_id: string;
   category: string | null;
+  seed_kind: "entity";
   nodes: UniversePatchNode[];
   has_more: boolean;
+  page: {
+    returned: number;
+    has_more: boolean;
+    next_cursor: string | null;
+  };
+  as_of: string;
+}
+
+export interface UniverseTimelineSlice {
+  epoch: number;
+  source_id: string;
+  nodes: UniversePatchNode[];
+  relations: UniverseRelation[];
   page: {
     returned: number;
     has_more: boolean;

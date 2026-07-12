@@ -64,8 +64,11 @@ async def update_(
     body: SourceUpdate,
     _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
+    job_queue: JobQueue = Depends(get_job_queue),
 ) -> SourceOut:
-    return SourceOut.model_validate(await update_source(session, source_id, body))
+    return SourceOut.model_validate(
+        await update_source(session, source_id, body, job_queue=job_queue)
+    )
 
 
 @router.delete("/{source_id}", response_model=Ok)
@@ -74,11 +77,16 @@ async def delete_(
     _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     engine_manager: EngineManager = Depends(get_engine_manager),
+    job_queue: JobQueue = Depends(get_job_queue),
 ) -> Ok:
     from sag_api.core.config import settings
 
     await delete_source(
-        session, source_id, engine_manager=engine_manager, upload_dir=settings.upload_dir
+        session,
+        source_id,
+        engine_manager=engine_manager,
+        upload_dir=settings.upload_dir,
+        job_queue=job_queue,
     )
     return Ok(detail="信源已删除")
 

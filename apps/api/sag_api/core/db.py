@@ -61,6 +61,7 @@ _COLUMN_UPGRADES: dict[str, dict[str, str]] = {
     "agents": {"is_default": "BOOLEAN NOT NULL DEFAULT 0"},
     "threads": {"archived": "BOOLEAN NOT NULL DEFAULT 0"},
     "messages": {"attachments_json": "JSON", "steps_json": "JSON"},
+    "universe_dirty_sources": {"revision": "INTEGER NOT NULL DEFAULT 1"},
 }
 
 # Existing tables also need newly introduced hot-path indexes. Keep these
@@ -69,6 +70,8 @@ _COLUMN_UPGRADES: dict[str, dict[str, str]] = {
 _INDEX_UPGRADES = (
     "CREATE INDEX IF NOT EXISTS ix_messages_thread_created_id "
     "ON messages (thread_id, created_at, id)",
+    "CREATE INDEX IF NOT EXISTS ix_documents_source_sag_source "
+    "ON documents (source_id, sag_source_id)",
 )
 
 

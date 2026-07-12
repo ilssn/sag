@@ -96,7 +96,13 @@ async def create_source(
     return source
 
 
-async def update_source(session: AsyncSession, source_id: str, data: SourceUpdate) -> Source:
+async def update_source(
+    session: AsyncSession,
+    source_id: str,
+    data: SourceUpdate,
+    *,
+    job_queue: JobQueue | None = None,
+) -> Source:
     source = await get_source(session, source_id)
     if data.name is not None:
         source.name = data.name
@@ -106,11 +112,24 @@ async def update_source(session: AsyncSession, source_id: str, data: SourceUpdat
         source.status = data.status
     await session.commit()
     await session.refresh(source)
+    from sag_api.services.universe_service import schedule_universe_refresh
+
+    await schedule_universe_refresh(
+        session,
+        job_queue,
+        source_id=source.id,
+        reason="source_updated",
+    )
     return source
 
 
 async def delete_source(
-    session: AsyncSession, source_id: str, *, engine_manager: EngineManager, upload_dir: str
+    session: AsyncSession,
+    source_id: str,
+    *,
+    engine_manager: EngineManager,
+    upload_dir: str,
+    job_queue: JobQueue | None = None,
 ) -> None:
     """删除信源并收尾：移除悬挂绑定、关闭引擎槽、清理上传文件。"""
     source = await get_source(session, source_id)
@@ -129,6 +148,14 @@ async def delete_source(
     # 引擎槽关闭 + 上传目录清理（尽力而为，不阻断删除）
     await engine_manager.release(sag_id)
     shutil.rmtree(os.path.join(upload_dir, source_id), ignore_errors=True)
+    from sag_api.services.universe_service import schedule_universe_refresh
+
+    await schedule_universe_refresh(
+        session,
+        job_queue,
+        source_id=None,
+        reason="source_deleted",
+    )
 
 
 async def sync_source(session: AsyncSession, source_id: str, *, job_queue: JobQueue) -> Job:

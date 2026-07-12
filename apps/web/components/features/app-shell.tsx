@@ -25,6 +25,7 @@ import {
   workspaceSectionFromPathname,
 } from "@/lib/workspace";
 import {
+  UNIVERSE_ASK_EVENT,
   UNIVERSE_DETAIL_EVENT,
   dispatchUniverseActivation,
 } from "@/lib/universe-events";
@@ -368,9 +369,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         persistWorkspace("mini", "search");
       }
     };
+    const revealAsk = () => openMiniWorkspace("answer");
     window.addEventListener(UNIVERSE_DETAIL_EVENT, revealDetail);
-    return () => window.removeEventListener(UNIVERSE_DETAIL_EVENT, revealDetail);
-  }, [panelMode]);
+    window.addEventListener(UNIVERSE_ASK_EVENT, revealAsk);
+    return () => {
+      window.removeEventListener(UNIVERSE_DETAIL_EVENT, revealDetail);
+      window.removeEventListener(UNIVERSE_ASK_EVENT, revealAsk);
+    };
+  }, [openMiniWorkspace, panelMode]);
 
   const windowed = windowMode === "window" && isDesktop;
 
@@ -629,7 +635,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 )}
               >
                 <SpaceBackdrop />
-                <KnowledgeUniverse interactive={panelMode !== "normal"} />
+                <KnowledgeUniverse
+                  interactive={panelMode !== "normal"}
+                  workspacePanel={panelMode}
+                />
                 {panelMode !== "normal" && (
                   <motion.div
                     initial={{ opacity: 0, scale: 0.92, y: -4 }}

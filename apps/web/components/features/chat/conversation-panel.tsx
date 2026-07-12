@@ -158,6 +158,8 @@ export interface ConversationPanelProps {
   showPromptPreview?: boolean;
   /** 消息区顶部的入口级内容，例如迷你面板的历史会话选择器。 */
   beforeMessages?: React.ReactNode;
+  /** 来自图谱等外部入口的显式草稿；相同 id 只应用一次。 */
+  draftPrompt?: { id: number; text: string } | null;
   onCitationClick?: (citation: Citation, message: ConversationMessage) => void;
   onToolMatchClick?: (
     match: AgentActivityMatch,
@@ -181,6 +183,7 @@ export function ConversationPanel({
   active = true,
   showPromptPreview = true,
   beforeMessages,
+  draftPrompt,
   onCitationClick,
   onToolMatchClick,
 }: ConversationPanelProps) {
@@ -206,6 +209,7 @@ export function ConversationPanel({
   const lastScrollAt = React.useRef(0);
   const followOutputRef = React.useRef(true);
   const sendRef = React.useRef<(text: string) => void>(() => {});
+  const lastDraftPromptRef = React.useRef<number | null>(null);
 
   if (!session) throw new Error(`conversation session 不存在: ${sessionId}`);
   const messages = session.messages;
@@ -219,6 +223,22 @@ export function ConversationPanel({
     if (active) runtime.activate(sessionId);
     void runtime.ensureHistory(sessionId);
   }, [active, runtime, sessionId]);
+
+  React.useEffect(() => {
+    if (
+      !active
+      || !draftPrompt
+      || lastDraftPromptRef.current === draftPrompt.id
+    ) return;
+    lastDraftPromptRef.current = draftPrompt.id;
+    setInput(draftPrompt.text);
+    const frame = window.requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      const length = textareaRef.current?.value.length ?? 0;
+      textareaRef.current?.setSelectionRange(length, length);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [active, draftPrompt, setInput]);
 
   React.useEffect(() => {
     imagesRef.current = images;

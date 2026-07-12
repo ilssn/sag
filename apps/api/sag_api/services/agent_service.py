@@ -106,10 +106,85 @@ def _adapt_tool(host_tool, host_context: HostToolContext, citations: list[dict])
             details["matches"] = matches
         elif result.content:
             details["output_preview"] = result.content[:800]
+        artifacts: dict[str, Any] = {"citations": result.citations}
+        sections = result.data.get("sections")
+        if host_tool.meta.name == "search_context" and isinstance(sections, list) and sections:
+            sources_by_config = {
+                source.sag_source_config_id: source for source in host_context.sources
+            }
+            graph = await host_context.engine_manager.graph_for_sections(
+                sections,
+                sources_by_config,
+                event_limit=12,
+                entity_limit=36,
+            )
+            event_nodes = []
+            for item in graph.events:
+                source = sources_by_config.get(item.source_config_id)
+                event_nodes.append(
+                    {
+                        "id": item.id,
+                        "kind": "event",
+                        "source_id": source.id if source else None,
+                        "label": item.title,
+                        "description": item.summary,
+                        "category": item.category,
+                        "chunk_id": item.chunk_id,
+                        "importance": item.score,
+                        "citation_numbers": [
+                            citation.get("n")
+                            for citation in result.citations
+                            if citation.get("chunk_id") == item.chunk_id
+                        ],
+                    }
+                )
+            event_source_by_id = {
+                str(event["id"]): str(event["source_id"] or "") for event in event_nodes
+            }
+            artifacts["universe_activation"] = {
+                "query": str(arguments.get("query") or ""),
+                "nodes": [
+                    *event_nodes,
+                    *[
+                        {
+                            "id": item.id,
+                            "kind": "entity",
+                            "source_id": next(
+                                (
+                                    event["source_id"]
+                                    for event in event_nodes
+                                    if any(
+                                        association.event_id == event["id"]
+                                        and association.entity_id == item.id
+                                        for association in graph.associations
+                                    )
+                                ),
+                                None,
+                            ),
+                            "label": item.name,
+                            "description": item.description,
+                            "category": item.type,
+                            "importance": min(1.0, 0.2 + item.heat / 10.0),
+                        }
+                        for item in graph.entities
+                    ],
+                ],
+                "relations": [
+                    {
+                        "source_id": event_source_by_id.get(item.event_id, ""),
+                        "from_id": item.event_id,
+                        "to_id": item.entity_id,
+                        "kind": "mentions",
+                        "weight": item.weight,
+                        "description": item.description,
+                    }
+                    for item in graph.associations
+                ],
+            }
         return RuntimeToolResult(
             content=result.content,
             details=details,
-            artifacts={"citations": result.citations},
+            artifacts=artifacts,
         )
 
     name = host_tool.meta.name
@@ -250,6 +325,16 @@ async def generate_stream(
                     }
                 elif event.type == EventType.TOOL_COMPLETED:
                     details = payload.get("details") or {}
+                    artifacts = payload.get("artifacts") or {}
+                    activation = artifacts.get("universe_activation")
+                    if isinstance(activation, Mapping):
+                        activation_event = event.to_dict()
+                        activation_event["type"] = "universe.activation"
+                        activation_event["payload"] = dict(activation)
+                        yield AgentStreamEvent(
+                            type="universe.activation",
+                            data=activation_event,
+                        )
                     tool_call_id = str(payload.get("tool_call_id") or "")
                     started = tool_inputs.pop(tool_call_id, {})
                     trace.append(
