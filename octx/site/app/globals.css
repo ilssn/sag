@@ -562,6 +562,16 @@ button {
   background: var(--surface-muted);
 }
 
+.home-doc-link {
+  color: var(--green);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.home-doc-link:hover {
+  color: var(--ink);
+}
+
 .hero-facts {
   display: flex;
   flex-wrap: wrap;

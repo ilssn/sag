@@ -177,7 +177,17 @@ export default function HomePage() {
         <div className="section-heading">
           <p>开始构建</p>
           <h2>创建、打开、校验，然后导入。</h2>
-          <span>通用 `octx` 包保持厂商中立；`zleap-sag` 在同一读取层之上提供 SAG 导入与导出。</span>
+          <span>
+            通用 <code>octx</code> 包保持厂商中立；
+            <Link className="home-doc-link" href="/docs/sag">
+              <code>zleap-sag</code>
+            </Link>{" "}
+            在同一读取层之上提供
+            <Link className="home-doc-link" href="/docs/sag">
+              SAG
+            </Link>
+            导入与导出。
+          </span>
         </div>
         <div className="code-columns">
           <article>
@@ -195,7 +205,11 @@ export default function HomePage() {
               <strong>02</strong>
               <span>
                 <b>导入检索系统</b>
-                <small>zleap-sag adapter</small>
+                <small>
+                  <Link className="home-doc-link" href="/docs/sag">
+                    zleap-sag adapter
+                  </Link>
+                </small>
               </span>
             </div>
             <CodeBlock code={importCode} language="python" />
@@ -238,7 +252,11 @@ export default function HomePage() {
                 <td>可传播、可校验</td>
               </tr>
               <tr>
-                <th>SAG-structured</th>
+                <th>
+                  <Link className="home-doc-link" href="/docs/sag-structured">
+                    SAG-structured
+                  </Link>
+                </th>
                 <td>✓</td>
                 <td>✓</td>
                 <td>完整且无孤立记录</td>
