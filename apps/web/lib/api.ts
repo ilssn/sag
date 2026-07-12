@@ -8,7 +8,7 @@ import type {
   BindingTargetType,
   Capabilities,
   Doc,
-  Message,
+  MessagePage,
   ModelConfig,
   ModelConfigPatch,
   ModelSetupStatus,
@@ -18,9 +18,17 @@ import type {
   Source,
   SourceGraphResponse,
   SourceMcpDescriptor,
+  SystemPreferences,
   Thread,
   TokenResponse,
   User,
+  UniverseManifest,
+  UniverseActivationSeed,
+  UniverseGraphPatch,
+  UniverseNodeDetail,
+  BackgroundJob,
+  ExplorationDetail,
+  ExplorationSession,
 } from "./types";
 
 /** 浏览器通过局域网 IP 打开前端时，自动将 API 指向同主机 8000 端口。 */
@@ -63,13 +71,19 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   // 30s 超时护栏（SSE 流式接口不走此函数，不受影响）
-  const signal = opts.signal ?? AbortSignal.timeout(30_000);
+  const timeoutSignal = AbortSignal.timeout(30_000);
+  const signal = opts.signal
+    ? AbortSignal.any([opts.signal, timeoutSignal])
+    : timeoutSignal;
   let res: Response;
   try {
     res = await fetch(`${API_BASE}${path}`, { ...opts, headers, signal });
   } catch (e) {
     if (e instanceof DOMException && e.name === "TimeoutError") {
       throw new ApiError(0, "timeout", "请求超时，请检查网络后重试");
+    }
+    if (e instanceof DOMException && e.name === "AbortError") {
+      throw new ApiError(0, "aborted", "请求已取消");
     }
     throw new ApiError(0, "network", "网络异常，请稍后重试");
   }
@@ -109,6 +123,13 @@ export const api = {
     request<TokenResponse>("/api/v1/auth/login", { method: "POST", body: JSON.stringify(b) }),
   me: () => request<User>("/api/v1/auth/me"),
   capabilities: () => request<Capabilities>("/api/v1/system/capabilities"),
+  getSystemPreferences: () =>
+    request<SystemPreferences>("/api/v1/system/preferences"),
+  saveSystemPreferences: (preferences: SystemPreferences) =>
+    request<SystemPreferences>("/api/v1/system/preferences", {
+      method: "PUT",
+      body: JSON.stringify(preferences),
+    }),
 
   // 模型与检索配置
   getModelConfig: () => request<ModelConfig>("/api/v1/system/model-config"),
@@ -216,14 +237,30 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(b),
     }),
-  createThread: (id: string, title = "新会话") =>
-    request<Thread>(`/api/v1/agents/${id}/threads`, { method: "POST", body: JSON.stringify({ title }) }),
+  createThread: (id: string, title = "新会话", signal?: AbortSignal) =>
+    request<Thread>(`/api/v1/agents/${id}/threads`, {
+      method: "POST",
+      body: JSON.stringify({ title }),
+      signal,
+    }),
   deleteMessage: (id: string, tid: string, mid: string) =>
     request<{ ok: boolean }>(`/api/v1/agents/${id}/threads/${tid}/messages/${mid}`, {
       method: "DELETE",
     }),
-  listMessages: (id: string, tid: string) =>
-    request<Message[]>(`/api/v1/agents/${id}/threads/${tid}/messages`),
+  listMessages: (
+    id: string,
+    tid: string,
+    options?: { limit?: number; cursor?: string | null; signal?: AbortSignal },
+  ) => {
+    const params = new URLSearchParams();
+    if (options?.limit != null) params.set("limit", String(options.limit));
+    if (options?.cursor) params.set("cursor", options.cursor);
+    const query = params.toString();
+    return request<MessagePage>(
+      `/api/v1/agents/${id}/threads/${tid}/messages${query ? `?${query}` : ""}`,
+      { signal: options?.signal },
+    );
+  },
   cancelAgentRun: (id: string, tid: string, runId: string) =>
     request<{ ok: boolean }>(`/api/v1/agents/${id}/threads/${tid}/runs/${runId}/cancel`, {
       method: "POST",
@@ -247,8 +284,58 @@ export const api = {
     source_ids?: string[];
     top_k?: number;
     strategy?: SearchStrategy;
-  }) =>
-    request<SearchResponse>("/api/v1/search", { method: "POST", body: JSON.stringify(b) }),
+    save_exploration?: boolean;
+  }, signal?: AbortSignal) =>
+    request<SearchResponse>("/api/v1/search", {
+      method: "POST",
+      body: JSON.stringify(b),
+      signal,
+    }),
+
+  // 知识宇宙：统计轮廓 + 有界激活
+  universeManifest: () => request<UniverseManifest>("/api/v1/universe/manifest"),
+  universeNode: (kind: "event" | "entity", id: string, sourceId?: string | null) => {
+    if (!sourceId) throw new ApiError(0, "missing_source", "知识星点缺少信息源上下文");
+    const query = `?source_id=${encodeURIComponent(sourceId)}`;
+    return request<UniverseNodeDetail>(`/api/v1/universe/nodes/${kind}/${id}${query}`);
+  },
+  universeExpand: (body: {
+    epoch: number;
+    source_id: string;
+    node_kind: "event" | "entity";
+    node_id: string;
+    limit?: number;
+    cursor?: string | null;
+    after?: string | null;
+    before?: string | null;
+  }, signal?: AbortSignal) =>
+    request<UniverseGraphPatch>("/api/v1/universe/expand", {
+      method: "POST",
+      body: JSON.stringify(body),
+      signal,
+    }),
+  universeActivate: (body: {
+    epoch: number;
+    source_id: string;
+    category?: string | null;
+    limit?: number;
+    cursor?: string | null;
+    after?: string | null;
+    before?: string | null;
+  }, signal?: AbortSignal) =>
+    request<UniverseActivationSeed>("/api/v1/universe/activate", {
+      method: "POST",
+      body: JSON.stringify(body),
+      signal,
+    }),
+  rebuildUniverse: (signal?: AbortSignal) =>
+    request<BackgroundJob>("/api/v1/universe/rebuild", { method: "POST", signal }),
+  getJob: (id: string, signal?: AbortSignal) =>
+    request<BackgroundJob>(`/api/v1/jobs/${id}`, { signal }),
+  listExplorations: (limit = 20) =>
+    request<ExplorationSession[]>(`/api/v1/universe/explorations?limit=${limit}`),
+  getExploration: (id: string) =>
+    request<ExplorationDetail>(`/api/v1/universe/explorations/${id}`),
 
   // 引用溯源：分块原文
   getChunk: (sourceId: string, chunkId: string) =>
@@ -256,7 +343,7 @@ export const api = {
       `/api/v1/sources/${sourceId}/chunks/${chunkId}`,
     ),
 
-  // 实体（图谱增强）
+  // 检索结果关联实体
   listEntities: (sid: string) => request<Entity[]>(`/api/v1/sources/${sid}/entities`),
   getSourceGraph: (sid: string) =>
     request<SourceGraphResponse>(`/api/v1/sources/${sid}/graph`),

@@ -152,6 +152,10 @@ export interface ModelSetupStatus {
   database_configured: boolean;
 }
 
+export interface SystemPreferences {
+  timezone: string;
+}
+
 export interface McpToolDetail {
   name: string;
   label: string;
@@ -239,6 +243,12 @@ export interface Message {
   created_at: string;
 }
 
+export interface MessagePage {
+  items: Message[];
+  next_cursor: string | null;
+  has_more: boolean;
+}
+
 export interface Entity {
   id: string;
   name: string;
@@ -320,7 +330,217 @@ export interface SearchResponse {
   events: SearchEvent[];
   entities: Entity[];
   relations: SourceGraphRelation[];
+  source_hits: SearchSourceHit[];
+  summary: string;
+  exploration_id: string | null;
   stats: Record<string, unknown>;
+}
+
+export interface SearchSourceHit {
+  source_id: string;
+  source_name: string | null;
+  event_hits: number;
+  max_score: number;
+  latest_event_time: string | null;
+}
+
+export type UniverseNodeKind = "event" | "entity";
+
+export interface UniversePartition {
+  id: string;
+  source_id: string;
+  parent_id: string | null;
+  kind: "source" | "topic";
+  key: string;
+  label: string;
+  x: number;
+  y: number;
+  z: number;
+  radius: number;
+  node_count: number;
+  event_count: number;
+  entity_count: number;
+  relation_count: number;
+  density: number;
+  time_buckets: Array<{ start: string; end: string; count: number }>;
+  importance: number;
+}
+
+export interface UniverseManifest {
+  version: string | null;
+  status: "empty" | "building" | "ready" | "stale" | "failed";
+  stale: boolean;
+  as_of: string | null;
+  bounds: {
+    min_x?: number;
+    min_y?: number;
+    min_z?: number;
+    max_x?: number;
+    max_y?: number;
+    max_z?: number;
+  };
+  partitions: UniversePartition[];
+  counts: {
+    sources?: number;
+    partitions?: number;
+    events?: number;
+    entities?: number;
+    nodes?: number;
+    relations?: number;
+  };
+  policy: UniversePolicy;
+}
+
+export interface UniversePolicy {
+  source_limit: number;
+  event_page_size: number;
+  event_page_max: number;
+  auto_page_limit: number;
+  lod_orbit_px: number;
+  lod_near_px: number;
+  lod_deep_px: number;
+  lod_hysteresis_px: number;
+  lod_debounce_ms: number;
+  proxy_budget_desktop: number;
+  proxy_budget_mobile: number;
+  node_budget_desktop: number;
+  node_budget_mobile: number;
+  edge_budget_desktop: number;
+  edge_budget_mobile: number;
+}
+
+export interface UniverseRelation {
+  source_id: string;
+  from_id: string;
+  to_id: string;
+  kind: "mentions" | "subevent";
+  weight: number;
+  description: string;
+}
+
+export interface UniverseEvidence {
+  source_id: string;
+  source_name: string;
+  document_id: string | null;
+  document_name: string | null;
+  chunk_id: string | null;
+  heading: string;
+  content: string;
+}
+
+export interface UniverseNodeDetail {
+  id: string;
+  kind: UniverseNodeKind;
+  source_id: string;
+  source_name: string;
+  label: string;
+  description: string;
+  category: string;
+  start_time: string | null;
+  evidence: UniverseEvidence | null;
+}
+
+export interface UniverseActivationNode {
+  id: string;
+  kind: UniverseNodeKind;
+  source_id?: string | null;
+  label: string;
+  description?: string;
+  category?: string;
+  chunk_id?: string | null;
+  importance?: number;
+  citation_numbers?: number[];
+  state?: "latent" | "active";
+}
+
+export interface UniverseActivation {
+  epoch?: number;
+  query: string;
+  nodes: UniverseActivationNode[];
+  relations: UniverseRelation[];
+  source_hits?: SearchSourceHit[];
+}
+
+export interface UniversePatchNode {
+  id: string;
+  kind: UniverseNodeKind;
+  source_id: string;
+  label: string;
+  description: string;
+  category: string;
+  chunk_id: string | null;
+  start_time: string | null;
+  importance: number;
+  state: "latent" | "active";
+}
+
+export interface UniverseGraphPatch {
+  epoch: number;
+  anchor: UniversePatchNode;
+  nodes: UniversePatchNode[];
+  relations: UniverseRelation[];
+  page: {
+    returned: number;
+    has_more: boolean;
+    next_cursor: string | null;
+  };
+  as_of: string | null;
+}
+
+export interface UniverseActivationSeed {
+  epoch: number;
+  source_id: string;
+  category: string | null;
+  nodes: UniversePatchNode[];
+  has_more: boolean;
+  page: {
+    returned: number;
+    has_more: boolean;
+    next_cursor: string | null;
+  };
+  as_of: string;
+}
+
+export interface BackgroundJob {
+  id: string;
+  type: string;
+  status: "queued" | "running" | "succeeded" | "failed";
+  source_id: string | null;
+  document_id: string | null;
+  progress: number;
+  attempts: number;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface ExplorationSession {
+  id: string;
+  title: string;
+  source_ids: string[];
+  created_at: string;
+  updated_at: string;
+  step_count: number;
+}
+
+export interface ExplorationStep {
+  id: string;
+  session_id: string;
+  query: string;
+  summary: string;
+  source_ids: string[];
+  event_refs: SearchEvent[];
+  entity_refs: Entity[];
+  relation_refs: SourceGraphRelation[];
+  evidence_refs: Array<Record<string, unknown>>;
+  camera: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ExplorationDetail {
+  session: ExplorationSession;
+  steps: ExplorationStep[];
 }
 
 export interface Capabilities {
@@ -336,4 +556,5 @@ export interface Capabilities {
   mineru_configured: boolean;
   max_upload_mb: number;
   allowed_upload_exts?: string[];
+  timezone: string;
 }

@@ -18,11 +18,13 @@ function sourceKey(citation: Citation): string {
   return citation.source_id || citation.source_name || `citation-${citation.n}`;
 }
 
-/** 常驻的紧凑来源入口；详情使用浮层，避免在每条消息下制造额外高度。 */
+/** 常驻的紧凑来源入口；默认打开全局详情，紧凑容器可接管为原位详情。 */
 export const CitationBlock = React.memo(function CitationBlock({
   citations,
+  onCitationClick,
 }: {
   citations: Citation[];
+  onCitationClick?: (citation: Citation) => void;
 }) {
   const panel = useDetailPanel();
   if (!citations?.length) return null;
@@ -65,6 +67,10 @@ export const CitationBlock = React.memo(function CitationBlock({
               disabled={!traceable}
               onSelect={() => {
                 if (!citation.chunk_id || !citation.source_id) return;
+                if (onCitationClick) {
+                  onCitationClick(citation);
+                  return;
+                }
                 panel.open({
                   kind: "chunk",
                   sourceId: citation.source_id,
