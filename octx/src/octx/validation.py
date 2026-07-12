@@ -58,8 +58,10 @@ _RECORD_SCHEMAS = {
     "chunk-events": ("relations/chunk-events.jsonl", "chunk-event.schema.json"),
     "event-entities": ("relations/event-entities.jsonl", "event-entity.schema.json"),
 }
+_MAJOR_MINOR = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
 _EXTENSION = re.compile(
-    r"^extensions/(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?/\d+\.\d+/.+"
+    rf"^extensions/(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+"
+    rf"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?/{_MAJOR_MINOR}/.+"
 )
 
 
@@ -924,8 +926,10 @@ def validate_octx(
     limits: ArchiveLimits | None = None,
     max_issues: int | None = None,
 ) -> ValidationReport:
-    if max_issues is not None and max_issues <= 0:
-        raise ValueError("max_issues must be positive")
+    if max_issues is not None and (
+        isinstance(max_issues, bool) or not isinstance(max_issues, int) or max_issues <= 0
+    ):
+        raise ValueError("max_issues must be a positive integer")
     selected_limits = limits or (
         package_or_source.limits if isinstance(package_or_source, OctxPackage) else ArchiveLimits()
     )

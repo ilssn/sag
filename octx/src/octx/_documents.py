@@ -128,3 +128,6 @@ def validate_reserved_document(data: bytes, *, path: str, max_depth: int = 100) 
     parsed = [date.fromisoformat(value) for value in headings]
     if parsed != sorted(parsed, reverse=True):
         raise ValueError(f"{path} date headings must be newest first")
+    sections = re.split(r"(?m)^##\s+\d{4}-\d{2}-\d{2}\s*$", body)[1:]
+    if any(re.search(r"(?m)^\s*[*+-]\s+\S", section) is None for section in sections):
+        raise ValueError(f"{path} date headings must each contain at least one log entry")

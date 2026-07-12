@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -40,10 +41,17 @@ class ArchiveLimits:
             "max_arrow_values",
             "max_issues",
         ):
-            if getattr(self, name) <= 0:
-                raise ValueError(f"{name} must be positive")
-        if self.max_compression_ratio <= 0:
-            raise ValueError("max_compression_ratio must be positive")
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError(f"{name} must be a positive integer")
+        ratio = self.max_compression_ratio
+        if (
+            isinstance(ratio, bool)
+            or not isinstance(ratio, (int, float))
+            or ratio <= 0
+            or (isinstance(ratio, float) and not math.isfinite(ratio))
+        ):
+            raise ValueError("max_compression_ratio must be positive and finite")
 
 
 @dataclass(frozen=True, slots=True)

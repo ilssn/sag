@@ -216,6 +216,8 @@ def _validate_workspace_tree(workspace: Path) -> None:
             metadata = _safe_lstat(candidate)
             if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
                 raise OctxSecurityError("workspace contains a linked or special file", path=str(candidate))
+            if metadata.st_nlink != 1:
+                raise OctxSecurityError("workspace hard links are not allowed", path=str(candidate))
 
 
 def _raise_walk_error(error: OSError) -> None:
@@ -519,6 +521,8 @@ def _payload_files(workspace: Path, limits: ArchiveLimits) -> list[tuple[str, Pa
             metadata = _safe_lstat(candidate)
             if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
                 raise ValueError(f"payload must be a regular file: {logical}")
+            if metadata.st_nlink != 1:
+                raise OctxSecurityError("payload hard links are not allowed", path=logical)
             size = metadata.st_size
             if size > limits.max_file_size:
                 raise OctxResourceLimitError("payload exceeds configured file size limit", path=logical)
@@ -543,6 +547,8 @@ def _hash_payload(path: Path, logical: str, limits: ArchiveLimits) -> tuple[str,
         metadata = os.fstat(descriptor)
         if not stat.S_ISREG(metadata.st_mode):
             raise OctxSecurityError("payload is no longer a regular file", path=logical)
+        if metadata.st_nlink != 1:
+            raise OctxSecurityError("payload hard links are not allowed", path=logical)
         with os.fdopen(descriptor, "rb") as stream:
             descriptor = -1
             while chunk := stream.read(1024 * 1024):
@@ -653,6 +659,8 @@ def _write_archive(
                 metadata = os.fstat(descriptor)
                 if not stat.S_ISREG(metadata.st_mode):
                     raise OctxSecurityError("payload is no longer a regular file", path=logical)
+                if metadata.st_nlink != 1:
+                    raise OctxSecurityError("payload hard links are not allowed", path=logical)
                 with os.fdopen(descriptor, "rb") as incoming, archive.open(info, "w", force_zip64=True) as outgoing:
                     descriptor = -1
                     while chunk := incoming.read(1024 * 1024):

@@ -58,7 +58,7 @@ def test_package_digest_ignores_archive_order_compression_and_timestamp(tmp_path
         "2026-07-12T10:00:60Z",
     ],
 )
-def test_created_at_requires_octx_rfc3339_utc_profile(tmp_path: Path, created_at: str) -> None:
+def test_created_at_requires_octx_rfc3339_utc_format(tmp_path: Path, created_at: str) -> None:
     package = _base_package(tmp_path)
 
     def mutate(manifest: dict) -> None:
@@ -188,6 +188,12 @@ def test_issue_limit_must_be_positive(tmp_path: Path) -> None:
         validate_octx(_base_package(tmp_path), max_issues=0)
 
 
+@pytest.mark.parametrize("max_issues", [True, 1.5])
+def test_issue_limit_must_be_an_integer(tmp_path: Path, max_issues: object) -> None:
+    with pytest.raises(ValueError, match="max_issues"):
+        validate_octx(_base_package(tmp_path), max_issues=max_issues)  # type: ignore[arg-type]
+
+
 def test_declared_missing_capability_file_does_not_invalidate_format(tmp_path: Path) -> None:
     package = _base_package(tmp_path)
 
@@ -310,6 +316,67 @@ def test_reserved_document_unhashable_yaml_key_returns_a_report(tmp_path: Path) 
 
     assert not report.format.valid
     assert "OCTX_OKF_RESERVED_INVALID" in report.issue_codes
+
+
+def test_okf_log_requires_an_entry_in_every_date_group(tmp_path: Path) -> None:
+    package = _base_package(tmp_path)
+
+    def add_log(manifest: dict) -> None:
+        manifest["files"].append({"path": "knowledge/log.md", "sha256": "0" * 64})
+
+    invalid = repack(
+        package,
+        tmp_path / "empty-log-group.octx",
+        replacements={"knowledge/log.md": b"# Update Log\n\n## 2026-07-12\n"},
+        mutate_manifest=add_log,
+    )
+
+    report = validate_octx(invalid)
+
+    assert not report.format.valid
+    assert "OCTX_OKF_RESERVED_INVALID" in report.issue_codes
+
+
+def test_okf_log_accepts_date_groups_with_entries(tmp_path: Path) -> None:
+    package = _base_package(tmp_path)
+
+    def add_log(manifest: dict) -> None:
+        manifest["files"].append({"path": "knowledge/log.md", "sha256": "0" * 64})
+
+    valid = repack(
+        package,
+        tmp_path / "valid-log.octx",
+        replacements={
+            "knowledge/log.md": (
+                b"# Update Log\n\n## 2026-07-12\n\n- Added the guide.\n\n"
+                b"## 2026-07-11\n\n- Created the package.\n"
+            )
+        },
+        mutate_manifest=add_log,
+    )
+
+    assert validate_octx(valid).format.valid
+
+
+@pytest.mark.parametrize("version", ["01.0", "1.00"])
+def test_extension_path_requires_a_canonical_major_minor_version(tmp_path: Path, version: str) -> None:
+    package = _base_package(tmp_path)
+    extension_path = f"extensions/com.example.vendor/{version}/payload.bin"
+
+    def add_extension(manifest: dict) -> None:
+        manifest["files"].append({"path": extension_path, "sha256": "0" * 64})
+
+    invalid = repack(
+        package,
+        tmp_path / f"extension-{version}.octx",
+        replacements={extension_path: b"extension"},
+        mutate_manifest=add_extension,
+    )
+
+    report = validate_octx(invalid)
+
+    assert not report.format.valid
+    assert "OCTX_PAYLOAD_PATH_UNSUPPORTED" in report.issue_codes
 
 
 def test_configured_json_depth_limit_applies_before_manifest_parsing(tmp_path: Path) -> None:

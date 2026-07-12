@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import stat
 import warnings
 import zipfile
@@ -279,6 +280,55 @@ def test_directory_reader_rejects_symlinks_even_when_unlisted(markdown_source: P
     (workspace / "unlisted-link").symlink_to(workspace / "knowledge" / "guide.md")
     with pytest.raises(OctxSecurityError):
         open_octx(workspace)
+
+
+def test_working_directory_rejects_hard_links_even_when_unlisted(
+    markdown_source: Path, tmp_path: Path
+) -> None:
+    workspace = tmp_path / "workspace"
+    create_octx(workspace, source=markdown_source, name="Guide", output=tmp_path / "guide.octx")
+    try:
+        (workspace / "unlisted-hardlink").hardlink_to(workspace / "knowledge" / "guide.md")
+    except OSError as error:
+        pytest.skip(f"hard links are unavailable: {error}")
+
+    with pytest.raises(OctxSecurityError, match="hard link"):
+        open_octx(workspace)
+    with pytest.raises(OctxSecurityError, match="hard link"):
+        create_octx(workspace, output=tmp_path / "rebuilt.octx")
+
+
+@pytest.mark.parametrize("attribute", ["manifest", "files", "available_paths"])
+def test_cached_package_views_reject_archive_replacement(
+    markdown_source: Path,
+    tmp_path: Path,
+    attribute: str,
+) -> None:
+    package_path = _valid_package(markdown_source, tmp_path)
+    package = open_octx(package_path)
+    replacement = tmp_path / "replacement.octx"
+    shutil.copyfile(package_path, replacement)
+    replacement.replace(package_path)
+    try:
+        with pytest.raises(OctxSecurityError, match="changed"):
+            getattr(package, attribute)
+    finally:
+        package.close()
+
+
+def test_cached_manifest_rejects_working_directory_manifest_change(
+    markdown_source: Path, tmp_path: Path
+) -> None:
+    _valid_package(markdown_source, tmp_path)
+    workspace = tmp_path / "workspace"
+    package = open_octx(workspace)
+    manifest = workspace / "manifest.json"
+    manifest.write_bytes(manifest.read_bytes() + b"\n")
+    try:
+        with pytest.raises(OctxSecurityError, match="manifest.json"):
+            _ = package.manifest
+    finally:
+        package.close()
 
 
 def test_create_rejects_workspace_parent_symlinks_before_copying(tmp_path: Path) -> None:

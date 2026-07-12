@@ -414,16 +414,19 @@ class OctxPackage:
     @property
     def manifest(self) -> dict[str, Any]:
         self._ensure_open()
+        self._verify_cached_view()
         return copy.deepcopy(self._manifest)
 
     @property
     def files(self) -> tuple[str, ...]:
         self._ensure_open()
+        self._verify_cached_view()
         return self._listed_paths
 
     @property
     def available_paths(self) -> frozenset[str]:
         self._ensure_open()
+        self._verify_cached_view()
         return self._available_paths
 
     def __enter__(self) -> OctxPackage:
@@ -451,6 +454,21 @@ class OctxPackage:
     def _ensure_open(self) -> None:
         if self._closed:
             raise ValueError("OCTX package is closed")
+
+    def _verify_cached_view(self) -> None:
+        self._verify_source_unchanged()
+        if self.source_kind != "directory":
+            return
+        manifest_entry = self._entries.get("manifest.json")
+        if manifest_entry is None:
+            return
+        manifest_path, expected_signature = manifest_entry
+        current = _safe_lstat(manifest_path, logical="manifest.json")
+        if not stat.S_ISREG(current.st_mode) or _file_signature(current) != expected_signature:
+            raise OctxSecurityError(
+                "working directory manifest.json changed after the Package was opened",
+                path="manifest.json",
+            )
 
     def _verify_source_unchanged(self) -> None:
         if self._source_signature is None:
@@ -1161,6 +1179,8 @@ def _scan_directory(
             path = logical_path(candidate.relative_to(source).as_posix())
             if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
                 raise OctxSecurityError("working directory contains a linked or special file", path=path)
+            if metadata.st_nlink != 1:
+                raise OctxSecurityError("working directory hard links are not allowed", path=path)
             count += 1
             if count > limits.max_entries:
                 raise OctxResourceLimitError("working directory entry count exceeds configured limit", path=str(source))

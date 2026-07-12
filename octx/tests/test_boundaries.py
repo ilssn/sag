@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import math
 import zipfile
 from pathlib import Path
 
@@ -24,6 +25,21 @@ def _base_package(tmp_path: Path) -> Path:
         name="Boundary Guide",
         output=tmp_path / "base.octx",
     ).output
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("max_entries", True),
+        ("max_entries", 1.5),
+        ("max_compression_ratio", True),
+        ("max_compression_ratio", math.nan),
+        ("max_compression_ratio", math.inf),
+    ],
+)
+def test_archive_limits_require_positive_finite_values(field: str, value: object) -> None:
+    with pytest.raises(ValueError, match=field):
+        ArchiveLimits(**{field: value})  # type: ignore[arg-type]
 
 
 def _structured_workspace(tmp_path: Path) -> Path:
