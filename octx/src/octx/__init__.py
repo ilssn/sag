@@ -2,7 +2,6 @@
 
 from octx.creation import create_octx
 from octx.errors import (
-    ConfirmationRequired,
     DerivationRequired,
     OctxError,
     OctxFormatError,
@@ -21,7 +20,6 @@ from octx.validation import validate_octx
 
 __all__ = [
     "ArchiveLimits",
-    "ConfirmationRequired",
     "CreateResult",
     "DerivationRequired",
     "Document",

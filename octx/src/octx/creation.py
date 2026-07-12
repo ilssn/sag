@@ -18,7 +18,6 @@ from octx._documents import derived_title, render_document, split_frontmatter, v
 from octx._paths import is_concept_path, logical_path
 from octx._strict import DuplicateKeyError, InvalidNumberError, loads_json, package_digest, pretty_json
 from octx.errors import (
-    ConfirmationRequired,
     DerivationRequired,
     OctxFormatError,
     OctxResourceLimitError,
@@ -401,51 +400,6 @@ def _copy_source(
                 metadata["octx"] = namespace
                 data = render_document(metadata, body)
         _atomic_write(destination, data)
-
-
-def _in_place_changes(workspace: Path, limits: ArchiveLimits) -> tuple[list[tuple[Path, Path]], list[str]]:
-    moves: list[tuple[Path, Path]] = []
-    changes: list[str] = []
-    knowledge = workspace / "knowledge"
-    for path in _walk_markdown(workspace, limits):
-        if path == knowledge or knowledge in path.parents or _STATE_PATH.parts[0] in path.relative_to(workspace).parts:
-            continue
-        relative = path.relative_to(workspace)
-        destination = knowledge / relative
-        if destination.exists():
-            raise FileExistsError(f"in-place destination already exists: {destination}")
-        moves.append((path, destination))
-        changes.append(f"move {relative.as_posix()} -> knowledge/{relative.as_posix()}")
-    candidates = [destination for _, destination in moves]
-    if knowledge.is_dir():
-        candidates.extend(knowledge.rglob("*.md"))
-    for path in candidates:
-        logical = "knowledge/" + path.relative_to(knowledge).as_posix()
-        data = (
-            _read_regular_file(path, logical, limits)
-            if path.exists()
-            else next(_read_regular_file(source, str(source), limits) for source, target in moves if target == path)
-        )
-        if is_concept_path(logical):
-            metadata, _ = split_frontmatter(data, path=logical, max_depth=limits.max_yaml_depth, required=False)
-            namespace = metadata.get("octx")
-            if (
-                "type" not in metadata
-                or "title" not in metadata
-                or not isinstance(namespace, dict)
-                or "document_id" not in namespace
-            ):
-                changes.append(f"complete frontmatter for {logical}")
-        else:
-            validate_reserved_document(data, path=logical, max_depth=limits.max_yaml_depth)
-    changes.extend(["write or update manifest.json", "write or update .octx/state.json"])
-    return moves, changes
-
-
-def _perform_in_place(workspace: Path, moves: list[tuple[Path, Path]]) -> None:
-    for source, destination in moves:
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(source, destination)
 
 
 def _prepare_documents(
@@ -861,14 +815,10 @@ def create_octx(
     source: os.PathLike[str] | str | None = None,
     name: str | None = None,
     version: str | None = None,
-    in_place: bool = False,
-    confirm_in_place: bool = False,
     derive: bool = False,
     capabilities: Mapping[str, str | Mapping[str, Any]] | None = None,
     limits: ArchiveLimits | None = None,
 ) -> CreateResult:
-    if source is not None and in_place:
-        raise ValueError("source and in_place are mutually exclusive")
     selected_limits = limits or ArchiveLimits()
     workspace_path = Path(workspace).expanduser().absolute()
     output_path = Path(output).expanduser().absolute()
@@ -885,7 +835,7 @@ def create_octx(
     _payload_files(workspace_path, selected_limits)
     state_exists = (workspace_path / _STATE_PATH).exists()
     if existing is not None and not state_exists and not derive:
-        if source_path is not None or in_place:
+        if source_path is not None:
             raise DerivationRequired("modifying an external Package requires explicit derive=True")
         return _external_repack(
             workspace_path,
@@ -981,12 +931,6 @@ def create_octx(
     if not preserve_unknown:
         if capabilities is None:
             declared_capabilities = _inherited_declarations(declared_capabilities)
-    moves: list[tuple[Path, Path]] = []
-    if in_place:
-        moves, changes = _in_place_changes(workspace_path, selected_limits)
-        if not confirm_in_place:
-            raise ConfirmationRequired("in-place creation requires explicit confirmation", changes)
-
     release_state = state["releases"].setdefault(selected_version, {})
     previous_release_state = copy.deepcopy(release_state)
     created_at = (
@@ -998,9 +942,7 @@ def create_octx(
     _save_state(workspace_path, state)
 
     try:
-        if in_place:
-            _perform_in_place(workspace_path, moves)
-        elif source_path is not None:
+        if source_path is not None:
             _copy_source(
                 source_path,
                 workspace_path,

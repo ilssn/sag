@@ -16,7 +16,6 @@
 | `ReleaseVersionError` | `OCTX_RELEASE_VERSION_REQUIRED` | 内容变化后沿用旧版本，或新版本没有向前移动。 |
 | `DerivationRequired` | `OCTX_DERIVATION_REQUIRED` | 修改外部 Package，却没有显式创建派生 Asset。 |
 | `OutputExistsError` | `OCTX_OUTPUT_EXISTS` | 输出路径已经存在另一份不可变 Package。 |
-| `ConfirmationRequired` | `OCTX_CONFIRMATION_REQUIRED` | `in_place` 需要调用方确认变更计划。 |
 
 ## 推荐处理方式
 

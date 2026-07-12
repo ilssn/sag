@@ -14,7 +14,6 @@ CLI 只暴露一个主命令：
 
 ```text
 octx create <workspace> --from <markdown-dir> --name <asset-name> -o <file.octx>
-octx create <directory> --in-place --name <asset-name> -o <file.octx>
 octx create <workspace> --version <semver> -o <file.octx>
 octx create <expanded-external-package> --derive -o <derived.octx>
 ```
@@ -44,7 +43,7 @@ octx create <expanded-external-package> --derive -o <derived.octx>
 
 如果普通 Markdown 来源中恰好存在不符合 OKF 导航或日志结构的 `index.md` 或 `log.md`，create 必须提示其为保留文件并要求用户重命名或修正，不能静默把它当作 Concept Document，也不能擅自改名破坏链接。
 
-`--in-place` 允许改造原目录。工具必须先显示将移动和修改的文件，并由用户明确选择；它不能成为默认路径。
+创建始终把源目录中的 Markdown 复制到 workspace，不提供原地移动模式，也不会移动、重命名或改写源文件。
 
 目标已经存在 Asset 身份时，create 必须复用，不能重新初始化或覆盖 ID。
 

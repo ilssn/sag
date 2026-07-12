@@ -1384,20 +1384,6 @@ button {
   line-height: 1.4;
 }
 
-.heading-anchor {
-  margin-left: 8px;
-  color: var(--border-strong);
-  font-size: 0.72em;
-  font-weight: 500;
-  opacity: 0;
-}
-
-.markdown-body h2:hover .heading-anchor,
-.markdown-body h3:hover .heading-anchor,
-.heading-anchor:focus {
-  opacity: 1;
-}
-
 .markdown-body p {
   margin: 0 0 18px;
 }

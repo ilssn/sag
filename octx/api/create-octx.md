@@ -12,8 +12,6 @@ def create_octx(
     source: os.PathLike[str] | str | None = None,
     name: str | None = None,
     version: str | None = None,
-    in_place: bool = False,
-    confirm_in_place: bool = False,
     derive: bool = False,
     capabilities: Mapping[str, str | Mapping[str, Any]] | None = None,
     limits: ArchiveLimits | None = None,
@@ -26,14 +24,14 @@ def create_octx(
 | --- | --- |
 | `workspace` | 可重复使用的生产目录，保存 `knowledge/`、`manifest.json` 和本地 `.octx/state.json`。 |
 | `output` | 要发布的 `.octx` 文件。已有不同内容时不会覆盖。 |
-| `source` | 复制进 workspace 的 Markdown 目录；原目录不会被修改。与 `in_place` 互斥。 |
+| `source` | 复制进 workspace 的 Markdown 目录；原目录不会被修改。 |
 | `name` | 首次创建 Asset 时必填；后续默认复用已保存名称。 |
 | `version` | Release 的 SemVer。首次默认 `1.0.0`；内容改变后必须提高版本。 |
-| `in_place` | 将 workspace 根目录中的 Markdown 整理进 `knowledge/`。 |
-| `confirm_in_place` | 明确确认 `in_place` 将执行的移动和 frontmatter 补全。 |
 | `derive` | 从展开的外部 Package 创建新 Asset，并记录 `asset.derived_from`。 |
 | `capabilities` | 显式声明能力，例如 `{"sag-structured": "0.1"}`；不会根据文件自动推断。 |
 | `limits` | 创建和校验期间使用的资源上限。 |
+
+`source` 始终采用复制语义。`create_octx()` 不会移动、重命名或改写源目录中的文件。
 
 ## 首次创建
 
@@ -105,4 +103,4 @@ derived = create_octx(
 
 返回 [`CreateResult`](./models-and-limits.md)，包含输出路径、workspace、Asset ID、Release 版本、创建时间、Package Digest、Document ID 映射和完整 `ValidationReport`。
 
-创建失败时不会发布半成品到 `output`。常见异常包括 `ReleaseVersionError`、`DerivationRequired`、`OutputExistsError`、`ConfirmationRequired` 和 `OctxValidationError`。
+创建失败时不会发布半成品到 `output`。常见异常包括 `ReleaseVersionError`、`DerivationRequired`、`OutputExistsError` 和 `OctxValidationError`。

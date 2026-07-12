@@ -6,13 +6,11 @@ from pathlib import Path
 
 import pytest
 import yaml
-from conftest import concept_markdown
 
 import octx.creation as creation_module
 from octx import ArchiveLimits, create_octx, open_octx, unpack_octx, validate_octx
 from octx._strict import package_digest
 from octx.errors import (
-    ConfirmationRequired,
     DerivationRequired,
     OctxFormatError,
     OctxValidationError,
@@ -154,28 +152,6 @@ def test_output_created_during_publish_is_not_overwritten(
         create_octx(tmp_path / "workspace", source=markdown_source, name="Guide", output=output)
 
     assert output.read_bytes() == b"competing publisher"
-
-
-def test_in_place_requires_explicit_confirmation(tmp_path: Path) -> None:
-    workspace = tmp_path / "content"
-    workspace.mkdir()
-    (workspace / "guide.md").write_text("# Guide\n\nText.\n", encoding="utf-8")
-
-    with pytest.raises(ConfirmationRequired) as error:
-        create_octx(workspace, in_place=True, name="Guide", output=tmp_path / "guide.octx")
-    assert error.value.changes
-    assert (workspace / "guide.md").is_file()
-
-    result = create_octx(
-        workspace,
-        in_place=True,
-        confirm_in_place=True,
-        name="Guide",
-        output=tmp_path / "guide.octx",
-    )
-    assert result.report.valid
-    assert not (workspace / "guide.md").exists()
-    assert (workspace / "knowledge" / "guide.md").is_file()
 
 
 def test_invalid_reserved_index_is_not_silently_rewritten(tmp_path: Path) -> None:
@@ -502,19 +478,6 @@ def test_output_cannot_replace_a_managed_workspace_file(markdown_source: Path, t
             output=workspace / "manifest.json",
         )
 
-    assert not (workspace / "manifest.json").exists()
-
-
-def test_in_place_always_requires_explicit_confirmation(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    knowledge = workspace / "knowledge"
-    knowledge.mkdir(parents=True)
-    (knowledge / "guide.md").write_text(concept_markdown(), encoding="utf-8")
-
-    with pytest.raises(ConfirmationRequired) as captured:
-        create_octx(workspace, in_place=True, name="Guide", output=tmp_path / "guide.octx")
-
-    assert "write or update manifest.json" in captured.value.changes
     assert not (workspace / "manifest.json").exists()
 
 

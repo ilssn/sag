@@ -10,7 +10,7 @@ import yaml
 
 from octx._paths import is_concept_path
 from octx.creation import create_octx
-from octx.errors import ConfirmationRequired, OctxError, OctxValidationError
+from octx.errors import OctxError, OctxValidationError
 from octx.package import open_octx
 from octx.unpack import unpack_octx
 from octx.validation import validate_octx
@@ -58,10 +58,7 @@ def _parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
 
     create = subparsers.add_parser("create", help="create an immutable .octx Package", json_errors=json_errors)
     create.add_argument("workspace")
-    source_mode = create.add_mutually_exclusive_group()
-    source_mode.add_argument("--from", dest="source")
-    source_mode.add_argument("--in-place", action="store_true")
-    create.add_argument("--yes", action="store_true", help="confirm a displayed in-place change plan")
+    create.add_argument("--from", dest="source")
     create.add_argument("--derive", action="store_true", help="create a new Asset from an expanded external Package")
     create.add_argument("--name")
     create.add_argument("--version")
@@ -88,27 +85,13 @@ def _create(args: argparse.Namespace) -> int:
     options = {
         "workspace": args.workspace,
         "source": args.source,
-        "in_place": args.in_place,
         "derive": args.derive,
         "name": args.name,
         "version": args.version,
         "capabilities": _declarations(args.capability),
         "output": args.output,
     }
-    try:
-        result = create_octx(**options, confirm_in_place=args.yes)
-    except ConfirmationRequired as error:
-        if args.json:
-            raise
-        print("The following changes will be made:", file=sys.stderr)
-        for change in error.changes:
-            print(f"  - {change}", file=sys.stderr)
-        if not sys.stdin.isatty():
-            print("rerun with --yes to confirm", file=sys.stderr)
-            return 2
-        if input("Continue? [y/N] ").strip().lower() not in {"y", "yes"}:
-            return 2
-        result = create_octx(**options, confirm_in_place=True)
+    result = create_octx(**options)
     if args.json:
         print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
     else:
@@ -191,8 +174,6 @@ def _json_error(error: Exception) -> dict[str, Any]:
     result: dict[str, Any] = {"error": detail}
     if isinstance(error, OctxValidationError):
         result["validation"] = error.report.to_dict()
-    if isinstance(error, ConfirmationRequired):
-        result["changes"] = list(error.changes)
     return result
 
 

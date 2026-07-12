@@ -1,7 +1,6 @@
 import { isValidElement, type ReactNode } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
-import rehypeAutolinkHeadings from "rehype-autolink-headings";
 import rehypeSlug from "rehype-slug";
 import remarkGfm from "remark-gfm";
 import { ExternalLink } from "lucide-react";
@@ -65,17 +64,7 @@ export function DocContent({ markdown }: { markdown: string }) {
     <div className="markdown-body">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[
-          rehypeSlug,
-          [
-            rehypeAutolinkHeadings,
-            {
-              behavior: "append",
-              properties: { className: ["heading-anchor"], "aria-label": "本节链接" },
-              content: { type: "text", value: "#" },
-            },
-          ],
-        ]}
+        rehypePlugins={[rehypeSlug]}
         components={{
           pre({ children }) {
             const { text, language } = codeText(children);

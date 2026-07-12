@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -68,11 +67,3 @@ class DerivationRequired(OctxError):
 
 class OutputExistsError(OctxError):
     code = "OCTX_OUTPUT_EXISTS"
-
-
-class ConfirmationRequired(OctxError):
-    code = "OCTX_CONFIRMATION_REQUIRED"
-
-    def __init__(self, message: str, changes: Sequence[str]) -> None:
-        super().__init__(message)
-        self.changes = tuple(changes)
