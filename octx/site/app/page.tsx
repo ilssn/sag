@@ -66,9 +66,9 @@ export default function HomePage() {
         <div className="hero-grid" aria-hidden="true" />
         <div className="hero-content">
           <p className="hero-eyebrow">
-            <span /> OPEN CONTEXT ASSET FORMAT
+            <span /> OCTX
           </p>
-          <h1>OCTX</h1>
+          <h1>Open Context</h1>
           <h2>
             让上下文成为可以传播的<span>资产。</span>
           </h2>
@@ -84,7 +84,7 @@ export default function HomePage() {
               查看 v1 规范
             </Link>
           </div>
-          <div className="hero-facts" aria-label="OCTX 核心事实">
+          <div className="hero-facts" aria-label="Open Context 核心事实">
             <span>
               <Check size={15} aria-hidden="true" /> OKF compatible
             </span>
@@ -111,7 +111,7 @@ export default function HomePage() {
 
       <section className="meaning-section">
         <div className="meaning-intro">
-          <p>为什么需要 OCTX</p>
+          <p>为什么需要 Open Context</p>
           <h2>文档会传播，提取后的上下文也应该传播。</h2>
         </div>
         <div className="meaning-copy">
@@ -120,7 +120,8 @@ export default function HomePage() {
             文件离开系统，结构就消失了。
           </p>
           <p>
-            OCTX 把这些成果提升为独立资产。生产者可以发布，接收者可以检查、安装、升级和追溯，Agent 则可以直接进入正常检索路径。
+            Open Context 把这些成果提升为独立资产。生产者可以发布，接收者可以检查、安装、升级和追溯，Agent
+            则可以直接进入正常检索路径。
           </p>
         </div>
       </section>
@@ -149,7 +150,7 @@ export default function HomePage() {
           <p>从创建到召回</p>
           <h2>同一个 Package，连接生产者与消费者。</h2>
         </div>
-        <div className="flow-line" aria-label="OCTX 生命周期">
+        <div className="flow-line" aria-label="Open Context 生命周期">
           <span>
             <FileText size={18} aria-hidden="true" /> Markdown / OKF
           </span>

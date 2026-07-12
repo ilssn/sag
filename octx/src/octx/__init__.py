@@ -1,4 +1,4 @@
-"""Reference implementation of the Open Context Asset Format."""
+"""Reference implementation for Open Context."""
 
 from octx.creation import create_octx
 from octx.errors import (

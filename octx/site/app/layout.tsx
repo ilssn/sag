@@ -4,16 +4,18 @@ import { SiteHeader } from "@/components/site-header";
 import { getSearchItems } from "@/lib/docs";
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://open-context.ai"),
   title: {
-    default: "OCTX · Open Context Asset Format",
-    template: "%s · OCTX",
+    default: "Open Context",
+    template: "%s · Open Context",
   },
-  description: "可创建、传播、校验并直接复用的开放上下文资产格式。",
-  keywords: ["OCTX", "Open Context Asset Format", "Agent Context", "SAG", "OKF"],
+  description: "让上下文成为可创建、传播、校验并直接复用的开放资产。",
+  keywords: ["Open Context", "OCTX", "Agent Context", "SAG", "OKF"],
   icons: { icon: "/octx-mark.svg" },
   openGraph: {
-    title: "OCTX · Open Context Asset Format",
+    title: "Open Context",
     description: "Build context once. Carry its meaning everywhere.",
+    siteName: "Open Context",
     type: "website",
   },
 };

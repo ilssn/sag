@@ -15,10 +15,10 @@ export function SiteHeader({ searchItems }: { searchItems: SearchItem[] }) {
   return (
     <header className="site-header">
       <div className="header-primary">
-        <Link className="brand" href="/" aria-label="OCTX 首页">
+        <Link className="brand" href="/" aria-label="Open Context 首页">
           <Image src="/octx-mark.svg" alt="" width={28} height={28} priority />
-          <span>OCTX</span>
-          <small>Open Context Asset Format</small>
+          <span>Open Context</span>
+          <small>OCTX</small>
         </Link>
 
         <div className="header-search desktop-only">

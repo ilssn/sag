@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "octx"
 version = "0.1.0"
-description = "Reference implementation of the Open Context Asset Format"
+description = "Reference implementation for Open Context"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }

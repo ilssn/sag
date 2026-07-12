@@ -1,8 +1,8 @@
-# OCTX
+# Open Context
 
-OCTX（Open Context Asset Format）是一种建立在 Google Open Knowledge Format（OKF）之上的开放上下文资产格式。它把可读 Markdown、稳定身份、版本、完整性信息及可选的 chunks、events、entities、关系和向量封装为可传播的 `.octx` Package。
+Open Context（简称 OCTX）是一种建立在 Google Open Knowledge Format（OKF）之上的开放上下文标准。它把可读 Markdown、稳定身份、版本、完整性信息及可选的 chunks、events、entities、关系和向量封装为可传播的 `.octx` Package。
 
-OCTX 由 SAG 首先实现，但规范和参考工具不依赖 SAG、`zleap-sag`、特定数据库或向量后端。
+Open Context 由 SAG 首先实现，但规范和参考工具不依赖 SAG、`zleap-sag`、特定数据库或向量后端。
 
 ## 阅读顺序
 
@@ -58,7 +58,7 @@ octx unpack ./product-guide.octx ./product-guide-expanded
 
 ## 官网与文档站
 
-独立网站位于 `site/`。它直接发布本目录中的完整规范、Python API、Schema 和词汇表，不依赖 SAG 项目的应用代码。
+官网域名是 [open-context.ai](https://open-context.ai)。独立网站源码位于 `site/`，直接发布本目录中的完整规范、Python API、Schema 和词汇表，不依赖 SAG 项目的应用代码。
 
 ## v1 核心
 

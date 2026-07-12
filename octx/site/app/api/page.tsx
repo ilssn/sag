@@ -5,8 +5,8 @@ import { DocsShell } from "@/components/docs-shell";
 import { getAdjacentDocs, getDoc } from "@/lib/docs";
 
 export const metadata: Metadata = {
-  title: "Python API",
-  description: "使用 OCTX Python API 与 CLI 创建、打开、校验和安全解包 Package。",
+  title: "Open Context Python API",
+  description: "使用 Open Context Python API 与 CLI 创建、打开、校验和安全解包 Package。",
 };
 
 export default function ApiPage() {

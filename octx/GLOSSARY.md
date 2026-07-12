@@ -1,4 +1,4 @@
-# OCTX 领域词汇表
+# Open Context 领域词汇表
 
 本文统一 OCTX 及其与 SAG、zleap-sag 集成时使用的领域语言。
 
@@ -35,7 +35,7 @@ _Avoid_: zleap-sag Python API、公共云 API
 ## OCTX 术语
 
 **OCTX 格式（OCTX Format）**:
-全称 Open Context Asset Format，发布文件扩展名为 `.octx`。它是建立在 OKF 知识内容之上的开放、厂商中立上下文资产封装与派生数据标准，增加身份、版本、完整性、安装语义及可选索引层；SAG 与 zleap-sag 是生产者和消费者，但不是使用前提。OCTX 不定义搜索 API、召回算法或 Agent 协议。
+OCTX 是 Open Context 的简称与技术标识，发布文件扩展名为 `.octx`。它是建立在 OKF 知识内容之上的开放、厂商中立上下文资产封装与派生数据标准，增加身份、版本、完整性、安装语义及可选索引层；SAG 与 zleap-sag 是生产者和消费者，但不是使用前提。OCTX 不定义搜索 API、召回算法或 Agent 协议。
 _Avoid_: OKF 竞争格式、SAG 专有格式、数据库备份格式、zleap-sag 存储格式
 
 **OCTX 参考工具链（OCTX Reference Tooling）**:

@@ -4,7 +4,7 @@
 
 ## 1. 范围
 
-OCTX（Open Context Asset Format）把一个可版本化知识资产发布为不可变、自包含、可校验的 Package。Package 可以只包含人和 Agent 可直接阅读的 OKF Markdown，也可以声明标准 Capability 携带派生结构与向量。
+Open Context（简称 OCTX）把一个可版本化知识资产发布为不可变、自包含、可校验的 Package。Package 可以只包含人和 Agent 可直接阅读的 OKF Markdown，也可以声明标准 Capability 携带派生结构与向量。
 
 OCTX Core 负责：
 

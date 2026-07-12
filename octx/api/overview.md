@@ -1,6 +1,6 @@
-# OCTX Python API
+# Open Context Python API
 
-`octx` 是 OCTX 格式的独立 Python 参考实现。它负责创建、打开、校验和安全解包 `.octx` Package，不依赖 SAG、数据库或检索后端。
+`octx` 是 Open Context 的独立 Python 参考实现。它负责创建、打开、校验和安全解包 `.octx` Package，不依赖 SAG、数据库或检索后端。
 
 ## 安装
 

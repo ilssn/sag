@@ -29,8 +29,8 @@ const CONTENT_ROOT = path.resolve(process.cwd(), "..");
 const DOCUMENTS = [
   {
     slug: "introduction",
-    title: "什么是 OCTX？",
-    description: "OCTX 的完整含义、核心价值与文档入口。",
+    title: "什么是 Open Context？",
+    description: "Open Context 的核心价值、技术简称与文档入口。",
     group: "开始",
     section: "docs",
     href: "/docs/introduction",
@@ -74,7 +74,7 @@ const DOCUMENTS = [
   },
   {
     slug: "glossary",
-    title: "OCTX 领域词汇表",
+    title: "Open Context 领域词汇表",
     description: "OCTX、SAG 与 zleap-sag 的统一领域语言。",
     group: "参考",
     section: "docs",
@@ -83,7 +83,7 @@ const DOCUMENTS = [
   },
   {
     slug: "api-overview",
-    title: "OCTX Python API",
+    title: "Open Context Python API",
     description: "安装 octx，了解公开入口、调用顺序与最小使用示例。",
     group: "入门",
     section: "api",

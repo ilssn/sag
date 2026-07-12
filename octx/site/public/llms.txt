@@ -1,6 +1,6 @@
-# OCTX documentation
+# Open Context documentation
 
-> Open Context Asset Format: portable, verifiable context assets for people, agents, and knowledge systems.
+> Portable, verifiable context assets for people, agents, and knowledge systems.
 
 - [Introduction](/docs/introduction/)
 - [OCTX Core v1](/docs/core/)

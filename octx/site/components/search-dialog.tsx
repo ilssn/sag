@@ -60,7 +60,7 @@ export function SearchDialog({ items, compact = false }: Props) {
         className={compact ? "icon-button" : "search-trigger"}
         type="button"
         onClick={() => setOpen(true)}
-        aria-label="搜索 OCTX 文档"
+        aria-label="搜索 Open Context 文档"
         title="搜索文档"
       >
         <Search size={17} aria-hidden="true" />
@@ -74,7 +74,7 @@ export function SearchDialog({ items, compact = false }: Props) {
             className="search-panel"
             role="dialog"
             aria-modal="true"
-            aria-label="搜索 OCTX 文档"
+            aria-label="搜索 Open Context 文档"
             onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="search-input-row">

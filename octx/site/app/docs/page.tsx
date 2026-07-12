@@ -6,7 +6,7 @@ import { getAdjacentDocs, getDoc } from "@/lib/docs";
 
 export const metadata: Metadata = {
   title: "文档",
-  description: "OCTX 的完整文档入口。",
+  description: "Open Context 的完整文档入口。",
 };
 
 export default function DocsIndexPage() {

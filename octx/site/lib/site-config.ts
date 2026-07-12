@@ -14,7 +14,7 @@ export const DOC_NAV: NavGroup[] = [
     title: "开始",
     items: [
       {
-        title: "什么是 OCTX？",
+        title: "什么是 Open Context？",
         href: "/docs/introduction",
         description: "格式定位、核心价值与阅读入口",
       },

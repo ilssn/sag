@@ -31,9 +31,9 @@ const coreDocuments = [
 ];
 
 const indexLines = [
-  "# OCTX documentation",
+  "# Open Context documentation",
   "",
-  "> Open Context Asset Format: portable, verifiable context assets for people, agents, and knowledge systems.",
+  "> Portable, verifiable context assets for people, agents, and knowledge systems.",
   "",
   ...coreDocuments.map(([title, , href]) => `- [${title}](${href})`),
   "- [JSON Schemas](/docs/schemas/)",
@@ -50,6 +50,6 @@ for (const [title, file] of coreDocuments) {
 
 await writeFile(
   path.join(publicRoot, "llms-full.txt"),
-  `# OCTX complete documentation${fullSections.join("")}\n`,
+  `# Open Context complete documentation${fullSections.join("")}\n`,
   "utf8",
 );

@@ -4,8 +4,8 @@ export function SiteFooter() {
   return (
     <footer className="site-footer">
       <div>
-        <strong>OCTX</strong>
-        <span>Open Context Asset Format</span>
+        <strong>Open Context</strong>
+        <span>OCTX · open-context.ai</span>
       </div>
       <nav aria-label="页脚导航">
         <Link href="/docs/introduction">文档</Link>

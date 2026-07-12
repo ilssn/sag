@@ -51,7 +51,7 @@ class _ArgumentParser(argparse.ArgumentParser):
 def _parser(*, json_errors: bool = False) -> argparse.ArgumentParser:
     parser = _ArgumentParser(
         prog="octx",
-        description="Open Context Asset Format reference tooling",
+        description="Open Context reference tooling",
         json_errors=json_errors,
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
