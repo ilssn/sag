@@ -64,12 +64,67 @@ export const DOC_NAV: NavGroup[] = [
 
 export const API_NAV: NavGroup[] = [
   {
-    title: "Python 包",
+    title: "入门",
     items: [
       {
-        title: "Python API",
+        title: "API 概览",
         href: "/api",
-        description: "安装、创建、读取、校验与 CLI",
+        description: "安装、调用顺序与公开入口",
+      },
+    ],
+  },
+  {
+    title: "核心函数",
+    items: [
+      {
+        title: "create_octx()",
+        href: "/api/create-octx",
+        description: "创建 Package 与发布 Release",
+      },
+      {
+        title: "open_octx()",
+        href: "/api/open-octx",
+        description: "安全打开只读 Package",
+      },
+      {
+        title: "validate_octx()",
+        href: "/api/validate-octx",
+        description: "完整校验并返回报告",
+      },
+      {
+        title: "unpack_octx()",
+        href: "/api/unpack-octx",
+        description: "校验后安全展开",
+      },
+    ],
+  },
+  {
+    title: "读取与模型",
+    items: [
+      {
+        title: "OctxPackage",
+        href: "/api/octx-package",
+        description: "读取 Markdown、JSONL 与向量",
+      },
+      {
+        title: "数据模型与限制",
+        href: "/api/models-and-limits",
+        description: "结果对象、报告与 ArchiveLimits",
+      },
+    ],
+  },
+  {
+    title: "命令行与错误",
+    items: [
+      {
+        title: "CLI",
+        href: "/api/cli",
+        description: "create、inspect、validate、unpack",
+      },
+      {
+        title: "错误处理",
+        href: "/api/errors",
+        description: "异常层级、错误码与处理方式",
       },
     ],
   },

@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 };
 
 export default function ApiPage() {
-  const doc = getDoc("python-api")!;
+  const doc = getDoc("api-overview")!;
   const adjacent = getAdjacentDocs(doc.slug);
 
   return (

@@ -18,7 +18,15 @@ const coreDocuments = [
   ["OCTX Core v1", "spec-v1.md", "/docs/core/"],
   ["SAG-structured Profile 1.0", "sag-structured-v1.md", "/docs/sag-structured/"],
   ["Tooling and lifecycle", "tooling-lifecycle.md", "/docs/tooling/"],
-  ["Python API", "python-api.md", "/api/"],
+  ["Python API overview", "api/overview.md", "/api/"],
+  ["create_octx()", "api/create-octx.md", "/api/create-octx/"],
+  ["open_octx()", "api/open-octx.md", "/api/open-octx/"],
+  ["validate_octx()", "api/validate-octx.md", "/api/validate-octx/"],
+  ["unpack_octx()", "api/unpack-octx.md", "/api/unpack-octx/"],
+  ["OctxPackage", "api/octx-package.md", "/api/octx-package/"],
+  ["Models and limits", "api/models-and-limits.md", "/api/models-and-limits/"],
+  ["CLI", "api/cli.md", "/api/cli/"],
+  ["Error handling", "api/errors.md", "/api/errors/"],
   ["Glossary", "GLOSSARY.md", "/docs/glossary/"],
 ];
 

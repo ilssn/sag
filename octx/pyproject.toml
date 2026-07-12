@@ -53,7 +53,7 @@ include = [
   "/README.md",
   "/GLOSSARY.md",
   "/LICENSE",
-  "/python-api.md",
+  "/api",
   "/sag-structured-v1.md",
   "/spec-v1.md",
   "/tooling-lifecycle.md",

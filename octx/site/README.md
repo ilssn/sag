@@ -1,6 +1,6 @@
 # OCTX Website
 
-OCTX 的独立官网与完整文档站。网站不依赖 SAG 应用，只在构建时读取上一级 `octx/` 目录中的公开规范、Python API、Schema 和词汇表。
+OCTX 的独立官网与完整文档站。网站不依赖 SAG 应用，只在构建时读取上一级 `octx/` 目录中的公开规范、分页面 Python API、Schema 和词汇表。
 
 ## 本地运行
 
