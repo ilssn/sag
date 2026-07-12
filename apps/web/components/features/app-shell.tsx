@@ -330,7 +330,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setWindowMode(readWindowMode());
     setWindowSize(readWindowSize());
     setPanelMode(/^\/chat\/[^/]+/.test(pathname) ? "normal" : readWorkspacePanel());
-    setWorkspaceSection(workspaceSectionFromPathname(pathname) ?? readWorkspaceSection());
+    setWorkspaceSection(readWorkspaceSection());
   }, [pathname]);
   const toggleWindowMode = React.useCallback(() => {
     setWindowMode((m) => {
