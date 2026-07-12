@@ -102,85 +102,127 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="architecture-section">
+      <section id="architecture" className="architecture-section">
         <div className="section-heading">
           <p>基础架构</p>
-          <h2>从 OCTX 文件，到人获得知识。</h2>
+          <h2>统一的上下文格式，连接知识资产与智能应用。</h2>
           <span>
-            OCTX 位于知识流的基础层。知识库负责导入和检索，Agent 把召回结果带入上下文，人通过 Agent
-            获得知识。
+            OCTX 作为标准化交换层，将可传播的知识资产交付给知识库系统；知识库完成导入与检索，Agent
+            将召回结果注入运行上下文，最终支持人的知识获取与决策。
           </span>
         </div>
 
         <div className="architecture-diagram" aria-label="Open Context 四层基础架构">
-          <article className="architecture-layer architecture-human">
-            <span className="architecture-layer-number">04</span>
-            <span className="architecture-layer-icon">
-              <UserRound size={23} aria-hidden="true" />
+          <div className="architecture-diagram-header">
+            <span>OPEN CONTEXT / REFERENCE ARCHITECTURE</span>
+            <span>
+              <i aria-hidden="true" /> 知识流向 <ArrowUp size={14} aria-hidden="true" />
             </span>
-            <div className="architecture-layer-copy">
-              <h3>人</h3>
-              <p>用自然语言提出问题，通过 Agent 获取知识与答案。</p>
-            </div>
-            <strong>获取知识</strong>
-          </article>
-
-          <div className="architecture-connector" aria-hidden="true">
-            <ArrowUp size={18} />
-            <span>回答 / 交付</span>
           </div>
 
-          <article className="architecture-layer architecture-agent">
-            <span className="architecture-layer-number">03</span>
-            <span className="architecture-layer-icon">
-              <Bot size={23} aria-hidden="true" />
-            </span>
-            <div className="architecture-layer-copy">
-              <h3>Agent</h3>
-              <p>自动检索知识库，把召回结果写入当前上下文后完成回答。</p>
-            </div>
-            <strong>使用上下文</strong>
-          </article>
+          <div className="architecture-stack">
+            <article className="architecture-layer architecture-human">
+              <div className="architecture-layer-key">
+                <span className="architecture-layer-number">04</span>
+                <span className="architecture-layer-icon">
+                  <UserRound size={23} aria-hidden="true" />
+                </span>
+              </div>
+              <div className="architecture-layer-copy">
+                <span>交互层</span>
+                <h3>人</h3>
+                <p>以自然语言提出问题，通过 Agent 获取经过知识支撑的答案。</p>
+              </div>
+              <div className="architecture-layer-role">
+                <span>OUTCOME</span>
+                <strong>知识与决策</strong>
+              </div>
+            </article>
 
-          <div className="architecture-connector" aria-hidden="true">
-            <ArrowUp size={18} />
-            <span>检索 / 召回</span>
+            <div className="architecture-connector" aria-hidden="true">
+              <span>
+                <ArrowUp size={14} /> 回答与交付
+              </span>
+            </div>
+
+            <article className="architecture-layer architecture-agent">
+              <div className="architecture-layer-key">
+                <span className="architecture-layer-number">03</span>
+                <span className="architecture-layer-icon">
+                  <Bot size={23} aria-hidden="true" />
+                </span>
+              </div>
+              <div className="architecture-layer-copy">
+                <span>智能应用层</span>
+                <h3>Agent</h3>
+                <p>自动检索知识库，把召回结果写入当前上下文后完成回答。</p>
+              </div>
+              <div className="architecture-layer-role">
+                <span>RUNTIME</span>
+                <strong>上下文注入</strong>
+              </div>
+            </article>
+
+            <div className="architecture-connector" aria-hidden="true">
+              <span>
+                <ArrowUp size={14} /> 检索与召回
+              </span>
+            </div>
+
+            <article className="architecture-layer architecture-knowledge">
+              <div className="architecture-layer-key">
+                <span className="architecture-layer-number">02</span>
+                <span className="architecture-layer-icon">
+                  <Database size={23} aria-hidden="true" />
+                </span>
+              </div>
+              <div className="architecture-layer-copy">
+                <span>知识系统层</span>
+                <h3>知识库程序</h3>
+                <p>
+                  例如
+                  <Link className="home-doc-link" href="/docs/sag">
+                    SAG
+                  </Link>
+                  ，读取 OCTX，将知识写入数据库并建立检索索引。
+                </p>
+              </div>
+              <div className="architecture-layer-role">
+                <span>SYSTEM</span>
+                <strong>导入 · 索引 · 检索</strong>
+              </div>
+            </article>
+
+            <div className="architecture-connector" aria-hidden="true">
+              <span>
+                <ArrowUp size={14} /> 导入与安装
+              </span>
+            </div>
+
+            <article className="architecture-layer architecture-file">
+              <div className="architecture-layer-key">
+                <span className="architecture-layer-number">01</span>
+                <span className="architecture-layer-icon">
+                  <FileArchive size={23} aria-hidden="true" />
+                </span>
+              </div>
+              <div className="architecture-layer-copy">
+                <span>资产与交换层</span>
+                <h3>OCTX 文件</h3>
+                <p>携带 Markdown、Chunk、Event、Entity、关系和可选向量的开放上下文资产。</p>
+              </div>
+              <div className="architecture-layer-role">
+                <span>FORMAT</span>
+                <strong>封装 · 校验 · 传播</strong>
+              </div>
+            </article>
           </div>
 
-          <article className="architecture-layer architecture-knowledge">
-            <span className="architecture-layer-number">02</span>
-            <span className="architecture-layer-icon">
-              <Database size={23} aria-hidden="true" />
-            </span>
-            <div className="architecture-layer-copy">
-              <h3>知识库程序</h3>
-              <p>
-                例如
-                <Link className="home-doc-link" href="/docs/sag">
-                  SAG
-                </Link>
-                ，读取 OCTX，将知识写入数据库并建立检索索引。
-              </p>
-            </div>
-            <strong>管理与检索</strong>
-          </article>
-
-          <div className="architecture-connector" aria-hidden="true">
-            <ArrowUp size={18} />
-            <span>导入 / 安装</span>
+          <div className="architecture-diagram-footer" aria-label="架构原则">
+            <span>开放格式</span>
+            <span>可替换实现</span>
+            <span>标准化流转</span>
           </div>
-
-          <article className="architecture-layer architecture-file">
-            <span className="architecture-layer-number">01</span>
-            <span className="architecture-layer-icon">
-              <FileArchive size={23} aria-hidden="true" />
-            </span>
-            <div className="architecture-layer-copy">
-              <h3>OCTX 文件</h3>
-              <p>携带 Markdown、Chunk、Event、Entity、关系和可选向量的开放上下文资产。</p>
-            </div>
-            <strong>可传播资产</strong>
-          </article>
         </div>
       </section>
 

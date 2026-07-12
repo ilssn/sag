@@ -606,20 +606,86 @@ button {
 
 .architecture-diagram {
   width: 100%;
-  border-top: 1px solid var(--border-strong);
-  border-bottom: 1px solid var(--border-strong);
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.architecture-diagram-header,
+.architecture-diagram-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 48px;
+  padding: 0 24px;
+  color: var(--ink-faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.architecture-diagram-header {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-muted);
+}
+
+.architecture-diagram-header > span:last-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--green);
+}
+
+.architecture-diagram-header i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--green-bright);
+  box-shadow: 0 0 0 4px var(--green-soft);
+}
+
+.architecture-stack {
+  padding: 34px 34px 30px;
+  background-color: var(--surface);
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 32px 32px;
+  background-position: -1px -1px;
 }
 
 .architecture-layer {
+  position: relative;
   display: grid;
-  grid-template-columns: 44px 48px minmax(0, 1fr) minmax(130px, 180px);
+  grid-template-columns: 84px minmax(0, 1fr) minmax(145px, 180px);
   align-items: center;
-  gap: 18px;
-  min-height: 108px;
-  border-right: 1px solid var(--border-strong);
-  border-left: 1px solid var(--border-strong);
+  gap: 22px;
+  min-height: 106px;
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
   padding: 18px 24px;
   background: var(--surface-raised);
+  box-shadow: 0 10px 24px rgba(30, 35, 28, 0.07);
+}
+
+.architecture-layer::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: currentColor;
+  content: "";
+}
+
+.architecture-layer-key {
+  display: grid;
+  grid-template-columns: 24px 44px;
+  align-items: center;
+  gap: 10px;
 }
 
 .architecture-layer-number {
@@ -641,9 +707,20 @@ button {
   min-width: 0;
 }
 
+.architecture-layer-copy > span,
+.architecture-layer-role > span {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--ink-faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
 .architecture-layer-copy h3 {
-  margin: 0 0 3px;
-  font-size: 19px;
+  margin: 0 0 2px;
+  font-size: 20px;
   line-height: 1.35;
 }
 
@@ -658,59 +735,156 @@ button {
   margin: 0 4px;
 }
 
-.architecture-layer > strong {
-  grid-column: 4;
+.architecture-layer-role {
   justify-self: end;
-  color: var(--ink-faint);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-  font-weight: 760;
+  min-width: 140px;
+  border-left: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  padding-left: 20px;
+}
+
+.architecture-layer-role strong {
+  display: block;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 720;
+  white-space: nowrap;
+}
+
+.architecture-human {
+  width: 74%;
+  border-color: color-mix(in srgb, var(--coral) 36%, var(--border));
+  background: color-mix(in srgb, var(--coral-soft) 55%, var(--surface-raised));
+  color: var(--coral);
+}
+
+.architecture-agent {
+  width: 83%;
+  border-color: color-mix(in srgb, var(--blue) 34%, var(--border));
+  background: color-mix(in srgb, var(--blue-soft) 55%, var(--surface-raised));
+  color: var(--blue);
+}
+
+.architecture-knowledge {
+  width: 92%;
+  border-color: color-mix(in srgb, var(--green) 38%, var(--border));
+  background: color-mix(in srgb, var(--green-soft) 58%, var(--surface-raised));
+  color: var(--green);
+}
+
+.architecture-file {
+  width: 100%;
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--amber);
+}
+
+.architecture-layer-copy h3 {
+  color: var(--ink);
+}
+
+.architecture-file .architecture-layer-copy h3 {
+  color: var(--bg);
+}
+
+.architecture-file .architecture-layer-copy p,
+.architecture-file .architecture-layer-copy > span,
+.architecture-file .architecture-layer-role > span {
+  color: color-mix(in srgb, var(--bg) 62%, transparent);
+}
+
+.architecture-file .architecture-layer-role {
+  border-left-color: color-mix(in srgb, var(--bg) 18%, transparent);
+}
+
+.architecture-file .architecture-layer-role strong {
+  color: var(--bg);
+}
+
+.architecture-file .architecture-layer-number {
+  color: color-mix(in srgb, var(--bg) 64%, transparent);
+}
+
+.architecture-file .architecture-layer-icon {
+  background: color-mix(in srgb, var(--amber) 20%, transparent);
+  color: #f0c66f;
 }
 
 .architecture-human .architecture-layer-icon {
-  background: var(--coral-soft);
+  background: color-mix(in srgb, var(--coral-soft) 74%, var(--surface));
   color: var(--coral);
 }
 
 .architecture-agent .architecture-layer-icon {
-  background: var(--blue-soft);
+  background: color-mix(in srgb, var(--blue-soft) 74%, var(--surface));
   color: var(--blue);
 }
 
 .architecture-knowledge .architecture-layer-icon {
-  background: var(--green-soft);
+  background: color-mix(in srgb, var(--green-soft) 74%, var(--surface));
   color: var(--green);
 }
 
-.architecture-file .architecture-layer-icon {
-  background: var(--amber-soft);
-  color: var(--amber);
+.architecture-layer-copy p,
+.architecture-layer-role {
+  color: var(--ink-soft);
 }
 
 .architecture-connector {
-  display: grid;
-  grid-template-columns: 44px 48px minmax(0, 1fr) minmax(130px, 180px);
-  align-items: center;
-  gap: 18px;
-  min-height: 46px;
-  border-right: 1px solid var(--border-strong);
-  border-left: 1px solid var(--border-strong);
-  padding: 0 24px;
-  background: var(--surface);
+  position: relative;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  min-height: 48px;
 }
 
-.architecture-connector svg {
-  grid-column: 2;
-  justify-self: center;
-  color: var(--green);
+.architecture-connector::before {
+  position: absolute;
+  inset: 0 auto;
+  width: 1px;
+  background: var(--green);
+  content: "";
 }
 
 .architecture-connector span {
-  grid-column: 3;
-  color: var(--ink-faint);
+  z-index: 1;
+  display: inline-flex;
+  align-self: center;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--green) 42%, var(--border));
+  border-radius: 4px;
+  padding: 4px 9px;
+  background: var(--surface);
+  color: var(--green);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 760;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.architecture-diagram-footer {
+  justify-content: flex-start;
+  gap: 0;
+  border-top: 1px solid var(--border);
+  background: var(--surface-muted);
+}
+
+.architecture-diagram-footer span {
+  display: inline-flex;
+  align-items: center;
+}
+
+.architecture-diagram-footer span::before {
+  width: 5px;
+  height: 5px;
+  margin-right: 8px;
+  border: 1px solid var(--green);
+  content: "";
+}
+
+.architecture-diagram-footer span + span::before {
+  margin-left: 28px;
 }
 
 .package-band,
@@ -1796,6 +1970,25 @@ button {
     gap: 18px;
   }
 
+  .architecture-layer {
+    grid-template-columns: 78px minmax(0, 1fr) minmax(130px, 150px);
+    gap: 16px;
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .architecture-human {
+    width: 82%;
+  }
+
+  .architecture-agent {
+    width: 88%;
+  }
+
+  .architecture-knowledge {
+    width: 94%;
+  }
+
   .flow-line {
     grid-template-columns: 1fr;
     gap: 0;
@@ -1907,16 +2100,39 @@ button {
     padding: 72px 18px;
   }
 
+  .architecture-diagram-header,
+  .architecture-diagram-footer {
+    min-height: 44px;
+    padding: 0 14px;
+    font-size: 8px;
+  }
+
+  .architecture-diagram-header > span:first-child {
+    max-width: 160px;
+    line-height: 1.4;
+  }
+
+  .architecture-stack {
+    padding: 20px 12px 18px;
+    background-size: 24px 24px;
+  }
+
   .architecture-layer {
-    grid-template-columns: 30px 40px minmax(0, 1fr);
+    grid-template-columns: 58px minmax(0, 1fr);
     gap: 12px;
-    min-height: 124px;
-    padding: 18px 14px;
+    width: 100%;
+    min-height: 0;
+    padding: 16px 14px;
+  }
+
+  .architecture-layer-key {
+    grid-template-columns: 16px 36px;
+    gap: 6px;
   }
 
   .architecture-layer-icon {
-    width: 38px;
-    height: 38px;
+    width: 36px;
+    height: 36px;
   }
 
   .architecture-layer-copy h3 {
@@ -1927,17 +2143,31 @@ button {
     font-size: 13px;
   }
 
-  .architecture-layer > strong {
-    grid-column: 3;
+  .architecture-layer-role {
+    grid-column: 2;
     justify-self: start;
-    margin-top: 2px;
+    min-width: 0;
+    width: 100%;
+    margin-top: 1px;
+    border-top: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+    border-left: 0;
+    padding-top: 9px;
+    padding-left: 0;
   }
 
   .architecture-connector {
-    grid-template-columns: 30px 40px minmax(0, 1fr);
-    gap: 12px;
     min-height: 44px;
-    padding: 0 14px;
+  }
+
+  .architecture-diagram-footer {
+    flex-wrap: wrap;
+    gap: 5px 14px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .architecture-diagram-footer span + span::before {
+    margin-left: 0;
   }
 
   .section-heading {
