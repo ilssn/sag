@@ -26,7 +26,7 @@ const documents = [
   ["validate_octx()", "api/validate-octx.md", "/api/validate-octx/"],
   ["unpack_octx()", "api/unpack-octx.md", "/api/unpack-octx/"],
   ["OctxPackage", "api/octx-package.md", "/api/octx-package/"],
-  ["Models and limits", "api/models-and-limits.md", "/api/models-and-limits/"],
+  ["Data types and limits", "api/models-and-limits.md", "/api/models-and-limits/"],
   ["CLI", "api/cli.md", "/api/cli/"],
   ["Error handling", "api/errors.md", "/api/errors/"],
   ["Glossary", "GLOSSARY.md", "/docs/glossary/"],

@@ -104,7 +104,7 @@ export const API_NAV: NavGroup[] = [
     ],
   },
   {
-    title: "读取与模型",
+    title: "Package 数据格式",
     items: [
       {
         title: "OctxPackage",
@@ -112,7 +112,7 @@ export const API_NAV: NavGroup[] = [
         description: "读取 Markdown、JSONL 与向量",
       },
       {
-        title: "数据模型与限制",
+        title: "数据类型与资源限制",
         href: "/api/models-and-limits",
         description: "结果对象、报告与 ArchiveLimits",
       },

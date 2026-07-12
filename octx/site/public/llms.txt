@@ -13,7 +13,7 @@
 - [validate_octx()](/api/validate-octx/)
 - [unpack_octx()](/api/unpack-octx/)
 - [OctxPackage](/api/octx-package/)
-- [Models and limits](/api/models-and-limits/)
+- [Data types and limits](/api/models-and-limits/)
 - [CLI](/api/cli/)
 - [Error handling](/api/errors/)
 - [Glossary](/docs/glossary/)
