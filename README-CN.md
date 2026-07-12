@@ -547,8 +547,6 @@ docker compose -f compose.yaml -f compose.postgres.yaml up -d --build
 ## 参与贡献与许可
 
 - 贡献流程：[CONTRIBUTING.md](CONTRIBUTING.md)
-- 架构文档：[docs/architecture.md](docs/architecture.md)
-- 工程规范：[docs/standards/](docs/standards/README.md)
 - Python 引擎：[`zleap-sag` PyPI](https://pypi.org/project/zleap-sag/)
 - 论文复现：[Zleap-AI/SAG-Benchmark](https://github.com/Zleap-AI/SAG-Benchmark)
 
