@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sag_api.connectors import registry
+from sag_api.core.config import settings
 from sag_api.core.errors import ApiError, NotFoundError, ValidationError
 from sag_api.core.logging import get_logger
 from sag_api.db.base import new_id
@@ -23,6 +24,41 @@ log = get_logger("services.source")
 
 async def list_sources(session: AsyncSession) -> list[Source]:
     rows = await session.execute(select(Source).order_by(Source.created_at.desc()))
+    return list(rows.scalars().all())
+
+
+async def search_source_candidates(
+    session: AsyncSession,
+    source_ids: list[str] | None = None,
+) -> list[Source]:
+    """Select a bounded retrieval scope without materializing the source table.
+
+    Explicit `source_ids` preserve the user's @ order. An implicit global search
+    uses data density and recency as the cheap partition router until a dedicated
+    source-level semantic index is available.
+    """
+    limit = settings.search_source_candidate_limit
+    if source_ids:
+        ordered_ids = list(dict.fromkeys(source_ids))
+        if len(ordered_ids) > limit:
+            raise ValidationError(
+                f"单次最多检索 {limit} 个信息源，请通过 @ 缩小范围",
+                code="too_many_search_sources",
+            )
+        rows = await session.execute(select(Source).where(Source.id.in_(ordered_ids)))
+        by_id = {source.id: source for source in rows.scalars().all()}
+        return [by_id[source_id] for source_id in ordered_ids if source_id in by_id]
+
+    rows = await session.execute(
+        select(Source)
+        .order_by(
+            Source.chunk_count.desc(),
+            Source.event_count.desc(),
+            Source.updated_at.desc(),
+            Source.id,
+        )
+        .limit(limit)
+    )
     return list(rows.scalars().all())
 
 

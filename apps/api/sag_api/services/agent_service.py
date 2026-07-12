@@ -39,10 +39,12 @@ from sag_api.tools.mcp import open_agent_mcp_tools
 
 AGENT_MAX_STEPS = 4
 
-_DEFAULT_TOOLS = ["search_context", "get_entity"]
+_KNOWLEDGE_TOOLS = ["search_context", "get_entity"]
+_ALWAYS_TOOLS = ["get_time"]
 _TOOL_LABELS = {
     "search_context": "检索知识库",
     "get_entity": "查询实体",
+    "get_time": "查询时间",
 }
 
 
@@ -54,13 +56,21 @@ class AgentStreamEvent:
     data: dict[str, Any]
 
 
-def _enabled_tool_names(agent, *, has_sources: bool = False) -> list[str]:
+def _enabled_tool_names(
+    agent, *, has_sources: bool = False, knowledge_only: bool = False
+) -> list[str]:
     persona = agent.persona or {}
     names = persona.get("tools")
     configured = [name for name in names if isinstance(name, str)] if isinstance(names, list) else []
     # 检索是信源挂载带来的基础能力，不应依赖 persona 中是否碰巧保存了 tools 字段。
-    builtins = _DEFAULT_TOOLS if has_sources or getattr(agent, "is_default", False) else []
-    return list(dict.fromkeys([*builtins, *configured]))
+    knowledge_tools = (
+        _KNOWLEDGE_TOOLS if has_sources or getattr(agent, "is_default", False) else []
+    )
+    if knowledge_only:
+        # Keep local, read-only system utilities available while excluding
+        # configured/MCP tools and model-knowledge fallbacks.
+        return list(dict.fromkeys([*_ALWAYS_TOOLS, *knowledge_tools]))
+    return list(dict.fromkeys([*_ALWAYS_TOOLS, *knowledge_tools, *configured]))
 
 
 def _adapt_tool(host_tool, host_context: HostToolContext, citations: list[dict]) -> AgentTool:
@@ -138,6 +148,7 @@ async def generate_stream(
     llm: LLMClient,
     tool_registry: ToolRegistry,
     runtime: AgentRuntime | None = None,
+    knowledge_only: bool = False,
 ) -> AsyncIterator[AgentStreamEvent]:
     """Run one request and expose the SDK event contract to the host transport."""
 
@@ -156,7 +167,7 @@ async def generate_stream(
 
     async with session_factory() as session:
         sources = await resolve_sources(session, agent, plan.source_ids)
-        mcp_specs = await resolve_mcp_specs(session, agent)
+        mcp_specs = [] if knowledge_only else await resolve_mcp_specs(session, agent)
     host_context = HostToolContext(
         engine_manager=engine_manager,
         sources=sources,
@@ -166,11 +177,27 @@ async def generate_stream(
 
     try:
         async with open_agent_mcp_tools(mcp_specs) as mcp_tools:
-            names = _enabled_tool_names(agent, has_sources=bool(sources))
+            names = _enabled_tool_names(
+                agent,
+                has_sources=bool(sources),
+                knowledge_only=knowledge_only,
+            )
             host_tools = [tool_registry.get(name) for name in names if tool_registry.has(name)]
             host_tools.extend(mcp_tools)
             tools = tuple(_adapt_tool(tool, host_context, citations) for tool in host_tools)
             run_messages = list(plan.messages)
+            if knowledge_only:
+                run_messages.insert(
+                    1 if run_messages and run_messages[0].get("role") == "system" else 0,
+                    {
+                        "role": "system",
+                        "content": (
+                            "本轮是本地知识库问答。知识性问题必须先调用 search_context，"
+                            "只根据工具返回的原文证据回答并保留引用；证据不足时明确说明"
+                            "知识库中没有足够依据，不得使用模型自身知识补充。"
+                        ),
+                    },
+                )
             if plan.source_ids and sources:
                 scope_note = {
                     "role": "system",
@@ -208,6 +235,7 @@ async def generate_stream(
                 if event.type == EventType.RUN_STARTED:
                     output_payload = {
                         **payload,
+                        "user_message_id": plan.user_message_id,
                         "citations": citations,
                         "sources": [{"id": source.id, "name": source.name} for source in sources],
                         "tools": [tool.spec.name for tool in tools],

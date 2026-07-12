@@ -75,9 +75,15 @@ class MessageOut(BaseModel):
     role: MessageRole
     content: str
     citations: list[dict[str, Any]]
-    attachments: list[dict[str, Any]] = []
-    steps: list[dict[str, Any]] = []
+    attachments: list[dict[str, Any]] = Field(default_factory=list)
+    steps: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime
+
+
+class MessagePageOut(BaseModel):
+    items: list[MessageOut] = Field(default_factory=list)
+    next_cursor: str | None = None
+    has_more: bool = False
 
 
 class AskRequest(BaseModel):
@@ -86,6 +92,8 @@ class AskRequest(BaseModel):
     attachments: list[str] = Field(default_factory=list, max_length=4)
     # @知识库 范围限定：仅在这些信源内检索（空=默认全部）
     source_ids: list[str] = Field(default_factory=list, max_length=8)
+    # 可选的受限问答模式；默认保留 Agent 已绑定的完整工具能力。
+    knowledge_only: bool = False
 
     @model_validator(mode="after")
     def require_text_or_attachment(self):

@@ -6,140 +6,14 @@ Agent 循环对它们与远端 MCP 工具使用同一契约。
 
 from __future__ import annotations
 
-import asyncio
-import re
+from datetime import UTC, datetime
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from sag_api.core.config import settings
 from sag_api.generation import build_citations
-from sag_api.sag import RetrievedSection
+from sag_api.services.retrieval_service import retrieve_relevant_sections
 from sag_api.tools.base import Tool, ToolContext, ToolMeta, ToolResult
-
-_QUERY_NOISE = (
-    "知识库",
-    "资料库",
-    "资料中",
-    "文档中",
-    "告诉我",
-    "帮我查",
-    "搜索",
-    "查询",
-    "请问",
-    "关于",
-    "最新",
-    "最近",
-    "动态",
-    "消息",
-    "新闻",
-    "明星",
-    "娱乐圈",
-    "内容",
-    "资料",
-    "一下",
-    "是什么",
-    "有哪些",
-    "有什么",
-)
-
-
-def _query_terms(query: str) -> list[str]:
-    """提取适合精确召回的短词，弥补网页长分块的向量偏移。"""
-
-    cleaned = query.strip()
-    for phrase in _QUERY_NOISE:
-        cleaned = cleaned.replace(phrase, " ")
-    candidates = re.findall(r"[A-Za-z0-9][A-Za-z0-9_.+-]{1,31}|[\u3400-\u9fff]{2,12}", cleaned)
-    terms: list[str] = []
-    for candidate in candidates:
-        value = candidate.strip()
-        if value and not value.isdigit() and value not in terms:
-            terms.append(value)
-    return terms[:3]
-
-
-async def _lexical_sections(
-    ctx: ToolContext,
-    query: str,
-    *,
-    score: float,
-) -> list[RetrievedSection]:
-    terms = _query_terms(query)
-    if not terms:
-        return []
-
-    calls = [
-        (source, term, ctx.engine_manager.grep_chunks(
-            source.sag_source_config_id,
-            term,
-            source=source,
-            limit=2,
-        ))
-        for source in ctx.sources
-        for term in terms
-    ]
-    results = await asyncio.gather(*(call for _, _, call in calls), return_exceptions=True)
-    sections: list[RetrievedSection] = []
-    for (source, _term, _call), rows in zip(calls, results, strict=True):
-        if isinstance(rows, BaseException):
-            continue
-        for index, row in enumerate(rows):
-            sections.append(
-                RetrievedSection(
-                    chunk_id=row.get("chunk_id"),
-                    heading=row.get("heading") or "精确匹配",
-                    content=row.get("snippet") or "",
-                    score=max(0.0, score - index * 0.01),
-                    rank=index,
-                    source_config_id=source.sag_source_config_id,
-                )
-            )
-    return sections
-
-
-def _merge_sections(
-    lexical: list[RetrievedSection],
-    semantic: list[RetrievedSection],
-    *,
-    limit: int,
-) -> list[RetrievedSection]:
-    merged: list[RetrievedSection] = []
-    chunk_ids: set[str] = set()
-    fingerprints: set[str] = set()
-    for section in [*lexical, *semantic]:
-        fingerprint = re.sub(r"\s+", " ", section.content).strip()[:180]
-        if section.chunk_id and section.chunk_id in chunk_ids:
-            continue
-        if fingerprint and fingerprint in fingerprints:
-            continue
-        if section.chunk_id:
-            chunk_ids.add(section.chunk_id)
-        if fingerprint:
-            fingerprints.add(fingerprint)
-        merged.append(section)
-        if len(merged) >= limit:
-            break
-    return merged
-
-
-def _useful_semantic_sections(
-    sections: list[RetrievedSection],
-    query: str,
-    *,
-    has_lexical: bool,
-) -> list[RetrievedSection]:
-    if not has_lexical:
-        return sections
-    terms = [term.lower() for term in _query_terms(query)]
-    boilerplate = ("新浪首页", "权利保护声明", "阅读排行榜", "评论排行榜", "点击加载更多")
-    useful: list[RetrievedSection] = []
-    for section in sections:
-        text = f"{section.heading}\n{section.content}"
-        lowered = text.lower()
-        if terms and not any(term in lowered for term in terms):
-            continue
-        if sum(marker in text for marker in boilerplate) >= 2:
-            continue
-        useful.append(section)
-    return useful
 
 
 def _format_sections(sections: list, offset: int = 0) -> str:
@@ -175,20 +49,16 @@ class SearchContextTool(Tool):
             return ToolResult(content="（无相关资料）", citations=[], data={"section_count": 0})
         persona = ctx.persona or {}
         top_k = args.get("top_k") or persona.get("top_k")
-        targets = [(s.sag_source_config_id, s) for s in ctx.sources]
-        outcome = await ctx.engine_manager.search_many(
-            # 默认 vector（毫秒级）：多轮改写补召回；multi 图谱增强需人格显式开启
-            targets, query, strategy=persona.get("search_strategy") or "vector", top_k=top_k
-        )
         limit = max(1, min(int(top_k or 8), 50))
-        lexical_score = max([section.score for section in outcome.sections] or [0.9]) + 0.05
-        lexical = await _lexical_sections(ctx, query, score=lexical_score)
-        semantic = _useful_semantic_sections(
-            outcome.sections,
+        outcome = await retrieve_relevant_sections(
+            ctx.engine_manager,
+            ctx.sources,
             query,
-            has_lexical=bool(lexical),
+            # 未在人格中指定时沿用全局快速/精确设置。
+            strategy=persona.get("search_strategy"),
+            top_k=limit,
         )
-        sections = _merge_sections(lexical, semantic, limit=limit)
+        sections = outcome.sections
         source_refs = {s.sag_source_config_id: {"id": s.id, "name": s.name} for s in ctx.sources}
         offset = max(0, ctx.citation_offset)
         citations = build_citations(sections, source_refs)
@@ -200,8 +70,9 @@ class SearchContextTool(Tool):
             data={
                 "sections": sections,
                 "section_count": len(sections),
-                "lexical_count": len(lexical),
-                "semantic_count": len(semantic),
+                "lexical_count": int(outcome.stats.get("lexical_candidates") or 0),
+                "filtered_count": int(outcome.stats.get("filtered_irrelevant") or 0),
+                "candidate_count": int(outcome.stats.get("candidates") or len(sections)),
             },
         )
 
@@ -238,3 +109,60 @@ class GetEntityTool(Tool):
                     data={"entity_id": match.id, "source_id": source.id},
                 )
         return ToolResult(content="（未找到该实体）")
+
+
+class GetTimeTool(Tool):
+    meta = ToolMeta(
+        name="get_time",
+        description=(
+            "获取准确的当前日期、时间、星期与 UTC 偏移。"
+            "用户询问现在、今天、当前时间、相对日期或跨时区换算时使用；"
+            "不传 timezone 时使用系统设定时区。"
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "timezone": {
+                    "type": "string",
+                    "description": "可选 IANA 时区，例如 Asia/Shanghai、UTC、America/New_York",
+                    "maxLength": 100,
+                }
+            },
+            "additionalProperties": False,
+        },
+    )
+
+    async def invoke(self, args: dict[str, Any], ctx: ToolContext) -> ToolResult:
+        del ctx
+        timezone_name = str(args.get("timezone") or settings.timezone).strip()
+        try:
+            zone = ZoneInfo(timezone_name)
+        except (ZoneInfoNotFoundError, ValueError):
+            return ToolResult(
+                content=(
+                    f"无法识别时区「{timezone_name}」。请使用 IANA 时区名称；"
+                    f"当前系统时区为 {settings.timezone}。"
+                ),
+                data={"ok": False, "timezone": timezone_name},
+            )
+
+        now_utc = datetime.now(UTC)
+        local = now_utc.astimezone(zone)
+        offset = local.strftime("%z")
+        formatted_offset = f"{offset[:3]}:{offset[3:]}" if len(offset) == 5 else offset
+        weekdays = ("星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日")
+        return ToolResult(
+            content=(
+                f"当前时间：{local:%Y-%m-%d %H:%M:%S} {weekdays[local.weekday()]} "
+                f"（{timezone_name}，UTC{formatted_offset}）\n"
+                f"UTC 时间：{now_utc:%Y-%m-%d %H:%M:%S} UTC"
+            ),
+            data={
+                "ok": True,
+                "timezone": timezone_name,
+                "utc_offset": formatted_offset,
+                "local_iso": local.isoformat(),
+                "utc_iso": now_utc.isoformat(),
+                "unix_seconds": int(now_utc.timestamp()),
+            },
+        )

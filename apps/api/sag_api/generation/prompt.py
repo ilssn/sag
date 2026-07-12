@@ -12,9 +12,13 @@ _GUIDANCE = {
         "你是一个带知识库的智能助手。自然对话，按需用工具。\n"
         "何时用工具：\n"
         "- 寒暄、闲聊、翻译、改写、通用常识——直接回答，**不要调用工具**。\n"
-        "- 涉及用户资料/知识库内容、具体事实核查——先调用 search_context 检索；"
+        "- 用户明确询问本地知识库、已上传资料、文档内容或通过 @ 指定信源时，"
+        "先调用 search_context 检索；"
         "结果不足时换角度改写查询（同义词/上位词/具体化）再搜，必要时用 get_entity 澄清人物或概念；"
         "证据足够即停，不做无谓调用。\n"
+        "- 询问现在、今天、当前日期/时间、星期、相对日期或跨时区换算时，必须调用 get_time。\n"
+        "- 实时天气、新闻、行情等使用已配置的实时/联网工具；没有相应工具时如实说明，"
+        "不要用本地知识库检索代替实时查询。\n"
         "如何作答：\n"
         "- 用了检索就只依据检索到的资料，不编造；检索不到时直说「资料中未提及」，"
         "并说明已试过的角度。\n"
@@ -30,14 +34,31 @@ _GUIDANCE = {
         "You are an assistant with a knowledge base. Converse naturally; use tools only when needed.\n"
         "When to use tools:\n"
         "- Greetings, chit-chat, translation, rewriting, general knowledge — answer directly, no tools.\n"
-        "- Questions about the user's documents or fact-checking — call search_context first; "
+        "- When the user explicitly asks about the local knowledge base, uploaded documents, "
+        "or an @-scoped source, call search_context first; "
         "if results are thin, rewrite the query from new angles and search again, "
         "or use get_entity for clarification; stop once evidence suffices.\n"
+        "- For the current date/time, weekday, relative dates, or timezone conversion, call get_time.\n"
+        "- For live weather, news, or prices, use an available real-time/network tool. "
+        "If none is available, say so; do not substitute the local knowledge base.\n"
         "How to answer:\n"
         "- When you searched, answer only from retrieved sources; say plainly when nothing relevant was found.\n"
         "- Evidence numbering is global across tool calls; cite [n] at key claims, never invent indices; "
         "tool-free answers carry no citations.\n"
         "- Be concise and structured."
+    ),
+}
+
+_TIME_RULE = {
+    "zh": (
+        "时间规则：系统时区为「{timezone}」。数据库和 API 时间戳统一为 UTC；"
+        "面向用户解释和展示时按系统时区转换。具体的当前时间是动态值，"
+        "需要时调用 get_time 获取，不得猜测。"
+    ),
+    "en": (
+        "Time rules: the configured system timezone is {timezone}. Database and API timestamps use UTC; "
+        "convert them to the system timezone for the user. Current time is dynamic: call get_time when "
+        "needed and never guess it."
     ),
 }
 
@@ -108,6 +129,7 @@ def build_agent_messages(
     *,
     history: list[dict[str, str]] | None = None,
     language: str = "zh",
+    timezone: str = "Asia/Shanghai",
     attachments: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """注入 Agent 设定（agent-first：无预置资料区，检索由工具按需完成）。"""
@@ -118,6 +140,7 @@ def build_agent_messages(
     if system_prompt:
         parts.append(system_prompt)
     parts.append(_GUIDANCE[lang])
+    parts.append(_TIME_RULE[lang].format(timezone=timezone))
     guardrails = persona.get("guardrails") or []
     if guardrails:
         parts.append("约束：" + "；".join(guardrails))

@@ -130,7 +130,7 @@ async def test_default_agent_activity_and_document_file():
             assert ask.status_code == 200 and "event: run.completed" in ask.text
             msgs = (
                 await c.get(f"/api/v1/agents/{a1['id']}/threads/{t['id']}/messages", headers=A)
-            ).json()
+            ).json()["items"]
             mine = [m for m in msgs if m["role"] == "user" and m["attachments"]]
             assert mine and mine[0]["attachments"][0]["id"] == aid
 
@@ -148,7 +148,7 @@ async def test_default_agent_activity_and_document_file():
             assert rd.status_code == 200
             after = (
                 await c.get(f"/api/v1/agents/{a1['id']}/threads/{t['id']}/messages", headers=A)
-            ).json()
+            ).json()["items"]
             assert all(m["id"] != gone_id for m in after)
 
             # 原文端点：200 + 内容与上传一致；不存在的 id → 404

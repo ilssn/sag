@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TypedDict
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sag_api.core.db import get_session
-from sag_api.core.deps import get_current_user, get_engine_manager
+from sag_api.core.deps import get_current_user, get_engine_manager, get_llm
 from sag_api.db.models import Source, User
+from sag_api.generation import LLMClient
 from sag_api.sag import EngineManager, RetrievedSection
 from sag_api.schemas.insight import EntityOut, GraphRelationOut
 from sag_api.schemas.search import (
@@ -15,9 +17,14 @@ from sag_api.schemas.search import (
     SearchEventOut,
     SearchRequest,
     SearchResponse,
+    SearchSourceHitOut,
     SectionOut,
 )
-from sag_api.services.source_service import get_source, list_sources
+from sag_api.services.retrieval_service import (
+    retrieve_relevant_sections,
+    synthesize_search_answer,
+)
+from sag_api.services.source_service import get_source, search_source_candidates
 
 router = APIRouter(prefix="/sources/{source_id}/search", tags=["search"])
 global_router = APIRouter(prefix="/search", tags=["search"])
@@ -29,11 +36,54 @@ class _EventGraphFields(TypedDict):
     relations: list[GraphRelationOut]
 
 
+def _source_hits(events: list[SearchEventOut]) -> list[SearchSourceHitOut]:
+    def utc(value: datetime) -> datetime:
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+    grouped: dict[str, dict] = {}
+    seen: set[tuple[str, str]] = set()
+    for event in events:
+        if not event.source_id:
+            continue
+        key = (event.source_id, event.id)
+        if key in seen:
+            continue
+        seen.add(key)
+        item = grouped.setdefault(
+            event.source_id,
+            {
+                "source_id": event.source_id,
+                "source_name": event.source_name,
+                "event_hits": 0,
+                "max_score": 0.0,
+                "latest_event_time": None,
+            },
+        )
+        item["event_hits"] += 1
+        item["max_score"] = max(float(item["max_score"]), float(event.score or 0.0))
+        if event.start_time is not None:
+            event_time = utc(event.start_time)
+            if item["latest_event_time"] is None or event_time > item["latest_event_time"]:
+                item["latest_event_time"] = event_time
+    ranked = sorted(
+        grouped.values(),
+        key=lambda item: (
+            -int(item["event_hits"]),
+            -float(item["max_score"]),
+            -(item["latest_event_time"].timestamp() if item["latest_event_time"] else 0.0),
+            str(item["source_id"]),
+        ),
+    )
+    return [SearchSourceHitOut(**item) for item in ranked]
+
+
 async def _event_graph_fields(
     engine_manager: EngineManager,
     sections: list[RetrievedSection],
     sources_by_config: dict[str, Source],
 ) -> _EventGraphFields:
+    if not sections:
+        return {"events": [], "entities": [], "relations": []}
     graph = await engine_manager.graph_for_sections(
         sections,
         sources_by_config,
@@ -82,12 +132,13 @@ async def search(
     _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     engine_manager: EngineManager = Depends(get_engine_manager),
+    llm: LLMClient = Depends(get_llm),
 ) -> SearchResponse:
     source = await get_source(session, source_id)
-    outcome = await engine_manager.search(
-        source.sag_source_config_id,
+    outcome = await retrieve_relevant_sections(
+        engine_manager,
+        [source],
         body.query,
-        source=source,
         strategy=body.strategy,
         top_k=body.top_k,
     )
@@ -106,6 +157,12 @@ async def search(
             for s in outcome.sections
         ],
         **graph_fields,
+        source_hits=_source_hits(graph_fields["events"]),
+        summary=await synthesize_search_answer(
+            outcome.query,
+            outcome.sections,
+            llm=llm,
+        ),
         stats=outcome.stats,
     )
 
@@ -116,19 +173,17 @@ async def global_search(
     _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     engine_manager: EngineManager = Depends(get_engine_manager),
+    llm: LLMClient = Depends(get_llm),
 ) -> SearchResponse:
-    """全局搜索：跨全部（或指定）信源 fan-out 检索，结果带信源名。"""
-    sources = await list_sources(session)
-    if body.source_ids:
-        wanted = set(body.source_ids)
-        sources = [s for s in sources if s.id in wanted]
+    """全局搜索：先选有界信源分区，再 fan-out 检索并返回可追溯结果。"""
+    sources = await search_source_candidates(session, body.source_ids)
     if not sources:
         return SearchResponse(query=body.query, sections=[], stats={"sources": 0})
 
     refs = {s.sag_source_config_id: s for s in sources}
-    targets = [(s.sag_source_config_id, s) for s in sources]
-    outcome = await engine_manager.search_many(
-        targets,
+    outcome = await retrieve_relevant_sections(
+        engine_manager,
+        sources,
         body.query,
         strategy=body.strategy,
         top_k=body.top_k,

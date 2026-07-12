@@ -2,7 +2,8 @@
 
 import pytest
 
-from sag_api.generation.prompt import estimate_tokens
+from sag_api.generation.prompt import build_agent_messages, estimate_tokens
+from sag_api.sag import RetrievedSection, SearchOutcome
 from sag_api.services.agent_domain import compress_history
 from sag_api.services.agent_service import _enabled_tool_names
 from sag_api.tools.base import ToolContext
@@ -16,12 +17,22 @@ class _A:
 
 
 def test_default_agent_gets_builtin_tools():
-    assert _enabled_tool_names(_A(is_default=True)) == ["search_context", "get_entity"]
-    assert _enabled_tool_names(_A(is_default=False)) == []
+    assert _enabled_tool_names(_A(is_default=True)) == [
+        "get_time",
+        "search_context",
+        "get_entity",
+    ]
+    assert _enabled_tool_names(_A(is_default=False)) == ["get_time"]
     assert _enabled_tool_names(_A(is_default=True, tools=["echo"])) == [
+        "get_time",
         "search_context",
         "get_entity",
         "echo",
+    ]
+    assert _enabled_tool_names(_A(is_default=True), knowledge_only=True) == [
+        "get_time",
+        "search_context",
+        "get_entity",
     ]
 
 
@@ -31,21 +42,35 @@ def test_estimate_tokens_cjk_aware():
     assert estimate_tokens("") == 0
 
 
+def test_agent_prompt_uses_static_timezone_rule_and_time_tool_guidance():
+    messages = build_agent_messages(
+        "测试助手",
+        {},
+        "现在几点",
+        timezone="Asia/Shanghai",
+    )
+    system = messages[0]["content"]
+    assert "Asia/Shanghai" in system
+    assert "get_time" in system
+    assert "当前时间是动态值" in system
+
+
 @pytest.mark.asyncio
 async def test_search_tool_uses_global_citation_offset():
-    class _Sec:
-        heading = "标题"
-        content = "内容"
-        chunk_id = "c1"
-        source_config_id = "scid"
-        score = 0.9
-
-    class _Outcome:
-        sections = [_Sec()]
-
     class _EM:
         async def search_many(self, targets, query, strategy=None, top_k=None):
-            return _Outcome()
+            return SearchOutcome(
+                query=query,
+                sections=[
+                    RetrievedSection(
+                        heading="标题",
+                        content="内容",
+                        chunk_id="c1",
+                        source_config_id="scid",
+                        score=0.9,
+                    )
+                ],
+            )
 
     class _Src:
         sag_source_config_id = "scid"

@@ -63,6 +63,14 @@ _COLUMN_UPGRADES: dict[str, dict[str, str]] = {
     "messages": {"attachments_json": "JSON", "steps_json": "JSON"},
 }
 
+# Existing tables also need newly introduced hot-path indexes. Keep these
+# idempotent for local/embedded upgrades; production deployments can express
+# the same DDL in their migration runner.
+_INDEX_UPGRADES = (
+    "CREATE INDEX IF NOT EXISTS ix_messages_thread_created_id "
+    "ON messages (thread_id, created_at, id)",
+)
+
 
 async def _ensure_columns() -> None:
     from sqlalchemy import inspect as sa_inspect
@@ -83,6 +91,12 @@ async def _ensure_columns() -> None:
                     await conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
 
 
+async def _ensure_indexes() -> None:
+    async with engine.begin() as conn:
+        for ddl in _INDEX_UPGRADES:
+            await conn.exec_driver_sql(ddl)
+
+
 async def init_db() -> None:
     """开发态建表（生产用 Alembic）。导入 models 以注册到 metadata。"""
     from sag_api.db import models  # noqa: F401
@@ -90,6 +104,7 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await _ensure_columns()
+    await _ensure_indexes()
 
 
 async def dispose_db() -> None:

@@ -15,7 +15,7 @@ from sag_api.sag import RetrievedSection, SearchOutcome
 from sag_api.services.agent_service import _enabled_tool_names
 from sag_api.tools import registry
 from sag_api.tools.base import Tool, ToolContext, ToolMeta, ToolResult
-from sag_api.tools.builtin import SearchContextTool
+from sag_api.tools.builtin import GetTimeTool, SearchContextTool
 
 ECHO_CITATION = {
     "n": 1,
@@ -83,10 +83,27 @@ async def test_search_tool_prefers_exact_body_window_over_semantic_boilerplate()
 
 def test_visible_sources_mount_builtin_knowledge_tools():
     agent = SimpleNamespace(persona={}, is_default=False)
-    assert _enabled_tool_names(agent, has_sources=True)[:2] == [
+    assert _enabled_tool_names(agent, has_sources=True) == [
+        "get_time",
         "search_context",
         "get_entity",
     ]
+
+
+@pytest.mark.asyncio
+async def test_get_time_uses_system_timezone_and_returns_utc_instant(monkeypatch):
+    from sag_api.core.config import settings
+
+    monkeypatch.setattr(settings, "timezone", "Asia/Shanghai")
+    result = await GetTimeTool().invoke(
+        {},
+        ToolContext(engine_manager=SimpleNamespace(), sources=[]),
+    )
+    assert result.data["ok"] is True
+    assert result.data["timezone"] == "Asia/Shanghai"
+    assert result.data["utc_offset"] == "+08:00"
+    assert result.data["local_iso"].endswith("+08:00")
+    assert result.data["utc_iso"].endswith("+00:00")
 
 
 class FakeLLM:
@@ -101,7 +118,11 @@ class FakeLLM:
 
     async def stream_turn(self, request, cancellation):
         self.calls += 1
-        if self.calls == 1 and request.tools:
+        has_echo = any(
+            tool.get("function", {}).get("name") == "echo"
+            for tool in request.tools
+        )
+        if self.calls == 1 and has_echo:
             yield ModelChunk(
                 tool_calls=(ToolCall(id="call_1", name="echo", arguments={"q": "hi"}),),
                 finish_reason="tool_calls",

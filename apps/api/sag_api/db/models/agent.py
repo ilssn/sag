@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import JSON, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import JSON, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -48,10 +48,11 @@ class Thread(IDMixin, TimestampMixin, Base):
 
 class Message(IDMixin, TimestampMixin, Base):
     __tablename__ = "messages"
-
-    thread_id: Mapped[str] = mapped_column(
-        ForeignKey("threads.id", ondelete="CASCADE"), index=True
+    __table_args__ = (
+        Index("ix_messages_thread_created_id", "thread_id", "created_at", "id"),
     )
+
+    thread_id: Mapped[str] = mapped_column(ForeignKey("threads.id", ondelete="CASCADE"))
     # 图片附件 meta：[{id, name, media_type}]（文件在 upload_dir/attachments/）
     attachments: Mapped[list] = mapped_column("attachments_json", JSON, default=list)
     # Agentic 执行轨迹：[{kind:thinking|tool, step, name?, args?, ms, count?}]（助手消息）

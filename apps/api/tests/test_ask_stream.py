@@ -105,9 +105,10 @@ async def test_ask_stream_agentic_events_and_trace():
                 "event: run.completed",
             ]:
                 assert marker in body, marker
+            assert '"user_message_id":' in body
             msgs = (
                 await c.get(f"/api/v1/agents/{a['id']}/threads/{th['id']}/messages", headers=H)
-            ).json()
+            ).json()["items"]
             asst = [m for m in msgs if m["role"] == "assistant"][-1]
             kinds = [s["kind"] for s in asst["steps"]]
             assert "tool" in kinds and "thinking" in kinds and "answer" in kinds  # 全程轨迹落库
@@ -137,7 +138,7 @@ async def test_ask_stream_provider_failure_has_terminal_error():
             assert "event: run.completed" not in body
             msgs = (
                 await c.get(f"/api/v1/agents/{a['id']}/threads/{th['id']}/messages", headers=H)
-            ).json()
+            ).json()["items"]
             assert not any(m["role"] == "assistant" for m in msgs)
 
 
@@ -166,7 +167,7 @@ async def test_ask_stream_exhausts_max_steps_then_answers(monkeypatch):
             assert '"forced_final": true' in body
             msgs = (
                 await c.get(f"/api/v1/agents/{a['id']}/threads/{th['id']}/messages", headers=H)
-            ).json()
+            ).json()["items"]
             asst = [m for m in msgs if m["role"] == "assistant"][-1]
             assert asst["content"] == "答案"
             kinds = [s["kind"] for s in asst["steps"]]
@@ -200,7 +201,7 @@ async def test_ask_stream_greeting_skips_tools():
             assert "event: message.delta" in body and "event: run.completed" in body
             msgs = (
                 await c.get(f"/api/v1/agents/{a['id']}/threads/{th['id']}/messages", headers=H)
-            ).json()
+            ).json()["items"]
             asst = [m for m in msgs if m["role"] == "assistant"][-1]
             assert asst["content"] == "你好呀"
             kinds = [x["kind"] for x in asst["steps"]]

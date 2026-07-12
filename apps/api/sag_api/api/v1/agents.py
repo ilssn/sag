@@ -29,6 +29,7 @@ from sag_api.schemas.agent import (
     BindingCreate,
     BindingOut,
     MessageOut,
+    MessagePageOut,
     ThreadCreate,
     ThreadOut,
     ThreadUpdate,
@@ -169,7 +170,11 @@ async def remove_binding(
 async def list_threads(
     agent_id: str,
     archived: bool = False,
-    limit: int | None = Query(default=None, ge=1, le=100),
+    limit: int = Query(
+        default=svc.THREAD_PAGE_DEFAULT,
+        ge=1,
+        le=svc.THREAD_PAGE_MAX,
+    ),
     offset: int = Query(default=0, ge=0),
     _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
@@ -214,16 +219,23 @@ async def update_thread(
     return ThreadOut.model_validate(t)
 
 
-@router.get("/{agent_id}/threads/{thread_id}/messages", response_model=list[MessageOut])
+@router.get("/{agent_id}/threads/{thread_id}/messages", response_model=MessagePageOut)
 async def messages(
     agent_id: str,
     thread_id: str,
+    limit: int = Query(default=svc.MESSAGE_PAGE_DEFAULT, ge=1, le=svc.MESSAGE_PAGE_MAX),
+    cursor: str | None = Query(default=None, max_length=svc.MESSAGE_CURSOR_MAX_LENGTH),
     _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
     agent = await svc.get_agent(session, agent_id)
     thread = await svc.get_thread(session, agent.id, thread_id)
-    return [MessageOut.model_validate(m) for m in await svc.list_messages(session, thread.id)]
+    page = await svc.list_messages_page(session, thread.id, limit=limit, cursor=cursor)
+    return MessagePageOut(
+        items=[MessageOut.model_validate(message) for message in page.items],
+        next_cursor=page.next_cursor,
+        has_more=page.has_more,
+    )
 
 
 @router.delete("/{agent_id}/threads/{thread_id}", response_model=Ok)
@@ -360,6 +372,7 @@ async def ask(
                 llm=llm,
                 tool_registry=tool_registry,
                 runtime=agent_runtime,
+                knowledge_only=body.knowledge_only,
             ):
                 last = event
                 yield _sse(event.type, event.data)

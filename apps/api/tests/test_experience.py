@@ -88,7 +88,7 @@ async def test_empty_response_injection_and_prompt_preview():
             # 该轮回答已落库
             msgs = (
                 await c.get(f"/api/v1/agents/{agent['id']}/threads/{thread['id']}/messages", headers=A)
-            ).json()
+            ).json()["items"]
             assert any(m["content"] == "你好！" and m["role"] == "assistant" for m in msgs)
 
 
