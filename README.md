@@ -108,9 +108,11 @@ uvicorn sag_api.main:app --reload
 ```bash
 # 终端 2：前端（http://localhost:3000）
 cd apps/web
-npm install
+npm ci
 npm run dev
 ```
+
+前端依赖统一由 npm 和 `apps/web/package-lock.json` 管理；不要在 `apps/web` 中运行 pnpm 或 yarn。
 
 ### 三步走完主干
 

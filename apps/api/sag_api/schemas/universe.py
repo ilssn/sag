@@ -40,7 +40,7 @@ class UniversePolicyOut(BaseModel):
     entity_page_size: int
     entity_page_max: int
     timeline_event_page_size: int
-    timeline_entities_per_event: int
+    event_entity_limit: int
     auto_page_limit: int
     lod_orbit_px: int
     lod_near_px: int
@@ -102,7 +102,7 @@ class UniverseExpandIn(BaseModel):
     source_id: str = Field(min_length=1, max_length=64)
     node_kind: UniverseNodeKind
     node_id: str = Field(min_length=1, max_length=128)
-    limit: int = Field(default=20, ge=1, le=50)
+    limit: int = Field(default=20, ge=1, le=128)
     cursor: str | None = Field(default=None, max_length=2048)
     after: datetime | None = None
     before: datetime | None = None
@@ -144,7 +144,6 @@ class UniverseTimelineIn(BaseModel):
     epoch: int = Field(ge=1)
     source_id: str = Field(min_length=1, max_length=64)
     limit: int = Field(default=8, ge=1, le=24)
-    entities_per_event: int = Field(default=4, ge=1, le=12)
     cursor: str | None = Field(default=None, max_length=2048)
 
 

@@ -122,7 +122,7 @@ async def test_universe_real_store_statistics_and_keyset_cursor():
                     session.add(
                         EventEntity(
                             id=uuid.uuid4().hex,
-                            event_id=event_ids[index + 1],
+                            event_id=event_ids[1],
                             entity_id=auxiliary_id,
                             weight=0.5,
                         )
@@ -176,7 +176,7 @@ async def test_universe_real_store_statistics_and_keyset_cursor():
             assert partition["relation_count"] == 34
             assert sum(bucket["count"] for bucket in partition["time_buckets"]) == 24
             assert rebuilt.json()["policy"]["timeline_event_page_size"] == 8
-            assert rebuilt.json()["policy"]["timeline_entities_per_event"] == 4
+            assert rebuilt.json()["policy"]["event_entity_limit"] == 96
 
             full_entities = await client.post(
                 "/api/v1/universe/activate",
@@ -264,7 +264,6 @@ async def test_universe_real_store_statistics_and_keyset_cursor():
                         "epoch": 10,
                         "source_id": source_id,
                         "limit": 7,
-                        "entities_per_event": 2,
                         "cursor": cursor,
                     },
                 )
@@ -286,21 +285,40 @@ async def test_universe_real_store_statistics_and_keyset_cursor():
             assert len(timeline_events) == len(set(timeline_events)) == 24
             assert set(timeline_events) == {*event_ids, old_event_id}
             assert timeline_events[-1] == old_event_id
+            assert sum(len(page["relations"]) for page in timeline_pages) == 34
+            assert max(
+                node["related_count"]
+                for page in timeline_pages
+                for node in page["nodes"]
+                if node["kind"] == "event"
+            ) == 11
             for page in timeline_pages:
                 event_ids_in_page = {
                     node["id"] for node in page["nodes"] if node["kind"] == "event"
+                }
+                entity_ids_in_page = {
+                    node["id"] for node in page["nodes"] if node["kind"] == "entity"
                 }
                 assert all(
                     relation["from_id"] in event_ids_in_page
                     for relation in page["relations"]
                 )
                 assert all(
+                    relation["to_id"] in entity_ids_in_page
+                    for relation in page["relations"]
+                )
+                event_counts = {
+                    node["id"]: node["related_count"]
+                    for node in page["nodes"]
+                    if node["kind"] == "event"
+                }
+                assert all(
                     sum(
                         1
                         for relation in page["relations"]
                         if relation["from_id"] == event_id
                     )
-                    <= 2
+                    == event_counts[event_id]
                     for event_id in event_ids_in_page
                 )
 
@@ -344,9 +362,30 @@ async def test_universe_real_store_statistics_and_keyset_cursor():
                 node["id"]
                 for page in (first, second, third)
                 for node in page["nodes"]
+                if node["kind"] == "event"
             ]
             assert len(paged_ids) == len(set(paged_ids)) == 24
             assert set(paged_ids) == {*event_ids, old_event_id}
+            assert set(auxiliary_entity_ids).issubset(
+                {
+                    node["id"]
+                    for page in (first, second, third)
+                    for node in page["nodes"]
+                    if node["kind"] == "entity"
+                }
+            )
+            for page in (first, second, third):
+                page_event_ids = {
+                    node["id"] for node in page["nodes"] if node["kind"] == "event"
+                }
+                page_entity_ids = {
+                    node["id"] for node in page["nodes"] if node["kind"] == "entity"
+                } | {entity_id}
+                assert all(
+                    relation["from_id"] in page_event_ids
+                    and relation["to_id"] in page_entity_ids
+                    for relation in page["relations"]
+                )
 
             wrong_anchor = await client.post(
                 "/api/v1/universe/expand",

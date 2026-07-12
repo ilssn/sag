@@ -6,7 +6,7 @@ import {
   mergeUniverseActivation,
   mergeUniverseGraphPatch,
   replaceUniverseWorkingSet,
-  sourceEntityPageTargetForLod,
+  sourceTimelinePageTargetForLod,
   trimUniverseWorkingSet,
   universeAnchorProgress,
 } from "./universe-working-set";
@@ -91,14 +91,14 @@ function patch(epoch: number, index: number): UniverseGraphPatch {
 
 describe("universe working set", () => {
   it("advances deep LOD one page at a time", () => {
-    expect(sourceEntityPageTargetForLod(1, 0)).toBe(0);
-    expect(sourceEntityPageTargetForLod(2, 0)).toBe(1);
-    expect(sourceEntityPageTargetForLod(3, 0)).toBe(1);
-    expect(sourceEntityPageTargetForLod(2, 2)).toBe(2);
-    expect(sourceEntityPageTargetForLod(3, 2)).toBe(3);
+    expect(sourceTimelinePageTargetForLod(1, 0)).toBe(0);
+    expect(sourceTimelinePageTargetForLod(2, 0)).toBe(1);
+    expect(sourceTimelinePageTargetForLod(3, 0)).toBe(1);
+    expect(sourceTimelinePageTargetForLod(2, 2)).toBe(2);
+    expect(sourceTimelinePageTargetForLod(3, 2)).toBe(3);
   });
 
-  it("keeps source entity pages as protected exploration roots", () => {
+  it("keeps the initial event bundle as protected exploration roots", () => {
     const current = mergeUniverseActivation(
       emptyUniverseWorkingSet(9),
       {
@@ -223,7 +223,7 @@ describe("universe working set", () => {
     expect(current.relations).toHaveLength(2);
   });
 
-  it("enforces budgets without evicting the activated connected set", () => {
+  it("enforces budgets while preserving the root and newest expansion", () => {
     const rootActivation: UniverseActivation = {
       epoch: 5,
       query: "root",
@@ -252,9 +252,62 @@ describe("universe working set", () => {
       });
     }
     expect(current.nodes.some((node) => node.id === "root-event")).toBe(true);
-    expect(current.nodes.some((node) => node.id === "entity-0")).toBe(true);
-    expect(current.nodes.some((node) => node.id === "entity-99")).toBe(false);
-    expect(current.relations.some((relation) => relation.to_id === "entity-0")).toBe(true);
+    expect(current.nodes.some((node) => node.id === "entity-0")).toBe(false);
+    expect(current.nodes.some((node) => node.id === "entity-99")).toBe(true);
+    expect(current.relations.some((relation) => relation.to_id === "entity-99")).toBe(true);
+  });
+
+  it("keeps every node in a fitting event bundle when older branches are evicted", () => {
+    let current = replaceUniverseWorkingSet({
+      epoch: 6,
+      query: "old",
+      nodes: [{
+        id: "old-event-0",
+        kind: "event",
+        source_id: "source-a",
+        label: "根事件",
+      }],
+      relations: [],
+    }, { nodes: 5, edges: 5 });
+    for (let index = 1; index <= 4; index += 1) {
+      const oldPatch = patch(6, index);
+      oldPatch.anchor = { ...oldPatch.anchor, id: "old-event-0" };
+      oldPatch.relations = [{
+        source_id: "source-a",
+        from_id: "old-event-0",
+        to_id: `entity-${index}`,
+        kind: "mentions",
+        weight: 1,
+        description: "",
+      }];
+      current = mergeUniverseGraphPatch(current, oldPatch, { nodes: 5, edges: 5 });
+    }
+    const bundle = patch(6, 40);
+    bundle.anchor = {
+      ...bundle.anchor,
+      id: "old-event-0",
+      related_count: 2,
+    };
+    bundle.nodes.push({
+      ...bundle.nodes[0],
+      id: "entity-41",
+      label: "实体 41",
+    });
+    bundle.relations = [40, 41].map((index) => ({
+      source_id: "source-a",
+      from_id: "old-event-0",
+      to_id: `entity-${index}`,
+      kind: "mentions" as const,
+      weight: 1,
+      description: "",
+    }));
+
+    const merged = mergeUniverseGraphPatch(current, bundle, { nodes: 5, edges: 5 });
+    expect(merged.nodes.some((node) => node.id === "entity-40")).toBe(true);
+    expect(merged.nodes.some((node) => node.id === "entity-41")).toBe(true);
+    expect(merged.relations.filter(
+      (relation) => relation.to_id === "entity-40" || relation.to_id === "entity-41",
+    )).toHaveLength(2);
   });
 
   it("immediately trims to the mobile budget", () => {

@@ -123,7 +123,8 @@ class Settings(BaseSettings):
     universe_entity_page_size: int = Field(default=24, ge=4, le=48)
     universe_entity_page_max: int = Field(default=48, ge=4, le=100)
     universe_timeline_event_page_size: int = Field(default=8, ge=2, le=24)
-    universe_timeline_entities_per_event: int = Field(default=4, ge=1, le=12)
+    # 事件包通常完整返回全部直接实体；该值只保护异常抽取造成的超大事件。
+    universe_event_entity_limit: int = Field(default=96, ge=8, le=128)
     universe_auto_page_limit: int = Field(default=4, ge=1, le=12)
     universe_lod_orbit_px: int = Field(default=72, ge=24, le=240)
     universe_lod_near_px: int = Field(default=180, ge=64, le=640)

@@ -137,7 +137,6 @@ async def timeline(
         engine_manager,
         source_id=body.source_id,
         limit=body.limit,
-        entities_per_event=body.entities_per_event,
         cursor=body.cursor,
     )
     return UniverseTimelineSliceOut(epoch=body.epoch, **value)

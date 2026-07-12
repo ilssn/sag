@@ -11,7 +11,7 @@ export const UNIVERSE_SCENE_BUDGET = {
   mobile: { nodes: 800, edges: 1500 },
 } as const;
 
-export function sourceEntityPageTargetForLod(
+export function sourceTimelinePageTargetForLod(
   level: 0 | 1 | 2 | 3,
   loadedPages: number,
 ) {
@@ -171,13 +171,13 @@ export function mergeUniverseGraphPatch(
   const relationMap = new Map<string, UniverseRelation>();
   current.relations.forEach((relation) => relationMap.set(relationKey(relation), relation));
   patch.relations.forEach((relation) => {
-    relationMap.delete(relationKey(relation));
     relationMap.set(relationKey(relation), relation);
   });
-  const committedKeys = new Set(
-    current.nodes.map((node) => universeNodeKey(node.kind, node.id, node.source_id)),
-  );
+  const committedKeys = new Set(current.root_keys);
   committedKeys.add(anchorKey);
+  patch.nodes.forEach((node) => {
+    committedKeys.add(universeNodeKey(node.kind, node.id, node.source_id));
+  });
   return bounded(
     {
       ...current,
@@ -221,6 +221,7 @@ export function mergeUniverseActivation(
     current.nodes.map((node) => [universeNodeKey(node.kind, node.id, node.source_id), node]),
   );
   const addedRootKeys = new Set<string>();
+  const addedKeys = new Set<string>();
   for (const node of activation.nodes) {
     const sourceId = node.source_id || "";
     const key = universeNodeKey(node.kind, node.id, sourceId);
@@ -232,14 +233,14 @@ export function mergeUniverseActivation(
       touched_at: now,
       root: existing?.root ?? Boolean(options.roots),
     });
+    addedKeys.add(key);
     if (existing?.root || options.roots) addedRootKeys.add(key);
   }
   const relationMap = new Map<string, UniverseRelation>();
   current.relations.forEach((relation) => relationMap.set(relationKey(relation), relation));
   activation.relations.forEach((relation) => relationMap.set(relationKey(relation), relation));
-  const committedKeys = new Set(
-    current.nodes.map((node) => universeNodeKey(node.kind, node.id, node.source_id)),
-  );
+  const committedKeys = new Set(current.root_keys);
+  addedKeys.forEach((key) => committedKeys.add(key));
   addedRootKeys.forEach((key) => committedKeys.add(key));
   return bounded(
     {

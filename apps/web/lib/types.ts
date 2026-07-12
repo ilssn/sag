@@ -396,7 +396,7 @@ export interface UniversePolicy {
   entity_page_size: number;
   entity_page_max: number;
   timeline_event_page_size: number;
-  timeline_entities_per_event: number;
+  event_entity_limit: number;
   auto_page_limit: number;
   lod_orbit_px: number;
   lod_near_px: number;

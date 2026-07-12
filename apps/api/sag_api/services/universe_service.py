@@ -41,7 +41,7 @@ def _universe_policy() -> dict[str, int]:
         "entity_page_size": settings.universe_entity_page_size,
         "entity_page_max": settings.universe_entity_page_max,
         "timeline_event_page_size": settings.universe_timeline_event_page_size,
-        "timeline_entities_per_event": settings.universe_timeline_entities_per_event,
+        "event_entity_limit": settings.universe_event_entity_limit,
         "auto_page_limit": settings.universe_auto_page_limit,
         "lod_orbit_px": settings.universe_lod_orbit_px,
         "lod_near_px": settings.universe_lod_near_px,
@@ -578,7 +578,7 @@ async def universe_expand(
                 node_kind,
                 node_id,
                 source=source,
-                limit=max(1, min(int(limit), 50)),
+                limit=max(1, min(int(limit), 128)),
                 cursor=cursor,
                 after=after,
                 before=before,
@@ -599,32 +599,47 @@ async def universe_expand(
         {
             **neighbor,
             "source_id": source.id,
-            "importance": max(0.2, min(1.0, float(neighbor.get("weight", 0.5)))),
+            "importance": max(
+                0.2,
+                min(
+                    1.0,
+                    float(neighbor.get("importance", neighbor.get("weight", 0.5))),
+                ),
+            ),
         }
         for neighbor in expansion.neighbors
     ]
-    relations = []
-    for neighbor in expansion.neighbors:
-        if node_kind == "event":
-            relation_source, relation_target = node_id, neighbor["id"]
-        else:
-            relation_source, relation_target = neighbor["id"], node_id
-        relations.append(
-            {
-                "source_id": source.id,
-                "from_id": relation_source,
-                "to_id": relation_target,
-                "kind": "mentions",
-                "weight": float(neighbor.get("weight", 1.0)),
-                "description": str(neighbor.get("relation_description", "")),
-            }
-        )
+    relations = [
+        {
+            **relation,
+            "source_id": source.id,
+            "weight": float(relation.get("weight", 1.0)),
+            "description": str(relation.get("description", "")),
+        }
+        for relation in expansion.relations
+    ]
+    if not relations:
+        for neighbor in expansion.neighbors:
+            if node_kind == "event":
+                relation_source, relation_target = node_id, neighbor["id"]
+            else:
+                relation_source, relation_target = neighbor["id"], node_id
+            relations.append(
+                {
+                    "source_id": source.id,
+                    "from_id": relation_source,
+                    "to_id": relation_target,
+                    "kind": "mentions",
+                    "weight": float(neighbor.get("weight", 1.0)),
+                    "description": str(neighbor.get("relation_description", "")),
+                }
+            )
     return {
         "anchor": anchor,
         "nodes": nodes,
         "relations": relations,
         "page": {
-            "returned": len(nodes),
+            "returned": expansion.returned or len(nodes),
             "has_more": expansion.has_more,
             "next_cursor": expansion.next_cursor,
         },
@@ -638,7 +653,6 @@ async def universe_timeline(
     *,
     source_id: str,
     limit: int,
-    entities_per_event: int,
     cursor: str | None,
 ) -> dict[str, Any]:
     """Load one stable, recent-to-old source timeline page with bounded context."""
@@ -651,7 +665,7 @@ async def universe_timeline(
                 source.sag_source_config_id,
                 source=source,
                 limit=max(1, min(int(limit), 24)),
-                entities_per_event=max(1, min(int(entities_per_event), 12)),
+                entity_limit=settings.universe_event_entity_limit,
                 cursor=cursor,
             )
     except TimeoutError as error:

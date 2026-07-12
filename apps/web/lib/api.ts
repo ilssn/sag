@@ -333,7 +333,6 @@ export const api = {
     epoch: number;
     source_id: string;
     limit?: number;
-    entities_per_event?: number;
     cursor?: string | null;
   }, signal?: AbortSignal) =>
     request<UniverseTimelineSlice>("/api/v1/universe/timeline", {

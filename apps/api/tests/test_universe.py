@@ -346,7 +346,7 @@ async def test_universe_overview_expand_detail_and_reset_contract():
                         "source_id": source_id,
                         "node_kind": "event",
                         "node_id": event_id,
-                        "limit": 51,
+                            "limit": 129,
                     },
                 )
                 assert too_large.status_code == 422

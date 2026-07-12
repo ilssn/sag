@@ -124,10 +124,12 @@ class UniverseSourceStatsInfo(BaseModel):
 
 
 class UniverseExpansionInfo(BaseModel):
-    """A server-bounded, single-hop graph expansion page."""
+    """A bounded expansion page whose event nodes carry their factual bundles."""
 
     anchor: dict[str, Any]
     neighbors: list[dict[str, Any]] = Field(default_factory=list)
+    relations: list[dict[str, Any]] = Field(default_factory=list)
+    returned: int = 0
     has_more: bool = False
     next_cursor: str | None = None
     as_of: datetime | None = None

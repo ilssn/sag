@@ -11,7 +11,9 @@ import type {
 import type { SearchSourceHit, UniversePolicy } from "@/lib/types";
 import {
   resolveUniverseDetailSource,
+  universeCardMorph,
   universeDeepLoadMilestone,
+  universeVisualDetailProgress,
 } from "@/lib/universe-presentation";
 
 export type UniverseSceneNodeKind = "source" | "event" | "entity";
@@ -120,6 +122,7 @@ interface ForceNode extends NodeObject {
   };
   entryOpacity?: number;
   renderedEntryOpacity?: number;
+  entryStabilized?: boolean;
 }
 
 interface ForceLink extends LinkObject<ForceNode> {
@@ -183,7 +186,7 @@ const ENTITY_COLOR = new THREE.Color("#75d8e8");
 const EVENT_LIGHT_COLOR = new THREE.Color("#b77b0b");
 const ENTITY_LIGHT_COLOR = new THREE.Color("#16879a");
 const WHITE = new THREE.Color("#ffffff");
-const DETAIL_MORPH_DURATION_MS = 320;
+const DETAIL_MORPH_RESPONSE_MS = 92;
 const SOURCE_PALETTE = [
   "#6fc0d0",
   "#9d8bd0",
@@ -460,8 +463,6 @@ class UniverseForceSceneEngine {
   private visualSourceId: string | null = null;
   private visualDetailMix = 0;
   private visualDetailTarget = 0;
-  private visualDetailTransitionFrom = 0;
-  private visualDetailTransitionStartedAt = 0;
   private reportedViewSourceId: string | null = null;
   private overviewRequested = true;
   private lodLevels = new Map<string, 0 | 1 | 2 | 3>();
@@ -683,8 +684,6 @@ class UniverseForceSceneEngine {
       this.visualSourceId = null;
       this.visualDetailMix = 0;
       this.visualDetailTarget = 0;
-      this.visualDetailTransitionFrom = 0;
-      this.visualDetailTransitionStartedAt = performance.now();
       this.reportedViewSourceId = null;
       this.overviewRequested = true;
       this.lodLevels.clear();
@@ -698,6 +697,10 @@ class UniverseForceSceneEngine {
     const nextHits = sourceHits.map((hit) => hit.source_id).join("|");
     const targets = this.sourceTargets(data.nodes, sourceHits);
     const oldNodes = this.nodes;
+    const hasAnimatedEntrants = !this.reducedMotion && data.nodes.some(
+      (node) => node.kind !== "source" && !oldNodes.has(node.id),
+    );
+    const persistentAnchor = oldNodes.get(this.lockedId ?? this.selectedId ?? "");
     const nextNodes = new Map<string, ForceNode>();
     const sceneNodesById = new Map(data.nodes.map((node) => [node.id, node]));
     const expansionAnchors = new Map<string, string>();
@@ -790,6 +793,17 @@ class UniverseForceSceneEngine {
         existing.targetY = desired.y;
         existing.targetZ = desired.z;
         existing.entry?.to.copy(desired);
+        if (
+          hasAnimatedEntrants
+          && existing.kind !== "source"
+          && !existing.pinned
+          && existing.id !== this.lockedId
+        ) {
+          existing.fx = existing.x;
+          existing.fy = existing.y;
+          existing.fz = existing.z;
+          existing.entryStabilized = true;
+        }
         nextNodes.set(sceneNode.id, existing);
         return;
       }
@@ -798,7 +812,11 @@ class UniverseForceSceneEngine {
       const focusOrigin = expansionAnchor
         && (expansionAnchor.id === this.lockedId || expansionAnchor.id === this.selectedId)
         ? new THREE.Vector3(expansionAnchor.x, expansionAnchor.y, expansionAnchor.z)
-        : currentSource.clone();
+        : persistentAnchor
+          && persistentAnchor.kind !== "source"
+          && persistentAnchor.sourceId === sceneNode.sourceId
+          ? new THREE.Vector3(persistentAnchor.x, persistentAnchor.y, persistentAnchor.z)
+          : currentSource.clone();
       const jitter = stableDirection(`${sceneNode.id}:entry-origin`).multiplyScalar(
         2.2 + stableUnit(`${sceneNode.id}:entry-jitter`) * 3.8,
       );
@@ -984,7 +1002,7 @@ class UniverseForceSceneEngine {
     const node = this.nodes.get(nodeId);
     if (
       !node
-      || node.kind !== "event"
+      || node.kind === "source"
       || !Number.isFinite(node.x)
       || !Number.isFinite(node.y)
       || !Number.isFinite(node.z)
@@ -1256,7 +1274,16 @@ class UniverseForceSceneEngine {
     });
     this.host.dataset.universeEnteringCount = String(entering);
     if (changed) this.graph.refresh();
-    if (completed && entering === 0) this.graph.d3ReheatSimulation();
+    if (completed && entering === 0) {
+      this.nodes.forEach((node) => {
+        if (!node.entryStabilized) return;
+        node.entryStabilized = false;
+        if (node.pinned || node.id === this.lockedId) return;
+        node.fx = undefined;
+        node.fy = undefined;
+        node.fz = undefined;
+      });
+    }
     return entering > 0;
   }
 
@@ -1521,7 +1548,9 @@ class UniverseForceSceneEngine {
     const object = node.object;
     if (!object) return;
     const entryScale = 0.28 + easeOutCubic(entryOpacity) * 0.72;
-    object.scale.setScalar((emphasized ? 1.18 : 1) * entryScale);
+    object.scale.setScalar(
+      (emphasized ? 1.18 : 1) * entryScale * this.nodeMorphScale(node),
+    );
     object.traverse((child) => {
       if (child.userData.hitArea) return;
       const candidate = child as THREE.Object3D & {
@@ -1550,6 +1579,23 @@ class UniverseForceSceneEngine {
               base * opacity * entryOpacity * detailFactor,
             );
       });
+    });
+  }
+
+  private nodeMorphScale(node: ForceNode) {
+    if (node.kind === "source") return 1;
+    const progress = node.sourceId === this.visualSourceId ? this.visualDetailMix : 0;
+    return 0.82 + easeOutCubic(progress) * 0.18;
+  }
+
+  private updateNodeMorphScales() {
+    this.nodes.forEach((node) => {
+      if (!node.object || node.kind === "source") return;
+      const entryOpacity = node.entryOpacity ?? 1;
+      const entryScale = 0.28 + easeOutCubic(entryOpacity) * 0.72;
+      node.object.scale.setScalar(
+        (node.visuallyEmphasized ? 1.18 : 1) * entryScale * this.nodeMorphScale(node),
+      );
     });
   }
 
@@ -1838,6 +1884,11 @@ class UniverseForceSceneEngine {
   }
 
   private rebuildLabels() {
+    const retainedLabelRank = new Map(
+      this.labels
+        .filter((label) => label.kind === "node")
+        .map((label, index) => [label.nodeId, index]),
+    );
     this.labelLayer.replaceChildren();
     this.labels = [];
     const mobile = this.host.clientWidth < 768;
@@ -1857,19 +1908,43 @@ class UniverseForceSceneEngine {
         return right.sceneNode.importance - left.sceneNode.importance;
       })
       .slice(0, mobile ? 8 : 18);
-    const activeNodes = [...this.nodes.values()]
+    const activeBySource = new Map<string, ForceNode[]>();
+    [...this.nodes.values()]
       .filter((node) => node.kind !== "source" && node.sceneNode.state === "active")
-      .sort((left, right) => {
-        if (left.id === this.selectedId || left.id === this.hoveredId) return -1;
-        if (right.id === this.selectedId || right.id === this.hoveredId) return 1;
-        const leftConnected = Boolean(focusNeighbors?.has(left.id));
-        const rightConnected = Boolean(focusNeighbors?.has(right.id));
-        if (leftConnected !== rightConnected) return leftConnected ? -1 : 1;
-        if (left.sceneNode.root !== right.sceneNode.root) return left.sceneNode.root ? -1 : 1;
-        if (left.kind !== right.kind) return left.kind === "entity" ? -1 : 1;
-        return right.sceneNode.importance - left.sceneNode.importance;
-      })
-      .slice(0, mobile ? 5 : 12);
+      .forEach((node) => {
+        const group = activeBySource.get(node.sourceId) ?? [];
+        group.push(node);
+        activeBySource.set(node.sourceId, group);
+      });
+    const activeNodes: ForceNode[] = [];
+    const labelLimit = mobile ? 5 : 12;
+    activeBySource.forEach((candidates) => {
+      const retained = candidates
+        .filter((node) => retainedLabelRank.has(node.id))
+        .sort(
+          (left, right) => (retainedLabelRank.get(left.id) ?? 0)
+            - (retainedLabelRank.get(right.id) ?? 0),
+        );
+      const additions = candidates
+        .filter((node) => !retainedLabelRank.has(node.id))
+        .sort((left, right) => {
+          const leftConnected = Boolean(focusNeighbors?.has(left.id));
+          const rightConnected = Boolean(focusNeighbors?.has(right.id));
+          if (leftConnected !== rightConnected) return leftConnected ? -1 : 1;
+          if (left.sceneNode.root !== right.sceneNode.root) return left.sceneNode.root ? -1 : 1;
+          if (left.kind !== right.kind) return left.kind === "entity" ? -1 : 1;
+          return right.sceneNode.importance - left.sceneNode.importance;
+        });
+      activeNodes.push(
+        ...retained,
+        ...additions.slice(0, Math.max(0, labelLimit - retained.length)),
+      );
+    });
+    [this.selectedId, this.hoveredId].forEach((id) => {
+      if (!id || activeNodes.some((node) => node.id === id)) return;
+      const node = this.nodes.get(id);
+      if (node?.kind !== "source" && node?.sceneNode.state === "active") activeNodes.push(node);
+    });
 
     sources.forEach((node) => {
       const element = document.createElement("button");
@@ -2010,6 +2085,8 @@ class UniverseForceSceneEngine {
     const progressRect = this.relativeOverlayRect("[data-universe-load-progress='true']", 8);
     const inspectorRect = this.relativeOverlayRect("[data-universe-inspector='true']", 8);
     const placed: Array<{ left: number; top: number; right: number; bottom: number }> = [];
+    const cardMorph = universeCardMorph(this.visualDetailMix);
+    const sourceReveal = 1 - THREE.MathUtils.smoothstep(this.visualDetailMix, 0, 0.72);
 
     this.labels.forEach((label) => {
       const node = this.nodes.get(label.nodeId);
@@ -2022,13 +2099,13 @@ class UniverseForceSceneEngine {
       const belongsToVisualSource = node.sourceId === this.visualSourceId;
       const sourceHovered = label.kind === "source" && node.id === this.hoveredId;
       const layoutOpacity = label.kind === "source"
-        ? 1 - this.visualDetailMix
-        : belongsToVisualSource ? this.visualDetailMix : 0;
+        ? sourceReveal
+        : belongsToVisualSource ? cardMorph.reveal : 0;
       const entryReveal = label.kind === "node"
         ? THREE.MathUtils.clamp(((node.entryOpacity ?? 1) - 0.16) / 0.84, 0, 1)
         : 1;
       const visibleOpacity = layoutOpacity * entryReveal;
-      if (visibleOpacity <= 0.015) {
+      if (visibleOpacity <= 0.01) {
         label.element.hidden = true;
         label.element.style.display = "none";
         label.element.style.pointerEvents = "none";
@@ -2056,16 +2133,20 @@ class UniverseForceSceneEngine {
       const sourceInfoWidth = mobile ? 138 : 154;
       const sourceInfoHeight = mobile ? 40 : 44;
       const sourceInfoGap = 8;
-      const labelWidth = label.kind === "source"
+      const baseLabelWidth = label.kind === "source"
         ? sourceBeaconSize
         : mobile
           ? expanded ? 204 : 184
           : expanded ? 244 : 216;
-      const labelHeight = label.kind === "source"
+      const baseLabelHeight = label.kind === "source"
         ? sourceBeaconSize
         : mobile
           ? expanded ? 82 : 70
           : expanded ? 94 : 78;
+      const labelScale = label.kind === "source" ? 1 : cardMorph.scale;
+      const labelWidth = baseLabelWidth * labelScale;
+      const labelHeight = baseLabelHeight * labelScale;
+      const labelGap = 3 + labelScale * 7;
       type LabelSide = "right" | "left" | "top" | "bottom" | "center";
       type LabelRect = {
         left: number;
@@ -2121,10 +2202,34 @@ class UniverseForceSceneEngine {
             ]
           : [sourceMarkerRect]
         : [
-            makeRect(screen.x + 10, screen.y - labelHeight / 2, labelWidth, labelHeight, "right"),
-            makeRect(screen.x - labelWidth - 10, screen.y - labelHeight / 2, labelWidth, labelHeight, "left"),
-            makeRect(screen.x - labelWidth / 2, screen.y + 10, labelWidth, labelHeight, "bottom"),
-            makeRect(screen.x - labelWidth / 2, screen.y - labelHeight - 10, labelWidth, labelHeight, "top"),
+            makeRect(
+              screen.x + labelGap,
+              screen.y - labelHeight / 2,
+              labelWidth,
+              labelHeight,
+              "right",
+            ),
+            makeRect(
+              screen.x - labelWidth - labelGap,
+              screen.y - labelHeight / 2,
+              labelWidth,
+              labelHeight,
+              "left",
+            ),
+            makeRect(
+              screen.x - labelWidth / 2,
+              screen.y + labelGap,
+              labelWidth,
+              labelHeight,
+              "bottom",
+            ),
+            makeRect(
+              screen.x - labelWidth / 2,
+              screen.y - labelHeight - labelGap,
+              labelWidth,
+              labelHeight,
+              "top",
+            ),
           ];
       if (label.kind === "node" && screen.x >= width / 2) {
         [candidates[0], candidates[1]] = [candidates[1], candidates[0]];
@@ -2149,7 +2254,12 @@ class UniverseForceSceneEngine {
         return outside || overlapsPanel || overlapsLabel;
       };
       const rect = candidates.find((candidate) => !overlaps(candidate))
-        ?? (emphasized ? candidates[0] : null);
+        ?? (label.kind === "node"
+          ? candidates[Math.min(
+              candidates.length - 1,
+              Math.floor(stableUnit(`${node.id}:label-fallback`) * candidates.length),
+            )]
+          : emphasized ? candidates[0] : null);
       if (!rect) {
         label.element.hidden = true;
         label.element.style.display = "none";
@@ -2166,12 +2276,46 @@ class UniverseForceSceneEngine {
       label.element.style.opacity = String(
         visibleOpacity * (emphasized ? 1 : label.kind === "source" ? 0.94 : 0.82),
       );
-      label.element.style.pointerEvents = visibleOpacity >= 0.58 ? "auto" : "none";
+      label.element.style.pointerEvents = label.kind === "source"
+        ? visibleOpacity >= 0.58 ? "auto" : "none"
+        : this.visualDetailMix >= 0.5 && cardMorph.reveal >= 0.72 ? "auto" : "none";
       label.element.style.zIndex = emphasized ? "4" : label.kind === "node" ? "2" : "1";
-      label.element.style.transform = label.kind === "source"
-        ? `translate3d(${screen.x}px, ${screen.y}px, 0) translate(-50%, -50%)`
-        : `translate3d(${rect.left}px, ${rect.top}px, 0)`;
-      if (visibleOpacity >= 0.45) placed.push(rect);
+      if (label.kind === "source") {
+        label.element.style.transformOrigin = "center";
+        label.element.style.transform = `translate3d(${screen.x}px, ${screen.y}px, 0) translate(-50%, -50%)`;
+      } else {
+        let translateX = rect.left;
+        let translateY = rect.top;
+        if (rect.side === "right") {
+          label.element.style.transformOrigin = "left center";
+          translateY -= (baseLabelHeight - labelHeight) / 2;
+        } else if (rect.side === "left") {
+          label.element.style.transformOrigin = "right center";
+          translateX -= baseLabelWidth - labelWidth;
+          translateY -= (baseLabelHeight - labelHeight) / 2;
+        } else if (rect.side === "bottom") {
+          label.element.style.transformOrigin = "center top";
+          translateX -= (baseLabelWidth - labelWidth) / 2;
+        } else {
+          label.element.style.transformOrigin = "center bottom";
+          translateX -= (baseLabelWidth - labelWidth) / 2;
+          translateY -= baseLabelHeight - labelHeight;
+        }
+        label.element.style.setProperty(
+          "--universe-card-eyebrow-opacity",
+          cardMorph.eyebrow.toFixed(3),
+        );
+        label.element.style.setProperty(
+          "--universe-card-summary-opacity",
+          cardMorph.summary.toFixed(3),
+        );
+        label.element.style.setProperty(
+          "--universe-card-summary-y",
+          `${((1 - cardMorph.summary) * 3).toFixed(2)}px`,
+        );
+        label.element.style.transform = `translate3d(${translateX}px, ${translateY}px, 0) scale(${labelScale})`;
+      }
+      if (visibleOpacity >= 0.22) placed.push(rect);
     });
   }
 
@@ -2269,8 +2413,22 @@ class UniverseForceSceneEngine {
     this.startLoop(this.reducedMotion ? 80 : duration + 180);
   }
 
+  private projectedSourceRadius(node: ForceNode, cameraRight: THREE.Vector3) {
+    const center = this.graph.graph2ScreenCoords(node.x, node.y, node.z);
+    const edge = new THREE.Vector3(node.x, node.y, node.z).addScaledVector(
+      cameraRight,
+      node.sceneNode.radius,
+    );
+    const projectedEdge = this.graph.graph2ScreenCoords(edge.x, edge.y, edge.z);
+    const radiusPx = Math.hypot(projectedEdge.x - center.x, projectedEdge.y - center.y);
+    return Number.isFinite(radiusPx) ? radiusPx : null;
+  }
+
   private updateVisualLayout(now: number, force = false, refresh = true) {
-    if (!force && now - this.lastVisualLodAt < 48) return;
+    const elapsed = this.lastVisualLodAt > 0
+      ? Math.max(1, now - this.lastVisualLodAt)
+      : 32;
+    if (!force && elapsed < 24) return;
     this.lastVisualLodAt = now;
     const camera = this.graph.camera();
     camera.updateMatrixWorld();
@@ -2285,13 +2443,9 @@ class UniverseForceSceneEngine {
     this.nodes.forEach((node) => {
       if (node.kind !== "source") return;
       const center = this.graph.graph2ScreenCoords(node.x, node.y, node.z);
-      const edge = new THREE.Vector3(node.x, node.y, node.z).addScaledVector(
-        cameraRight,
-        node.sceneNode.radius,
-      );
-      const projectedEdge = this.graph.graph2ScreenCoords(edge.x, edge.y, edge.z);
       const projectedCenter = new THREE.Vector3(node.x, node.y, node.z).project(camera);
-      const radiusPx = Math.hypot(projectedEdge.x - center.x, projectedEdge.y - center.y);
+      const radiusPx = this.projectedSourceRadius(node, cameraRight);
+      if (radiusPx === null) return;
       const distancePx = Math.hypot(center.x - width / 2, center.y - height / 2);
       const inFrame = projectedCenter.z > -1
         && projectedCenter.z < 1
@@ -2303,11 +2457,37 @@ class UniverseForceSceneEngine {
       if (!inFrame) return;
       const score = radiusPx
         - distancePx * 0.45
-        + (node.sourceId === this.visualSourceId ? this.policy.lod_hysteresis_px : 0);
+        + (node.sourceId === (this.latchedDetailSourceId ?? this.visualSourceId)
+          ? this.policy.lod_hysteresis_px
+          : 0);
       if (!best || score > best.score) best = { node, radiusPx, score };
     });
 
     const inferredVisual = best as { node: ForceNode; radiusPx: number; score: number } | null;
+    const suppressDetail = this.overviewRequested;
+    const previousVisualNode = this.visualSourceId
+      ? [...this.nodes.values()].find(
+          (node) => node.kind === "source" && node.sourceId === this.visualSourceId,
+        )
+      : undefined;
+    const resetVisual = previousVisualNode ?? inferredVisual?.node;
+    const resetRadiusPx = resetVisual
+      ? this.projectedSourceRadius(resetVisual, cameraRight)
+      : null;
+    if (
+      suppressDetail
+      && (resetRadiusPx === null || resetRadiusPx <= this.policy.lod_orbit_px)
+    ) {
+      this.overviewRequested = false;
+    }
+    const currentSource = this.latchedDetailSourceId
+      ? [...this.nodes.values()].find(
+          (node) => node.kind === "source" && node.sourceId === this.latchedDetailSourceId,
+        )
+      : undefined;
+    const currentRadiusPx = currentSource
+      ? this.projectedSourceRadius(currentSource, cameraRight)
+      : null;
     const explicitAnchor = this.nodes.get(this.lockedId ?? this.selectedId ?? "");
     let explicitSource: ForceNode | undefined;
     if (
@@ -2323,45 +2503,83 @@ class UniverseForceSceneEngine {
         (node) => node.kind === "source" && node.sourceId === explicitAnchor.sourceId,
       );
     }
-    const visual = explicitSource
-      ? {
-          node: explicitSource,
-          radiusPx: Math.max(this.policy.lod_near_px, inferredVisual?.radiusPx ?? 0),
-          score: Number.POSITIVE_INFINITY,
-        }
-      : inferredVisual;
-    const nextSourceId = visual?.node.sourceId ?? null;
-    const transitionBand = Math.max(8, this.policy.lod_hysteresis_px);
-    const linearMix = explicitSource
-      ? 1
-      : visual
-      ? THREE.MathUtils.clamp(
-          (visual.radiusPx - (this.policy.lod_near_px - transitionBand))
-            / (transitionBand * 2),
-          0,
-          1,
+
+    const nextLatchedSourceId = suppressDetail
+      ? null
+      : resolveUniverseDetailSource({
+          currentSourceId: this.latchedDetailSourceId,
+          currentRadiusPx,
+          candidateSourceId: inferredVisual?.node.sourceId ?? null,
+          candidateRadiusPx: inferredVisual?.radiusPx ?? null,
+          explicitSourceId: explicitSource?.sourceId,
+          enterRadiusPx: this.policy.lod_near_px,
+          exitRadiusPx: this.policy.lod_orbit_px,
+        });
+    const previousSourceId = this.visualSourceId;
+    const previousMix = this.visualDetailMix;
+    const previousReportedSourceId = this.reportedViewSourceId;
+    const latchChanged = nextLatchedSourceId !== this.latchedDetailSourceId;
+    this.latchedDetailSourceId = nextLatchedSourceId;
+    const latchedVisual = nextLatchedSourceId
+      ? [...this.nodes.values()].find(
+          (node) => node.kind === "source" && node.sourceId === nextLatchedSourceId,
+        )
+      : undefined;
+    const visual = suppressDetail
+      ? previousVisualNode
+      : latchedVisual ?? explicitSource ?? inferredVisual?.node;
+    const visualRadiusPx = visual
+      ? this.projectedSourceRadius(visual, cameraRight)
+      : null;
+    const nextTarget = visual
+      ? universeVisualDetailProgress(
+          visualRadiusPx,
+          this.policy.lod_orbit_px,
+          this.policy.lod_near_px,
+          this.policy.lod_deep_px,
         )
       : 0;
-    const nextMix = linearMix * linearMix * (3 - 2 * linearMix);
-    const sourceChanged = nextSourceId !== this.visualSourceId;
-    const mixChanged = Math.abs(nextMix - this.visualDetailMix) >= 0.01;
+    this.visualDetailTarget = nextTarget;
+    let nextSourceId = nextTarget > 0.001 || nextLatchedSourceId
+      ? visual?.sourceId ?? null
+      : previousSourceId;
+    const response = this.reducedMotion
+      ? 1
+      : 1 - Math.exp(-elapsed / DETAIL_MORPH_RESPONSE_MS);
+    let nextMix = THREE.MathUtils.lerp(previousMix, nextTarget, response);
+    if (Math.abs(nextTarget - nextMix) <= 0.002) nextMix = nextTarget;
+    if (!this.reducedMotion && Math.abs(nextTarget - nextMix) > 0.002) {
+      this.loopKeepAliveUntil = Math.max(
+        this.loopKeepAliveUntil,
+        now + DETAIL_MORPH_RESPONSE_MS * 4,
+      );
+    }
+    if (nextMix <= 0.002 && nextTarget === 0 && !nextLatchedSourceId) {
+      nextMix = 0;
+      nextSourceId = null;
+    }
     const nextReportedSourceId = nextMix >= 0.5 ? nextSourceId : null;
-    const reportedChanged = nextReportedSourceId !== this.reportedViewSourceId;
-    if (!force && !sourceChanged && !mixChanged && !reportedChanged) return;
+    const sourceChanged = nextSourceId !== previousSourceId;
+    const mixChanged = Math.abs(nextMix - previousMix) >= 0.002;
+    const reportedChanged = nextReportedSourceId !== previousReportedSourceId;
+    if (!force && !latchChanged && !sourceChanged && !mixChanged && !reportedChanged) return;
 
     this.visualSourceId = nextSourceId;
     this.visualDetailMix = nextMix;
     this.reportedViewSourceId = nextReportedSourceId;
     this.host.dataset.universeVisualMode = nextReportedSourceId ? "detail" : "overview";
     this.host.dataset.universeDetailSource = nextReportedSourceId ?? "";
+    this.host.dataset.universeDetailLatched = this.latchedDetailSourceId ?? "";
     this.host.dataset.universeDetailMix = nextMix.toFixed(2);
+    this.host.dataset.universeDetailTarget = nextTarget.toFixed(2);
+    this.updateNodeMorphScales();
     this.updateSourceAuraOpacities();
     this.updateNebulaMotionState();
     this.nodes.forEach((node) => {
       if (node.kind !== "source") return;
       node.object?.traverse((child) => {
         if (!child.userData.hitArea) return;
-        child.visible = node.sourceId !== nextSourceId || nextMix < 0.5;
+        child.visible = node.sourceId !== nextSourceId || nextMix < 0.62;
       });
     });
     const hovered = this.hoveredId ? this.nodes.get(this.hoveredId) : undefined;
@@ -2373,15 +2591,13 @@ class UniverseForceSceneEngine {
       this.hoveredFromLabel = false;
       this.callbacks.onHover(null);
     }
-    if (reportedChanged || sourceChanged || mixChanged || force) {
-      this.callbacks.onViewChange({
-        mode: nextReportedSourceId ? "detail" : "overview",
-        sourceId: nextReportedSourceId,
-        progress: nextMix,
-      });
-    }
+    this.callbacks.onViewChange({
+      mode: nextReportedSourceId ? "detail" : "overview",
+      sourceId: nextReportedSourceId,
+      progress: nextMix,
+    });
     if (!refresh) return;
-    if (reportedChanged) this.applyHighlight();
+    if (reportedChanged || sourceChanged) this.applyHighlight();
     else this.updateLabels(now, true);
   }
 
@@ -2395,6 +2611,7 @@ class UniverseForceSceneEngine {
     let best: { node: ForceNode; radiusPx: number; distance: number } | null = null;
     this.nodes.forEach((node) => {
       if (node.kind !== "source") return;
+      if (this.latchedDetailSourceId && node.sourceId !== this.latchedDetailSourceId) return;
       const center = this.graph.graph2ScreenCoords(node.x, node.y, node.z);
       if (center.x < -80 || center.x > width + 80 || center.y < -80 || center.y > height + 80) return;
       const edge = new THREE.Vector3(node.x, node.y, node.z).addScaledVector(
@@ -2418,24 +2635,39 @@ class UniverseForceSceneEngine {
     else if (candidate.radiusPx >= this.policy.lod_near_px - (previous >= 2 ? hysteresis : 0)) level = 2;
     else if (candidate.radiusPx >= this.policy.lod_orbit_px - (previous >= 1 ? hysteresis : 0)) level = 1;
     else level = 0;
-    const repeatedDeepGesture = level === 3
-      && previous === 3
-      && this.wheelGesture > this.handledDeepWheelGesture;
-    if (level === previous && !repeatedDeepGesture) return;
+    const deepMilestone = level === 3
+      ? universeDeepLoadMilestone(
+          candidate.radiusPx,
+          this.policy.lod_deep_px,
+          this.policy.lod_hysteresis_px,
+        )
+      : 0;
+    const previousDeepMilestone = this.deepLodMilestones.get(candidate.node.sourceId) ?? 0;
+    const deepMilestoneAdvanced = level === 3 && deepMilestone > previousDeepMilestone;
+    if (level === previous && !deepMilestoneAdvanced) return;
     this.pendingLod = {
       sourceId: candidate.node.sourceId,
       level,
-      wheelGesture: this.wheelGesture,
+      deepMilestone,
+      notify: level !== 3 || deepMilestoneAdvanced,
     };
     if (this.lodTimer !== null) window.clearTimeout(this.lodTimer);
     this.lodTimer = window.setTimeout(() => {
       this.lodTimer = null;
       if (!this.pendingLod) return;
       this.lodLevels.set(this.pendingLod.sourceId, this.pendingLod.level);
-      if (this.pendingLod.level === 3) {
-        this.handledDeepWheelGesture = this.pendingLod.wheelGesture;
+      if (this.pendingLod.deepMilestone > 0) {
+        this.deepLodMilestones.set(
+          this.pendingLod.sourceId,
+          Math.max(
+            this.deepLodMilestones.get(this.pendingLod.sourceId) ?? 0,
+            this.pendingLod.deepMilestone,
+          ),
+        );
       }
-      this.callbacks.onSourceLod(this.pendingLod.sourceId, this.pendingLod.level);
+      if (this.pendingLod.notify) {
+        this.callbacks.onSourceLod(this.pendingLod.sourceId, this.pendingLod.level);
+      }
       this.pendingLod = null;
     }, this.policy.lod_debounce_ms);
   }
@@ -2558,16 +2790,9 @@ class UniverseForceSceneEngine {
     if (this.selectedId) this.callbacks.onSelectionClear();
   };
 
-  private armLod = (event: Event) => {
+  private armLod = () => {
     this.wakeRendering(1400);
     this.lodArmed = true;
-    if (event.type === "wheel") {
-      if (this.wheelGestureTimer === null) this.wheelGesture += 1;
-      else window.clearTimeout(this.wheelGestureTimer);
-      this.wheelGestureTimer = window.setTimeout(() => {
-        this.wheelGestureTimer = null;
-      }, 280);
-    }
     this.startLoop(this.policy.lod_debounce_ms + 240);
   };
 

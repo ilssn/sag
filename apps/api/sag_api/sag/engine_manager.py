@@ -1239,23 +1239,194 @@ class EngineManager:
             as_of=_utc_time(as_of),
         )
 
+    async def _universe_entity_event_counts(
+        self,
+        session: Any,
+        source_config_id: str,
+        entity_ids: list[str],
+        *,
+        as_of_db: datetime,
+    ) -> dict[str, int]:
+        """Count factual source events for a batch of entities at one snapshot."""
+        if not entity_ids:
+            return {}
+        from sqlalchemy import func, select
+        from zleap.sag.db.models import EventEntity, SourceEvent
+
+        event_time = func.coalesce(SourceEvent.start_time, SourceEvent.created_time)
+        return {
+            str(entity_id): int(count or 0)
+            for entity_id, count in (
+                await session.execute(
+                    select(
+                        EventEntity.entity_id,
+                        func.count(func.distinct(EventEntity.event_id)),
+                    )
+                    .join(SourceEvent, SourceEvent.id == EventEntity.event_id)
+                    .where(
+                        EventEntity.entity_id.in_(entity_ids),
+                        EventEntity.created_time <= as_of_db,
+                        SourceEvent.source_config_id == source_config_id,
+                        event_time <= as_of_db,
+                        (
+                            SourceEvent.status.is_(None)
+                            | (SourceEvent.status != "DELETED")
+                        ),
+                    )
+                    .group_by(EventEntity.entity_id)
+                )
+            ).all()
+        }
+
+    async def _universe_event_bundles(
+        self,
+        session: Any,
+        source_config_id: str,
+        events: list[dict[str, Any]],
+        *,
+        as_of_db: datetime,
+        entity_limit: int,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Hydrate event rows and their factual entity relations without N+1 reads."""
+        from sqlalchemy import func, select
+        from zleap.sag.db.models import Entity, EventEntity
+
+        event_ids = [str(event["id"]) for event in events]
+        if not event_ids:
+            return [], []
+
+        bounded_entities = max(8, min(int(entity_limit), 128))
+        ranked_relations = (
+            select(
+                EventEntity.event_id.label("event_id"),
+                EventEntity.entity_id.label("entity_id"),
+                EventEntity.weight.label("weight"),
+                EventEntity.description.label("relation_description"),
+                func.count(EventEntity.id)
+                .over(partition_by=EventEntity.event_id)
+                .label("relation_total"),
+                func.row_number()
+                .over(
+                    partition_by=EventEntity.event_id,
+                    order_by=(EventEntity.weight.desc(), EventEntity.entity_id.asc()),
+                )
+                .label("relation_rank"),
+            )
+            .where(
+                EventEntity.event_id.in_(event_ids),
+                EventEntity.created_time <= as_of_db,
+            )
+            .subquery()
+        )
+        relation_rows = (
+            await session.execute(
+                select(
+                    ranked_relations.c.event_id,
+                    ranked_relations.c.entity_id,
+                    ranked_relations.c.weight,
+                    ranked_relations.c.relation_description,
+                    ranked_relations.c.relation_total,
+                    ranked_relations.c.relation_rank,
+                    Entity.name,
+                    Entity.type,
+                    Entity.description.label("entity_description"),
+                )
+                .join(Entity, Entity.id == ranked_relations.c.entity_id)
+                .where(
+                    ranked_relations.c.relation_rank <= bounded_entities,
+                    Entity.source_config_id == source_config_id,
+                )
+                .order_by(
+                    ranked_relations.c.event_id,
+                    ranked_relations.c.relation_rank,
+                )
+            )
+        ).all()
+
+        entity_ids = sorted({str(row.entity_id) for row in relation_rows})
+        entity_counts = await self._universe_entity_event_counts(
+            session,
+            source_config_id,
+            entity_ids,
+            as_of_db=as_of_db,
+        )
+
+        event_counts: dict[str, int] = {}
+        entity_nodes: dict[str, dict[str, Any]] = {}
+        relations: list[dict[str, Any]] = []
+        for row in relation_rows:
+            event_id = str(row.event_id)
+            entity_id = str(row.entity_id)
+            event_counts[event_id] = int(row.relation_total or 0)
+            entity_nodes.setdefault(
+                entity_id,
+                {
+                    "id": entity_id,
+                    "kind": "entity",
+                    "label": row.name or "未命名实体",
+                    "description": str(row.entity_description or "")[:800],
+                    "category": row.type or "实体",
+                    "chunk_id": None,
+                    "start_time": None,
+                    "importance": max(
+                        0.3,
+                        min(1.0, 0.42 + _weight(row.weight) * 0.08),
+                    ),
+                    "related_count": entity_counts.get(entity_id, 0),
+                    "state": "active",
+                },
+            )
+            relations.append(
+                {
+                    "from_id": event_id,
+                    "to_id": entity_id,
+                    "kind": "mentions",
+                    "weight": _weight(row.weight),
+                    "description": str(row.relation_description or "")[:240],
+                }
+            )
+
+        event_nodes = [
+            {
+                "id": str(event["id"]),
+                "kind": "event",
+                "label": event.get("title") or "未命名事件",
+                "description": str(event.get("summary") or "")[:800],
+                "category": event.get("category") or "事件",
+                "chunk_id": event.get("chunk_id"),
+                "start_time": _utc_time(event.get("start_time") or event.get("event_time")),
+                "importance": max(
+                    0.4,
+                    min(
+                        1.0,
+                        0.5
+                        + math.log1p(event_counts.get(str(event["id"]), 0)) * 0.08,
+                    ),
+                ),
+                "related_count": event_counts.get(str(event["id"]), 0),
+                "state": "active",
+            }
+            for event in events
+        ]
+        return [*event_nodes, *entity_nodes.values()], relations
+
     async def universe_timeline(
         self,
         source_config_id: str,
         *,
         source: Source | None = None,
         limit: int = 8,
-        entities_per_event: int = 4,
+        entity_limit: int = 96,
         cursor: str | None = None,
     ) -> UniverseTimelineInfo:
-        """Return a recent-to-old event page with a bounded entity neighborhood."""
+        """Return recent event bundles in stable event-time order."""
         await self._slot(source_config_id, source)
         from sqlalchemy import and_, func, or_, select
         from zleap.sag.db import get_session_factory
-        from zleap.sag.db.models import Entity, EventEntity, SourceEvent
+        from zleap.sag.db.models import SourceEvent
 
         bounded_limit = max(1, min(int(limit), 24))
-        bounded_entities = max(1, min(int(entities_per_event), 12))
+        bounded_entities = max(8, min(int(entity_limit), 128))
         cursor_payload = (
             _decode_universe_cursor(cursor, self._settings.secret_key) if cursor else None
         )
@@ -1305,87 +1476,25 @@ class EngineManager:
             ).all()
             has_more = len(event_rows) > bounded_limit
             page = event_rows[:bounded_limit]
-            event_ids = [row.id for row in page]
 
-            relation_rows = []
-            event_counts: dict[str, int] = {}
-            entity_counts: dict[str, int] = {}
-            if event_ids:
-                event_counts = {
-                    str(event_id): int(count or 0)
-                    for event_id, count in (
-                        await session.execute(
-                            select(EventEntity.event_id, func.count(EventEntity.id))
-                            .where(EventEntity.event_id.in_(event_ids))
-                            .group_by(EventEntity.event_id)
-                        )
-                    ).all()
-                }
-                ranked_relations = (
-                    select(
-                        EventEntity.event_id.label("event_id"),
-                        EventEntity.entity_id.label("entity_id"),
-                        EventEntity.weight.label("weight"),
-                        EventEntity.description.label("relation_description"),
-                        func.row_number()
-                        .over(
-                            partition_by=EventEntity.event_id,
-                            order_by=(EventEntity.weight.desc(), EventEntity.entity_id.asc()),
-                        )
-                        .label("relation_rank"),
-                    )
-                    .where(
-                        EventEntity.event_id.in_(event_ids),
-                        EventEntity.created_time <= as_of_db,
-                    )
-                    .subquery()
-                )
-                relation_rows = (
-                    await session.execute(
-                        select(
-                            ranked_relations.c.event_id,
-                            ranked_relations.c.entity_id,
-                            ranked_relations.c.weight,
-                            ranked_relations.c.relation_description,
-                            ranked_relations.c.relation_rank,
-                            Entity.name,
-                            Entity.type,
-                            Entity.description.label("entity_description"),
-                        )
-                        .join(Entity, Entity.id == ranked_relations.c.entity_id)
-                        .where(
-                            ranked_relations.c.relation_rank <= bounded_entities,
-                            Entity.source_config_id == source_config_id,
-                        )
-                        .order_by(
-                            ranked_relations.c.event_id,
-                            ranked_relations.c.relation_rank,
-                        )
-                    )
-                ).all()
-                entity_ids = sorted({str(row.entity_id) for row in relation_rows})
-                if entity_ids:
-                    entity_counts = {
-                        str(entity_id): int(count or 0)
-                        for entity_id, count in (
-                            await session.execute(
-                                select(
-                                    EventEntity.entity_id,
-                                    func.count(func.distinct(EventEntity.event_id)),
-                                )
-                                .join(SourceEvent, SourceEvent.id == EventEntity.event_id)
-                                .where(
-                                    EventEntity.entity_id.in_(entity_ids),
-                                    SourceEvent.source_config_id == source_config_id,
-                                    (
-                                        SourceEvent.status.is_(None)
-                                        | (SourceEvent.status != "DELETED")
-                                    ),
-                                )
-                                .group_by(EventEntity.entity_id)
-                            )
-                        ).all()
+            bundle_nodes, bundle_relations = await self._universe_event_bundles(
+                session,
+                source_config_id,
+                [
+                    {
+                        "id": str(row.id),
+                        "title": row.title,
+                        "summary": row.summary,
+                        "category": row.category,
+                        "chunk_id": row.chunk_id,
+                        "start_time": row.start_time,
+                        "event_time": row.event_time,
                     }
+                    for row in page
+                ],
+                as_of_db=as_of_db,
+                entity_limit=bounded_entities,
+            )
 
         next_cursor = None
         if has_more and page:
@@ -1401,56 +1510,9 @@ class EngineManager:
                 self._settings.secret_key,
             )
 
-        entity_nodes: dict[str, dict[str, Any]] = {}
-        relations: list[dict[str, Any]] = []
-        for row in relation_rows:
-            entity_id = str(row.entity_id)
-            entity_nodes.setdefault(
-                entity_id,
-                {
-                    "id": entity_id,
-                    "kind": "entity",
-                    "label": row.name or "未命名实体",
-                    "description": str(row.entity_description or "")[:800],
-                    "category": row.type or "实体",
-                    "chunk_id": None,
-                    "start_time": None,
-                    "importance": max(0.3, min(1.0, 0.42 + _weight(row.weight) * 0.08)),
-                    "related_count": entity_counts.get(entity_id, 0),
-                    "state": "active",
-                },
-            )
-            relations.append(
-                {
-                    "from_id": str(row.event_id),
-                    "to_id": entity_id,
-                    "kind": "mentions",
-                    "weight": _weight(row.weight),
-                    "description": str(row.relation_description or "")[:240],
-                }
-            )
-
-        event_nodes = [
-            {
-                "id": str(row.id),
-                "kind": "event",
-                "label": row.title or "未命名事件",
-                "description": str(row.summary or "")[:800],
-                "category": row.category or "事件",
-                "chunk_id": row.chunk_id,
-                "start_time": _utc_time(row.start_time or row.event_time),
-                "importance": max(
-                    0.4,
-                    min(1.0, 0.5 + math.log1p(event_counts.get(str(row.id), 0)) * 0.08),
-                ),
-                "related_count": event_counts.get(str(row.id), 0),
-                "state": "active",
-            }
-            for row in page
-        ]
         return UniverseTimelineInfo(
-            nodes=[*event_nodes, *entity_nodes.values()],
-            relations=relations,
+            nodes=bundle_nodes,
+            relations=bundle_relations,
             has_more=has_more,
             next_cursor=next_cursor,
             as_of=_utc_time(as_of),
@@ -1474,7 +1536,7 @@ class EngineManager:
         from zleap.sag.db import get_session_factory
         from zleap.sag.db.models import Entity, EventEntity, SourceEvent
 
-        bounded_limit = max(1, min(int(limit), 50))
+        bounded_limit = max(1, min(int(limit), 128))
         cursor_payload = (
             _decode_universe_cursor(cursor, self._settings.secret_key) if cursor else None
         )
@@ -1560,6 +1622,12 @@ class EngineManager:
                 ).all()
                 has_more = len(rows) > bounded_limit
                 page = rows[:bounded_limit]
+                entity_counts = await self._universe_entity_event_counts(
+                    session,
+                    source_config_id,
+                    [str(row.entity_id) for row in page],
+                    as_of_db=as_of_db,
+                )
                 next_cursor = None
                 if has_more and page:
                     next_cursor = _encode_universe_cursor(
@@ -1593,10 +1661,22 @@ class EngineManager:
                             "description": str(row.entity_description or "")[:800],
                             "category": row.type or "实体",
                             "weight": _weight(row.weight),
+                            "related_count": entity_counts.get(str(row.entity_id), 0),
                             "relation_description": str(row.description or "")[:240],
                         }
                         for row in page
                     ],
+                    relations=[
+                        {
+                            "from_id": str(anchor.id),
+                            "to_id": str(row.entity_id),
+                            "kind": "mentions",
+                            "weight": _weight(row.weight),
+                            "description": str(row.description or "")[:240],
+                        }
+                        for row in page
+                    ],
+                    returned=len(page),
                     has_more=has_more,
                     next_cursor=next_cursor,
                     as_of=as_of,
@@ -1716,6 +1796,24 @@ class EngineManager:
                     },
                     self._settings.secret_key,
                 )
+            bundle_nodes, bundle_relations = await self._universe_event_bundles(
+                session,
+                source_config_id,
+                [
+                    {
+                        "id": str(row.event_id),
+                        "title": row.title,
+                        "summary": row.summary,
+                        "category": row.category,
+                        "chunk_id": row.chunk_id,
+                        "start_time": row.start_time,
+                        "event_time": row.event_time,
+                    }
+                    for row in page
+                ],
+                as_of_db=as_of_db,
+                entity_limit=self._settings.universe_event_entity_limit,
+            )
             return UniverseExpansionInfo(
                 anchor={
                     "id": anchor.id,
@@ -1726,19 +1824,12 @@ class EngineManager:
                     "related_count": related_count,
                 },
                 neighbors=[
-                    {
-                        "id": row.event_id,
-                        "kind": "event",
-                        "label": row.title or "未命名事件",
-                        "description": str(row.summary or "")[:800],
-                        "category": row.category or "事件",
-                        "chunk_id": row.chunk_id,
-                        "start_time": row.start_time or row.event_time,
-                        "weight": _weight(row.weight),
-                        "relation_description": str(row.description or "")[:240],
-                    }
-                    for row in page
+                    node
+                    for node in bundle_nodes
+                    if not (node.get("kind") == "entity" and node.get("id") == node_id)
                 ],
+                relations=bundle_relations,
+                returned=len(page),
                 has_more=has_more,
                 next_cursor=next_cursor,
                 as_of=as_of,

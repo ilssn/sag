@@ -6,7 +6,7 @@ sag 以「可执行的最佳实践」为标准——请先读 [docs/standards/](
 ## 环境
 
 - 后端：Python ≥ 3.11（`apps/api`，内含独立、可抽离的 `sag_agent` Core）
-- 前端：Node ≥ 20（`apps/web`，`npm install`；shadcn CLI 需要 Node 20+）
+- 前端：Node ≥ 20（`apps/web`，统一使用 `npm ci`；禁止混用 pnpm/yarn；shadcn CLI 需要 Node 20+）
 
 ## 门禁（不绿不提 · CI 强制）
 

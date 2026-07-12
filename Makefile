@@ -10,7 +10,7 @@ install-api: ## 安装后端依赖（editable + dev）
 	cd apps/api && python -m venv .venv && . .venv/bin/activate && pip install -e ".[dev]"
 
 install-web: ## 安装前端依赖
-	cd apps/web && npm install
+	cd apps/web && npm ci
 
 dev: ## 提示：分别在两个终端运行 make api / make web
 	@echo "在一个终端运行:  make api"

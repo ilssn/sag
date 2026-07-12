@@ -2949,6 +2949,9 @@
   }
 
   .sag-universe-node-label {
+    --universe-card-eyebrow-opacity: 1;
+    --universe-card-summary-opacity: 1;
+    --universe-card-summary-y: 0px;
     display: flex;
     width: 216px;
     height: 78px;
@@ -3044,10 +3047,12 @@
     align-items: center;
     gap: 5px;
     overflow: hidden;
+    opacity: var(--universe-card-eyebrow-opacity);
     color: hsl(var(--muted-foreground) / 0.82);
     font-size: 9px;
     line-height: 12px;
     text-overflow: ellipsis;
+    transition: opacity 80ms linear;
     white-space: nowrap;
   }
 
@@ -3085,15 +3090,25 @@
     display: -webkit-box;
     margin-top: 3px;
     overflow: hidden;
+    opacity: var(--universe-card-summary-opacity);
     color: hsl(var(--muted-foreground) / 0.8);
     font-size: 9px;
     line-height: 13px;
+    transform: translateY(var(--universe-card-summary-y));
+    transition:
+      opacity 80ms linear,
+      transform 80ms linear;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
   }
 
   .sag-universe-node-label[data-expanded="true"] p {
     -webkit-line-clamp: 3;
+  }
+
+  [data-universe-reduced-motion="true"]
+    :is(.sag-universe-node-label__eyebrow, .sag-universe-node-label p) {
+    transition: none;
   }
 
   @media (max-width: 767px) {

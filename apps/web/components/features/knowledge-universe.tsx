@@ -40,7 +40,7 @@ import {
   mergeUniverseActivation,
   mergeUniverseGraphPatch,
   replaceUniverseWorkingSet,
-  sourceEntityPageTargetForLod,
+  sourceTimelinePageTargetForLod,
   universeAnchorProgress,
   universeNodeKey,
   type UniverseWorkingSet,
@@ -84,15 +84,13 @@ interface Position3D {
   z: number;
 }
 
-interface SourceEntityPageState {
+interface SourceTimelinePageState {
   cursor: string | null;
   pages: number;
   targetPages: number;
   done: boolean;
   loading: boolean;
 }
-
-type SourceTimelinePageState = SourceEntityPageState;
 
 interface SourceContentLedger {
   events: Set<string>;
@@ -266,8 +264,8 @@ function UniverseLoadProgressPanel({
         )}
       </div>
       <div className="space-y-2.5">
-        <LoadProgressRow label="已加载实体" metric={progress.entities} tone="entity" />
         <LoadProgressRow label="已加载事件" metric={progress.events} tone="event" />
+        <LoadProgressRow label="已连接实体" metric={progress.entities} tone="entity" />
       </div>
     </motion.div>
   );
@@ -357,9 +355,7 @@ export function KnowledgeUniverse({
   const expansionInflightRef = React.useRef(new Map<string, Promise<UniverseGraphPatch>>());
   const rebuildAbortRef = React.useRef<AbortController | null>(null);
   const autoRebuildAttemptedRef = React.useRef(false);
-  const partitionAbortRef = React.useRef<AbortController | null>(null);
   const timelineAbortRef = React.useRef<AbortController | null>(null);
-  const sourceEntityPagesRef = React.useRef(new Map<string, SourceEntityPageState>());
   const sourceTimelinePagesRef = React.useRef(new Map<string, SourceTimelinePageState>());
   const sourceContentLedgerRef = React.useRef(new Map<string, SourceContentLedger>());
   const completedSourcesRef = React.useRef(new Set<string>());
@@ -503,7 +499,6 @@ export function KnowledgeUniverse({
   const viewportLoadProgress: SourceLoadProgress | null = (() => {
     if (!viewportSource) return null;
     const ledger = sourceContentLedgerRef.current.get(viewportSource.source_id);
-    const entityState = sourceEntityPagesRef.current.get(viewportSource.source_id);
     const eventState = sourceTimelinePagesRef.current.get(viewportSource.source_id);
     const entityTotal = Math.max(0, viewportSource.entity_count);
     const eventTotal = Math.max(0, viewportSource.event_count);
@@ -512,8 +507,8 @@ export function KnowledgeUniverse({
     const entities = {
       loaded: entityLoaded,
       total: entityTotal,
-      done: entityTotal === 0 || entityLoaded >= entityTotal || Boolean(entityState?.done),
-      loading: Boolean(entityState?.loading),
+      done: entityTotal === 0 || entityLoaded >= entityTotal || Boolean(eventState?.done),
+      loading: Boolean(eventState?.loading),
     };
     const events = {
       loaded: eventLoaded,
@@ -608,11 +603,8 @@ export function KnowledgeUniverse({
       epochRef.current = epoch;
       expandAbortRef.current?.abort();
       expandAbortRef.current = null;
-      partitionAbortRef.current?.abort();
-      partitionAbortRef.current = null;
       timelineAbortRef.current?.abort();
       timelineAbortRef.current = null;
-      sourceEntityPagesRef.current.clear();
       sourceTimelinePagesRef.current.clear();
       sourceContentLedgerRef.current.clear();
       completedSourcesRef.current.clear();
@@ -652,9 +644,7 @@ export function KnowledgeUniverse({
       if (!activation || epoch < epochRef.current) return;
       epochRef.current = epoch;
       expandAbortRef.current?.abort();
-      partitionAbortRef.current?.abort();
       timelineAbortRef.current?.abort();
-      sourceEntityPagesRef.current.clear();
       sourceTimelinePagesRef.current.clear();
       sourceContentLedgerRef.current.clear();
       completedSourcesRef.current.clear();
@@ -923,6 +913,15 @@ export function KnowledgeUniverse({
     ? Math.max(inspectorProgress, inspectorNode.relatedCount)
     : 0;
   const inspectorRemaining = Math.max(0, inspectorTotal - inspectorProgress);
+  const inspectorAnchorKey = inspectorNode
+    ? universeNodeKey(inspectorNode.kind, inspectorNode.rawId, inspectorNode.sourceId)
+    : null;
+  const inspectorExhausted = Boolean(
+    inspectorAnchorKey
+    && expandedAnchorsRef.current.has(inspectorAnchorKey)
+    && !cursorsRef.current.has(inspectorAnchorKey),
+  );
+  const inspectorCanExpand = inspectorRemaining > 0 && !inspectorExhausted;
 
   const requestExpansion = React.useCallback(
     (
@@ -947,7 +946,12 @@ export function KnowledgeUniverse({
             source_id: node.sourceId,
             node_kind: node.kind,
             node_id: node.rawId,
-            limit: node.kind === "event" ? 16 : 20,
+            limit: node.kind === "event"
+              ? manifest?.policy.event_entity_limit ?? 96
+              : Math.min(
+                  manifest?.policy.timeline_event_page_size ?? 8,
+                  mobile ? 4 : 8,
+                ),
             cursor,
           },
           signal,
@@ -967,7 +971,7 @@ export function KnowledgeUniverse({
       expansionInflightRef.current.set(cacheKey, request);
       return request;
     },
-    [],
+    [manifest?.policy.event_entity_limit, manifest?.policy.timeline_event_page_size, mobile],
   );
 
   const expandNode = React.useCallback(
@@ -1017,10 +1021,11 @@ export function KnowledgeUniverse({
           exactNode.sourceId,
         );
         const totalCount = Math.max(committedCount, patch.anchor.related_count);
+        const relationLabel = exactNode.kind === "entity" ? "关联事件" : "关联实体";
         setMoreHint(
           patch.page.has_more
-            ? `已展示 ${committedCount} / ${totalCount} 个关联星点，再次点击继续向更早内容探索`
-            : `已展示全部 ${totalCount} 个关联星点`,
+            ? `已展示 ${committedCount} / ${totalCount} 个${relationLabel}，再次点击继续向更早内容探索`
+            : `已展示全部 ${totalCount} 个${relationLabel}`,
         );
         stageTo(Math.min(previousCount, next.nodes.length), next.nodes.length);
       } catch (reason) {
@@ -1034,98 +1039,6 @@ export function KnowledgeUniverse({
       }
     },
     [pruneExpansionState, recordLoadedContent, requestExpansion, stageTo],
-  );
-
-  const loadSourceEntities = React.useCallback(
-    async (sourceId: string, requestedPages: number) => {
-      if (!manifest) return;
-      let state = sourceEntityPagesRef.current.get(sourceId);
-      if (!state) {
-        state = { cursor: null, pages: 0, targetPages: 0, done: false, loading: false };
-        sourceEntityPagesRef.current.set(sourceId, state);
-      }
-      state.targetPages = Math.max(
-        state.targetPages,
-        requestedPages,
-      );
-      if (state.loading || state.done || state.pages >= state.targetPages) return;
-
-      if (epochRef.current === 0) {
-        epochRef.current = 1;
-        const empty = emptyUniverseWorkingSet(1);
-        workingRef.current = empty;
-        setWorking(empty);
-      }
-      const epoch = epochRef.current;
-      const source = sourceById.get(sourceId);
-      state.loading = true;
-      refreshLoadProgress();
-      partitionAbortRef.current?.abort();
-      const controller = new AbortController();
-      partitionAbortRef.current = controller;
-      setExpandingKey(`partition:${sourceId}`);
-      setMoreHint("正在显现这个知识星系最近活跃的主题实体");
-      try {
-        while (!state.done && state.pages < state.targetPages) {
-          const seed = await api.universeActivate(
-            {
-              epoch,
-              source_id: sourceId,
-              limit: manifest.policy.entity_page_size,
-              cursor: state.cursor,
-            },
-            controller.signal,
-          );
-          if (seed.epoch !== epochRef.current || controller.signal.aborted) return;
-          recordLoadedContent(seed.nodes, sourceId);
-          const previousCount = workingRef.current.nodes.length;
-          const next = mergeUniverseActivation(
-            workingRef.current,
-            {
-              epoch,
-              query: source?.label ?? "知识星球",
-              nodes: seed.nodes,
-              relations: [],
-            },
-            budgetRef.current,
-            Date.now(),
-            { roots: true },
-          );
-          workingRef.current = next;
-          setWorking(next);
-          stageTo(previousCount, next.nodes.length);
-          state.pages += 1;
-          state.cursor = seed.page.next_cursor;
-          state.done = !seed.page.has_more || !seed.page.next_cursor;
-          refreshLoadProgress();
-          if (!searchActivationRef.current) {
-            setSummary({
-              query: source?.label ?? "知识星球",
-              events: next.nodes.filter((item) => item.kind === "event").length,
-              entities: next.nodes.filter((item) => item.kind === "entity").length,
-              relations: next.relations.length,
-            });
-          }
-        }
-        const loaded = workingRef.current.nodes.filter(
-          (item) => item.source_id === sourceId && item.kind === "entity",
-        ).length;
-        setMoreHint(
-          state.done
-            ? `已显现 ${source?.label ?? "这个星系"} 的全部主题实体`
-            : `已显现 ${loaded} 个主题实体，继续拉近可探索更早内容`,
-        );
-      } catch (reason) {
-        if (reason instanceof ApiError && reason.code === "aborted") return;
-        setMoreHint(reason instanceof ApiError ? reason.message : "主题实体加载失败");
-      } finally {
-        state.loading = false;
-        refreshLoadProgress();
-        if (partitionAbortRef.current === controller) partitionAbortRef.current = null;
-        if (epoch === epochRef.current) setExpandingKey(null);
-      }
-    },
-    [manifest, recordLoadedContent, refreshLoadProgress, sourceById, stageTo],
   );
 
   const loadSourceTimeline = React.useCallback(
@@ -1162,8 +1075,9 @@ export function KnowledgeUniverse({
             {
               epoch,
               source_id: sourceId,
-              limit: manifest.policy.timeline_event_page_size,
-              entities_per_event: manifest.policy.timeline_entities_per_event,
+              limit: mobile
+                ? Math.min(4, manifest.policy.timeline_event_page_size)
+                : manifest.policy.timeline_event_page_size,
               cursor: state.cursor,
             },
             controller.signal,
@@ -1181,7 +1095,7 @@ export function KnowledgeUniverse({
             },
             budgetRef.current,
             Date.now(),
-            { roots: true },
+            { roots: state.pages === 0 },
           );
           workingRef.current = next;
           setWorking(next);
@@ -1216,7 +1130,7 @@ export function KnowledgeUniverse({
         if (timelineAbortRef.current === controller) timelineAbortRef.current = null;
       }
     },
-    [manifest, recordLoadedContent, refreshLoadProgress, sourceById, stageTo],
+    [manifest, mobile, recordLoadedContent, refreshLoadProgress, sourceById, stageTo],
   );
 
   const activatePartition = React.useCallback(
@@ -1224,9 +1138,9 @@ export function KnowledgeUniverse({
       clearCameraSchedule();
       setActivePartition(node.sourceId);
       focusPartition(node.sourceId);
-      void loadSourceEntities(node.sourceId, 1);
+      void loadSourceTimeline(node.sourceId, 1);
     },
-    [clearCameraSchedule, focusPartition, loadSourceEntities],
+    [clearCameraSchedule, focusPartition, loadSourceTimeline],
   );
 
   const handleSourceLod = React.useCallback(
@@ -1234,15 +1148,12 @@ export function KnowledgeUniverse({
       if (level < 1) return;
       setActivePartition(sourceId);
       if (level >= 2) {
-        const entityPages = sourceEntityPagesRef.current.get(sourceId)?.pages ?? 0;
         const timelinePages = sourceTimelinePagesRef.current.get(sourceId)?.pages ?? 0;
-        const requestedEntityPages = sourceEntityPageTargetForLod(level, entityPages);
-        const requestedTimelinePages = sourceEntityPageTargetForLod(level, timelinePages);
-        void loadSourceEntities(sourceId, requestedEntityPages);
+        const requestedTimelinePages = sourceTimelinePageTargetForLod(level, timelinePages);
         void loadSourceTimeline(sourceId, requestedTimelinePages);
       }
     },
-    [loadSourceEntities, loadSourceTimeline],
+    [loadSourceTimeline],
   );
 
   const handleSceneViewChange = React.useCallback(
@@ -1271,11 +1182,26 @@ export function KnowledgeUniverse({
       }
       const exact = node as Universe3DNode & { kind: "event" | "entity" };
       setSelectedKey(exact.id);
-      if (exact.kind === "event") graphRef.current?.lockNode(exact.id);
-      else focusNode(exact);
+      graphRef.current?.lockNode(exact.id);
+      if (exact.kind === "event") {
+        const loadedEntities = universeAnchorProgress(
+          workingRef.current,
+          "event",
+          exact.rawId,
+          exact.sourceId,
+        );
+        if (loadedEntities >= exact.relatedCount) {
+          setMoreHint(
+            exact.relatedCount > 0
+              ? `事件关联的 ${exact.relatedCount} 个实体已全部呈现`
+              : "这个事件暂未抽取到关联实体",
+          );
+          return;
+        }
+      }
       void expandNode(exact);
     },
-    [activatePartition, expandNode, focusNode],
+    [activatePartition, expandNode],
   );
 
   const clearSelection = React.useCallback(() => {
@@ -1349,7 +1275,6 @@ export function KnowledgeUniverse({
       expansionCacheRef.current.clear();
       expansionInflightRef.current.clear();
       rebuildAbortRef.current?.abort();
-      partitionAbortRef.current?.abort();
       timelineAbortRef.current?.abort();
       clearStageTimer();
       clearCameraSchedule();
@@ -1648,7 +1573,7 @@ export function KnowledgeUniverse({
               {inspectorNode.description || (
                 inspectorNode.kind === "entity"
                   ? `${inspectorNode.category}，可继续探索它关联的事件。`
-                  : `${inspectorNode.category}，可继续探索事件中的相关实体。`
+                  : `${inspectorNode.category}，关联实体已随事件一同呈现。`
               )}
             </p>
             <div className="mt-2 flex items-center gap-2 text-[10px] text-muted-foreground">
@@ -1673,13 +1598,15 @@ export function KnowledgeUniverse({
               <p className="min-w-0 truncate text-[10px] text-muted-foreground">
                 {expandingKey === inspectorNode.id
                   ? "正在拓展下一批关联"
-                  : inspectorRemaining > 0
+                  : inspectorCanExpand
                     ? `还有 ${inspectorRemaining} 个关联可探索`
+                    : inspectorExhausted && inspectorRemaining > 0
+                      ? "已到达当前时间范围的起点"
                     : inspectorTotal > 0
                       ? "关联内容已全部呈现"
                       : "暂无可探索的关联"}
               </p>
-              {inspectorRemaining > 0 && (
+              {inspectorCanExpand && (
                 <Button
                   type="button"
                   variant="outline"
