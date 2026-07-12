@@ -9,8 +9,8 @@ from typing import Any
 
 @cache
 def load_schema(name: str) -> dict[str, Any]:
-    embedded = resources.files("octx").joinpath("schemas", "1.0", name)
+    embedded = resources.files("octx").joinpath("schemas", "0.1", name)
     if embedded.is_file():
         return json.loads(embedded.read_text(encoding="utf-8"))
-    project_schema = Path(__file__).resolve().parents[2] / "schemas" / "1.0" / name
+    project_schema = Path(__file__).resolve().parents[2] / "schemas" / "0.1" / name
     return json.loads(project_schema.read_text(encoding="utf-8"))

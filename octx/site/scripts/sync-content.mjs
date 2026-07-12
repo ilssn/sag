@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,16 +7,17 @@ const siteRoot = path.resolve(scriptDirectory, "..");
 const contentRoot = path.resolve(siteRoot, "..");
 const publicRoot = path.join(siteRoot, "public");
 
+await rm(path.join(publicRoot, "schemas"), { recursive: true, force: true });
 await mkdir(path.join(publicRoot, "schemas"), { recursive: true });
-await cp(path.join(contentRoot, "schemas", "1.0"), path.join(publicRoot, "schemas", "1.0"), {
+await cp(path.join(contentRoot, "schemas", "0.1"), path.join(publicRoot, "schemas", "0.1"), {
   recursive: true,
   force: true,
 });
 
-const coreDocuments = [
+const documents = [
   ["Introduction", "README.md", "/docs/introduction/"],
-  ["OCTX Core v1", "spec-v1.md", "/docs/core/"],
-  ["SAG-structured Profile 1.0", "sag-structured-v1.md", "/docs/sag-structured/"],
+  ["OCTX v0.1", "spec-v0.1.md", "/docs/specification/"],
+  ["SAG-structured Profile 0.1", "sag-structured-v0.1.md", "/docs/sag-structured/"],
   ["Tooling and lifecycle", "tooling-lifecycle.md", "/docs/tooling/"],
   ["Python API overview", "api/overview.md", "/api/"],
   ["create_octx()", "api/create-octx.md", "/api/create-octx/"],
@@ -35,7 +36,7 @@ const indexLines = [
   "",
   "> Portable, verifiable context assets for people, agents, and knowledge systems.",
   "",
-  ...coreDocuments.map(([title, , href]) => `- [${title}](${href})`),
+  ...documents.map(([title, , href]) => `- [${title}](${href})`),
   "- [JSON Schemas](/docs/schemas/)",
   "",
 ];
@@ -43,7 +44,7 @@ const indexLines = [
 await writeFile(path.join(publicRoot, "llms.txt"), indexLines.join("\n"), "utf8");
 
 const fullSections = [];
-for (const [title, file] of coreDocuments) {
+for (const [title, file] of documents) {
   const content = (await readFile(path.join(contentRoot, file), "utf8")).trimEnd();
   fullSections.push(`\n\n---\n\n# ${title}\n\n${content}`);
 }

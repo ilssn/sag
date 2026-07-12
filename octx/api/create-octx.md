@@ -33,8 +33,8 @@ def create_octx(
 | `in_place` | 将 workspace 根目录中的 Markdown 整理进 `knowledge/`。 |
 | `confirm_in_place` | 明确确认 `in_place` 将执行的移动和 frontmatter 补全。 |
 | `derive` | 从展开的外部 Package 创建新 Asset，并记录 `asset.derived_from`。 |
-| `capabilities` | 显式声明能力，例如 `{"chunks": "1.0"}`；不会根据文件自动推断。 |
-| `profiles` | 显式声明 Profile，例如 `{"sag-structured": "1.0"}`。 |
+| `capabilities` | 显式声明能力，例如 `{"chunks": "0.1"}`；不会根据文件自动推断。 |
+| `profiles` | 显式声明 Profile，例如 `{"sag-structured": "0.1"}`。 |
 | `limits` | 创建和校验期间使用的资源上限。 |
 
 ## 首次创建
@@ -80,12 +80,12 @@ result = create_octx(
     version="2.0.0",
     output="./product-guide-2.0.0.octx",
     capabilities={
-        "chunks": "1.0",
-        "events": "1.0",
-        "entities": "1.0",
-        "vectors": "1.0",
+        "chunks": "0.1",
+        "events": "0.1",
+        "entities": "0.1",
+        "vectors": "0.1",
     },
-    profiles={"sag-structured": "1.0"},
+    profiles={"sag-structured": "0.1"},
 )
 ```
 

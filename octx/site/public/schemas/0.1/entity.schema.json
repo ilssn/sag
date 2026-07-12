@@ -1,23 +1,29 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "OCTX Chunk 1.0",
+  "title": "OCTX Entity 0.1",
   "type": "object",
-  "required": ["id", "document_id", "ordinal", "text"],
+  "required": ["id", "name", "type"],
   "properties": {
     "id": {
       "$ref": "#/$defs/uuidv7"
     },
-    "document_id": {
-      "$ref": "#/$defs/uuidv7"
-    },
-    "ordinal": {
-      "type": "integer",
-      "minimum": 0
-    },
-    "text": {
+    "name": {
       "type": "string",
       "minLength": 1
-    }
+    },
+    "type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "normalized_name": false,
+    "entity_type_id": false,
+    "index_id": false,
+    "index_status": false,
+    "embedding": false,
+    "vector": false
   },
   "additionalProperties": true,
   "$defs": {

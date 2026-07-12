@@ -42,20 +42,16 @@ _Avoid_: OKF 竞争格式、SAG 专有格式、数据库备份格式、zleap-sag
 独立于任何知识系统的规范实现，负责 OCTX 的 create、open/inspect、validate 和 unpack，并提供 JSON Schema Draft 2020-12、固定 Arrow schema、规范样例与一致性测试。公开创建入口统一处理首次身份建立和后续 Release，读取类入口不写知识数据库。数据库映射、内容抽取和索引构建由各系统自己的适配层负责。
 _Avoid_: zleap-sag、SAG 导入器、知识抽取引擎
 
-**OCTX Core**:
-所有合规 OCTX 实现都必须支持的最小互操作层，由至少一篇 OKF 兼容 Markdown 知识文档和 OCTX 资产封装组成。普通 OKF bundle 可以无损封装为 Core，但在缺少 manifest、稳定身份和摘要时还不是完整 OCTX Package；只有扩展或派生数据而没有知识文档的 Package 无效。
-_Avoid_: SAG Profile、可选能力集合、最小 SAG 数据库
-
 **知识文档（OCTX Knowledge Document / OKF Concept）**:
-OCTX Core 中一篇符合 OKF Concept 约定的 Markdown 文件，是 v1 唯一正式 Document，也是人和 Agent 可以直接阅读、链接和维护的知识单元。OKF 保留的 `index.md` 与 `log.md` 是导航和日志文件，不属于 Knowledge Document。文档路径负责 OKF 导航，frontmatter 中的 `octx.document_id` 负责跨版本及派生数据引用；转换前 PDF、DOCX 等不进入 OCTX v1。
+OCTX Package 中一篇符合 OKF Concept 约定的 Markdown 文件，是 v0.1 唯一正式 Document，也是人和 Agent 可以直接阅读、链接和维护的知识单元。OKF 保留的 `index.md` 与 `log.md` 是导航和日志文件，不属于 Knowledge Document。文档路径负责 OKF 导航，frontmatter 中的 `octx.document_id` 负责跨版本及派生数据引用；转换前 PDF、DOCX 等不进入 OCTX v0.1。
 _Avoid_: 转换前 PDF、chunk、event、数据库行
 
 **OCTX Frontmatter 命名空间（`octx`）**:
-知识文档 YAML frontmatter 中专门保存 OCTX 扩展字段的对象。v1 在其中定义 `document_id`，避免把通用的 `document_id` 直接放入 OKF 的共享顶层字段空间。
+知识文档 YAML frontmatter 中专门保存 OCTX 扩展字段的对象。v0.1 在其中定义 `document_id`，避免把通用的 `document_id` 直接放入 OKF 的共享顶层字段空间。
 _Avoid_: 顶层 `document_id`、`octx_id`、生产者私有字段集合
 
 **OCTX 能力层（OCTX Capability）**:
-在 Core 之上增加一种标准数据能力的版本化模块，例如 chunks、events、entities 或 vectors。manifest 以 capability 名称为 key 并只声明版本；文件路径与依赖由规范固定。关系文件随 events 或 entities 提供，不构成独立 capability。
+OCTX Package 显式声明的一种版本化标准数据能力，例如 chunks、events、entities 或 vectors。manifest 以 capability 名称为 key 并只声明版本；文件路径与依赖由规范固定。关系文件随 events 或 entities 提供，不构成独立 capability。
 _Avoid_: 私有字段集合、OCTX Profile、数据库插件
 
 **OCTX 私有扩展数据（OCTX Private Extension Data）**:
@@ -63,16 +59,16 @@ _Avoid_: 私有字段集合、OCTX Profile、数据库插件
 _Avoid_: 未列入 manifest 的附加文件、标准能力、SAG-structured 数据
 
 **未知可选字段（Unknown Optional Field）**:
-受支持 major 版本内、当前消费者尚不认识的 manifest、JSON 或 JSONL 字段。它不导致校验失败，重写 Package 时应被保留；但不能改变已知字段语义，也不能用来满足 Capability 或 Profile。
-_Avoid_: 缺失的必填字段、未知 Capability、major 版本不兼容
+在消费者支持的格式或能力版本内，当前消费者尚不认识的 manifest、JSON 或 JSONL 字段。它不导致校验失败，重写 Package 时应被保留；但不能改变已知字段语义，也不能用来满足 Capability 或 Profile。
+_Avoid_: 缺失的必填字段、未知 Capability、不兼容版本
 
 **OCTX Profile**:
-面向特定用途定义的一组能力要求和一致性约束。Profile 必须由 manifest 显式声明并通过校验，不能仅根据 capabilities 自动推导。SAG-structured Profile 要求显式、完整且相互一致的 chunk-event-entity 数据；声明失实时禁止导入结构层，但 Core 有效时可由用户明确选择只安装 Markdown 并重新生成。
-_Avoid_: OCTX Core、厂商私有格式、产品配置预设
+面向特定用途定义的一组能力要求和一致性约束。Profile 必须由 manifest 显式声明并通过校验，不能仅根据 capabilities 自动推导。SAG-structured Profile 要求显式、完整且相互一致的 chunk-event-entity 数据；声明失实时禁止导入结构层，但 OCTX 文档有效时可由用户明确选择只安装 Markdown 并重新生成。
+_Avoid_: OCTX 基础格式、厂商私有格式、产品配置预设
 
 **SAG 结构数据（SAG-structured Data）**:
 满足 SAG-structured Profile 的显式 chunks、events、entities 及关系集合，可以被兼容 SAG 消费者直接导入结构层。它要求每篇 Concept Document 有 Chunk、每个 Chunk 有 Event、每个 Event 有 Entity、每个 Entity 被 Event 使用，不允许孤立记录；缺失层必须通过真实分块或抽取流程生成，不能用上一级内容进行合成回退。
-_Avoid_: 纯 OCTX Core、本地回退视图、未完成索引
+_Avoid_: 仅含 Markdown 的 OCTX Package、本地回退视图、未完成索引
 
 **OCTX 实体（OCTX Entity）**:
 OCTX Asset 内由生产者识别出的一个语义实体，而不是一次文字出现。每条记录必须有 `id`、`name` 和非空 `type`，`description` 可选；OCTX 不规定类型词表或命名格式。同一实体可关联多个 Events，并在同一 Asset 后续 Release 中保持 `entity_id`。`normalized_name` 属于消费者本地索引，不进入 OCTX，独立 Assets 中的同名实体也不自动合并。
@@ -119,21 +115,21 @@ _Avoid_: ZIP 文件摘要、版本号、数字签名
 _Avoid_: Package Digest、资产身份
 
 **派生资产（Derived Asset）**:
-以已有 OCTX 发布版或无效 Package 中仍可读取的 Markdown 为起点、但拥有新资产身份的可编辑知识资产。它通过 `asset.derived_from` 记录直接来源的资产 ID、版本和 Package Digest，却不再冒充原发布者资产的后续版本；从无效 Core 恢复时还必须为文档生成新的有效身份。本地增强后的导入资产一旦重新导出，也必须先成为派生资产。
+以已有 OCTX 发布版或无效 Package 中仍可读取的 Markdown 为起点、但拥有新资产身份的可编辑知识资产。它通过 `asset.derived_from` 记录直接来源的资产 ID、版本和 Package Digest，却不再冒充原发布者资产的后续版本；从无效 Package 恢复时还必须为文档生成新的有效身份。本地增强后的导入资产一旦重新导出，也必须先成为派生资产。
 _Avoid_: 原资产的新版本、原地修改的知识包、无来源副本
 
 **OCTX 安装（OCTX Installation）**:
-一个 OCTX 发布版在本地知识系统中经过校验并成为可用知识集合的状态。在 SAG 中，它表现为托管信源；升级安装是把本地集合原子切换到该资产的新发布版，不是修改已有知识包。有效 Core 或部分 Capability 安装后会自动补建缺失索引，缺失结构本身不属于安装错误。
+一个 OCTX 发布版在本地知识系统中经过校验并成为可用知识集合的状态。在 SAG 中，它表现为托管信源；升级安装是把本地集合原子切换到该资产的新发布版，不是修改已有知识包。格式有效但只包含部分 Capability 的 Package 安装后会自动补建缺失索引，缺失结构本身不属于安装错误。
 _Avoid_: OCTX 知识包、导入任务、解压目录
 
 **本地重建数据（Locally Rebuilt Data）**:
-当 Package 缺少结构层、结构层无效或向量不兼容时，消费者从有效 Core Markdown 或已验证的上游层重新生成并附着于当前 Installation 的 chunk、event、entity、关系或向量。重建从首个无效 Capability 起覆盖该层及全部下游，不做单条修补或新旧混用。它不修改原 Package，也不能让原 Package 的无效 Capability 或 Profile 变为有效。
+当 Package 缺少结构层、结构层无效或向量不兼容时，消费者从有效 OCTX Markdown 或已验证的上游层重新生成并附着于当前 Installation 的 chunk、event、entity、关系或向量。重建从首个无效 Capability 起覆盖该层及全部下游，不做单条修补或新旧混用。它不修改原 Package，也不能让原 Package 的无效 Capability 或 Profile 变为有效。
 _Avoid_: 原 Package payload、修正后的 Release、静默跳过坏记录
 
 **原文块（Source Chunk）**:
-文档经过解析和分块后保留的完整原文证据单元，是 SAG 检索结果与引用最终返回的内容边界。OCTX Core 可以不携带原文块；一旦声明 chunks capability，就必须保留完整块内容，event、entity 或摘要不能替代它。
+文档经过解析和分块后保留的完整原文证据单元，是 SAG 检索结果与引用最终返回的内容边界。OCTX Package 可以不携带原文块；一旦声明 chunks capability，就必须保留完整块内容，event、entity 或摘要不能替代它。
 _Avoid_: 摘要、event、原始文件
 
 **向量配置（Vector Configuration）**:
-保存在 `vectors/config.json`、由必填 `model` 和可选 `revision` 组成的向量来源标识。OCTX v1 每个 Package 最多一套配置，所有随包 Arrow 文件共用；维度从 Arrow 读取，数值类型固定为 float32，距离算法和归一化由消费者本地决定。
+保存在 `vectors/config.json`、由必填 `model` 和可选 `revision` 组成的向量来源标识。OCTX v0.1 每个 Package 最多一套配置，所有随包 Arrow 文件共用；维度从 Arrow 读取，数值类型固定为 float32，距离算法和归一化由消费者本地决定。
 _Avoid_: API 地址、密钥、供应商连接配置、多模型配置集合

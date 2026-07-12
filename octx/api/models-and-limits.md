@@ -37,9 +37,9 @@
 
 | 字段 | 作用 |
 | --- | --- |
-| `valid` | Core 和所有已执行的已知层是否有效。 |
+| `valid` | OCTX 格式和所有已执行的已知层是否有效。 |
 | `fully_validated` | 是否理解并完整验证了全部声明层。 |
-| `core` | Core 的 `LayerResult`。 |
+| `format` | OCTX 格式的 `LayerResult`。 |
 | `capabilities` | Capability 名称到 `LayerResult` 的只读映射。 |
 | `profiles` | Profile 名称到 `LayerResult` 的只读映射。 |
 | `issues` | 全部 `ValidationIssue`。 |

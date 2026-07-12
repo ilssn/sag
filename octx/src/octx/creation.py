@@ -619,10 +619,10 @@ def _manifest(
     manifest = copy.deepcopy(existing) if existing and preserve_unknown else {}
     if preserve_unknown:
         manifest.setdefault("format", "octx")
-        manifest.setdefault("format_version", "1.0")
+        manifest.setdefault("format_version", "0.1")
     else:
         manifest["format"] = "octx"
-        manifest["format_version"] = "1.0"
+        manifest["format_version"] = "0.1"
     asset = manifest.setdefault("asset", {})
     if not isinstance(asset, dict):
         raise ValueError("manifest.asset must be an object")
@@ -769,8 +769,7 @@ def _source_reference(manifest: dict[str, Any]) -> dict[str, str]:
     format_version = manifest.get("format_version")
     if (
         manifest.get("format") != "octx"
-        or not isinstance(format_version, str)
-        or re.fullmatch(r"1\.(?:0|[1-9][0-9]*)", format_version) is None
+        or format_version != "0.1"
         or not isinstance(asset_id, str)
         or _UUID7.fullmatch(asset_id) is None
         or not isinstance(version, str)

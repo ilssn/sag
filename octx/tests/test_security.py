@@ -101,7 +101,7 @@ def test_listed_payload_tampering_is_an_integrity_failure(markdown_source: Path,
 
     report = validate_octx(mutated)
     assert not report.valid
-    assert not report.core.valid
+    assert not report.format.valid
     assert "OCTX_FILE_DIGEST_MISMATCH" in report.issue_codes
 
 

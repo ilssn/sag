@@ -26,8 +26,8 @@ export function SiteHeader({ searchItems }: { searchItems: SearchItem[] }) {
         </div>
 
         <div className="header-actions">
-          <span className="version-label">v1.0</span>
-          <a className="schema-link desktop-only" href="/schemas/1.0/manifest.schema.json">
+          <span className="version-label">v0.1</span>
+          <a className="schema-link desktop-only" href="/schemas/0.1/manifest.schema.json">
             <FileJson2 size={16} aria-hidden="true" />
             JSON Schema
           </a>

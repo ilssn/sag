@@ -32,7 +32,7 @@ const importCode = `from zleap_sag import import_octx
 
 installation = import_octx("research-context.octx")
 
-# Core is available immediately.
+# Documents are available immediately.
 # Missing local indexes continue in the background.
 print(installation.status)  # installed | indexing | ready`;
 
@@ -40,7 +40,7 @@ const principles = [
   {
     icon: FileText,
     title: "人和 Agent 都能读",
-    text: "Core 直接采用 OKF 兼容 Markdown。没有专用 SDK，也能打开、审阅和版本控制。",
+    text: "OCTX 直接采用 OKF 兼容 Markdown。没有专用 SDK，也能打开、审阅和版本控制。",
   },
   {
     icon: Fingerprint,
@@ -80,8 +80,8 @@ export default function HomePage() {
             <Link className="primary-button" href="/docs/introduction">
               阅读文档 <ArrowRight size={17} aria-hidden="true" />
             </Link>
-            <Link className="secondary-button" href="/docs/core">
-              查看 v1 规范
+            <Link className="secondary-button" href="/docs/specification">
+              查看 v0.1 规范
             </Link>
           </div>
           <div className="hero-facts" aria-label="Open Context 核心事实">
@@ -230,7 +230,7 @@ export default function HomePage() {
                 <td>人和 Agent 可读</td>
               </tr>
               <tr>
-                <th>OCTX Core</th>
+                <th>OCTX</th>
                 <td>✓</td>
                 <td>✓</td>
                 <td>可选</td>
@@ -254,9 +254,9 @@ export default function HomePage() {
         <div>
           <p>OPEN BY DESIGN</p>
           <h2>上下文不应该被锁在一个数据库里。</h2>
-          <span>从 Open Context v1 开始，创建第一份可传播的上下文资产。</span>
+          <span>从 Open Context v0.1 开始，创建第一份可传播的上下文资产。</span>
         </div>
-        <Link className="primary-button" href="/docs/core">
+        <Link className="primary-button" href="/docs/specification">
           阅读规范 <ArrowRight size={17} aria-hidden="true" />
         </Link>
       </section>

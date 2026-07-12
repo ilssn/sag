@@ -211,7 +211,7 @@ def _validate_arrow_messages(
                 record_batches += 1
         if compressed:
             raise OctxFormatError(
-                "Arrow IPC body compression is not supported by OCTX vectors/1.0",
+                "Arrow IPC body compression is not supported by OCTX vectors/0.1",
                 path=path,
                 code="OCTX_VECTOR_COMPRESSION_UNSUPPORTED",
             )

@@ -1,20 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "OCTX Event-Entity Relation 1.0",
+  "title": "OCTX Chunk-Event Relation 0.1",
   "type": "object",
-  "required": ["event_id", "entity_id"],
+  "required": ["chunk_id", "event_id"],
   "properties": {
+    "chunk_id": {
+      "$ref": "#/$defs/uuidv7"
+    },
     "event_id": {
       "$ref": "#/$defs/uuidv7"
-    },
-    "entity_id": {
-      "$ref": "#/$defs/uuidv7"
-    },
-    "weight": {
-      "type": "number"
-    },
-    "description": {
-      "type": "string"
     }
   },
   "additionalProperties": true,

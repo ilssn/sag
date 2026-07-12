@@ -107,7 +107,7 @@ def _valid_vector_package(tmp_path: Path) -> Path:
     source.mkdir()
     (source / "guide.md").write_text(concept_markdown(), encoding="utf-8")
     workspace = tmp_path / "workspace"
-    create_octx(workspace, source=source, name="Vectors", output=tmp_path / "core.octx")
+    create_octx(workspace, source=source, name="Vectors", output=tmp_path / "base.octx")
     write_jsonl(
         workspace / "data/chunks.jsonl",
         [{"id": CHUNK_ID, "document_id": DOC_ID, "ordinal": 0, "text": "context"}],
@@ -127,8 +127,8 @@ def _valid_vector_package(tmp_path: Path) -> Path:
         workspace,
         version="1.1.0",
         output=tmp_path / "vectors.octx",
-        capabilities={"chunks": "1.0", "events": "1.0", "entities": "1.0", "vectors": "1.0"},
-        profiles={"sag-structured": "1.0"},
+        capabilities={"chunks": "0.1", "events": "0.1", "entities": "0.1", "vectors": "0.1"},
+        profiles={"sag-structured": "0.1"},
     ).output
 
 
@@ -241,7 +241,7 @@ def test_vector_config_rejects_connection_secret_and_retrieval_settings(tmp_path
 
     report = validate_octx(invalid)
 
-    assert report.core.valid
+    assert report.format.valid
     assert report.capabilities["vectors"].valid is False
     assert "OCTX_VECTOR_CONFIG_FORBIDDEN" in report.issue_codes or "OCTX_SCHEMA_VALIDATION" in report.issue_codes
 

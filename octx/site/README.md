@@ -18,4 +18,4 @@ npm run typecheck
 npm run build
 ```
 
-静态产物写入 `out/`。构建前会自动把 JSON Schema 同步到 `public/schemas/1.0/`，并生成 `llms.txt` 与 `llms-full.txt`。
+静态产物写入 `out/`。构建前会自动把 JSON Schema 同步到 `public/schemas/0.1/`，并生成 `llms.txt` 与 `llms-full.txt`。

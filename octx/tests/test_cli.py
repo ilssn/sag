@@ -97,7 +97,7 @@ def test_cli_inspect_tolerates_unvalidated_manifest_shapes(tmp_path: Path) -> No
     package = tmp_path / "odd.octx"
     manifest = {
         "format": "octx",
-        "format_version": "1.0",
+        "format_version": "0.1",
         "asset": "not-an-object",
         "release": "not-an-object",
         "files": [],

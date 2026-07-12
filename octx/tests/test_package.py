@@ -22,7 +22,7 @@ from octx.errors import (
 from octx.package import OctxPackage
 
 
-def test_create_open_validate_core_round_trip(markdown_source: Path, tmp_path: Path) -> None:
+def test_create_open_validate_package_round_trip(markdown_source: Path, tmp_path: Path) -> None:
     source_before = (markdown_source / "guide.md").read_bytes()
     workspace = tmp_path / "workspace"
     output = tmp_path / "guide-1.0.0.octx"
@@ -412,7 +412,7 @@ def test_normal_release_cannot_silently_replace_a_document_id(markdown_source: P
 
 def test_ready_unknown_layers_can_only_be_repacked_losslessly(markdown_source: Path, tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
-    create_octx(workspace, source=markdown_source, name="Guide", output=tmp_path / "core.octx")
+    create_octx(workspace, source=markdown_source, name="Guide", output=tmp_path / "base.octx")
     extension_path = "extensions/com.example.future/1.0/payload.bin"
     extension = workspace / extension_path
     extension.parent.mkdir(parents=True)

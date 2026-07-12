@@ -90,7 +90,7 @@ class LayerResult:
 
 @dataclass(frozen=True, slots=True)
 class ValidationReport:
-    core: LayerResult
+    format: LayerResult
     capabilities: Mapping[str, LayerResult] = field(default_factory=dict)
     profiles: Mapping[str, LayerResult] = field(default_factory=dict)
     issues: tuple[ValidationIssue, ...] = ()
@@ -101,13 +101,13 @@ class ValidationReport:
 
     @property
     def valid(self) -> bool:
-        if self.core.valid is not True:
+        if self.format.valid is not True:
             return False
         return all(layer.valid is not False for layer in (*self.capabilities.values(), *self.profiles.values()))
 
     @property
     def fully_validated(self) -> bool:
-        return self.core.fully_validated and all(
+        return self.format.fully_validated and all(
             layer.fully_validated for layer in (*self.capabilities.values(), *self.profiles.values())
         )
 
@@ -119,7 +119,7 @@ class ValidationReport:
         return {
             "valid": self.valid,
             "fully_validated": self.fully_validated,
-            "core": self.core.to_dict(),
+            "format": self.format.to_dict(),
             "capabilities": {name: result.to_dict() for name, result in self.capabilities.items()},
             "profiles": {name: result.to_dict() for name, result in self.profiles.items()},
             "issues": [issue.to_dict() for issue in self.issues],

@@ -6,8 +6,8 @@ Open Context 由 SAG 首先实现，但规范和参考工具不依赖 SAG、`zle
 
 ## 阅读顺序
 
-1. **OCTX Core v1 规范**（`spec-v1.md`）：容器、manifest、知识文档、身份、摘要、版本和扩展规则。
-2. **SAG-structured v1 Profile**（`sag-structured-v1.md`）：chunks、events、entities、关系、向量和完整覆盖约束。
+1. **OCTX v0.1 规范**（`spec-v0.1.md`）：容器、manifest、知识文档、身份、摘要、版本和扩展规则。
+2. **SAG-structured v0.1 Profile**（`sag-structured-v0.1.md`）：chunks、events、entities、关系、向量和完整覆盖约束。
 3. **工具与生命周期**（`tooling-lifecycle.md`）：create/open/validate/import/export、Asset/Release/Installation 和冲突处理。
 4. **Python API**（`api/overview.md`）：按功能拆分的创建、读取、校验、安全解包和 CLI 文档。
 5. **机器可读 Schema**（`schemas/README.md`）：JSON Schema Draft 2020-12 与语义校验边界。
@@ -60,13 +60,13 @@ octx unpack ./product-guide.octx ./product-guide-expanded
 
 官网域名是 [open-context.ai](https://open-context.ai)。独立网站源码位于 `site/`，直接发布本目录中的完整规范、Python API、Schema 和词汇表，不依赖 SAG 项目的应用代码。
 
-## v1 核心
+## v0.1 要点
 
 - 发布文件扩展名是 `.octx`，外层使用 ZIP / ZIP64。
 - 每个 Package 至少包含一篇 OKF Concept Markdown。
 - OKF 是 OCTX 的知识内容子集；OCTX 增加资产身份、Release、摘要和可选派生数据。
-- Core 可以只有 Markdown，不要求预先生成 chunks、events、entities 或 vectors。
-- `sag-structured/1.0` 是显式 Profile，不能根据文件存在情况自动推断。
+- OCTX Package 可以只有 Markdown，不要求预先生成 chunks、events、entities 或 vectors。
+- `sag-structured/0.1` 是显式 Profile，不能根据文件存在情况自动推断。
 - `.octx` 是不可变完整快照，不是数据库备份、增量包或同步协议。
 - OCTX 不定义搜索 API、召回算法、Agent 协议或向量数据库。
 

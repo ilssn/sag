@@ -11,11 +11,11 @@ from conftest import CHUNK_2_ID, CHUNK_ID, DOC_ID, ENTITY_ID, EVENT_ID, concept_
 from octx import ArchiveLimits, create_octx, open_octx, unpack_octx, validate_octx
 from octx.errors import OctxIntegrityError, OctxResourceLimitError, OctxSecurityError, OutputExistsError
 
-CAPABILITIES = {"chunks": "1.0", "events": "1.0", "entities": "1.0"}
-PROFILES = {"sag-structured": "1.0"}
+CAPABILITIES = {"chunks": "0.1", "events": "0.1", "entities": "0.1"}
+PROFILES = {"sag-structured": "0.1"}
 
 
-def _core_package(tmp_path: Path) -> Path:
+def _base_package(tmp_path: Path) -> Path:
     source = tmp_path / "source"
     source.mkdir()
     (source / "guide.md").write_text(concept_markdown(), encoding="utf-8")
@@ -23,12 +23,12 @@ def _core_package(tmp_path: Path) -> Path:
         tmp_path / "workspace",
         source=source,
         name="Boundary Guide",
-        output=tmp_path / "core.octx",
+        output=tmp_path / "base.octx",
     ).output
 
 
 def _structured_workspace(tmp_path: Path) -> Path:
-    _core_package(tmp_path)
+    _base_package(tmp_path)
     workspace = tmp_path / "workspace"
     write_jsonl(
         workspace / "data/chunks.jsonl",
@@ -57,28 +57,29 @@ def _structured_package(tmp_path: Path) -> Path:
     ).output
 
 
-def test_same_major_capability_and_profile_minor_versions_are_supported(tmp_path: Path) -> None:
+def test_unrecognized_capability_and_profile_versions_are_not_interpreted(tmp_path: Path) -> None:
     package = _structured_package(tmp_path)
 
     def use_next_minor(manifest: dict) -> None:
         for declaration in manifest["capabilities"].values():
-            declaration["version"] = "1.1"
-        manifest["profiles"]["sag-structured"]["version"] = "1.1"
+            declaration["version"] = "0.2"
+        manifest["profiles"]["sag-structured"]["version"] = "0.2"
 
-    next_minor = repack(package, tmp_path / "next-minor.octx", mutate_manifest=use_next_minor)
-    report = validate_octx(next_minor)
+    unsupported = repack(package, tmp_path / "unsupported-declarations.octx", mutate_manifest=use_next_minor)
+    report = validate_octx(unsupported)
 
-    assert report.core.valid
-    assert all(layer.valid for layer in report.capabilities.values())
-    assert report.profiles["sag-structured"].valid
-    assert report.fully_validated
+    assert report.format.valid
+    assert all(layer.valid is None for layer in report.capabilities.values())
+    assert report.profiles["sag-structured"].valid is None
+    assert report.valid
+    assert not report.fully_validated
 
 
 @pytest.mark.parametrize(
     ("section", "name", "declaration", "issue_code"),
     [
         ("capabilities", "chunks", {"version": "1"}, "OCTX_CAPABILITY_DECLARATION_INVALID"),
-        ("capabilities", "chunks", {"version": "01.0"}, "OCTX_CAPABILITY_DECLARATION_INVALID"),
+        ("capabilities", "chunks", {"version": "00.1"}, "OCTX_CAPABILITY_DECLARATION_INVALID"),
         ("profiles", "sag-structured", {"version": 1}, "OCTX_PROFILE_DECLARATION_INVALID"),
     ],
 )
@@ -98,17 +99,17 @@ def test_invalid_declaration_schema_only_invalidates_its_layer(
     report = validate_octx(invalid)
     layer = report.capabilities[name] if section == "capabilities" else report.profiles[name]
 
-    assert report.core.valid
+    assert report.format.valid
     assert layer.valid is False
     assert issue_code in {issue.code for issue in layer.issues}
     assert "OCTX_SCHEMA_VALIDATION" in {issue.code for issue in layer.issues}
 
 
-def test_events_without_chunks_declaration_leave_core_valid_but_invalidate_events(tmp_path: Path) -> None:
-    package = _core_package(tmp_path)
+def test_events_without_chunks_declaration_leave_format_valid_but_invalidate_events(tmp_path: Path) -> None:
+    package = _base_package(tmp_path)
 
     def declare_events_only(manifest: dict) -> None:
-        manifest["capabilities"] = {"events": {"version": "1.0"}}
+        manifest["capabilities"] = {"events": {"version": "0.1"}}
         manifest["files"].extend(
             [
                 {"path": "data/events.jsonl", "sha256": "0" * 64},
@@ -124,7 +125,7 @@ def test_events_without_chunks_declaration_leave_core_valid_but_invalidate_event
     )
     report = validate_octx(invalid)
 
-    assert report.core.valid
+    assert report.format.valid
     assert report.capabilities["events"].valid is False
     assert "OCTX_CAPABILITY_DEPENDENCY_INVALID" in {
         issue.code for issue in report.capabilities["events"].issues
@@ -132,7 +133,7 @@ def test_events_without_chunks_declaration_leave_core_valid_but_invalidate_event
 
 
 def test_manifest_file_count_cannot_exceed_entry_limit(tmp_path: Path) -> None:
-    package = _core_package(tmp_path)
+    package = _base_package(tmp_path)
 
     def add_manifest_only_entry(manifest: dict) -> None:
         manifest["files"].append(
@@ -166,7 +167,7 @@ def test_jsonl_record_limit_invalidates_only_the_affected_capability(tmp_path: P
 
     report = validate_octx(limited, limits=ArchiveLimits(max_jsonl_records=1))
 
-    assert report.core.valid
+    assert report.format.valid
     assert report.capabilities["chunks"].valid is False
     assert "OCTX_RESOURCE_LIMIT" in {issue.code for issue in report.capabilities["chunks"].issues}
 
@@ -207,7 +208,7 @@ def test_deep_event_parent_chain_is_validated_without_recursion(tmp_path: Path) 
 
 
 def test_unpack_rejects_symlink_ancestor_without_writing_to_victim(tmp_path: Path) -> None:
-    package = _core_package(tmp_path)
+    package = _base_package(tmp_path)
     victim = tmp_path / "victim"
     victim.mkdir()
     sentinel = victim / "sentinel.txt"
@@ -226,7 +227,7 @@ def test_unpack_source_change_after_validation_leaves_no_destination(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    _core_package(tmp_path)
+    _base_package(tmp_path)
     workspace = tmp_path / "workspace"
     document = workspace / "knowledge/guide.md"
     destination = tmp_path / "unpacked"
@@ -276,7 +277,7 @@ def test_empty_vector_file_can_be_read_as_an_empty_table(tmp_path: Path, write_e
     package = _structured_package(tmp_path)
 
     def declare_vectors(manifest: dict) -> None:
-        manifest["capabilities"]["vectors"] = {"version": "1.0"}
+        manifest["capabilities"]["vectors"] = {"version": "0.1"}
         manifest["files"].extend(
             [
                 {"path": "vectors/config.json", "sha256": "0" * 64},
@@ -300,7 +301,7 @@ def test_empty_vector_file_can_be_read_as_an_empty_table(tmp_path: Path, write_e
 
     assert table.num_rows == 0
     assert table.schema.names == ["record_id", "vector"]
-    assert report.core.valid
+    assert report.format.valid
     assert report.capabilities["vectors"].valid is False
     assert "OCTX_VECTOR_COVERAGE" in report.issue_codes
 
@@ -309,7 +310,7 @@ def test_malformed_existing_output_shape_raises_domain_error(tmp_path: Path) -> 
     output = tmp_path / "malformed.octx"
     malformed_manifest = {
         "format": "octx",
-        "format_version": "1.0",
+        "format_version": "0.1",
         "asset": "not-an-object",
         "release": ["not-an-object"],
         "files": [],
@@ -333,7 +334,7 @@ def test_malformed_existing_output_shape_raises_domain_error(tmp_path: Path) -> 
 
 
 def test_unpack_closes_only_the_package_it_opens(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    package_path = _core_package(tmp_path)
+    package_path = _base_package(tmp_path)
     unpack_module = importlib.import_module("octx.unpack")
     real_open = unpack_module.open_octx
     opened = []

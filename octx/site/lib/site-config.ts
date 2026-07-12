@@ -24,8 +24,8 @@ export const DOC_NAV: NavGroup[] = [
     title: "格式规范",
     items: [
       {
-        title: "OCTX Core v1",
-        href: "/docs/core",
+        title: "OCTX v0.1",
+        href: "/docs/specification",
         description: "容器、manifest、身份与完整性",
       },
       {

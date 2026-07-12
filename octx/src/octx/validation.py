@@ -25,7 +25,7 @@ _UUID7 = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _PACKAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _DECLARATION_VERSION = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
-_SUPPORTED_DECLARATION_VERSION = re.compile(r"^1\.(0|[1-9][0-9]*)$")
+_SUPPORTED_DECLARATION_VERSION = re.compile(r"^0\.1$")
 _RFC3339_UTC = re.compile(
     r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]+)?Z$"
 )
@@ -150,7 +150,7 @@ def _manifest_schema_issues(manifest: dict[str, Any], collector: _Collector) -> 
     )
     for error in errors:
         parts = tuple(error.absolute_path)
-        layer = "core"
+        layer = "format"
         if len(parts) >= 2 and parts[0] == "capabilities" and isinstance(parts[1], str):
             layer = f"cap:{parts[1]}"
         elif len(parts) >= 2 and parts[0] == "profiles" and isinstance(parts[1], str):
@@ -223,7 +223,7 @@ def _add_identity(
     return True
 
 
-def _validate_core(
+def _validate_format(
     package: OctxPackage,
     collector: _Collector,
     records: _Records,
@@ -233,7 +233,7 @@ def _validate_core(
     release = manifest.get("release") if isinstance(manifest.get("release"), dict) else {}
     if not _valid_rfc3339_utc(release.get("created_at")):
         collector.add(
-            "core",
+            "format",
             "OCTX_RELEASE_CREATED_AT_INVALID",
             "release.created_at must be a real UTC RFC 3339 timestamp ending in Z",
             path="manifest.json",
@@ -246,23 +246,23 @@ def _validate_core(
     derived_from = asset.get("derived_from") if isinstance(asset.get("derived_from"), dict) else {}
     if isinstance(asset_id, str) and derived_from.get("asset_id") == asset_id:
         collector.add(
-            "core",
+            "format",
             "OCTX_ASSET_DERIVED_FROM_SELF",
             "a Derived Asset must have an asset.id different from asset.derived_from.asset_id",
             path="manifest.json",
         )
 
     format_version = manifest.get("format_version")
-    core_supported = (
+    format_supported = (
         manifest.get("format") == "octx"
         and isinstance(format_version, str)
-        and re.fullmatch(r"1\.(?:0|[1-9][0-9]*)", format_version) is not None
+        and format_version == "0.1"
     )
-    if not core_supported:
+    if not format_supported:
         collector.add(
-            "core",
-            "OCTX_CORE_UNSUPPORTED",
-            f"Core {manifest.get('format')}/{format_version or '?'} is not supported by this implementation",
+            "format",
+            "OCTX_FORMAT_VERSION_UNSUPPORTED",
+            f"OCTX {format_version or '?'} is not supported by this implementation",
             path="manifest.json",
         )
 
@@ -280,21 +280,21 @@ def _validate_core(
             hashes_ok = False
             continue
         if path == "manifest.json":
-            collector.add("core", "OCTX_MANIFEST_SELF_LISTED", "manifest.json must not appear in files", path=path)
+            collector.add("format", "OCTX_MANIFEST_SELF_LISTED", "manifest.json must not appear in files", path=path)
             continue
         if path in listed:
-            collector.add("core", "OCTX_FILE_PATH_DUPLICATE", "manifest file path is duplicated", path=path)
+            collector.add("format", "OCTX_FILE_PATH_DUPLICATE", "manifest file path is duplicated", path=path)
             continue
         listed.add(path)
         if not _allowed_payload_path(path):
             collector.add(
-                "core", "OCTX_PAYLOAD_PATH_UNSUPPORTED", "path is not a standard or extension payload", path=path
+                "format", "OCTX_PAYLOAD_PATH_UNSUPPORTED", "path is not a standard or extension payload", path=path
             )
         if not isinstance(expected, str) or not _SHA256.fullmatch(expected):
             hashes_ok = False
             continue
         if path not in package.available_paths:
-            collector.add("core", "OCTX_FILE_MISSING", "manifest-listed file is missing", path=path)
+            collector.add("format", "OCTX_FILE_MISSING", "manifest-listed file is missing", path=path)
             hashes_ok = False
             continue
         try:
@@ -304,16 +304,16 @@ def _validate_core(
                     digest.update(chunk)
             actual = digest.hexdigest()
         except OctxError as error:
-            collector.add("core", error.code, str(error), path=path)
+            collector.add("format", error.code, str(error), path=path)
             hashes_ok = False
             continue
         if actual != expected:
-            collector.add("core", "OCTX_FILE_DIGEST_MISMATCH", "payload SHA-256 does not match manifest", path=path)
+            collector.add("format", "OCTX_FILE_DIGEST_MISMATCH", "payload SHA-256 does not match manifest", path=path)
             hashes_ok = False
             continue
         integrity_paths.add(path)
 
-    if not core_supported:
+    if not format_supported:
         hashes_ok = False
     elif (
         hashes_ok
@@ -323,12 +323,12 @@ def _validate_core(
         try:
             computed = package_digest(manifest)
         except (KeyError, TypeError, ValueError) as error:
-            collector.add("core", "OCTX_PACKAGE_DIGEST_INVALID", str(error), path="manifest.json")
+            collector.add("format", "OCTX_PACKAGE_DIGEST_INVALID", str(error), path="manifest.json")
             hashes_ok = False
         else:
             if computed != release["package_digest"]:
                 collector.add(
-                    "core",
+                    "format",
                     "OCTX_PACKAGE_DIGEST_MISMATCH",
                     "release.package_digest does not match logical package content",
                     path="manifest.json",
@@ -341,61 +341,61 @@ def _validate_core(
     for path, capability in _STANDARD_PATHS.items():
         if path in listed and capability not in capabilities:
             collector.add(
-                "core",
+                "format",
                 "OCTX_STANDARD_PATH_UNDECLARED",
-                f"{path} requires the {capability}/1.0 capability declaration",
+                f"{path} requires the {capability}/0.1 capability declaration",
                 path=path,
             )
 
     concepts = sorted((path for path in listed if is_concept_path(path)), key=str.encode)
     if not concepts:
-        collector.add("core", "OCTX_CONCEPT_REQUIRED", "package must contain at least one Concept Document")
+        collector.add("format", "OCTX_CONCEPT_REQUIRED", "package must contain at least one Concept Document")
 
-    if hashes_ok and core_supported:
+    if hashes_ok and format_supported:
         for path in sorted((value for value in listed if is_reserved_knowledge_path(value)), key=str.encode):
             if path not in integrity_paths:
                 continue
             try:
                 raw = package.read_payload(path)
             except OctxError as error:
-                collector.add("core", error.code, str(error), path=path)
+                collector.add("format", error.code, str(error), path=path)
                 continue
             try:
                 validate_reserved_document(raw, path=path, max_depth=package.limits.max_yaml_depth)
             except Exception as error:
-                collector.add("core", "OCTX_OKF_RESERVED_INVALID", str(error), path=path)
+                collector.add("format", "OCTX_OKF_RESERVED_INVALID", str(error), path=path)
         for path in concepts:
             if path not in integrity_paths:
                 continue
             try:
                 raw = package.read_payload(path)
             except OctxError as error:
-                collector.add("core", error.code, str(error), path=path)
+                collector.add("format", error.code, str(error), path=path)
                 continue
             try:
                 metadata, _ = split_frontmatter(raw, path=path, max_depth=package.limits.max_yaml_depth)
             except Exception as error:
-                collector.add("core", "OCTX_DOCUMENT_FRONTMATTER", str(error), path=path)
+                collector.add("format", "OCTX_DOCUMENT_FRONTMATTER", str(error), path=path)
                 continue
             document_type = metadata.get("type")
             if not isinstance(document_type, str) or document_type == "":
                 collector.add(
-                    "core", "OCTX_DOCUMENT_TYPE_REQUIRED", "document type must be a non-empty string", path=path
+                    "format", "OCTX_DOCUMENT_TYPE_REQUIRED", "document type must be a non-empty string", path=path
                 )
             namespace = metadata.get("octx")
             document_id = namespace.get("document_id") if isinstance(namespace, dict) else None
             if not isinstance(document_id, str) or not _UUID7.fullmatch(document_id):
                 collector.add(
-                    "core",
+                    "format",
                     "OCTX_DOCUMENT_ID_INVALID",
                     "octx.document_id must be a canonical UUIDv7",
                     path=path,
                 )
                 continue
-            if _add_identity(records, collector, "core", document_id, f"document {path}", path=path):
+            if _add_identity(records, collector, "format", document_id, f"document {path}", path=path):
                 records.documents[document_id] = path
     profiles = manifest.get("profiles") if isinstance(manifest.get("profiles"), dict) else {}
-    return integrity_paths, capabilities, profiles, hashes_ok, core_supported
+    return integrity_paths, capabilities, profiles, hashes_ok, format_supported
 
 
 def _require_paths(
@@ -410,7 +410,7 @@ def _require_paths(
             collector.add(
                 f"cap:{capability}",
                 "OCTX_CAPABILITY_FILE_REQUIRED",
-                f"{capability}/1.0 requires {path}",
+                f"{capability}/0.1 requires {path}",
                 path=path,
             )
             valid = False
@@ -418,7 +418,7 @@ def _require_paths(
             collector.add(
                 f"cap:{capability}",
                 "OCTX_CAPABILITY_FILE_UNTRUSTED",
-                f"{path} did not pass Core integrity checks",
+                f"{path} did not pass OCTX integrity checks",
                 path=path,
             )
             valid = False
@@ -704,7 +704,7 @@ def _validate_vectors(
     config_path = "vectors/config.json"
     if config_path not in package.files:
         collector.add(
-            layer, "OCTX_VECTOR_CONFIG_REQUIRED", "vectors/1.0 requires vectors/config.json", path=config_path
+            layer, "OCTX_VECTOR_CONFIG_REQUIRED", "vectors/0.1 requires vectors/config.json", path=config_path
         )
         return True
     try:
@@ -733,7 +733,7 @@ def _validate_vectors(
         if f"vectors/{target}.arrow" in package.files
     }
     if not targets:
-        collector.add(layer, "OCTX_VECTOR_TARGET_REQUIRED", "vectors/1.0 requires at least one Arrow target")
+        collector.add(layer, "OCTX_VECTOR_TARGET_REQUIRED", "vectors/0.1 requires at least one Arrow target")
         return True
     try:
         import pyarrow as pa
@@ -757,7 +757,7 @@ def _validate_vectors(
             collector.add(
                 layer,
                 "OCTX_CAPABILITY_FILE_UNTRUSTED",
-                f"{path} did not pass Core integrity checks",
+                f"{path} did not pass OCTX integrity checks",
                 path=path,
             )
             continue
@@ -765,7 +765,7 @@ def _validate_vectors(
             collector.add(
                 layer,
                 "OCTX_VECTOR_TARGET_DEPENDENCY",
-                f"{path} requires a valid {target}/1.0 capability",
+                f"{path} requires a valid {target}/0.1 capability",
                 path=path,
             )
             continue
@@ -921,8 +921,8 @@ def _report_for_open_error(error: Exception) -> ValidationReport:
         path=getattr(error, "path", None),
         line=getattr(error, "line", None),
     )
-    core = LayerResult(declared=True, valid=False, issues=(issue,))
-    return ValidationReport(core=core, issues=(issue,))
+    format_result = LayerResult(declared=True, valid=False, issues=(issue,))
+    return ValidationReport(format=format_result, issues=(issue,))
 
 
 def validate_octx(
@@ -956,11 +956,11 @@ def validate_octx(
 
     collector = _Collector(max_issues=max_issues or selected_limits.max_issues)
     records = _Records()
-    integrity_paths, capability_declarations, profile_declarations, integrity_ok, core_supported = _validate_core(
+    integrity_paths, capability_declarations, profile_declarations, integrity_ok, format_supported = _validate_format(
         package, collector, records
     )
-    core_valid = "core" not in collector.invalid
-    core_usable = integrity_ok and core_supported and core_valid
+    format_valid = "format" not in collector.invalid
+    format_usable = integrity_ok and format_supported and format_valid
 
     capability_results: dict[str, LayerResult] = {}
     supported_capabilities: dict[str, bool] = {}
@@ -997,11 +997,11 @@ def validate_octx(
                 fully_validated=False,
             )
             continue
-        if not core_usable:
+        if not format_usable:
             collector.add(
                 layer,
                 "OCTX_CAPABILITY_DEPENDENCY_INVALID",
-                "capability payload was not read because OCTX Core is invalid or unsupported",
+                "capability payload was not read because the OCTX format is invalid or unsupported",
             )
             supported_capabilities[name] = False
             fully_validated_capabilities[name] = False
@@ -1015,13 +1015,13 @@ def validate_octx(
         supported_capabilities["chunks"] = "cap:chunks" not in collector.invalid
     if "events" in supported_capabilities:
         if not supported_capabilities.get("chunks", False):
-            collector.add("cap:events", "OCTX_CAPABILITY_DEPENDENCY_INVALID", "events requires valid chunks/1.0")
+            collector.add("cap:events", "OCTX_CAPABILITY_DEPENDENCY_INVALID", "events requires valid chunks/0.1")
         if supported_capabilities["events"]:
             _validate_events(package, collector, records)
         supported_capabilities["events"] = "cap:events" not in collector.invalid
     if "entities" in supported_capabilities:
         if not supported_capabilities.get("events", False):
-            collector.add("cap:entities", "OCTX_CAPABILITY_DEPENDENCY_INVALID", "entities requires valid events/1.0")
+            collector.add("cap:entities", "OCTX_CAPABILITY_DEPENDENCY_INVALID", "entities requires valid events/0.1")
         if supported_capabilities["entities"]:
             _validate_entities(package, collector, records)
         supported_capabilities["entities"] = "cap:entities" not in collector.invalid
@@ -1032,7 +1032,7 @@ def validate_octx(
             collector.add(
                 "cap:vectors",
                 "OCTX_CAPABILITY_FILE_UNTRUSTED",
-                "vectors/config.json did not pass Core integrity checks",
+                "vectors/config.json did not pass OCTX integrity checks",
                 path="vectors/config.json",
             )
         else:
@@ -1043,7 +1043,7 @@ def validate_octx(
 
     for name in supported_capabilities:
         fully_validated = fully_validated_capabilities[name]
-        valid = supported_capabilities[name] if fully_validated or not core_usable else None
+        valid = supported_capabilities[name] if fully_validated or not format_usable else None
         capability_results[name] = _layer_result(
             collector,
             f"cap:{name}",
@@ -1102,15 +1102,15 @@ def validate_octx(
             version=version,
         )
 
-    core_result = _layer_result(
+    format_result = _layer_result(
         collector,
-        "core",
+        "format",
         declared=True,
         version=manifest.get("format_version"),
-        fully_validated=core_supported,
+        fully_validated=format_supported,
     )
     return ValidationReport(
-        core=core_result,
+        format=format_result,
         capabilities=capability_results,
         profiles=profile_results,
         issues=tuple(collector.issues),

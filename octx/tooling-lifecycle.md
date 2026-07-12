@@ -1,6 +1,6 @@
 # OCTX 工具与生命周期
 
-> 状态：v1 设计基线。本文定义参考工具、zleap-sag 适配层及 Asset、Release、Package、Installation 的行为边界。
+> 状态：v0.1 设计基线。本文定义参考工具、zleap-sag 适配层及 Asset、Release、Package、Installation 的行为边界。
 
 ## 1. 分层
 
@@ -102,7 +102,7 @@ octx create <expanded-external-package> --derive -o <derived.octx>
 
 展开的外部 Package 没有本地 producer state。内容未变化时，create 可以无损重新封装同一逻辑 Package，但不能借此续发原 Asset；内容发生修改或增强时，必须显式 `--derive`，生成新的 Asset ID，并把原 Package 三元组写入 `asset.derived_from`。
 
-无损重封装逐字保留未知 manifest 字段。新 Release 和 Derived Asset 则重新生成当前工具理解的 Core manifest、Release 与文件清单，不继承来源中的未知签名、证明或文件级断言；需要这些字段时，必须交给理解其语义的生产者重新声明。
+无损重封装逐字保留未知 manifest 字段。新 Release 和 Derived Asset 则重新生成当前工具理解的 OCTX manifest、Release 与文件清单，不继承来源中的未知签名、证明或文件级断言；需要这些字段时，必须交给理解其语义的生产者重新声明。
 
 ### 3.3 Release 版本保护
 
@@ -139,12 +139,12 @@ report = validate_octx(package_or_source)
 
 职责：
 
-- 校验 Core 与格式版本。
+- 校验 OCTX 格式与版本。
 - 校验规范路径、文件清单和逐文件 SHA-256。
 - 重新计算 Package Digest。
 - 校验 JSON Schema 与 Arrow schema。
 - 校验 ID 唯一性、引用、关系和层级。
-- 分别给出 Core、Capabilities 和 Profiles 的有效性。
+- 分别给出 OCTX 格式、Capabilities 和 Profiles 的有效性。
 - 生成结构化问题列表和可选安装计划信息。
 
 任何 import 实现都必须在自身事务中确保验证成功，不能相信调用方之前运行过 validate。
@@ -183,7 +183,7 @@ report = validate_octx(package_or_source)
 result = import_octx(source, options=...)
 ```
 
-`import_octx()` 属于 `zleap-sag`，不属于通用 OCTX Core。
+`import_octx()` 属于 `zleap-sag`，不属于通用 OCTX 工具链。
 
 ### 5.2 安装计划
 
@@ -193,8 +193,8 @@ result = import_octx(source, options=...)
 
 - 同 Asset、同版本、不同 Package Digest 的 Release 冲突。
 - 安装低于当前版本的显式回滚。
-- 放弃已声明但无效的结构层，只安装 Core 并重建。
-- 从无效 Core 提取可读 Markdown 并创建派生 Asset。
+- 放弃已声明但无效的结构层，只安装有效 Markdown 并重建。
+- 从无效 Package 提取可读 Markdown 并创建派生 Asset。
 
 交互式 CLI 可以询问。Python API 不弹出交互，而是返回：
 
@@ -208,7 +208,7 @@ confirmation_required + structured installation plan
 
 1. 完整验证输入。
 2. 在隔离 staging 中建立 Asset、Release、Installation 与 SAG Source 映射。
-3. 写入有效 Core 和可以复用的结构/向量。
+3. 写入有效 OCTX 文档和可以复用的结构/向量。
 4. 校验本地映射完整性。
 5. 单事务提交或原子切换。
 6. 失败时清理 staging，原有 Installation 保持不变。
@@ -243,12 +243,12 @@ validated
        or degraded
 ```
 
-- `installed`：有效 Core 已原子安装，可以浏览。
+- `installed`：有效 OCTX 文档已原子安装，可以浏览。
 - `indexing`：后台生成缺失或不兼容的结构/向量。
 - `ready`：当前消费者需要的检索能力全部可用。
-- `degraded`：部分索引失败，Core 继续可用并可重试。
+- `degraded`：部分索引失败，OCTX 文档继续可用并可重试。
 
-有效 Core-only 或部分 Capability Package 是正常输入。安装后自动从第一个缺失层开始补建，不要求错误确认。
+仅含 Markdown 或部分 Capability 的有效 Package 是正常输入。安装后自动从第一个缺失层开始补建，不要求错误确认。
 
 已声明但无效的数据不同：必须先展示验证错误，由用户明确选择是否放弃该结构并重建。
 
@@ -267,7 +267,7 @@ validated
 
 无效层不做单条记录补丁，也不混用该层的新旧抽取结果。已验证上游可以复用。
 
-Core 本身无效时不得安装原 Asset。用户可以明确提取可读 Markdown，使用新的 Asset 和文档身份创建 Derived Asset。
+OCTX 格式无效时不得安装原 Asset。用户可以明确提取可读 Markdown，使用新的 Asset 和文档身份创建 Derived Asset。
 
 ## 9. 导出 SAG
 
@@ -281,7 +281,7 @@ result = export_octx(source_or_asset, output, version=...)
 - 只有 chunks、events、entities 和两层关系完整时才导出结构并声明 `sag-structured`。
 - 结构半成品不进入 Package。
 - 每个导出的向量目标必须完整；不完整目标省略。
-- `core_only=True` 可以只导出 Markdown。
+- `documents_only=True` 可以只导出 Markdown。
 
 导入 Package 后生成的本地增强数据如果需要重新传播，必须先创建新的 Derived Asset，并记录：
 

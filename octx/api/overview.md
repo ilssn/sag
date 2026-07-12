@@ -22,7 +22,7 @@ python -m pip install "octx[vectors]"
 | --- | --- |
 | [`create_octx()`](./create-octx.md) | 从 Markdown 或已有 workspace 创建不可变 `.octx` Package，或发布后续 Release。 |
 | [`open_octx()`](./open-octx.md) | 安全打开 ZIP 或展开目录，得到只读 `OctxPackage`，但不执行完整规范校验。 |
-| [`validate_octx()`](./validate-octx.md) | 完整校验 Core、已知 Capability 与 Profile，返回结构化报告。 |
+| [`validate_octx()`](./validate-octx.md) | 完整校验 OCTX 格式、已知 Capability 与 Profile，返回结构化报告。 |
 | [`unpack_octx()`](./unpack-octx.md) | 校验通过后，将 manifest 和已声明 payload 安全展开到目录。 |
 | [`OctxPackage`](./octx-package.md) | 读取 manifest、Markdown、JSONL 结构层和 Arrow 向量。 |
 | [数据模型与资源限制](./models-and-limits.md) | `CreateResult`、`ValidationReport`、`Document`、`ArchiveLimits` 等类型。 |

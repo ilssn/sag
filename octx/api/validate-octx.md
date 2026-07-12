@@ -1,6 +1,6 @@
 # `validate_octx()`
 
-`validate_octx()` 完整校验 OCTX Core、当前实现认识的 Capability 和 Profile，并返回 [`ValidationReport`](./models-and-limits.md)。它是处理外部或不可信 Package 的首选入口。
+`validate_octx()` 完整校验 OCTX 格式、当前实现认识的 Capability 和 Profile，并返回 [`ValidationReport`](./models-and-limits.md)。它是处理外部或不可信 Package 的首选入口。
 
 ## 函数签名
 
@@ -35,7 +35,7 @@ if not report.valid:
 
 ## `valid` 与 `fully_validated`
 
-- `report.valid`：Core 有效，并且所有已识别且已执行的声明层都没有失败。
+- `report.valid`：OCTX 格式有效，并且所有已识别且已执行的声明层都没有失败。
 - `report.fully_validated`：当前安装理解并完整验证了全部声明层。
 
 因此，一个带未知可选 Capability 的 Package 可以是 `valid=True`、`fully_validated=False`。发布或高信任导入通常应同时要求两者为 `True`：
@@ -49,7 +49,7 @@ if not (report.valid and report.fully_validated):
 
 ## 校验范围
 
-Core 校验包括容器安全、manifest Schema、身份、版本、文件清单、逐文件 SHA-256、Package Digest、Markdown/OKF frontmatter 和 Document ID。
+OCTX 格式校验包括容器安全、manifest Schema、身份、版本、文件清单、逐文件 SHA-256、Package Digest、Markdown/OKF frontmatter 和 Document ID。
 
 声明结构层后，还会校验：
 

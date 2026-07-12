@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "OCTX Vector Configuration 1.0",
+  "title": "OCTX Vector Configuration 0.1",
   "type": "object",
   "required": ["model"],
   "properties": {

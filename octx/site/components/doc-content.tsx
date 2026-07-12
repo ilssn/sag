@@ -9,8 +9,8 @@ import { CodeBlock } from "@/components/code-block";
 
 const DOC_LINKS: Record<string, string> = {
   "README.md": "/docs/introduction",
-  "spec-v1.md": "/docs/core",
-  "sag-structured-v1.md": "/docs/sag-structured",
+  "spec-v0.1.md": "/docs/specification",
+  "sag-structured-v0.1.md": "/docs/sag-structured",
   "tooling-lifecycle.md": "/docs/tooling",
   "api/overview.md": "/api",
   "overview.md": "/api",
@@ -40,7 +40,7 @@ function mapHref(href?: string) {
   if (href.startsWith("http") || href.startsWith("#") || href.startsWith("/")) return href;
   const normalized = href.replace(/^\.\//, "").replace(/^\.\.\//, "");
   if (DOC_LINKS[normalized]) return DOC_LINKS[normalized];
-  if (/^(?:schemas\/)?1\.0\/[^/]+\.json$/.test(normalized)) {
+  if (/^(?:schemas\/)?0\.1\/[^/]+\.json$/.test(normalized)) {
     return `/schemas/${normalized.replace(/^schemas\//, "")}`;
   }
   return href;
