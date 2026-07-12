@@ -109,7 +109,7 @@ export const API_NAV: NavGroup[] = [
     ],
   },
   {
-    title: "Package 数据格式",
+    title: "数据对象",
     items: [
       {
         title: "OctxPackage",
