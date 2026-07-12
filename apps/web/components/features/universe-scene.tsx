@@ -187,6 +187,10 @@ const EVENT_LIGHT_COLOR = new THREE.Color("#b77b0b");
 const ENTITY_LIGHT_COLOR = new THREE.Color("#16879a");
 const WHITE = new THREE.Color("#ffffff");
 const DETAIL_MORPH_RESPONSE_MS = 92;
+const NODE_LABEL_BUDGET = {
+  mobile: { events: 10, entities: 40 },
+  desktop: { events: 24, entities: 120 },
+} as const;
 const SOURCE_PALETTE = [
   "#6fc0d0",
   "#9d8bd0",
@@ -516,11 +520,11 @@ class UniverseForceSceneEngine {
       .nodeThreeObjectExtend(false)
       .linkVisibility((link) => link.visible)
       .linkColor((link) => this.linkVisualColor(link))
-      .linkOpacity(0.18)
-      .linkWidth((link) => link.highlighted ? 0.14 : 0.025)
+      .linkOpacity(0.32)
+      .linkWidth((link) => link.highlighted ? 0.26 : 0.045)
       .linkCurvature((link) => 0.025 + stableUnit(link.id) * 0.055)
-      .linkDirectionalParticles((link) => (link.highlighted && !this.reducedMotion ? 1 : 0))
-      .linkDirectionalParticleWidth(0.24)
+      .linkDirectionalParticles((link) => (link.highlighted && !this.reducedMotion ? 2 : 0))
+      .linkDirectionalParticleWidth(0.3)
       .linkDirectionalParticleSpeed(0.0022)
       .linkDirectionalParticleColor(() => this.darkTheme
         ? "rgba(250,217,127,.72)"
@@ -642,7 +646,7 @@ class UniverseForceSceneEngine {
       .enablePointerInteraction(options.interactive)
       .enableNavigationControls(options.interactive)
       .enableNodeDrag(options.interactive)
-      .linkOpacity(options.darkTheme ? 0.2 : 0.16);
+      .linkOpacity(options.darkTheme ? 0.38 : 0.26);
     if (this.dataReady) {
       if (options.interactive) this.resume();
       else this.pause();
@@ -1870,17 +1874,17 @@ class UniverseForceSceneEngine {
   private linkVisualColor(link: ForceLink) {
     if (link.highlighted) {
       return this.darkTheme
-        ? "#7dddec"
-        : "#147e91";
+        ? "rgba(160, 241, 255, 1)"
+        : "rgba(6, 113, 134, 1)";
     }
     if (this.hoveredId || this.selectedId) {
       return this.darkTheme
-        ? "#4f6267"
-        : "#9aadb1";
+        ? "rgba(91, 116, 122, 0.28)"
+        : "rgba(112, 137, 142, 0.32)";
     }
     return this.darkTheme
-      ? "#82b4be"
-      : "#527b84";
+      ? "rgba(128, 184, 195, 0.92)"
+      : "rgba(66, 112, 122, 0.88)";
   }
 
   private rebuildLabels() {
@@ -1910,34 +1914,51 @@ class UniverseForceSceneEngine {
       .slice(0, mobile ? 8 : 18);
     const activeBySource = new Map<string, ForceNode[]>();
     [...this.nodes.values()]
-      .filter((node) => node.kind !== "source" && node.sceneNode.state === "active")
+      .filter((node) =>
+        node.kind !== "source"
+        && node.sceneNode.state === "active"
+        && node.sourceId === this.visualSourceId,
+      )
       .forEach((node) => {
         const group = activeBySource.get(node.sourceId) ?? [];
         group.push(node);
         activeBySource.set(node.sourceId, group);
       });
     const activeNodes: ForceNode[] = [];
-    const labelLimit = mobile ? 5 : 12;
+    const labelBudget = mobile ? NODE_LABEL_BUDGET.mobile : NODE_LABEL_BUDGET.desktop;
     activeBySource.forEach((candidates) => {
-      const retained = candidates
-        .filter((node) => retainedLabelRank.has(node.id))
-        .sort(
-          (left, right) => (retainedLabelRank.get(left.id) ?? 0)
-            - (retainedLabelRank.get(right.id) ?? 0),
-        );
-      const additions = candidates
-        .filter((node) => !retainedLabelRank.has(node.id))
-        .sort((left, right) => {
-          const leftConnected = Boolean(focusNeighbors?.has(left.id));
-          const rightConnected = Boolean(focusNeighbors?.has(right.id));
-          if (leftConnected !== rightConnected) return leftConnected ? -1 : 1;
-          if (left.sceneNode.root !== right.sceneNode.root) return left.sceneNode.root ? -1 : 1;
-          if (left.kind !== right.kind) return left.kind === "entity" ? -1 : 1;
-          return right.sceneNode.importance - left.sceneNode.importance;
-        });
+      const prioritize = (left: ForceNode, right: ForceNode) => {
+        const leftConnected = Boolean(focusNeighbors?.has(left.id));
+        const rightConnected = Boolean(focusNeighbors?.has(right.id));
+        if (leftConnected !== rightConnected) return leftConnected ? -1 : 1;
+        if (left.sceneNode.root !== right.sceneNode.root) return left.sceneNode.root ? -1 : 1;
+        return right.sceneNode.importance - left.sceneNode.importance;
+      };
+      const retainStableLabels = (nodes: ForceNode[], limit: number) => {
+        const retained = nodes
+          .filter((node) => retainedLabelRank.has(node.id))
+          .sort(
+            (left, right) => (retainedLabelRank.get(left.id) ?? 0)
+              - (retainedLabelRank.get(right.id) ?? 0),
+          )
+          .slice(0, limit);
+        const additions = nodes
+          .filter((node) => !retainedLabelRank.has(node.id))
+          .sort(prioritize);
+        return [
+          ...retained,
+          ...additions.slice(0, Math.max(0, limit - retained.length)),
+        ];
+      };
       activeNodes.push(
-        ...retained,
-        ...additions.slice(0, Math.max(0, labelLimit - retained.length)),
+        ...retainStableLabels(
+          candidates.filter((node) => node.kind === "event"),
+          labelBudget.events,
+        ),
+        ...retainStableLabels(
+          candidates.filter((node) => node.kind === "entity"),
+          labelBudget.entities,
+        ),
       );
     });
     [this.selectedId, this.hoveredId].forEach((id) => {
@@ -1968,7 +1989,7 @@ class UniverseForceSceneEngine {
       title.textContent = node.sceneNode.label;
       const meta = document.createElement("small");
       meta.textContent = node.sceneNode.statsReady
-        ? `${node.sceneNode.entityCount} 实体 · ${node.sceneNode.eventCount} 事件`
+        ? `${node.sceneNode.eventCount} 事件 · ${node.sceneNode.entityCount} 实体`
         : `${node.sceneNode.eventCount} 事件 · 实体统计中`;
       copy.append(title, meta);
       element.append(marker, copy);
@@ -1983,6 +2004,9 @@ class UniverseForceSceneEngine {
       element.dataset.kind = node.kind;
       element.dataset.expanded = String(
         node.id === this.selectedId,
+      );
+      element.dataset.compact = String(
+        node.kind === "entity" && node.id !== this.selectedId,
       );
       element.setAttribute(
         "aria-label",
@@ -2013,6 +2037,12 @@ class UniverseForceSceneEngine {
       this.labelLayer.appendChild(element);
       this.labels.push({ nodeId: node.id, kind: "node", element });
     });
+    this.host.dataset.universeEventLabelCount = String(
+      activeNodes.filter((node) => node.kind === "event").length,
+    );
+    this.host.dataset.universeEntityLabelCount = String(
+      activeNodes.filter((node) => node.kind === "entity").length,
+    );
     this.updateLabels(performance.now(), true);
   }
 
@@ -2129,17 +2159,23 @@ class UniverseForceSceneEngine {
 
       const emphasized = node.id === this.hoveredId || node.id === this.selectedId;
       const expanded = node.id === this.selectedId;
+      const compact = label.kind === "node" && node.kind === "entity" && !expanded;
+      label.element.dataset.compact = String(compact);
       const sourceBeaconSize = mobile ? 44 : 48;
       const sourceInfoWidth = mobile ? 138 : 154;
       const sourceInfoHeight = mobile ? 40 : 44;
       const sourceInfoGap = 8;
       const baseLabelWidth = label.kind === "source"
         ? sourceBeaconSize
+        : compact
+          ? mobile ? 112 : 136
         : mobile
           ? expanded ? 204 : 184
           : expanded ? 244 : 216;
       const baseLabelHeight = label.kind === "source"
         ? sourceBeaconSize
+        : compact
+          ? mobile ? 26 : 28
         : mobile
           ? expanded ? 82 : 70
           : expanded ? 94 : 78;
@@ -2274,7 +2310,9 @@ class UniverseForceSceneEngine {
         (hit) => hit.source_id === node.sourceId,
       ));
       label.element.style.opacity = String(
-        visibleOpacity * (emphasized ? 1 : label.kind === "source" ? 0.94 : 0.82),
+        visibleOpacity * (
+          emphasized ? 1 : label.kind === "source" ? 0.94 : compact ? 0.9 : 0.84
+        ),
       );
       label.element.style.pointerEvents = label.kind === "source"
         ? visibleOpacity >= 0.58 ? "auto" : "none"
@@ -2597,8 +2635,10 @@ class UniverseForceSceneEngine {
       progress: nextMix,
     });
     if (!refresh) return;
-    if (reportedChanged || sourceChanged) this.applyHighlight();
-    else this.updateLabels(now, true);
+    if (reportedChanged || sourceChanged) {
+      this.rebuildLabels();
+      this.applyHighlight();
+    } else this.updateLabels(now, true);
   }
 
   private evaluateLod(now: number) {

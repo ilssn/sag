@@ -1392,11 +1392,11 @@ export function KnowledgeUniverse({
                 <span
                   className="min-w-0 max-w-52 truncate border-l border-border/70 pl-2 tabular-nums sm:pl-3"
                   title={manifest?.version
-                    ? `${viewportSource.entity_count} 实体 · ${viewportSource.event_count} 事件`
+                    ? `${viewportSource.event_count} 事件 · ${viewportSource.entity_count} 实体`
                     : `${viewportSource.event_count} 事件 · 实体统计构建中`}
                 >
                   {manifest?.version
-                    ? `${compactCount(viewportSource.entity_count)} 实体 · ${compactCount(viewportSource.event_count)} 事件`
+                    ? `${compactCount(viewportSource.event_count)} 事件 · ${compactCount(viewportSource.entity_count)} 实体`
                     : `${compactCount(viewportSource.event_count)} 事件 · 实体统计构建中`}
                 </span>
               </motion.div>
