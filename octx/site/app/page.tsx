@@ -1,8 +1,11 @@
 import Link from "next/link";
 import {
+  ArrowUp,
   ArrowRight,
+  Bot,
   Boxes,
   Check,
+  Database,
   FileArchive,
   FileText,
   Fingerprint,
@@ -10,6 +13,7 @@ import {
   RefreshCw,
   ScanSearch,
   ShieldCheck,
+  UserRound,
 } from "lucide-react";
 import { CodeBlock } from "@/components/code-block";
 import { PackageVisual } from "@/components/package-visual";
@@ -95,6 +99,88 @@ export default function HomePage() {
               <Check size={15} aria-hidden="true" /> Vendor-neutral
             </span>
           </div>
+        </div>
+      </section>
+
+      <section className="architecture-section">
+        <div className="section-heading">
+          <p>基础架构</p>
+          <h2>从 OCTX 文件，到人获得知识。</h2>
+          <span>
+            OCTX 位于知识流的基础层。知识库负责导入和检索，Agent 把召回结果带入上下文，人通过 Agent
+            获得知识。
+          </span>
+        </div>
+
+        <div className="architecture-diagram" aria-label="Open Context 四层基础架构">
+          <article className="architecture-layer architecture-human">
+            <span className="architecture-layer-number">04</span>
+            <span className="architecture-layer-icon">
+              <UserRound size={23} aria-hidden="true" />
+            </span>
+            <div className="architecture-layer-copy">
+              <h3>人</h3>
+              <p>用自然语言提出问题，通过 Agent 获取知识与答案。</p>
+            </div>
+            <strong>获取知识</strong>
+          </article>
+
+          <div className="architecture-connector" aria-hidden="true">
+            <ArrowUp size={18} />
+            <span>回答 / 交付</span>
+          </div>
+
+          <article className="architecture-layer architecture-agent">
+            <span className="architecture-layer-number">03</span>
+            <span className="architecture-layer-icon">
+              <Bot size={23} aria-hidden="true" />
+            </span>
+            <div className="architecture-layer-copy">
+              <h3>Agent</h3>
+              <p>自动检索知识库，把召回结果写入当前上下文后完成回答。</p>
+            </div>
+            <strong>使用上下文</strong>
+          </article>
+
+          <div className="architecture-connector" aria-hidden="true">
+            <ArrowUp size={18} />
+            <span>检索 / 召回</span>
+          </div>
+
+          <article className="architecture-layer architecture-knowledge">
+            <span className="architecture-layer-number">02</span>
+            <span className="architecture-layer-icon">
+              <Database size={23} aria-hidden="true" />
+            </span>
+            <div className="architecture-layer-copy">
+              <h3>知识库程序</h3>
+              <p>
+                例如
+                <Link className="home-doc-link" href="/docs/sag">
+                  SAG
+                </Link>
+                ，读取 OCTX，将知识写入数据库并建立检索索引。
+              </p>
+            </div>
+            <strong>管理与检索</strong>
+          </article>
+
+          <div className="architecture-connector" aria-hidden="true">
+            <ArrowUp size={18} />
+            <span>导入 / 安装</span>
+          </div>
+
+          <article className="architecture-layer architecture-file">
+            <span className="architecture-layer-number">01</span>
+            <span className="architecture-layer-icon">
+              <FileArchive size={23} aria-hidden="true" />
+            </span>
+            <div className="architecture-layer-copy">
+              <h3>OCTX 文件</h3>
+              <p>携带 Markdown、Chunk、Event、Entity、关系和可选向量的开放上下文资产。</p>
+            </div>
+            <strong>可传播资产</strong>
+          </article>
         </div>
       </section>
 
