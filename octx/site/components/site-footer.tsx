@@ -15,7 +15,7 @@ export function SiteFooter() {
         <a href="/llms.txt">llms.txt</a>
       </nav>
       <p>
-        由 <Link className="home-doc-link" href="/docs/sag">SAG</Link> 首先实现，为所有知识系统保持开放。
+        兼容 <Link className="home-doc-link" href="/docs/sag">SAG</Link> 结构，也对所有知识系统开放。
       </p>
     </footer>
   );

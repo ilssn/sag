@@ -2,7 +2,7 @@
 
 Open Context（简称 OCTX）是一种建立在 Google Open Knowledge Format（OKF）之上的开放上下文标准。它把可读 Markdown、稳定身份、版本、完整性信息及可选的 chunks、events、entities、关系和向量封装为可传播的 `.octx` Package。
 
-Open Context 由 [SAG](sag.md) 首先实现，但规范和参考工具不依赖 SAG、`zleap-sag`、特定数据库或向量后端。
+Open Context 兼容 [SAG](sag.md) 的 Chunk-Event-Entity 超图数据结构，但规范和参考工具不依赖 SAG、`zleap-sag`、特定数据库或向量后端。
 
 ## 阅读顺序
 
