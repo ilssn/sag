@@ -382,7 +382,7 @@ export default function HomePage() {
               <tr>
                 <th>
                   <Link className="home-doc-link" href="/docs/sag-structured">
-                    SAG-structured
+                    SAG-Structured
                   </Link>
                 </th>
                 <td>✓</td>

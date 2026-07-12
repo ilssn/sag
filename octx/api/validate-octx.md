@@ -55,7 +55,7 @@ OCTX 格式校验包括容器安全、manifest Schema、身份、版本、文件
 
 - `sag-structured` 中 chunks、events、entities 的 JSON Schema 与 UUIDv7。
 - chunk-event、event-entity 引用及层级关系。
-- SAG-structured 的完整覆盖约束。
+- SAG-Structured 的完整覆盖约束。
 - Arrow schema、RecordBatch、维度、数值类型、目标覆盖和资源边界。
 
 完整性失败时，不会继续解析对应的不可信结构 payload。

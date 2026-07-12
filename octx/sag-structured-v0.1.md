@@ -1,4 +1,4 @@
-# SAG-structured Capability v0.1
+# SAG-Structured Capability v0.1
 
 > 状态：v0.1 设计基线。本文定义 OCTX `sag-structured/0.1` Capability 及其完整数据约束。
 
@@ -156,7 +156,7 @@ Event-Entity relation：
 
 `(event_id, entity_id)` 是关系身份，在文件中不得重复。每个 Entity 必须至少被一个 Event 引用。
 
-## 6. SAG-structured 完整覆盖
+## 6. SAG-Structured 完整覆盖
 
 `sag-structured/0.1` 要求整条链没有孤立记录：
 

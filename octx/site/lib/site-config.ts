@@ -44,7 +44,7 @@ export const DOC_NAV: NavGroup[] = [
         description: "应用、检索架构与 OCTX 的关系",
       },
       {
-        title: "SAG-structured",
+        title: "SAG-Structured",
         href: "/docs/sag-structured",
         description: "Chunk、Event、Entity、关系与向量",
       },

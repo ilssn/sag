@@ -66,7 +66,7 @@ result = create_octx(
 
 同一逻辑内容可以按同一版本稳定重建；同一 Asset 和版本出现不同 Package Digest 时会拒绝发布。版本回退或内容变化但版本未提高时抛出 `ReleaseVersionError`。
 
-## 声明 SAG-structured
+## 声明 SAG-Structured
 
 声明 Capability 不会自动生成数据。`sag-structured` 要求全部 JSONL 和关系文件已经存在于 workspace，并满足完整覆盖约束。
 

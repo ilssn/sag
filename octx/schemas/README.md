@@ -20,7 +20,7 @@ JSON Schema 只负责单个 JSON object 的结构约束。以下内容必须由 
 - UUID 在 Package 中的唯一性。
 - JSONL 跨记录引用和关系组合唯一性。
 - Event 层级、循环和 level。
-- SAG-structured 完整覆盖。
+- SAG-Structured 完整覆盖。
 - Arrow schema 与向量覆盖。
 - Arrow IPC 消息边界、批次数量、行数、向量值总量，以及 vectors v0.1 禁止 body compression 的约束。
 - 逐文件 SHA-256 和 Package Digest。
@@ -28,4 +28,4 @@ JSON Schema 只负责单个 JSON object 的结构约束。以下内容必须由 
 规范来源：
 
 - [OCTX v0.1](../spec-v0.1.md)
-- [SAG-structured Capability v0.1](../sag-structured-v0.1.md)
+- [SAG-Structured Capability v0.1](../sag-structured-v0.1.md)
