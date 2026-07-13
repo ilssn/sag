@@ -95,7 +95,16 @@ export const MarkdownContent = React.memo(function MarkdownContent({
   streaming?: boolean;
 }) {
   const citationByNumber = React.useMemo(() => {
-    return new Map((citations ?? []).map((c) => [String(c.n), c]));
+    return new Map(
+      (citations ?? [])
+        .filter(
+          (citation) => citation.kind !== "external"
+            && Number.isInteger(citation.n)
+            && citation.n > 0
+            && Boolean(citation.chunk_id && citation.source_id),
+        )
+        .map((citation) => [String(citation.n), citation]),
+    );
   }, [citations]);
   const citationPlugin = React.useMemo(
     () => remarkCitationLinks(new Set(citationByNumber.keys())),
@@ -139,7 +148,7 @@ export const MarkdownContent = React.memo(function MarkdownContent({
               );
             }
             return (
-              <a href={href} target="_blank" rel="noreferrer" {...props}>
+              <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
                 {children}
               </a>
             );

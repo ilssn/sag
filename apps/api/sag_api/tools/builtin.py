@@ -30,8 +30,11 @@ class SearchContextTool(Tool):
     meta = ToolMeta(
         name="search_context",
         description=(
+            "仅当回答依赖已挂载知识库、上传文档或 @ 范围中的事实、原文或出处时，"
             "在知识库中检索资料片段，返回带全局编号的证据（引用时用 [n]）。"
             "可多轮调用：每次用不同角度/更具体的查询改写，直到证据足够。"
+            "不要用于寒暄、致谢、身份询问、纯创作、简单计算或仅处理用户已提供内容；"
+            "信息不足时应先澄清，不能用检索代替澄清。"
         ),
         parameters={
             "type": "object",
@@ -60,8 +63,23 @@ class SearchContextTool(Tool):
         )
         sections = outcome.sections
         source_refs = {s.sag_source_config_id: {"id": s.id, "name": s.name} for s in ctx.sources}
+        sources_by_config = {source.sag_source_config_id: source for source in ctx.sources}
+        graph_for_sections = getattr(ctx.engine_manager, "graph_for_sections", None)
+        graph = (
+            await graph_for_sections(
+                sections,
+                sources_by_config,
+                # graph_for_sections allocates the first event of each chunk
+                # before a second pass. Cover every returned section while
+                # retaining the existing minimum activation capacity.
+                event_limit=max(12, len(sections)),
+                entity_limit=36,
+            )
+            if sections and callable(graph_for_sections)
+            else None
+        )
         offset = max(0, ctx.citation_offset)
-        citations = build_citations(sections, source_refs)
+        citations = build_citations(sections, source_refs, list(graph.events) if graph is not None else None)
         for c in citations:
             c["n"] = c["n"] + offset
         return ToolResult(
@@ -73,6 +91,7 @@ class SearchContextTool(Tool):
                 "lexical_count": int(outcome.stats.get("lexical_candidates") or 0),
                 "filtered_count": int(outcome.stats.get("filtered_irrelevant") or 0),
                 "candidate_count": int(outcome.stats.get("candidates") or len(sections)),
+                "_graph": graph,
             },
         )
 

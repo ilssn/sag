@@ -73,7 +73,7 @@ function MessageActions({
   const btn =
     "grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground";
   return (
-    <div className="mt-1 flex min-h-7 items-center gap-1">
+    <div className="mt-1 flex min-h-7 flex-wrap items-center gap-x-1 gap-y-0">
       <CitationBlock citations={citations} onCitationClick={onCitationClick} />
       <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover/msg:opacity-100 focus-within:opacity-100">
         <Tooltip>
@@ -835,23 +835,14 @@ export function ConversationPanel({
                       disabled={streaming || submitting}
                       onClick={() => setWebEnabled((enabled) => !enabled)}
                       className={cn(
-                        "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60",
+                        "inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-1.5 text-[11px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60",
                         webEnabled
-                          ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/15"
-                          : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground",
+                          ? "bg-sky-50 text-sky-600 hover:bg-sky-100 dark:bg-sky-950/40 dark:text-sky-300 dark:hover:bg-sky-950/60"
+                          : "bg-transparent text-muted-foreground/75 hover:bg-muted/70 hover:text-foreground",
                       )}
                     >
                       <Globe2 className="size-3.5" aria-hidden />
                       <span>联网</span>
-                      <span
-                        aria-hidden
-                        className={cn(
-                          "text-[10px] font-normal",
-                          webEnabled ? "text-primary/80" : "text-muted-foreground/70",
-                        )}
-                      >
-                        {webEnabled ? "开" : "关"}
-                      </span>
                     </button>
                   </span>
                 </TooltipTrigger>

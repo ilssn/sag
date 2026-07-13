@@ -85,6 +85,7 @@ export function dispatchUniverseActivation(
   if (expectedEpoch !== undefined && expectedEpoch !== universeEpoch) return 0;
   const detail: UniverseActivation = {
     epoch: ++universeEpoch,
+    origin: activation.origin ?? "assistant",
     query: activation.query,
     nodes: activation.nodes,
     relations: activation.relations,
@@ -143,6 +144,7 @@ export function activationFromSearch(response: SearchResponse): UniverseActivati
     }));
   });
   return {
+    origin: "search",
     query: response.query,
     nodes: [...eventNodes, ...entityNodes],
     relations: response.relations.map(

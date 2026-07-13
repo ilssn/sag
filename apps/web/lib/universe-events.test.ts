@@ -69,6 +69,7 @@ describe("universe search activation", () => {
       .sort();
 
     expect(projections).toEqual(["source-a", "source-b"]);
+    expect(activation.origin).toBe("search");
     expect(activation.relations.map((relation) => relation.source_id).sort()).toEqual([
       "source-a",
       "source-b",

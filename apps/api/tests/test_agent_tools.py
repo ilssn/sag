@@ -12,8 +12,8 @@ import httpx
 import pytest
 
 from sag_agent import ModelChunk, ToolCall
-from sag_api.sag import RetrievedSection, SearchOutcome
-from sag_api.services.agent_service import _enabled_tool_names
+from sag_api.sag import GraphEventInfo, RetrievedSection, SearchOutcome, SourceGraphInfo
+from sag_api.services.agent_service import _adapt_tool, _enabled_tool_names
 from sag_api.tools import registry
 from sag_api.tools.base import Tool, ToolContext, ToolMeta, ToolResult
 from sag_api.tools.builtin import GetTimeTool, SearchContextTool
@@ -60,7 +60,18 @@ class ExternalEvidenceTool(Tool):
                         "title": "Official release",
                         "url": "https://example.com/official-release",
                         "source": "example.com",
-                    }
+                        "snippet": "The official release confirms the update.",
+                    },
+                    {
+                        "title": "Duplicate release",
+                        "url": "https://example.com/official-release#summary",
+                        "source": "reader",
+                    },
+                    {
+                        "title": "Unsafe result",
+                        "url": "javascript:alert(1)",
+                        "source": "untrusted",
+                    },
                 ]
             },
         )
@@ -72,6 +83,8 @@ registry.register(ExternalEvidenceTool())
 @pytest.mark.asyncio
 async def test_search_tool_prefers_exact_body_window_over_semantic_boilerplate():
     class HybridEngine:
+        graph_calls = 0
+
         async def search_many(self, targets, query, *, strategy=None, top_k=None):
             return SearchOutcome(
                 query=query,
@@ -96,16 +109,114 @@ async def test_search_tool_prefers_exact_body_window_over_semantic_boilerplate()
                 }
             ]
 
+        async def graph_for_sections(self, sections, sources_by_config, **kwargs):
+            self.graph_calls += 1
+            assert kwargs["event_limit"] == max(12, len(sections))
+            assert sources_by_config["sc-1"].id == "source-1"
+            return SimpleNamespace(
+                events=[
+                    SimpleNamespace(
+                        id="event-1",
+                        source_config_id="sc-1",
+                        chunk_id=sections[0].chunk_id,
+                        title="林俊杰官宣恋情",
+                        summary="林俊杰于 12 月 29 日公开恋情。",
+                        category="娱乐",
+                        score=0.95,
+                    )
+                ],
+                entities=[],
+                associations=[],
+            )
+
+    engine = HybridEngine()
     source = SimpleNamespace(id="source-1", name="娱乐新闻", sag_source_config_id="sc-1")
+    host_context = ToolContext(engine_manager=engine, sources=[source])
     result = await SearchContextTool().invoke(
         {"query": "关于林俊杰最新动态 2024 2025", "top_k": 4},
-        ToolContext(engine_manager=HybridEngine(), sources=[source]),
+        host_context,
     )
 
     assert result.citations[0]["chunk_id"] == "body"
+    assert result.citations[0]["event_refs"][0]["title"] == "林俊杰官宣恋情"
+    assert "summary" not in result.citations[0]
     assert "12月29日晚" in result.content
     assert result.data["lexical_count"] == 1
     assert result.data["section_count"] == 1
+    assert result.data["_graph"] is not None
+    assert result.data["_graph"].events[0].id == "event-1"
+    assert engine.graph_calls == 1
+
+    # The runtime adapter must reuse SearchContextTool's graph result instead
+    # of issuing a second graph query while constructing universe artifacts.
+    collected_citations: list[dict] = []
+    adapter_engine = HybridEngine()
+    adapter_context = ToolContext(engine_manager=adapter_engine, sources=[source])
+    adapted = _adapt_tool(SearchContextTool(), adapter_context, collected_citations)
+    runtime_result = await adapted.execute(
+        {"query": "关于林俊杰最新动态 2024 2025", "top_k": 4},
+        SimpleNamespace(
+            cancellation=SimpleNamespace(raise_if_cancelled=lambda: None),
+        ),
+    )
+
+    assert adapter_engine.graph_calls == 1
+    assert collected_citations[0]["event_refs"][0]["id"] == "event-1"
+    assert runtime_result.artifacts["citations"][0]["event_refs"][0]["summary"] == ("林俊杰于 12 月 29 日公开恋情。")
+    assert runtime_result.details["matches"][0]["event_refs"][0]["category"] == "娱乐"
+
+
+@pytest.mark.asyncio
+async def test_search_tool_graph_capacity_covers_every_returned_section():
+    class ManySectionEngine:
+        graph_calls = 0
+        event_limit = 0
+
+        async def search_many(self, targets, query, *, strategy=None, top_k=None):
+            source_config_id = targets[0][0]
+            return SearchOutcome(
+                query=query,
+                sections=[
+                    RetrievedSection(
+                        chunk_id=f"chunk-{index}",
+                        heading=f"共同主题 {index}",
+                        content=f"共同主题的可核验证据 {index}",
+                        score=1.0 - index / 100,
+                        source_config_id=source_config_id,
+                    )
+                    for index in range(20)
+                ],
+            )
+
+        async def graph_for_sections(self, sections, sources_by_config, **kwargs):
+            self.graph_calls += 1
+            self.event_limit = kwargs["event_limit"]
+            return SourceGraphInfo(
+                events=[
+                    GraphEventInfo(
+                        id=f"event-{index}",
+                        source_id="document-1",
+                        source_config_id=section.source_config_id or "",
+                        chunk_id=section.chunk_id,
+                        title=f"真实事件 {index}",
+                        summary=f"真实事件摘要 {index}",
+                        category="测试",
+                    )
+                    for index, section in enumerate(sections)
+                ]
+            )
+
+    engine = ManySectionEngine()
+    source = SimpleNamespace(id="source-1", name="测试资料", sag_source_config_id="sc-1")
+    result = await SearchContextTool().invoke(
+        {"query": "共同主题", "top_k": 20},
+        ToolContext(engine_manager=engine, sources=[source]),
+    )
+
+    assert len(result.citations) == 20
+    assert engine.graph_calls == 1
+    assert engine.event_limit == 20
+    assert all(len(citation["event_refs"]) == 1 for citation in result.citations)
 
 
 def test_visible_sources_mount_builtin_knowledge_tools():
@@ -159,7 +270,7 @@ class FakeLLM:
 
 
 class ExternalEvidenceLLM:
-    """Calls an external tool, then intentionally forgets the returned URL."""
+    """Call an external tool, then omit its URL to exercise run-level mapping."""
 
     def __init__(self) -> None:
         self.calls = 0
@@ -212,7 +323,7 @@ async def test_agent_tool_loop_dispatch_and_citations():
             assert r.status_code == 200, r.text
             body = r.json()
             # 工具循环跑完 → 最终答案
-            assert body["choices"][0]["message"]["content"] == ("最终答案\n\n本轮知识库资料（未逐条对应）：[1]")
+            assert body["choices"][0]["message"]["content"] == "最终答案"
             # 工具被派发（echo 执行）→ 其引用汇总进 sag.citations
             assert any(c.get("source_name") == "回声源" for c in body["sag"]["citations"])
             # 统一 provider 协议恰好两轮（工具决策 + 收尾）
@@ -220,7 +331,7 @@ async def test_agent_tool_loop_dispatch_and_citations():
 
 
 @pytest.mark.asyncio
-async def test_agent_external_tool_adds_traceable_link_when_model_omits_it():
+async def test_agent_external_tool_returns_structured_citation_when_model_omits_url():
     from sag_api.main import app
 
     transport = httpx.ASGITransport(app=app)
@@ -244,8 +355,20 @@ async def test_agent_external_tool_adds_traceable_link_when_model_omits_it():
 
             assert response.status_code == 200, response.text
             content = response.json()["choices"][0]["message"]["content"]
-            assert "外部资料（本轮检索，未逐条对应）" in content
-            assert "[Official release](<https://example.com/official-release>)" in content
+            assert content == "已核实更新。"
+            assert response.json()["sag"]["citations"] == [
+                {
+                    "kind": "external",
+                    "n": 1,
+                    "url": "https://example.com/official-release",
+                    "title": "Official release",
+                    "source": "example.com",
+                    "mapped": False,
+                    "claim_level": "run",
+                    "summary": "The official release confirms the update.",
+                    "snippet": "The official release confirms the update.",
+                }
+            ]
 
             app.state.llm = ExternalEvidenceLLM()
             chunks: list[str] = []
@@ -265,7 +388,38 @@ async def test_agent_external_tool_adds_traceable_link_when_model_omits_it():
             streamed_content = "".join(
                 json.loads(item)["choices"][0]["delta"].get("content", "") for item in chunks if item != "[DONE]"
             )
-            assert "[Official release](<https://example.com/official-release>)" in streamed_content
+            assert streamed_content == "已核实更新。"
+
+            # Stateful SSE exposes the same structured citation and persists it
+            # for history playback without patching a source footer into prose.
+            thread = (await c.post(f"/api/v1/agents/{agent['id']}/threads", headers=A, json={})).json()
+            app.state.llm = ExternalEvidenceLLM()
+            ask = await c.post(
+                f"/api/v1/agents/{agent['id']}/threads/{thread['id']}/ask",
+                headers=A,
+                json={"query": "请搜索并核实更新", "web_enabled": True},
+            )
+            assert ask.status_code == 200, ask.text
+            event_name = ""
+            completed = None
+            for line in ask.text.splitlines():
+                if line.startswith("event:"):
+                    event_name = line.split(":", 1)[1].strip()
+                elif line.startswith("data:") and event_name == "run.completed":
+                    completed = json.loads(line.split(":", 1)[1].strip())["payload"]
+            assert completed is not None
+            assert completed["citations"] == response.json()["sag"]["citations"]
+
+            messages = (
+                await c.get(
+                    f"/api/v1/agents/{agent['id']}/threads/{thread['id']}/messages",
+                    headers=A,
+                )
+            ).json()["items"]
+            saved = next(message for message in messages if message["role"] == "assistant")
+            assert saved["citations"] == completed["citations"]
+            assert saved["citations"][0]["kind"] == "external"
+            assert "javascript:" not in json.dumps(saved["citations"])
 
 
 @pytest.mark.asyncio

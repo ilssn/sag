@@ -7,18 +7,11 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
-  ChevronLeft,
-  ChevronRight,
-  EyeOff,
   Hand,
   Library,
   Loader2,
   MessageCircle,
-  Maximize2,
-  Minimize2,
   Music2,
-  Palette,
-  Plus,
   Rocket,
   RotateCcw,
   Route,
@@ -30,15 +23,23 @@ import {
   X,
 } from "lucide-react";
 
-import { normalizeAvatar } from "@/lib/avatar";
 import { DEFAULT_AGENT_AVATAR, DEFAULT_AGENT_NAME } from "@/lib/branding";
+import {
+  APP_INITIALIZATION_DEFAULTS,
+  persistPetCollapsed,
+  readInitialPetCollapsed,
+} from "@/lib/app-initialization";
 import type { ConversationSessionSnapshot } from "@/lib/conversation-runtime";
 import {
   PetAgent,
   type PetAgentActivity,
   type PetAgentFacing,
 } from "@/lib/pet-agent";
-import { setPetEnabled, usePetEnabled } from "@/lib/pet-preferences";
+import {
+  resolvePetFace,
+  usePetAppearancePreferences,
+} from "@/lib/pet-appearance-preferences";
+import { usePetEnabled } from "@/lib/pet-preferences";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/components/features/app-shell";
 import {
@@ -47,8 +48,6 @@ import {
 } from "@/components/features/chat/conversation-provider";
 import { PetMiniWorkspace } from "@/components/features/pet-mini-workspace";
 import { petFaceStyle } from "@/components/features/pet-head-avatar";
-import { Slider } from "@/components/ui/slider";
-import { Switch } from "@/components/ui/switch";
 
 type PetVisualMode = PetAgentActivity | "jumping" | "flying" | "roaming" | "dancing";
 
@@ -61,30 +60,7 @@ interface PetActivity {
   failed: boolean;
 }
 
-const DEFAULT_FACE_PRESETS = [
-  "@_@",
-  "^_^",
-  "-_-",
-  "o_o",
-  "._.",
-  ">_<",
-  "x_x",
-  "AI",
-  "01",
-  "S",
-  "Z",
-] as const;
 const IDLE_EXPRESSIONS = ["^_^", "-_-", "o_o", "._.", "u_u"] as const;
-const PET_FACE_KEY = "sag:pet-face";
-const PET_FACE_MODE_KEY = "sag:pet-face-mode";
-const PET_FACE_PRESETS_KEY = "sag:pet-face-presets";
-const PET_COLLAPSED_KEY = "sag:pet-collapsed";
-const PET_SIZE_KEY = "sag:pet-size";
-const PET_FLOAT_KEY = "sag:pet-float-strength";
-const PET_ACTION_RATE_KEY = "sag:pet-action-rate";
-const PET_EXPRESSION_DELAY_KEY = "sag:pet-expression-delay";
-const PET_REDUCE_MOTION_KEY = "sag:pet-reduce-motion";
-const MAX_FACE_PRESETS = 24;
 const PET_VIEWPORT_MARGIN = 24;
 const MODE_EXPRESSIONS: Partial<Record<PetVisualMode, string>> = {
   thinking: "◔_◔",
@@ -98,11 +74,6 @@ const MODE_EXPRESSIONS: Partial<Record<PetVisualMode, string>> = {
   roaming: "^o^",
   dancing: "^3^",
 };
-
-function normalizeFace(value: string) {
-  const next = normalizeAvatar(value);
-  return next === "s" ? "S" : next;
-}
 
 function nameplateStyle(value: string): React.CSSProperties {
   const length = Array.from(value).length;
@@ -198,8 +169,7 @@ interface PetActionButtonProps {
     | "roam"
     | "dance"
     | "collapse"
-    | "expand"
-    | "hide";
+    | "expand";
 }
 
 function PetActionButton({
@@ -241,6 +211,7 @@ export function Pet({
     panelMode,
     workspaceSection,
     openMiniWorkspace,
+    openSettings,
     hideWorkspace,
   } = useApp();
   const router = useRouter();
@@ -261,20 +232,14 @@ export function Pet({
   const [alignRight, setAlignRight] = React.useState(false);
   const [panelAbove, setPanelAbove] = React.useState(true);
   const [open, setOpen] = React.useState(false);
-  const [collapsed, setCollapsed] = React.useState(false);
+  const [collapsed, setCollapsed] = React.useState<boolean>(
+    APP_INITIALIZATION_DEFAULTS.petCollapsed,
+  );
   const [revealing, setRevealing] = React.useState(false);
   const [curious, setCurious] = React.useState(false);
-  const [petOverlay, setPetOverlay] = React.useState<"none" | "actions" | "appearance">("none");
-  const [face, setFace] = React.useState<string | null>(null);
-  const [facePresets, setFacePresets] = React.useState<string[]>(() => [
-    ...DEFAULT_FACE_PRESETS,
-  ]);
+  const [petOverlay, setPetOverlay] = React.useState<"none" | "actions">("none");
   const [roamPath, setRoamPath] = React.useState<PetRoamPath | null>(null);
-  const [petSize, setPetSize] = React.useState(1);
-  const [floatStrength, setFloatStrength] = React.useState(1);
-  const [actionRate, setActionRate] = React.useState(1);
-  const [expressionDelay, setExpressionDelay] = React.useState(1);
-  const [petReduceMotion, setPetReduceMotion] = React.useState(false);
+  const { preferences: appearance } = usePetAppearancePreferences();
   const dragRef = React.useRef<{
     dx: number;
     dy: number;
@@ -295,12 +260,10 @@ export function Pet({
   const pointerRef = React.useRef({ x: 0, y: 0 });
   const elRef = React.useRef<HTMLDivElement>(null);
   const visualRef = React.useRef<HTMLDivElement>(null);
-  const agentFace =
-    normalizeFace(agent?.avatar || DEFAULT_AGENT_AVATAR) ||
-    DEFAULT_AGENT_AVATAR;
+  const agentFace = agent?.avatar || DEFAULT_AGENT_AVATAR;
   const identityFace = shouldSyncIdentity ? agentFace : characterState.identity.avatar;
-  const displayFace = normalizeFace(face === null ? identityFace : face);
-  const motionReduced = Boolean(reduceMotion || petReduceMotion);
+  const displayFace = resolvePetFace(appearance, identityFace);
+  const motionReduced = Boolean(reduceMotion || appearance.reduceMotion);
 
   React.useEffect(
     () => () => {
@@ -314,9 +277,9 @@ export function Pet({
     character.configure({
       name: agent?.name || DEFAULT_AGENT_NAME,
       avatar: displayFace,
-      size: petSize,
+      size: appearance.size,
     });
-  }, [agent?.name, character, displayFace, petSize, shouldSyncIdentity]);
+  }, [agent?.name, appearance.size, character, displayFace, shouldSyncIdentity]);
 
   React.useEffect(() => {
     try {
@@ -344,52 +307,7 @@ export function Pet({
       }
       const savedFacing = window.localStorage.getItem("sag:pet-facing");
       if (savedFacing === "left" || savedFacing === "right") character.face(savedFacing);
-      if (!ambient) setCollapsed(window.localStorage.getItem(PET_COLLAPSED_KEY) === "true");
-      const savedFaceMode = window.localStorage.getItem(PET_FACE_MODE_KEY);
-      const savedFace = window.localStorage.getItem(PET_FACE_KEY);
-      const legacyFace = window.localStorage.getItem("sag:pet-emoji");
-      if (savedFaceMode === "custom") setFace(normalizeFace(savedFace ?? ""));
-      else if (savedFace !== null) setFace(normalizeFace(savedFace));
-      else if (legacyFace !== null) setFace(normalizeFace(legacyFace));
-
-      const savedPresets = window.localStorage.getItem(PET_FACE_PRESETS_KEY);
-      if (savedPresets !== null) {
-        const parsed = JSON.parse(savedPresets) as unknown;
-        if (Array.isArray(parsed)) {
-          const next = Array.from(
-            new Set(
-              parsed
-                .filter((value): value is string => typeof value === "string")
-                .map(normalizeFace)
-                .filter(Boolean),
-            ),
-          ).slice(0, MAX_FACE_PRESETS);
-          setFacePresets(next);
-        }
-      }
-      const savedSize = Number(window.localStorage.getItem(PET_SIZE_KEY));
-      if (Number.isFinite(savedSize) && savedSize >= 0.72 && savedSize <= 1.35) {
-        setPetSize(savedSize);
-      }
-      const savedFloat = Number(window.localStorage.getItem(PET_FLOAT_KEY));
-      if (Number.isFinite(savedFloat) && savedFloat >= 0.4 && savedFloat <= 1.8) {
-        setFloatStrength(savedFloat);
-      }
-      const savedActionRate = Number(window.localStorage.getItem(PET_ACTION_RATE_KEY));
-      if (Number.isFinite(savedActionRate) && savedActionRate >= 0 && savedActionRate <= 2) {
-        setActionRate(savedActionRate);
-      }
-      const savedExpressionDelay = Number(
-        window.localStorage.getItem(PET_EXPRESSION_DELAY_KEY),
-      );
-      if (
-        Number.isFinite(savedExpressionDelay) &&
-        savedExpressionDelay >= 0.5 &&
-        savedExpressionDelay <= 2
-      ) {
-        setExpressionDelay(savedExpressionDelay);
-      }
-      setPetReduceMotion(window.localStorage.getItem(PET_REDUCE_MOTION_KEY) === "true");
+      if (!ambient) setCollapsed(readInitialPetCollapsed(window.localStorage));
     } catch {
       /* ignore */
     }
@@ -589,7 +507,7 @@ export function Pet({
       !visible ||
       collapsed ||
       open ||
-      actionRate <= 0.05 ||
+      appearance.actionRate <= 0.05 ||
       characterState.activity !== "idle" ||
       characterState.motion !== "idle"
     ) {
@@ -600,12 +518,12 @@ export function Pet({
       if (roll < 0.2) triggerDance();
       else if (roll < 0.44) triggerFlight();
       else triggerWave();
-    }, (16_000 + Math.round(Math.random() * 12_000)) / actionRate);
+    }, (16_000 + Math.round(Math.random() * 12_000)) / appearance.actionRate);
     return () => window.clearTimeout(timer);
   }, [
     characterState.activity,
     characterState.motion,
-    actionRate,
+    appearance.actionRate,
     collapsed,
     open,
     motionReduced,
@@ -632,7 +550,7 @@ export function Pet({
       const choices = IDLE_EXPRESSIONS.filter((expression) => expression !== displayFace);
       const expression = choices[Math.floor(Math.random() * choices.length)] ?? "^_^";
       character.emote(expression, 1_650 + Math.round(Math.random() * 900));
-    }, (7_500 + Math.round(Math.random() * 8_500)) * expressionDelay);
+    }, (7_500 + Math.round(Math.random() * 8_500)) * appearance.expressionDelay);
     return () => window.clearTimeout(timer);
   }, [
     character,
@@ -641,7 +559,7 @@ export function Pet({
     characterState.motion,
     curious,
     displayFace,
-    expressionDelay,
+    appearance.expressionDelay,
     open,
     motionReduced,
     visible,
@@ -724,76 +642,6 @@ export function Pet({
   const petName = Array.from(characterState.identity.name || DEFAULT_AGENT_NAME)
     .slice(0, 7)
     .join("");
-  const canAddFacePreset =
-    Boolean(displayFace) &&
-    !facePresets.includes(displayFace) &&
-    facePresets.length < MAX_FACE_PRESETS;
-
-  function saveFace(value: string) {
-    const next = normalizeFace(value);
-    setFace(next);
-    character.setAvatar(next);
-    window.localStorage.removeItem("sag:pet-emoji");
-    window.localStorage.setItem(PET_FACE_MODE_KEY, "custom");
-    window.localStorage.setItem(PET_FACE_KEY, next);
-  }
-
-  function persistFacePresets(next: string[]) {
-    setFacePresets(next);
-    window.localStorage.setItem(PET_FACE_PRESETS_KEY, JSON.stringify(next));
-  }
-
-  function addFacePreset() {
-    if (!canAddFacePreset) return;
-    persistFacePresets([...facePresets, displayFace]);
-  }
-
-  function removeFacePreset(preset: string) {
-    persistFacePresets(facePresets.filter((value) => value !== preset));
-  }
-
-  function moveFacePreset(preset: string, direction: -1 | 1) {
-    const index = facePresets.indexOf(preset);
-    const target = index + direction;
-    if (index < 0 || target < 0 || target >= facePresets.length) return;
-    const next = [...facePresets];
-    [next[index], next[target]] = [next[target], next[index]];
-    persistFacePresets(next);
-  }
-
-  function followAvatar() {
-    setFace(null);
-    character.setAvatar(identityFace);
-    window.localStorage.removeItem(PET_FACE_MODE_KEY);
-    window.localStorage.removeItem(PET_FACE_KEY);
-    window.localStorage.removeItem("sag:pet-emoji");
-  }
-
-  function updatePetSize(value: number) {
-    setPetSize(value);
-    character.configure({ size: value });
-    window.localStorage.setItem(PET_SIZE_KEY, String(value));
-  }
-
-  function updateFloatStrength(value: number) {
-    setFloatStrength(value);
-    window.localStorage.setItem(PET_FLOAT_KEY, String(value));
-  }
-
-  function updateActionRate(value: number) {
-    setActionRate(value);
-    window.localStorage.setItem(PET_ACTION_RATE_KEY, String(value));
-  }
-
-  function updateExpressionDelay(value: number) {
-    setExpressionDelay(value);
-    window.localStorage.setItem(PET_EXPRESSION_DELAY_KEY, String(value));
-  }
-
-  function updateReducedMotion(value: boolean) {
-    setPetReduceMotion(value);
-    window.localStorage.setItem(PET_REDUCE_MOTION_KEY, String(value));
-  }
 
   function setFacing(direction: PetAgentFacing) {
     character.face(direction);
@@ -814,34 +662,10 @@ export function Pet({
     window.localStorage.setItem("sag:pet-pos", JSON.stringify(next));
   }
 
-  function resetPetPreferences() {
-    setPetSize(1);
-    setFloatStrength(1);
-    setActionRate(1);
-    setExpressionDelay(1);
-    setPetReduceMotion(false);
-    setFacePresets([...DEFAULT_FACE_PRESETS]);
-    character.configure({ size: 1 });
-    followAvatar();
-    [
-      PET_SIZE_KEY,
-      PET_FLOAT_KEY,
-      PET_ACTION_RATE_KEY,
-      PET_EXPRESSION_DELAY_KEY,
-      PET_REDUCE_MOTION_KEY,
-      PET_FACE_PRESETS_KEY,
-    ].forEach((key) => window.localStorage.removeItem(key));
-  }
-
-  function hide() {
-    setOpen(false);
+  function openAppearanceSettings() {
+    setCurious(false);
     setPetOverlay("none");
-    hideWorkspace();
-    if (expandActionTimerRef.current !== null) {
-      window.clearTimeout(expandActionTimerRef.current);
-      expandActionTimerRef.current = null;
-    }
-    setPetEnabled(false);
+    openSettings("agent", "appearance");
   }
 
   function collapseToHead() {
@@ -856,7 +680,7 @@ export function Pet({
       expandActionTimerRef.current = null;
     }
     setCollapsed(true);
-    window.localStorage.setItem(PET_COLLAPSED_KEY, "true");
+    persistPetCollapsed(window.localStorage, true);
   }
 
   function expandFromHead() {
@@ -864,7 +688,7 @@ export function Pet({
     setCollapsed(false);
     setCurious(false);
     setRevealing(true);
-    window.localStorage.setItem(PET_COLLAPSED_KEY, "false");
+    persistPetCollapsed(window.localStorage, false);
 
     const snapshot = character.getSnapshot();
     if (snapshot.activity !== "idle" || snapshot.motion !== "idle") return;
@@ -971,9 +795,9 @@ export function Pet({
     ? undefined
     : collapsed
       ? {
-          x: [0, 0.8 * floatStrength, 0],
-          y: [0, -2.2 * floatStrength, 0],
-          rotate: [0, 0.65 * floatStrength, 0],
+          x: [0, 0.8 * appearance.floatStrength, 0],
+          y: [0, -2.2 * appearance.floatStrength, 0],
+          rotate: [0, 0.65 * appearance.floatStrength, 0],
         }
     : characterState.motion === "fly"
       ? {
@@ -1010,10 +834,14 @@ export function Pet({
           ? { x: 0, y: -1.5, rotate: 0 }
         : visualMode === "idle"
           ? {
-              x: [0, 4.2, 1.4, -4.6, -1.5, 0].map((value) => value * floatStrength),
-              y: [0, -5.8, -2.4, 3.8, 1.2, 0].map((value) => value * floatStrength),
+              x: [0, 4.2, 1.4, -4.6, -1.5, 0].map(
+                (value) => value * appearance.floatStrength,
+              ),
+              y: [0, -5.8, -2.4, 3.8, 1.2, 0].map(
+                (value) => value * appearance.floatStrength,
+              ),
               rotate: [0, 0.62, 0.2, -0.56, -0.14, 0].map(
-                (value) => value * floatStrength,
+                (value) => value * appearance.floatStrength,
               ),
             }
           : { x: [0, 0.45, 0], y: [0, -1, 0], rotate: [0, 0, 0] };
@@ -1176,6 +1004,42 @@ export function Pet({
                 </button>
               ))}
             </div>
+            <div className="flex items-center gap-2 border-t px-2.5 py-2">
+              <span className="mr-auto text-[11px] text-muted-foreground">形态切换</span>
+              <div className="inline-flex rounded-md bg-muted p-0.5" role="group" aria-label="形态切换">
+                <button
+                  type="button"
+                  aria-pressed={collapsed}
+                  disabled={!collapsed && characterState.motion !== "idle"}
+                  onClick={() => {
+                    if (collapsed) return;
+                    setPetOverlay("none");
+                    collapseToHead();
+                  }}
+                  className={cn(
+                    "h-6 rounded px-2 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-35",
+                    collapsed && "bg-background text-foreground shadow-sm",
+                  )}
+                >
+                  简单
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={!collapsed}
+                  onClick={() => {
+                    if (!collapsed) return;
+                    setPetOverlay("none");
+                    expandFromHead();
+                  }}
+                  className={cn(
+                    "h-6 rounded px-2 text-[11px] text-muted-foreground transition-colors hover:text-foreground",
+                    !collapsed && "bg-background text-foreground shadow-sm",
+                  )}
+                >
+                  完整
+                </button>
+              </div>
+            </div>
             <div className="flex items-center gap-1.5 border-t px-2.5 py-2">
               <span className="mr-auto text-[11px] text-muted-foreground">朝向</span>
               <button
@@ -1214,209 +1078,6 @@ export function Pet({
           </motion.div>
         )}
 
-        {!ambient && petOverlay === "appearance" && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.94, y: 6 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 4 }}
-            transition={{ type: "spring", stiffness: 380, damping: 28 }}
-            className={cn(
-              "absolute max-h-[min(470px,calc(100dvh-14rem))] w-[330px] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border bg-popover/96 shadow-2xl backdrop-blur-xl",
-              panelVertical,
-              panelSide,
-            )}
-            onPointerDown={(event) => event.stopPropagation()}
-          >
-            <div className="sticky top-0 z-10 flex h-11 items-center border-b bg-popover/96 px-3 backdrop-blur-xl">
-              <Palette className="size-3.5 text-muted-foreground" />
-              <span className="ml-2 flex-1 text-sm font-medium">宇航员配置</span>
-              <button
-                type="button"
-                onClick={() => setPetOverlay("none")}
-                aria-label="收起配置"
-                title="收起"
-                className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                <X className="size-3.5" />
-              </button>
-            </div>
-
-            <div className="space-y-4 p-3">
-              <section>
-                <div className="mb-2 text-xs font-medium">面罩</div>
-                <div className="grid grid-cols-3 rounded-md bg-muted p-0.5">
-                  <button
-                    type="button"
-                    onClick={followAvatar}
-                    className={cn(
-                      "h-7 rounded text-[11px] text-muted-foreground",
-                      face === null && "bg-background text-foreground shadow-sm",
-                    )}
-                  >
-                    跟随头像
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => saveFace(displayFace || "^_^")}
-                    className={cn(
-                      "h-7 rounded text-[11px] text-muted-foreground",
-                      face !== null && Boolean(displayFace) && "bg-background text-foreground shadow-sm",
-                    )}
-                  >
-                    自定义
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => saveFace("")}
-                    className={cn(
-                      "h-7 rounded text-[11px] text-muted-foreground",
-                      face !== null && !displayFace && "bg-background text-foreground shadow-sm",
-                    )}
-                  >
-                    留空
-                  </button>
-                </div>
-
-                <div className="mt-2 flex items-center gap-1.5">
-                  <input
-                    value={displayFace}
-                    onChange={(event) => saveFace(event.target.value)}
-                    aria-label="自定义面罩字符"
-                    placeholder="@_@"
-                    className="h-9 min-w-0 flex-1 rounded-md border bg-background px-2 text-center font-mono text-sm font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  />
-                  <button
-                    type="button"
-                    onClick={addFacePreset}
-                    disabled={!canAddFacePreset}
-                    aria-label="添加表情"
-                    title="添加到表情库"
-                    className="grid size-9 shrink-0 place-items-center rounded-md border text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30"
-                  >
-                    <Plus className="size-3.5" />
-                  </button>
-                </div>
-
-                <div className="mt-2 space-y-1">
-                  {facePresets.map((preset, index) => (
-                    <div
-                      key={preset}
-                      className={cn(
-                        "flex h-8 items-center rounded-md border border-transparent pl-2 transition-colors hover:border-border hover:bg-muted/50",
-                        displayFace === preset && face !== null && "border-border bg-muted/70",
-                      )}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => saveFace(preset)}
-                        className="min-w-0 flex-1 truncate text-left font-mono text-xs"
-                      >
-                        {preset}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={index === 0}
-                        onClick={() => moveFacePreset(preset, -1)}
-                        aria-label={`向前移动 ${preset}`}
-                        title="向前"
-                        className="grid size-7 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-20"
-                      >
-                        <ChevronLeft className="size-3" />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={index === facePresets.length - 1}
-                        onClick={() => moveFacePreset(preset, 1)}
-                        aria-label={`向后移动 ${preset}`}
-                        title="向后"
-                        className="grid size-7 place-items-center text-muted-foreground hover:text-foreground disabled:opacity-20"
-                      >
-                        <ChevronRight className="size-3" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => removeFacePreset(preset)}
-                        aria-label={`删除 ${preset}`}
-                        title="删除"
-                        className="grid size-7 place-items-center text-muted-foreground hover:text-destructive"
-                      >
-                        <X className="size-3" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <section className="space-y-3 border-t pt-3">
-                <PetPreferenceSlider
-                  label="角色尺寸"
-                  value={`${Math.round(petSize * 100)}%`}
-                  sliderValue={petSize}
-                  min={0.72}
-                  max={1.35}
-                  step={0.01}
-                  onChange={updatePetSize}
-                />
-                <PetPreferenceSlider
-                  label="悬浮幅度"
-                  value={`${Math.round(floatStrength * 100)}%`}
-                  sliderValue={floatStrength}
-                  min={0.4}
-                  max={1.8}
-                  step={0.05}
-                  onChange={updateFloatStrength}
-                />
-                <PetPreferenceSlider
-                  label="随机动作频率"
-                  value={actionRate < 0.05 ? "关闭" : `${Math.round(actionRate * 100)}%`}
-                  sliderValue={actionRate}
-                  min={0}
-                  max={2}
-                  step={0.05}
-                  onChange={updateActionRate}
-                />
-                <PetPreferenceSlider
-                  label="待机表情间隔"
-                  value={`${expressionDelay.toFixed(1)}×`}
-                  sliderValue={expressionDelay}
-                  min={0.5}
-                  max={2}
-                  step={0.1}
-                  onChange={updateExpressionDelay}
-                />
-              </section>
-
-              <div className="flex items-center gap-3 border-t pt-3">
-                <span className="min-w-0 flex-1">
-                  <span className="block text-xs font-medium">减少动态</span>
-                  <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                    停止悬浮、表情轮换与随机动作
-                  </span>
-                </span>
-                <Switch checked={petReduceMotion} onCheckedChange={updateReducedMotion} />
-              </div>
-            </div>
-
-            <div className="flex items-center gap-1.5 border-t p-2">
-              <button
-                type="button"
-                onClick={resetPetPreferences}
-                className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                <RotateCcw className="size-3.5" />
-                恢复默认
-              </button>
-              <button
-                type="button"
-                onClick={hide}
-                className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md text-xs text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-              >
-                <EyeOff className="size-3.5" />
-                隐藏宇航员
-              </button>
-            </div>
-          </motion.div>
-        )}
       </AnimatePresence>
 
       <motion.div
@@ -1472,13 +1133,17 @@ export function Pet({
             </PetActionButton>
             <PetActionButton
               slot="appearance"
-              label="配置宇航员"
-              onClick={() => setPetOverlay("appearance")}
+              label="设置"
+              onClick={openAppearanceSettings}
             >
               <SlidersHorizontal />
             </PetActionButton>
-            <PetActionButton slot="expand" label="切换为全身" onClick={expandFromHead}>
-              <Maximize2 />
+            <PetActionButton
+              slot="actions"
+              label="动作"
+              onClick={() => setPetOverlay("actions")}
+            >
+              <WandSparkles />
             </PetActionButton>
           </div>
         )}
@@ -1538,26 +1203,18 @@ export function Pet({
                   <Library />
                 </PetActionButton>
                 <PetActionButton
+                  slot="appearance"
+                  label="设置"
+                  onClick={openAppearanceSettings}
+                >
+                  <SlidersHorizontal />
+                </PetActionButton>
+                <PetActionButton
                   slot="actions"
                   label="动作"
                   onClick={() => setPetOverlay("actions")}
                 >
                   <WandSparkles />
-                </PetActionButton>
-                <PetActionButton
-                  slot="appearance"
-                  label="配置宇航员"
-                  onClick={() => setPetOverlay("appearance")}
-                >
-                  <SlidersHorizontal />
-                </PetActionButton>
-                <PetActionButton
-                  slot="collapse"
-                  label="切换为头部"
-                  onClick={collapseToHead}
-                  disabled={characterState.motion !== "idle"}
-                >
-                  <Minimize2 />
                 </PetActionButton>
               </>
             )}
@@ -1584,8 +1241,8 @@ export function Pet({
                 expandFromHead();
               }
             }}
-            aria-label={`${characterState.identity.name} 头部形态，点击切换为全身${statusText ? `，${statusText}` : ""}`}
-            title="切换为全身"
+            aria-label={`${characterState.identity.name} 简单形态，点击切换为完整${statusText ? `，${statusText}` : ""}`}
+            title="切换为完整形态"
             style={characterStyle}
             className="sag-pet-collapsed relative cursor-grab outline-none active:cursor-grabbing"
           >
@@ -1657,7 +1314,7 @@ export function Pet({
                 else openMiniWorkspace(workspaceSection);
               }
             }}
-            aria-label={`${characterState.identity.name} 宇航员${statusText ? `，${statusText}` : ""}`}
+            aria-label={`${characterState.identity.name} 完整形态${statusText ? `，${statusText}` : ""}`}
             title={characterState.identity.name}
             style={characterStyle}
             className="sag-pet-astronaut relative h-full w-full cursor-grab outline-none active:cursor-grabbing"
@@ -1738,40 +1395,5 @@ export function Pet({
         )}
       </motion.div>
     </div>
-  );
-}
-
-function PetPreferenceSlider({
-  label,
-  value,
-  sliderValue,
-  min,
-  max,
-  step,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  sliderValue: number;
-  min: number;
-  max: number;
-  step: number;
-  onChange: (value: number) => void;
-}) {
-  return (
-    <label className="block">
-      <span className="mb-2 flex items-center text-[11px] text-muted-foreground">
-        <span className="flex-1">{label}</span>
-        <span className="font-mono text-foreground">{value}</span>
-      </span>
-      <Slider
-        value={[sliderValue]}
-        min={min}
-        max={max}
-        step={step}
-        onValueChange={(next) => onChange(next[0] ?? sliderValue)}
-        aria-label={label}
-      />
-    </label>
   );
 }

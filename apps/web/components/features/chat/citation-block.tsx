@@ -1,24 +1,139 @@
 "use client";
 
 import * as React from "react";
-import { BookOpenText, ChevronDown } from "lucide-react";
+import { ArrowUpRight, BookOpenText, ChevronDown, Globe2, Library } from "lucide-react";
 
 import type { Citation } from "@/lib/types";
+import { citationCopy } from "@/lib/citation-presentation";
 import { cn } from "@/lib/utils";
 import { useDetailPanel } from "@/components/features/detail-panel";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 
-function sourceKey(citation: Citation): string {
-  return citation.source_id || citation.source_name || `citation-${citation.n}`;
+function safeExternalUrl(citation: Citation): string | null {
+  const raw = citation.url;
+  if (typeof raw !== "string" || !raw || raw !== raw.trim() || /\s/.test(raw)) return null;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    if (!parsed.hostname || parsed.username || parsed.password) return null;
+    return raw;
+  } catch {
+    return null;
+  }
 }
 
-/** 常驻的紧凑来源入口；默认打开全局详情，紧凑容器可接管为原位详情。 */
+function CitationNumber({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="grid size-5 shrink-0 place-items-center rounded-full bg-muted font-mono text-[10px] font-semibold text-muted-foreground">
+      {children}
+    </span>
+  );
+}
+
+function CitationCard({
+  citation,
+  fallbackIndex,
+  onOpen,
+  url,
+}: {
+  citation: Citation;
+  fallbackIndex: number;
+  onOpen?: () => void;
+  url?: string;
+}) {
+  const [excerptExpanded, setExcerptExpanded] = React.useState(false);
+  const excerptId = React.useId();
+  const copy = citationCopy(citation, fallbackIndex);
+  const sourceActionClass =
+    "inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded-md bg-muted/55 px-1.5 text-[10px] font-medium text-muted-foreground/85 outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:opacity-40";
+  const disclosureClass =
+    "inline-flex h-5 shrink-0 items-center gap-0.5 whitespace-nowrap rounded px-1 text-[10px] font-normal text-muted-foreground/55 outline-none transition-colors hover:bg-muted/40 hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring";
+
+  return (
+    <article className="px-2.5 py-2.5 transition-colors hover:bg-background/55">
+      <div className="flex items-start gap-2.5">
+        <CitationNumber>{citation.n || fallbackIndex}</CitationNumber>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-start gap-2">
+            <h4 className="min-w-0 flex-1 line-clamp-2 text-xs font-semibold leading-5 text-foreground">
+              {copy.title}
+            </h4>
+            {url ? (
+              <a
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={`访问外部来源：${copy.title}`}
+                title="打开原文"
+                className={sourceActionClass}
+              >
+                <ArrowUpRight className="size-3" aria-hidden="true" />
+                原文
+              </a>
+            ) : (
+              <button
+                type="button"
+                onClick={onOpen}
+                disabled={!onOpen}
+                aria-label={`查看内部来源原文：${copy.title}`}
+                title={onOpen ? "查看原文" : "原文暂不可用"}
+                className={sourceActionClass}
+              >
+                <ArrowUpRight className="size-3" aria-hidden="true" />
+                原文
+              </button>
+            )}
+          </div>
+
+          {copy.summary && (
+            <p className="mt-1 line-clamp-2 text-[11px] leading-[1.65] text-muted-foreground">
+              {copy.summary}
+            </p>
+          )}
+
+          {copy.excerpt && excerptExpanded && (
+            <div
+              id={excerptId}
+              className="mt-2 border-l-2 border-primary/15 pl-2.5 animate-in fade-in slide-in-from-top-1 duration-150"
+            >
+              <span className="text-[10px] font-medium text-muted-foreground/80">引用片段</span>
+              <p
+                className="mt-0.5 whitespace-pre-wrap break-words text-[11px] leading-[1.7] text-muted-foreground"
+              >
+                {copy.excerpt}
+              </p>
+            </div>
+          )}
+
+          {copy.excerpt && (
+            <div className="mt-1.5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setExcerptExpanded((value) => !value)}
+                aria-expanded={excerptExpanded}
+                aria-controls={excerptId}
+                aria-label={excerptExpanded ? `收起引用片段：${copy.title}` : `展开引用片段：${copy.title}`}
+                title={excerptExpanded ? "收起" : "展开"}
+                className={disclosureClass}
+              >
+                {excerptExpanded ? "收起" : "展开"}
+                <ChevronDown
+                  className={cn("size-3 transition-transform", excerptExpanded && "rotate-180")}
+                  aria-hidden="true"
+                />
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+/**
+ * A single source center for knowledge-base and web references. Legacy
+ * citations without `kind` remain internal so persisted conversations keep
+ * their existing traceability.
+ */
 export const CitationBlock = React.memo(function CitationBlock({
   citations,
   onCitationClick,
@@ -27,90 +142,137 @@ export const CitationBlock = React.memo(function CitationBlock({
   onCitationClick?: (citation: Citation) => void;
 }) {
   const panel = useDetailPanel();
-  if (!citations?.length) return null;
+  const [expanded, setExpanded] = React.useState(false);
+  const contentId = React.useId();
+  const { internal, external } = React.useMemo(() => {
+    const internalItems: Citation[] = [];
+    const externalItems: Array<{ citation: Citation; url: string }> = [];
+    const seenInternal = new Set<string>();
+    const seenExternal = new Set<string>();
 
-  const sourceCount = new Set(citations.map(sourceKey)).size;
-  const referenceCount = citations.length;
+    for (const citation of citations ?? []) {
+      if (citation.kind === "external") {
+        const url = safeExternalUrl(citation);
+        if (!url || seenExternal.has(url)) continue;
+        seenExternal.add(url);
+        externalItems.push({ citation, url });
+        continue;
+      }
+      const key = `${citation.n}:${citation.source_id ?? ""}:${citation.chunk_id ?? ""}`;
+      if (seenInternal.has(key)) continue;
+      seenInternal.add(key);
+      internalItems.push(citation);
+    }
+    return { internal: internalItems, external: externalItems };
+  }, [citations]);
+
+  const referenceCount = internal.length + external.length;
+  if (!referenceCount) return null;
+
+  const openInternal = (citation: Citation) => {
+    if (!citation.chunk_id || !citation.source_id) return;
+    if (onCitationClick) {
+      onCitationClick(citation);
+      return;
+    }
+    panel.open({
+      kind: "chunk",
+      sourceId: citation.source_id,
+      chunkId: citation.chunk_id,
+      heading: citation.heading || undefined,
+      sourceName: citation.source_name ?? undefined,
+    });
+  };
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md bg-muted/70 px-2 text-[11px] font-medium text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-          aria-label={`${sourceCount} 个来源，${referenceCount} 条引用`}
-        >
-          <BookOpenText className="size-3" />
-          <span>{sourceCount} 个来源</span>
-          {referenceCount !== sourceCount && (
-            <span className="font-normal text-muted-foreground/70">· {referenceCount} 条引用</span>
-          )}
-          <ChevronDown className="size-3 opacity-60" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        side="bottom"
-        align="start"
-        className="w-[min(28rem,calc(100vw-2rem))] p-1.5"
+    <>
+      <button
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        aria-expanded={expanded}
+        aria-controls={contentId}
+        aria-label={`${expanded ? "收起" : "展开"} ${referenceCount} 条引用，其中内部来源 ${internal.length} 条，外部引用 ${external.length} 条`}
+        title={expanded ? "收起引用" : "展开引用"}
+        className={cn(
+          "inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-2 text-[11px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+          expanded
+            ? "bg-muted text-foreground"
+            : "bg-muted/70 text-muted-foreground hover:bg-muted hover:text-foreground",
+        )}
       >
-        <DropdownMenuLabel className="flex items-center justify-between px-2 py-1.5">
-          <span>参考来源</span>
-          <span className="font-normal tabular-nums text-muted-foreground/70">
-            {referenceCount} 条引用
-          </span>
-        </DropdownMenuLabel>
-        {citations.map((citation) => {
-          const traceable = Boolean(citation.chunk_id && citation.source_id);
-          return (
-            <DropdownMenuItem
-              key={citation.n}
-              disabled={!traceable}
-              onSelect={() => {
-                if (!citation.chunk_id || !citation.source_id) return;
-                if (onCitationClick) {
-                  onCitationClick(citation);
-                  return;
-                }
-                panel.open({
-                  kind: "chunk",
-                  sourceId: citation.source_id,
-                  chunkId: citation.chunk_id,
-                  heading: citation.heading ?? undefined,
-                  sourceName: citation.source_name ?? undefined,
-                });
-              }}
-              className="group/cite items-start gap-2.5 px-2 py-2.5"
-            >
-              <span className="grid size-5 shrink-0 place-items-center rounded-full bg-muted font-mono text-[10px] font-semibold text-muted-foreground">
-                {citation.n}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <span className="truncate text-xs font-medium text-foreground">
-                    {citation.heading || "资料片段"}
-                  </span>
-                  {citation.source_name && (
-                    <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                      {citation.source_name}
-                    </span>
-                  )}
+        <BookOpenText className="size-3" aria-hidden="true" />
+        <span>引用 {referenceCount}</span>
+        <ChevronDown
+          className={cn("size-3 opacity-60 transition-transform", expanded && "rotate-180")}
+          aria-hidden="true"
+        />
+      </button>
+
+      {expanded && (
+        <section
+          id={contentId}
+          aria-label="引用来源"
+          className="order-last mt-1.5 w-full basis-full overflow-hidden rounded-xl border border-border/70 bg-muted/20 animate-in fade-in slide-in-from-top-1 duration-150"
+        >
+          <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+            <span className="text-xs font-semibold text-foreground">引用来源</span>
+            <span className="shrink-0 rounded-full bg-background px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-muted-foreground">
+              {referenceCount}
+            </span>
+          </div>
+
+          {internal.length > 0 && (
+            <div className="border-t border-border/60 px-1.5 py-1.5">
+              <div className="flex items-center justify-between px-1.5 py-1.5">
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-foreground">
+                  <Library className="size-3.5" aria-hidden="true" />
+                  内部来源
                 </span>
-                {citation.snippet && (
-                  <span className="mt-0.5 block max-h-8 overflow-hidden text-[11px] leading-4 text-muted-foreground">
-                    {citation.snippet}
-                  </span>
-                )}
-              </span>
-              <BookOpenText
-                className={cn(
-                  "mt-0.5 size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity",
-                  traceable && "group-hover/cite:opacity-100",
-                )}
-              />
-            </DropdownMenuItem>
-          );
-        })}
-      </DropdownMenuContent>
-    </DropdownMenu>
+                <span className="font-mono text-[10px] font-normal tabular-nums text-muted-foreground">
+                  {internal.length}
+                </span>
+              </div>
+              <div className="divide-y divide-border/50">
+                {internal.map((citation, index) => {
+                  const traceable = Boolean(citation.chunk_id && citation.source_id);
+                  return (
+                    <CitationCard
+                      key={`internal:${citation.n}:${citation.source_id ?? ""}:${citation.chunk_id ?? ""}`}
+                      citation={citation}
+                      fallbackIndex={index + 1}
+                      onOpen={traceable ? () => openInternal(citation) : undefined}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {external.length > 0 && (
+            <div className="border-t border-border/60 px-1.5 py-1.5">
+              <div className="flex items-center justify-between px-1.5 py-1.5">
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-foreground">
+                  <Globe2 className="size-3.5" aria-hidden="true" />
+                  外部引用
+                </span>
+                <span className="font-mono text-[10px] font-normal tabular-nums text-muted-foreground">
+                  {external.length}
+                </span>
+              </div>
+              <div className="divide-y divide-border/50">
+                {external.map(({ citation, url }, index) => (
+                  <CitationCard
+                    key={`external:${url}`}
+                    citation={citation}
+                    fallbackIndex={index + 1}
+                    url={url}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+    </>
   );
 });

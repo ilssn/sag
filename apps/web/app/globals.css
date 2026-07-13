@@ -1459,6 +1459,22 @@
     transform: translateY(7px) scale(0.84);
   }
 
+  .sag-pet__actions.sag-pet__actions--commands .sag-pet__action[data-slot="actions"] {
+    margin-left: 8px;
+  }
+
+  .sag-pet__actions.sag-pet__actions--commands .sag-pet__action[data-slot="actions"]::before {
+    position: absolute;
+    left: -7px;
+    top: 7px;
+    width: 1px;
+    height: 18px;
+    border-radius: 999px;
+    background: hsl(var(--border) / 0.85);
+    content: "";
+    pointer-events: none;
+  }
+
   .sag-pet__actions.sag-pet__actions--commands .sag-pet__action svg {
     width: 15px;
     height: 15px;

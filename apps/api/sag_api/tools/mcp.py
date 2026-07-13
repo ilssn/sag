@@ -71,6 +71,8 @@ _URL_KEYS = frozenset(
 )
 _TITLE_KEYS = ("title", "name", "label", "headline")
 _SOURCE_KEYS = ("source", "publisher", "site", "domain", "provider")
+_SNIPPET_KEYS = ("snippet", "description", "summary", "excerpt", "content")
+_SNIPPET_MAX_LENGTH = 320
 _URL_TRAILING_PUNCTUATION = ".,;:!?)]}，。；：！？、"
 
 
@@ -101,18 +103,23 @@ def _plain_value(value: Any) -> Any:
 def _clean_url(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
-    url = value.strip().rstrip(_URL_TRAILING_PUNCTUATION)
+    url = value.rstrip(_URL_TRAILING_PUNCTUATION)
+    if not url or any(character.isspace() for character in url):
+        return None
     try:
         parsed = urlsplit(url)
+        _ = parsed.port
     except ValueError:
         return None
-    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        return None
+    if parsed.username is not None or parsed.password is not None:
         return None
     return url
 
 
 def _string_field(node: dict[str, Any], keys: tuple[str, ...]) -> str:
-    lower = {str(key).lower(): value for key, value in node.items()}
+    lower = {str(key).lower().replace("-", "_"): value for key, value in node.items()}
     for key in keys:
         value = lower.get(key)
         if isinstance(value, str) and value.strip():
@@ -120,11 +127,38 @@ def _string_field(node: dict[str, Any], keys: tuple[str, ...]) -> str:
     return ""
 
 
+def _short_snippet(value: Any) -> str:
+    """Return a bounded human-readable excerpt, never a structured payload dump."""
+    if not isinstance(value, str):
+        return ""
+    snippet = " ".join(value.split())
+    if not snippet:
+        return ""
+
+    # Some search MCPs put their complete JSON response in a field named
+    # ``content``.  That payload is transport data, not a citation excerpt.
+    json_candidate = snippet
+    fenced = _JSON_FENCE_PATTERN.fullmatch(snippet)
+    if fenced:
+        json_candidate = fenced.group(1).strip()
+    try:
+        parsed = json.loads(json_candidate)
+    except (TypeError, ValueError):
+        pass
+    else:
+        if isinstance(parsed, (dict, list)):
+            return ""
+
+    if len(snippet) <= _SNIPPET_MAX_LENGTH:
+        return snippet
+    return snippet[: _SNIPPET_MAX_LENGTH - 1].rstrip() + "…"
+
+
 def _external_references(result: Any) -> list[dict[str, str]]:
     """Collect de-duplicated web references from MCP structured/text output."""
     references: dict[str, dict[str, str]] = {}
 
-    def add(raw_url: Any, *, title: str = "", source: str = "") -> None:
+    def add(raw_url: Any, *, title: str = "", source: str = "", snippet: str = "") -> None:
         url = _clean_url(raw_url)
         if not url:
             return
@@ -142,16 +176,30 @@ def _external_references(result: Any) -> list[dict[str, str]]:
             current["title"] = title
         if source and (not current["source"] or current["source"] == fallback_source):
             current["source"] = source
+        clean_snippet = _short_snippet(snippet)
+        if clean_snippet and not current.get("snippet"):
+            current["snippet"] = clean_snippet
 
     def walk(value: Any) -> None:
         value = _plain_value(value)
         if isinstance(value, dict):
             title = _string_field(value, _TITLE_KEYS)
             source = _string_field(value, _SOURCE_KEYS)
+            snippet = _string_field(value, _SNIPPET_KEYS)
             for key, child in value.items():
                 normalized_key = str(key).lower().replace("-", "_")
                 if normalized_key in _URL_KEYS:
-                    add(child, title=title, source=source)
+                    add(child, title=title, source=source, snippet=snippet)
+                    continue
+                # Metadata strings may contain URLs or even a serialized copy
+                # of the complete tool payload.  They describe the current
+                # result and must not recursively become unrelated citations.
+                if isinstance(child, str) and normalized_key in {
+                    *_TITLE_KEYS,
+                    *_SOURCE_KEYS,
+                    *_SNIPPET_KEYS,
+                }:
+                    continue
                 walk(child)
             return
         if isinstance(value, (list, tuple)):
@@ -174,14 +222,22 @@ def _external_references(result: Any) -> list[dict[str, str]]:
         text = getattr(block, "text", None)
         if not isinstance(text, str) or not text.strip():
             continue
-        candidates = [text.strip(), *_JSON_FENCE_PATTERN.findall(text)]
-        for candidate in candidates:
+        stripped_text = text.strip()
+        full_text_is_json = False
+        candidates = [stripped_text, *_JSON_FENCE_PATTERN.findall(text)]
+        for index, candidate in enumerate(candidates):
             try:
                 parsed = json.loads(candidate)
             except (TypeError, ValueError):
                 continue
+            if index == 0 and isinstance(parsed, (dict, list)):
+                full_text_is_json = True
             walk(parsed)
-        walk(text)
+        if not full_text_is_json:
+            # JSON fences were already processed structurally.  Excluding them
+            # from the raw URL scan prevents links embedded in serialized
+            # snippets from leaking out as standalone references.
+            walk(_JSON_FENCE_PATTERN.sub("", text))
     return list(references.values())
 
 

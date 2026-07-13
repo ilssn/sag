@@ -6,6 +6,7 @@ import re
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -27,7 +28,7 @@ from sag_agent import (
     ToolResult as RuntimeToolResult,
 )
 from sag_api.generation import LLMClient, build_prompt_preview
-from sag_api.sag import EngineManager
+from sag_api.sag import EngineManager, SourceGraphInfo
 from sag_api.services.agent_domain import (
     AskPlan,
     persist_answer,
@@ -49,8 +50,14 @@ _TOOL_LABELS = {
 }
 
 _DIRECT_INTENT = re.compile(
-    r"^(?:你好|您好|嗨|hi|hello|谢谢|感谢|再见|你是谁|你叫什么)[!！?？。,.，\s]*$"
-    r"|(?:翻译|改写|润色|续写|纠错|起名|写一首|写一段|生成文案|头脑风暴)"
+    r"^(?:你好(?:呀|啊)?|您好(?:呀|啊)?|嗨|哈[啰罗喽]|hi|hello|hey|"
+    r"早上好|下午好|晚上好|在吗|你在吗|谢谢(?:你)?|感谢(?:你)?|多谢|"
+    r"再见|拜拜|你是谁(?:呀|啊)?|你叫什么(?:名字)?|who are you|"
+    r"what(?:'|’)s your name)[!！?？。,.，\s]*$",
+    re.IGNORECASE,
+)
+_DIRECT_RESPONSE_HINT = re.compile(
+    r"(?:翻译|改写|润色|续写|纠错|起名|写一首|写一段|生成文案|头脑风暴)"
     r"|(?:总结|概括)(?:以下|这段|这篇|我提供的)",
     re.IGNORECASE,
 )
@@ -92,8 +99,12 @@ _RESEARCH_TOOL = re.compile(
     r"检索|搜索|查询|新闻|天气|行情|知识|文档|网页)",
     re.IGNORECASE,
 )
-_CITATION_REFERENCE = re.compile(r"\[(\d+)]")
-_HTTP_URL = re.compile(r"^https?://\S+$", re.IGNORECASE)
+# Numeric knowledge markers are plain ``[n]``. A numeric Markdown link label
+# (``[n](https://...)``) is an external link and must not be stripped.
+_CITATION_REFERENCE = re.compile(r"\[(\d+)](?!\()")
+_ANSWER_URL = re.compile(r"https?://[^\s<>\"'`，。；：！？、（）【】《》]+", re.IGNORECASE)
+_MAX_EXTERNAL_CITATIONS = 12
+_URL_TRAILING_PUNCTUATION = ".,;:!?)]}，。；：！？、"
 
 
 def _tool_supports_research(tool: AgentTool) -> bool:
@@ -115,21 +126,21 @@ def _initial_tool_choice(
 ) -> str | dict[str, Any]:
     """Apply only high-confidence first-turn routing.
 
-    The model keeps ``auto`` for ambiguous requests so it can clarify. Explicit
-    temporal requests first establish a dynamic time anchor; explicit knowledge
-    scopes and research requests still receive deterministic grounding.
+    High-confidence social requests, complete arithmetic, and requests that
+    require clarification cannot use tools on the first turn. Explicit temporal
+    requests establish a dynamic time anchor; knowledge scopes and research
+    requests still receive deterministic grounding.
     """
 
     if not tools:
         return "auto"
     names = {tool.spec.name for tool in tools}
     normalized = " ".join(query.strip().split())
-    if (
-        not normalized
-        or _DIRECT_INTENT.search(normalized)
-        or _CLARIFICATION_FIRST_INTENT.search(normalized)
-        or _SIMPLE_ARITHMETIC.fullmatch(normalized)
-    ):
+    if _DIRECT_INTENT.fullmatch(normalized):
+        return "none"
+    if _CLARIFICATION_FIRST_INTENT.fullmatch(normalized) or _SIMPLE_ARITHMETIC.fullmatch(normalized):
+        return "none"
+    if not normalized or _DIRECT_RESPONSE_HINT.search(normalized):
         return "auto"
 
     temporal = bool(
@@ -174,8 +185,8 @@ def _finalize_answer_citations(
     """Return one canonical answer whose numeric citations are all clickable.
 
     Model-invented or non-traceable numbers are removed. When grounded search
-    evidence exists but the model forgot claim markers, an explicitly
-    non-claim-mapped source row is appended instead of fake precision.
+    evidence exists but the model forgot claim markers, return a small set of
+    explicitly non-claim-mapped structured sources without modifying the answer.
     """
 
     traceable: dict[int, dict[str, Any]] = {}
@@ -201,53 +212,119 @@ def _finalize_answer_citations(
 
     canonical = _CITATION_REFERENCE.sub(replace_reference, answer).strip()
     canonical = re.sub(r"[ \t]+([，。！？；：,.!?;:])", r"\1", canonical)
+    explicitly_mapped = set(used)
     if canonical and traceable and not used:
         used = list(traceable)[:3]
-        label = (
-            "本轮知识库资料（未逐条对应）："
-            if re.search(r"[\u4e00-\u9fff]", canonical)
-            else ("Retrieved knowledge sources (not mapped claim by claim): ")
+    normalized = []
+    for number in used:
+        citation = dict(traceable[number])
+        mapped = number in explicitly_mapped
+        citation.update(
+            {
+                "kind": "internal",
+                "mapped": mapped,
+                "claim_level": "claim" if mapped else "run",
+            }
         )
-        canonical += "\n\n" + label + " ".join(f"[{number}]" for number in used)
-    return canonical, [traceable[number] for number in used]
+        normalized.append(citation)
+    return canonical, normalized
 
 
-def _finalize_external_references(
-    answer: str,
-    references: list[dict[str, Any]],
-) -> str:
-    """Guarantee a visible, truthful fallback for URLs returned by tools.
+def _normalize_external_url(value: Any) -> str | None:
+    """Return a safe, canonical HTTP(S) URL, or ``None``.
 
-    The prompt asks the model to place links next to claims. If it forgets all
-    of them, append a compact run-level list and explicitly say it is not a
-    claim-by-claim mapping. Only URLs observed in tool output are eligible.
+    External citations are persisted as clickable links, so accepting a broad
+    string prefix is not sufficient. Credentials, whitespace, malformed ports,
+    and non-web schemes are rejected before anything reaches the API payload.
+    Fragments are dropped for stable de-duplication.
     """
 
-    valid: list[tuple[str, str]] = []
+    if not isinstance(value, str):
+        return None
+    raw = value.strip()
+    if not raw or any(character.isspace() for character in raw):
+        return None
+    try:
+        parsed = urlsplit(raw)
+        _ = parsed.port
+    except ValueError:
+        return None
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        return None
+    if parsed.username is not None or parsed.password is not None:
+        return None
+    netloc = parsed.hostname.lower()
+    if parsed.port is not None:
+        netloc = f"{netloc}:{parsed.port}"
+    return urlunsplit((parsed.scheme.lower(), netloc, parsed.path or "", parsed.query, ""))
+
+
+def _build_external_citations(
+    answer: str,
+    references: list[dict[str, Any]],
+    *,
+    start_n: int = 1,
+) -> list[dict[str, Any]]:
+    """Build bounded, de-duplicated citations from this run's tool artifacts.
+
+    A URL is claim-mapped only when the model placed that observed URL in its
+    answer. Other observed sources remain explicitly run-level so the citation
+    UI can present them without pretending they support a particular claim.
+    """
+
+    answer_urls = {
+        normalized
+        for match in _ANSWER_URL.findall(answer)
+        if (normalized := _normalize_external_url(match.rstrip(_URL_TRAILING_PUNCTUATION)))
+    }
+    citations: list[dict[str, Any]] = []
     seen: set[str] = set()
     for reference in references:
-        raw_url = reference.get("url")
-        if not isinstance(raw_url, str):
-            continue
-        url = raw_url.strip()
-        if not _HTTP_URL.fullmatch(url) or url in seen:
+        url = _normalize_external_url(reference.get("url"))
+        if url is None or url in seen:
             continue
         seen.add(url)
         raw_title = reference.get("title")
-        title = " ".join(str(raw_title or "").split()).replace("[", "(").replace("]", ")")
-        if not title:
-            title = url.split("//", 1)[-1].split("/", 1)[0]
-        valid.append((title[:160], url))
-
-    if not valid or any(url in answer for _, url in valid):
-        return answer
-    links = " · ".join(f"[{title}](<{url}>)" for title, url in valid[:3])
-    label = (
-        "外部资料（本轮检索，未逐条对应）："
-        if re.search(r"[\u4e00-\u9fff]", answer)
-        else ("External sources from this run (not mapped claim by claim): ")
-    )
-    return f"{answer.rstrip()}\n\n{label}{links}".strip()
+        title = " ".join(str(raw_title or "").split())[:200]
+        raw_source = reference.get("source")
+        source = " ".join(str(raw_source or "").split())[:120]
+        raw_snippet = next(
+            (
+                reference.get(key)
+                for key in ("snippet", "summary", "description", "content")
+                if isinstance(reference.get(key), str) and str(reference.get(key)).strip()
+            ),
+            "",
+        )
+        snippet = " ".join(str(raw_snippet or "").split())[:720]
+        summary = snippet[:160].strip()
+        if len(snippet) > 160:
+            sentence_end = next(
+                (index + 1 for index, character in enumerate(summary) if index >= 5 and character in "。！？.!?"),
+                0,
+            )
+            if sentence_end:
+                summary = summary[:sentence_end].strip()
+            elif not summary.endswith(("。", "！", "？", ".", "!", "?")):
+                summary = summary.rstrip("…") + "…"
+        hostname = urlsplit(url).hostname or ""
+        mapped = url in answer_urls
+        citation = {
+            "kind": "external",
+            "n": start_n + len(citations),
+            "url": url,
+            "title": title or hostname or url,
+            "source": source or hostname,
+            "mapped": mapped,
+            "claim_level": "claim" if mapped else "run",
+        }
+        if snippet:
+            citation["summary"] = summary
+            citation["snippet"] = snippet
+        citations.append(citation)
+        if len(citations) >= _MAX_EXTERNAL_CITATIONS:
+            break
+    return citations
 
 
 @dataclass(frozen=True, slots=True)
@@ -298,6 +375,7 @@ def _adapt_tool(host_tool, host_context: HostToolContext, citations: list[dict])
                     "score",
                     "source_id",
                     "source_name",
+                    "event_refs",
                 )
             }
             for citation in result.citations[:6]
@@ -317,12 +395,18 @@ def _adapt_tool(host_tool, host_context: HostToolContext, citations: list[dict])
         sections = result.data.get("sections")
         if host_tool.meta.name == "search_context" and isinstance(sections, list) and sections:
             sources_by_config = {source.sag_source_config_id: source for source in host_context.sources}
-            graph = await host_context.engine_manager.graph_for_sections(
-                sections,
-                sources_by_config,
-                event_limit=12,
-                entity_limit=36,
-            )
+            graph_resolved = "_graph" in result.data
+            graph = result.data.get("_graph")
+            if not graph_resolved:
+                graph_for_sections = getattr(host_context.engine_manager, "graph_for_sections", None)
+                if callable(graph_for_sections):
+                    graph = await graph_for_sections(
+                        sections,
+                        sources_by_config,
+                        event_limit=max(12, len(sections)),
+                        entity_limit=36,
+                    )
+            graph = graph or SourceGraphInfo()
             event_nodes = []
             for item in graph.events:
                 source = sources_by_config.get(item.source_config_id)
@@ -340,6 +424,7 @@ def _adapt_tool(host_tool, host_context: HostToolContext, citations: list[dict])
                             citation.get("n")
                             for citation in result.citations
                             if citation.get("chunk_id") == item.chunk_id
+                            and citation.get("source_id") == (source.id if source else None)
                         ],
                     }
                 )
@@ -470,8 +555,9 @@ async def generate_stream(
             if knowledge_only:
                 offline_rule = (
                     "本轮联网已关闭，只能使用已挂载的本地知识库和必要系统工具；"
-                    "不得调用或声称使用网页、MCP 或其他外部搜索。知识性问题必须先调用 "
-                    "search_context，只根据工具返回的原文证据回答并保留引用；"
+                    "不得调用或声称使用网页、MCP 或其他外部搜索。联网关闭不代表每轮都要检索；"
+                    "仅当回答依赖知识性事实时，必须先调用 search_context，只根据工具返回的原文证据"
+                    "回答并保留引用；"
                     "证据不足时明确说明知识库中没有足够依据，不得使用模型自身知识补充。"
                 )
                 if "search_context" not in names:
@@ -610,14 +696,27 @@ async def generate_stream(
                     else:
                         trace.append({"kind": "answer", "step": event.turn, "ms": duration})
                 elif event.type == EventType.RUN_COMPLETED:
-                    canonical_answer, canonical_citations = _finalize_answer_citations(
+                    canonical_answer, internal_citations = _finalize_answer_citations(
                         str(payload.get("output") or ""),
                         citations,
                     )
-                    canonical_answer = _finalize_external_references(
+                    external_start = (
+                        max(
+                            (
+                                citation["n"]
+                                for citation in internal_citations
+                                if isinstance(citation.get("n"), int) and not isinstance(citation.get("n"), bool)
+                            ),
+                            default=0,
+                        )
+                        + 1
+                    )
+                    external_citations = _build_external_citations(
                         canonical_answer,
                         external_references,
+                        start_n=external_start,
                     )
+                    canonical_citations = [*internal_citations, *external_citations]
                     message_id = None
                     if thread_id is not None:
                         message_id = await persist_answer(

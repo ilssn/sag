@@ -222,7 +222,7 @@ function normalizeMessage(message: Message): ConversationMessage {
     threadId: message.thread_id,
     role: message.role,
     content: message.content,
-    citations: Array.isArray(message.citations) ? message.citations : [],
+    citations: citationsFromArtifacts({ citations: message.citations }),
     attachments: Array.isArray(message.attachments) ? message.attachments : [],
     steps: Array.isArray(message.steps) ? message.steps : [],
     promptPreview:

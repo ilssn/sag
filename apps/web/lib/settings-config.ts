@@ -1,8 +1,18 @@
-import { Bot, Cpu, Monitor, Moon, Palette, Plug, Sun, UserRound } from "lucide-react";
+import {
+  Bot,
+  Cpu,
+  Monitor,
+  Moon,
+  Orbit,
+  Palette,
+  Plug,
+  Sun,
+  UserRound,
+} from "lucide-react";
 
 export const SETTINGS_PAGE = {
   title: "设置",
-  description: "管理账户、默认助手、模型连接、集成和界面偏好。",
+  description: "管理账户、默认助手、模型连接、集成、界面和图谱偏好。",
 } as const;
 
 export const SETTINGS_TABS = [
@@ -11,7 +21,25 @@ export const SETTINGS_TABS = [
   { value: "model", label: "模型", icon: Cpu },
   { value: "integrations", label: "集成", icon: Plug },
   { value: "appearance", label: "外观", icon: Palette },
+  { value: "graph", label: "图谱", icon: Orbit },
 ] as const;
+
+export type SettingsTab = (typeof SETTINGS_TABS)[number]["value"];
+
+export function isSettingsTab(value: string | null): value is SettingsTab {
+  return SETTINGS_TABS.some((tab) => tab.value === value);
+}
+
+export function resolveSettingsTab(value: string | null): SettingsTab {
+  return isSettingsTab(value) ? value : "account";
+}
+
+/** Canonical URL used by full-size, mini and ambient settings entry points. */
+export function settingsTabHref(tab: SettingsTab, section?: string) {
+  const params = new URLSearchParams({ tab });
+  if (section?.trim()) params.set("section", section.trim());
+  return `/settings?${params.toString()}`;
+}
 
 export const THEME_OPTIONS = [
   { value: "light", label: "浅色", icon: Sun },

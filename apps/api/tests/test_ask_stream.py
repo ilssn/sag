@@ -188,11 +188,16 @@ async def test_ask_web_switch_isolates_external_tools_and_records_run_mode(monke
             assert "mcp__web_fixture__search" not in offline_tools
             assert offline_request.metadata["web_enabled"] is False
             assert offline_request.metadata["knowledge_only"] is True
+            assert offline_request.tool_choice == {
+                "type": "function",
+                "function": {"name": "search_context"},
+            }
             offline_system = next(
                 message.content for message in offline_request.messages if message.role == "system"
             )
             assert "本轮联网已关闭" in offline_system
             assert "不得调用或声称使用网页、MCP 或其他外部搜索" in offline_system
+            assert "联网关闭不代表每轮都要检索" in offline_system
             assert "不得使用模型自身知识补充" in offline_system
             assert '"web_enabled": false' in offline.text
             assert '"knowledge_only": true' in offline.text
@@ -318,12 +323,17 @@ async def test_ask_stream_exhausts_max_steps_then_answers(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ask_stream_greeting_skips_tools():
-    """agent-first：模型判定无需检索（寒暄）→ 零工具调用直答，不再「打个招呼也 RAG」。"""
+    """宿主把高置信寒暄设为 none，不把「是否 RAG」交给模型碰运气。"""
     from sag_api.main import app
 
     class DirectLLM(AgenticLLM):
+        def __init__(self):
+            super().__init__()
+            self.requests = []
+
         async def stream_turn(self, request, cancellation):
             self.calls += 1
+            self.requests.append(request)
             yield ModelChunk(text_delta="你好呀", finish_reason="stop")
 
     transport = httpx.ASGITransport(app=app)
@@ -339,6 +349,11 @@ async def test_ask_stream_greeting_skips_tools():
             )
             body = ask.text
             assert llm.calls == 1                       # 一轮决策即收
+            assert llm.requests[0].tool_choice == "none"
+            assert any(
+                tool.get("function", {}).get("name") == "search_context"
+                for tool in llm.requests[0].tools
+            )
             assert "event: tool.started" not in body
             assert "event: message.delta" in body and "event: run.completed" in body
             msgs = (

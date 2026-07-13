@@ -593,29 +593,22 @@ function SearchSummaryCard({
   }, [updateFollowing]);
 
   React.useLayoutEffect(() => {
-    let finalScrollFrame: number | null = null;
     if (streaming && !wasStreamingRef.current) {
       setExpanded(true);
       setStreamLayoutLocked(true);
       updateFollowing(true);
-    } else if (
-      !streaming
-      && wasStreamingRef.current
-      && expanded
-      && followOutputRef.current
-    ) {
-      // The terminal event can replace the last buffered tokens (or a failed
-      // model answer with the grounded fallback). Follow that final canonical
-      // content once, while still honoring a user who scrolled upward.
-      finalScrollFrame = requestAnimationFrame(() => {
-        if (followOutputRef.current) scrollToLatest();
-      });
+    } else if (!streaming && wasStreamingRef.current) {
+      // Streaming reserves a stable viewport to avoid page jitter. Once the
+      // final answer arrives, release that height immediately: short answers
+      // become content-sized and long answers return to the compact preview.
+      setExpanded(false);
+      setStreamLayoutLocked(false);
+      updateFollowing(true);
     }
     wasStreamingRef.current = streaming;
-    return () => {
-      if (finalScrollFrame !== null) cancelAnimationFrame(finalScrollFrame);
-    };
-  }, [expanded, scrollToLatest, streaming, updateFollowing]);
+  }, [streaming, updateFollowing]);
+
+  const collapsedLimit = compact ? 72 : 96;
 
   React.useLayoutEffect(() => {
     const viewport = viewportRef.current;
@@ -623,8 +616,9 @@ function SearchSummaryCard({
     if (!viewport || !content) return;
 
     const update = () => {
-      const collapsedLimit = Math.min(160, Math.max(96, window.innerHeight * 0.24));
-      const expandedLimit = Math.min(224, Math.max(160, window.innerHeight * 0.24));
+      const expandedLimit = compact
+        ? Math.min(160, Math.max(120, window.innerHeight * 0.3))
+        : Math.min(280, Math.max(176, window.innerHeight * 0.32));
       const contentHeight = content.scrollHeight;
       const nextCanExpand = contentHeight > collapsedLimit + 1;
       const nextScrollable = expanded && contentHeight > expandedLimit + 1;
@@ -636,7 +630,7 @@ function SearchSummaryCard({
     observer.observe(viewport);
     observer.observe(content);
     return () => observer.disconnect();
-  }, [compact, expanded]);
+  }, [collapsedLimit, compact, expanded]);
 
   React.useLayoutEffect(() => {
     if (!streaming || !expanded || !followOutputRef.current) return;
@@ -650,9 +644,14 @@ function SearchSummaryCard({
 
   const collapsed = canExpand && !expanded;
   const expandedScrollRegion = expanded && expandedScrollable;
-  const maxHeight = !expanded
-    ? "clamp(6rem, 24dvh, 10rem)"
-    : "clamp(10rem, 24dvh, 14rem)";
+  const streamHeight = compact ? "7.5rem" : "10rem";
+  const maxHeight = streamLayoutLocked && expanded
+    ? streamHeight
+    : !expanded
+      ? `${collapsedLimit}px`
+      : compact
+        ? "clamp(7.5rem, 30dvh, 10rem)"
+        : "clamp(11rem, 32dvh, 17.5rem)";
 
   return (
     <div

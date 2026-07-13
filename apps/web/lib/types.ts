@@ -60,14 +60,36 @@ export interface Doc {
   updated_at: string;
 }
 
+export interface CitationEventRef {
+  id?: string | null;
+  title: string;
+  summary?: string | null;
+  category?: string | null;
+}
+
 export interface Citation {
   n: number;
+  /** Missing on legacy messages; legacy citations are internal knowledge references. */
+  kind?: "internal" | "external";
   chunk_id: string | null;
+  /** Source section heading; never treat this as an extracted event title. */
   heading: string;
+  /** Explicit external-result summary. Legacy internal values are not event summaries. */
+  summary?: string;
+  /** Real extracted events associated with this knowledge chunk, ordered by relevance. */
+  event_refs?: CitationEventRef[];
+  /** Source excerpt. It is only shown after the user expands the excerpt control. */
   snippet: string;
   score: number;
   source_id: string | null;
   source_name?: string | null;
+  /** Present for external tool/web references only. */
+  url?: string | null;
+  title?: string | null;
+  source?: string | null;
+  /** Whether the answer placed this reference next to a specific claim. */
+  mapped?: boolean;
+  claim_level?: "claim" | "run";
 }
 
 export type BindingTargetType = "source" | "mcp_server";

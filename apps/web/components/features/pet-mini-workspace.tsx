@@ -14,10 +14,12 @@ import {
   Maximize2,
   MessageSquarePlus,
   Search,
+  Settings,
   X,
 } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
+import { stripCitationTransportTokens } from "@/lib/citation-presentation";
 import type { ConversationMessage } from "@/lib/conversation-runtime";
 import { formatDate } from "@/lib/format";
 import type { PetAgent } from "@/lib/pet-agent";
@@ -269,6 +271,7 @@ export function PetMiniWorkspace({
     user,
     workspaceSection,
     openMiniWorkspace,
+    openSettings,
     expandWorkspace,
     hideWorkspace,
     threads,
@@ -897,6 +900,17 @@ export function PetMiniWorkspace({
             </div>
           </>
         )}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-7"
+          onClick={() => openSettings()}
+          aria-label="打开设置"
+          title="打开设置"
+        >
+          <Settings className="size-3.5" />
+        </Button>
         {!detailTarget && (
           <Button
             type="button"
@@ -1122,7 +1136,8 @@ export function PetMiniWorkspace({
                         </h2>
                       )}
                       <p className="whitespace-pre-wrap text-xs leading-5 text-foreground/75">
-                        {detailTarget.citation.snippet || "这条引用暂时没有可展示的原文。"}
+                        {stripCitationTransportTokens(detailTarget.citation.snippet)
+                          || "这条引用暂时没有可展示的原文。"}
                       </p>
                     </div>
                   ) : detailLoading && !detail ? (
@@ -1193,7 +1208,7 @@ export function PetMiniWorkspace({
                             <p className="mt-2 text-xs font-medium">{detail.evidence.heading}</p>
                           )}
                           <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-foreground/70">
-                            {detail.evidence.content}
+                            {stripCitationTransportTokens(detail.evidence.content)}
                           </p>
                         </section>
                       )}

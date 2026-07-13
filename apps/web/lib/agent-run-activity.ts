@@ -1,5 +1,5 @@
 import type { AgentEvent } from "./sse";
-import type { Citation, MessageStep } from "./types";
+import type { Citation, CitationEventRef, MessageStep } from "./types";
 
 export interface LiveStep extends MessageStep {
   id: string;
@@ -26,31 +26,146 @@ export function toolArgumentsPreview(value: unknown, limit = 60): string {
   return text.length > limit ? `${text.slice(0, limit)}…` : text;
 }
 
-function isCitation(value: unknown): value is Citation {
-  if (!value || typeof value !== "object") return false;
-  const citation = value as Partial<Citation>;
-  return (
-    typeof citation.n === "number" &&
-    Number.isFinite(citation.n) &&
-    (citation.chunk_id === null || typeof citation.chunk_id === "string") &&
-    typeof citation.heading === "string" &&
-    typeof citation.snippet === "string" &&
-    typeof citation.score === "number" &&
-    Number.isFinite(citation.score) &&
-    (citation.source_id === null || typeof citation.source_id === "string")
-  );
+function optionalText(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function safeExternalUrl(value: unknown): string | null {
+  if (typeof value !== "string" || !value || value !== value.trim() || /\s/.test(value)) {
+    return null;
+  }
+  try {
+    const parsed = new URL(value);
+    if (!(["http:", "https:"] as const).includes(parsed.protocol as "http:" | "https:")) {
+      return null;
+    }
+    if (!parsed.hostname || parsed.username || parsed.password) return null;
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+function citationMapping(value: Record<string, unknown>): Partial<Citation> {
+  const mapping: Partial<Citation> = {};
+  if (typeof value.mapped === "boolean") mapping.mapped = value.mapped;
+  if (value.claim_level === "claim" || value.claim_level === "run") {
+    mapping.claim_level = value.claim_level;
+  }
+  return mapping;
+}
+
+function normalizeEventRefs(value: unknown): CitationEventRef[] {
+  if (!Array.isArray(value)) return [];
+  const refs: CitationEventRef[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const raw = item as Record<string, unknown>;
+    const title = optionalText(raw.title)?.trim();
+    if (!title) continue;
+    const event: CitationEventRef = { title };
+    const id = optionalText(raw.id)?.trim();
+    const summary = optionalText(raw.summary)?.trim();
+    const category = optionalText(raw.category)?.trim();
+    if (id) event.id = id;
+    if (summary) event.summary = summary;
+    if (category) event.category = category;
+    refs.push(event);
+    if (refs.length >= 3) break;
+  }
+  return refs;
+}
+
+function normalizeCitation(value: unknown): Citation | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const citation = value as Record<string, unknown>;
+  const n = citation.n;
+  if (
+    typeof n !== "number"
+    || !Number.isFinite(n)
+    || !Number.isInteger(n)
+    || n < 1
+  ) {
+    return null;
+  }
+  if (citation.kind !== undefined && citation.kind !== "internal" && citation.kind !== "external") {
+    return null;
+  }
+
+  if (citation.kind === "external") {
+    const url = safeExternalUrl(citation.url);
+    if (!url) return null;
+    const parsed = new URL(url);
+    const title = optionalText(citation.title)?.trim() || parsed.hostname;
+    const source = optionalText(citation.source)?.trim() || parsed.hostname;
+    const summary = optionalText(citation.summary)?.trim() || undefined;
+    const snippet = optionalText(citation.snippet)?.trim() || "";
+    return {
+      n,
+      kind: "external",
+      chunk_id: null,
+      heading: title,
+      snippet,
+      score: 0,
+      source_id: null,
+      source_name: source,
+      url,
+      title,
+      source,
+      ...(summary ? { summary } : {}),
+      ...citationMapping(citation),
+    };
+  }
+
+  const chunkId = citation.chunk_id;
+  const sourceId = citation.source_id;
+  const score = citation.score;
+  if (
+    !(chunkId === null || typeof chunkId === "string")
+    || !(sourceId === null || typeof sourceId === "string")
+    || typeof citation.heading !== "string"
+    || typeof citation.snippet !== "string"
+    || typeof score !== "number"
+    || !Number.isFinite(score)
+  ) {
+    return null;
+  }
+  const normalized: Citation = {
+    n,
+    kind: "internal",
+    chunk_id: chunkId,
+    heading: citation.heading,
+    snippet: citation.snippet,
+    score,
+    source_id: sourceId,
+    ...citationMapping(citation),
+  };
+  const sourceName = optionalText(citation.source_name);
+  if (sourceName !== null) normalized.source_name = sourceName;
+  const eventRefs = normalizeEventRefs(citation.event_refs);
+  if (eventRefs.length) normalized.event_refs = eventRefs;
+  return normalized;
 }
 
 export function citationsFromArtifacts(value: unknown): Citation[] {
   const citations = objectValue(value).citations;
-  return Array.isArray(citations) ? citations.filter(isCitation) : [];
+  return Array.isArray(citations)
+    ? citations.map(normalizeCitation).filter((citation): citation is Citation => citation !== null)
+    : [];
 }
 
 export function mergeCitations(current: Citation[], incoming: Citation[]): Citation[] {
   if (!incoming.length) return current;
-  const byNumber = new Map(current.map((citation) => [citation.n, citation]));
-  incoming.forEach((citation) => byNumber.set(citation.n, citation));
-  return [...byNumber.values()].sort((left, right) => left.n - right.n);
+  const key = (citation: Citation) => citation.kind === "external"
+    ? `external:${citation.url ?? citation.n}`
+    : `internal:${citation.n}`;
+  const byReference = new Map(current.map((citation) => [key(citation), citation]));
+  incoming.forEach((citation) => byReference.set(key(citation), citation));
+  return [...byReference.values()].sort((left, right) => {
+    if (left.kind === "external" && right.kind !== "external") return 1;
+    if (left.kind !== "external" && right.kind === "external") return -1;
+    return left.n - right.n;
+  });
 }
 
 function elapsed(step: LiveStep, now: number): number {

@@ -8,9 +8,9 @@ from sag_api.sag import RetrievedSection, SearchOutcome
 from sag_api.services.agent_domain import compress_history
 from sag_api.services.agent_service import (
     _append_current_scene,
+    _build_external_citations,
     _enabled_tool_names,
     _finalize_answer_citations,
-    _finalize_external_references,
     _initial_tool_choice,
 )
 from sag_api.tools.base import ToolContext
@@ -82,6 +82,8 @@ def test_agent_prompt_guides_clarification_progress_and_delivery_in_both_languag
     assert "至少两个相互独立的来源交叉核验" in zh
     assert "关键外部事实就必须在对应论断附近附上可点击的直接来源" in zh
     assert "get_entity 做实体消歧和形成后续检索词" in zh
+    assert "寒暄、致谢、告别、身份询问应直接回答，不调用检索" in zh
+    assert "不能用搜索代替澄清" in zh
     assert "materially change the conclusion or deliverable" in en
     assert "reasonable assumptions and proceed" in en
     assert "directly usable result" in en
@@ -90,6 +92,16 @@ def test_agent_prompt_guides_clarification_progress_and_delivery_in_both_languag
     assert "at least two independent sources" in en
     assert "clickable direct source near each key external claim" in en
     assert "get_entity only to disambiguate entities" in en
+    assert "Answer greetings, thanks, farewells, and identity questions directly" in en
+    assert "search is not a substitute for clarification" in en
+
+
+def test_search_context_description_has_explicit_non_retrieval_boundary():
+    description = SearchContextTool.meta.description
+
+    assert "仅当回答依赖已挂载知识库" in description
+    assert "不要用于寒暄、致谢、身份询问、纯创作、简单计算" in description
+    assert "不能用检索代替澄清" in description
 
 
 def test_agent_messages_keep_system_history_and_current_user_separate():
@@ -190,7 +202,7 @@ def test_initial_tool_policy_anchors_time_and_preserves_clarification():
             knowledge_only=True,
             scoped=False,
         )
-        == "auto"
+        == "none"
     )
     assert (
         _initial_tool_choice(
@@ -199,7 +211,7 @@ def test_initial_tool_policy_anchors_time_and_preserves_clarification():
             knowledge_only=True,
             scoped=False,
         )
-        == "auto"
+        == "none"
     )
     assert (
         _initial_tool_choice(
@@ -208,7 +220,7 @@ def test_initial_tool_policy_anchors_time_and_preserves_clarification():
             knowledge_only=False,
             scoped=False,
         )
-        == "auto"
+        == "none"
     )
     assert (
         _initial_tool_choice(
@@ -217,7 +229,16 @@ def test_initial_tool_policy_anchors_time_and_preserves_clarification():
             knowledge_only=False,
             scoped=False,
         )
-        == "auto"
+        == "none"
+    )
+    assert (
+        _initial_tool_choice(
+            "(2 + 3) * 4 = ?",
+            tools,
+            knowledge_only=True,
+            scoped=False,
+        )
+        == "none"
     )
     assert (
         _initial_tool_choice(
@@ -244,7 +265,7 @@ def test_initial_tool_policy_anchors_time_and_preserves_clarification():
             knowledge_only=False,
             scoped=False,
         )
-        == "auto"
+        == "none"
     )
     assert (
         _initial_tool_choice(
@@ -254,6 +275,25 @@ def test_initial_tool_policy_anchors_time_and_preserves_clarification():
             scoped=False,
         )
         == "auto"
+    )
+
+
+@pytest.mark.parametrize(
+    "query",
+    ["你好！", "Hello", "在吗？", "谢谢你", "你是谁呀？", "What's your name?"],
+)
+def test_high_confidence_social_intents_disable_tools(query):
+    async def execute(arguments, context):
+        return ToolResult(content="ok")
+
+    tools = (
+        AgentTool(ToolSpec(name="get_time", description="查询时间"), execute),
+        AgentTool(ToolSpec(name="search_context", description="检索知识库"), execute),
+    )
+
+    assert (
+        _initial_tool_choice(query, tools, knowledge_only=True, scoped=False)
+        == "none"
     )
 
 
@@ -267,27 +307,64 @@ def test_answer_citations_are_canonical_and_traceable():
     answer, used = _finalize_answer_citations("结论 [1]，虚构 [9]，坏引用 [2]。", citations)
     assert answer == "结论 [1]，虚构，坏引用。"
     assert [citation["n"] for citation in used] == [1]
+    assert used[0]["kind"] == "internal"
+    assert used[0]["mapped"] is True
+    assert used[0]["claim_level"] == "claim"
 
     uncited, fallback = _finalize_answer_citations("模型忘了引用。", citations)
-    assert uncited.endswith("本轮知识库资料（未逐条对应）：[1] [3]")
+    assert uncited == "模型忘了引用。"
     assert [citation["n"] for citation in fallback] == [1, 3]
+    assert all(citation["kind"] == "internal" for citation in fallback)
+    assert all(citation["mapped"] is False for citation in fallback)
+    assert all(citation["claim_level"] == "run" for citation in fallback)
+
+    external_link = "外部来源 [9](https://example.com/release)。"
+    preserved, none = _finalize_answer_citations(external_link, [])
+    assert preserved == external_link
+    assert none == []
 
 
-def test_external_reference_fallback_uses_only_tool_observed_urls():
+def test_external_citations_are_safe_deduplicated_bounded_and_mapping_aware():
     references = [
-        {"title": "官方发布", "url": "https://example.com/release", "source": "web"},
-        {"title": "重复", "url": "https://example.com/release", "source": "reader"},
-        {"title": "非法", "url": "javascript:alert(1)", "source": "web"},
+        {
+            "title": "Official release",
+            "url": "HTTPS://Example.COM/release#details",
+            "source": "OpenAI",
+            "description": "  Product   update details.  ",
+        },
+        {"title": "duplicate", "url": "https://example.com/release"},
+        {"title": "bad scheme", "url": "javascript:alert(1)"},
+        {"title": "credentials", "url": "https://user:secret@example.com/private"},
+        {"title": "whitespace", "url": "https://example.com/a b"},
+        *[
+            {"title": f"Result {index}", "url": f"https://source{index}.example/article"}
+            for index in range(20)
+        ],
     ]
 
-    answer = _finalize_external_references("结论已整理。", references)
-    assert "外部资料（本轮检索，未逐条对应）" in answer
-    assert answer.count("https://example.com/release") == 1
-    assert "javascript:" not in answer
+    citations = _build_external_citations(
+        "结论见 https://example.com/release。",
+        references,
+        start_n=6,
+    )
 
-    cited = "结论见[官方发布](https://example.com/release)。"
-    assert _finalize_external_references(cited, references) == cited
-    assert _finalize_external_references("没有来源。", []) == "没有来源。"
+    assert len(citations) == 12
+    assert citations[0] == {
+        "kind": "external",
+        "n": 6,
+        "url": "https://example.com/release",
+        "title": "Official release",
+        "source": "OpenAI",
+        "mapped": True,
+        "claim_level": "claim",
+        "summary": "Product update details.",
+        "snippet": "Product update details.",
+    }
+    assert citations[1]["n"] == 7
+    assert citations[1]["mapped"] is False
+    assert citations[1]["claim_level"] == "run"
+    assert not any("javascript:" in citation["url"] for citation in citations)
+    assert not any("secret" in citation["url"] for citation in citations)
 
 
 @pytest.mark.asyncio

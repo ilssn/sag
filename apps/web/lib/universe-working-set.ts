@@ -31,6 +31,8 @@ export interface UniverseWorkingSet {
   nodes: UniverseWorkingNode[];
   relations: UniverseRelation[];
   root_keys: string[];
+  /** Oldest-to-newest admission order. Missing values are derived from `nodes` for compatibility. */
+  node_order?: string[];
 }
 
 export interface MergeUniverseActivationOptions {
@@ -51,6 +53,7 @@ export function emptyUniverseWorkingSet(epoch = 0): UniverseWorkingSet {
     nodes: [],
     relations: [],
     root_keys: [],
+    node_order: [],
   };
 }
 
@@ -58,48 +61,90 @@ function relationKey(relation: UniverseRelation) {
   return `${relation.source_id}:${relation.kind}:${relation.from_id}:${relation.to_id}`;
 }
 
+function nodeLimit(value: number) {
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
+function normalizedNodeOrder(value: UniverseWorkingSet) {
+  const nodesByKey = new Map(
+    value.nodes.map((node) => [universeNodeKey(node.kind, node.id, node.source_id), node]),
+  );
+  const seen = new Set<string>();
+  const order: string[] = [];
+  const append = (key: string) => {
+    if (seen.has(key) || !nodesByKey.has(key)) return;
+    seen.add(key);
+    order.push(key);
+  };
+  value.node_order?.forEach(append);
+  value.nodes.forEach((node) => append(universeNodeKey(node.kind, node.id, node.source_id)));
+  return order;
+}
+
+function dedupeRelations(relations: UniverseRelation[]) {
+  const relationMap = new Map<string, UniverseRelation>();
+  relations.forEach((relation) => {
+    const key = relationKey(relation);
+    // Re-insertion records the latest occurrence at the end of the map.
+    relationMap.delete(key);
+    relationMap.set(key, relation);
+  });
+  return [...relationMap.values()];
+}
+
 function bounded(
   value: UniverseWorkingSet,
   budget: { nodes: number; edges: number },
-  protectedKeys: Set<string>,
+  protectedKeys: Iterable<string>,
 ): UniverseWorkingSet {
-  const rootKeys = new Set(value.root_keys);
-  const protectedNodes = value.nodes.filter((node) => {
-    const key = universeNodeKey(node.kind, node.id, node.source_id);
-    return protectedKeys.has(key) || rootKeys.has(key);
-  });
-  const protectedSlice = protectedNodes.slice(0, budget.nodes);
-  const keptKeys = new Set(
-    protectedSlice.map((node) => universeNodeKey(node.kind, node.id, node.source_id)),
+  const nodesByKey = new Map(
+    value.nodes.map((node) => [universeNodeKey(node.kind, node.id, node.source_id), node]),
   );
-  const remaining = value.nodes
-    .filter((node) => !keptKeys.has(universeNodeKey(node.kind, node.id, node.source_id)));
-  const nodes = [...protectedSlice, ...remaining.slice(0, budget.nodes - protectedSlice.length)];
-  const nodeKeys = new Set(
-    nodes.map((node) => universeNodeKey(node.kind, node.id, node.source_id)),
-  );
-  const relations = value.relations
+  const order = normalizedNodeOrder(value);
+  const maximumNodes = nodeLimit(budget.nodes);
+  const protectedOrder = [...new Set(protectedKeys)].filter((key) => nodesByKey.has(key));
+  const protectedSet = new Set(protectedOrder);
+  const keptKeys = new Set(order);
+
+  // FIFO eviction: walk from the oldest admission and skip only this transaction's protection.
+  for (const key of order) {
+    if (keptKeys.size <= maximumNodes) break;
+    if (!protectedSet.has(key)) keptKeys.delete(key);
+  }
+  // A batch larger than the whole budget cannot be kept atomically. Preserve its declared
+  // protection order deterministically (anchor first, then patch input order).
+  if (keptKeys.size > maximumNodes) {
+    keptKeys.clear();
+    protectedOrder.slice(0, maximumNodes).forEach((key) => keptKeys.add(key));
+  }
+
+  const nodeOrder = order.filter((key) => keptKeys.has(key));
+  const nodes = nodeOrder
+    .map((key) => nodesByKey.get(key))
+    .filter((node): node is UniverseWorkingNode => Boolean(node));
+  const validRelations = dedupeRelations(value.relations)
     .filter((relation) => {
       const targetKind = relation.kind === "subevent" ? "event" : "entity";
-      return nodeKeys.has(universeNodeKey("event", relation.from_id, relation.source_id))
-        && nodeKeys.has(universeNodeKey(targetKind, relation.to_id, relation.source_id));
-    })
-    .slice(0, budget.edges);
+      return keptKeys.has(universeNodeKey("event", relation.from_id, relation.source_id))
+        && keptKeys.has(universeNodeKey(targetKind, relation.to_id, relation.source_id));
+    });
+  const maximumEdges = nodeLimit(budget.edges);
+  const relations = maximumEdges === 0 ? [] : validRelations.slice(-maximumEdges);
   return {
     ...value,
     nodes,
     relations,
-    root_keys: value.root_keys.filter((key) => keptKeys.has(key) || nodes.some(
-      (node) => universeNodeKey(node.kind, node.id, node.source_id) === key,
-    )),
+    root_keys: value.root_keys.filter((key) => keptKeys.has(key)),
+    node_order: nodeOrder,
   };
 }
 
 export function trimUniverseWorkingSet(
   current: UniverseWorkingSet,
   budget: { nodes: number; edges: number },
+  protectedKeys: Iterable<string> = [],
 ): UniverseWorkingSet {
-  return bounded(current, budget, new Set());
+  return bounded(current, budget, protectedKeys);
 }
 
 export function replaceUniverseWorkingSet(
@@ -121,15 +166,17 @@ export function replaceUniverseWorkingSet(
   const relationMap = new Map<string, UniverseRelation>();
   activation.relations.forEach((relation) => relationMap.set(relationKey(relation), relation));
   const rootKeys = [...nodesByKey.keys()];
+  const initialOrder = [...nodesByKey.keys()];
   return bounded(
     {
       epoch: activation.epoch ?? 0,
       nodes: [...nodesByKey.values()],
       relations: [...relationMap.values()],
       root_keys: rootKeys,
+      node_order: initialOrder,
     },
     budget,
-    new Set(rootKeys),
+    initialOrder.slice(0, nodeLimit(budget.nodes)),
   );
 }
 
@@ -143,12 +190,14 @@ export function mergeUniverseGraphPatch(
   const nodesByKey = new Map(
     current.nodes.map((node) => [universeNodeKey(node.kind, node.id, node.source_id), node]),
   );
+  const nodeOrder = normalizedNodeOrder(current);
   const anchorKey = universeNodeKey(
     patch.anchor.kind,
     patch.anchor.id,
     patch.anchor.source_id,
   );
   const anchor = nodesByKey.get(anchorKey);
+  if (!anchor) nodeOrder.push(anchorKey);
   nodesByKey.set(anchorKey, {
     ...anchor,
     ...patch.anchor,
@@ -157,9 +206,11 @@ export function mergeUniverseGraphPatch(
     root: anchor?.root ?? true,
     state: "active",
   });
+  const protectedOrder = [anchorKey];
   for (const node of patch.nodes) {
     const key = universeNodeKey(node.kind, node.id, node.source_id);
     const existing = nodesByKey.get(key);
+    if (!existing) nodeOrder.push(key);
     nodesByKey.set(key, {
       ...existing,
       ...node,
@@ -167,25 +218,17 @@ export function mergeUniverseGraphPatch(
       touched_at: now,
       root: existing?.root ?? false,
     });
+    if (!protectedOrder.includes(key)) protectedOrder.push(key);
   }
-  const relationMap = new Map<string, UniverseRelation>();
-  current.relations.forEach((relation) => relationMap.set(relationKey(relation), relation));
-  patch.relations.forEach((relation) => {
-    relationMap.set(relationKey(relation), relation);
-  });
-  const committedKeys = new Set(current.root_keys);
-  committedKeys.add(anchorKey);
-  patch.nodes.forEach((node) => {
-    committedKeys.add(universeNodeKey(node.kind, node.id, node.source_id));
-  });
   return bounded(
     {
       ...current,
       nodes: [...nodesByKey.values()],
-      relations: [...relationMap.values()],
+      relations: dedupeRelations([...current.relations, ...patch.relations]),
+      node_order: nodeOrder,
     },
     budget,
-    committedKeys,
+    protectedOrder,
   );
 }
 
@@ -220,12 +263,17 @@ export function mergeUniverseActivation(
   const nodesByKey = new Map(
     current.nodes.map((node) => [universeNodeKey(node.kind, node.id, node.source_id), node]),
   );
+  const nodeOrder = normalizedNodeOrder(current);
   const addedRootKeys = new Set<string>();
-  const addedKeys = new Set<string>();
+  const newKeys: string[] = [];
   for (const node of activation.nodes) {
     const sourceId = node.source_id || "";
     const key = universeNodeKey(node.kind, node.id, sourceId);
     const existing = nodesByKey.get(key);
+    if (!existing) {
+      nodeOrder.push(key);
+      newKeys.push(key);
+    }
     nodesByKey.set(key, {
       ...existing,
       ...node,
@@ -233,24 +281,18 @@ export function mergeUniverseActivation(
       touched_at: now,
       root: existing?.root ?? Boolean(options.roots),
     });
-    addedKeys.add(key);
     if (existing?.root || options.roots) addedRootKeys.add(key);
   }
-  const relationMap = new Map<string, UniverseRelation>();
-  current.relations.forEach((relation) => relationMap.set(relationKey(relation), relation));
-  activation.relations.forEach((relation) => relationMap.set(relationKey(relation), relation));
-  const committedKeys = new Set(current.root_keys);
-  addedKeys.forEach((key) => committedKeys.add(key));
-  addedRootKeys.forEach((key) => committedKeys.add(key));
   return bounded(
     {
       ...current,
       epoch,
       nodes: [...nodesByKey.values()],
-      relations: [...relationMap.values()],
+      relations: dedupeRelations([...current.relations, ...activation.relations]),
       root_keys: [...new Set([...current.root_keys, ...addedRootKeys])],
+      node_order: nodeOrder,
     },
     budget,
-    committedKeys,
+    newKeys,
   );
 }

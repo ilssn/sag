@@ -200,6 +200,45 @@ describe("conversation runtime", () => {
     });
   });
 
+  it("normalizes persisted external citations without treating them as knowledge chunks", async () => {
+    const transport = new FakeTransport();
+    const persisted = message("message-1", "带外部来源的历史回答");
+    persisted.citations = [
+      {
+        n: 1,
+        kind: "external",
+        url: "https://news.example.com/story",
+        title: "外部报道",
+        source: "Example News",
+        mapped: false,
+        claim_level: "run",
+      } as unknown as Message["citations"][number],
+    ];
+    transport.historyPages.push(page([persisted]));
+    const conversations = runtime(transport);
+    const sessionId = conversations.forThread("thread-1", { activate: true });
+
+    await conversations.ensureHistory(sessionId);
+
+    expect(conversations.getSessionSnapshot(sessionId).messages[0].citations).toEqual([
+      {
+        n: 1,
+        kind: "external",
+        chunk_id: null,
+        heading: "外部报道",
+        snippet: "",
+        score: 0,
+        source_id: null,
+        source_name: "Example News",
+        url: "https://news.example.com/story",
+        title: "外部报道",
+        source: "Example News",
+        mapped: false,
+        claim_level: "run",
+      },
+    ]);
+  });
+
   it("prepends older history by cursor and de-duplicates overlapping ids", async () => {
     const transport = new FakeTransport();
     transport.historyPages.push(
@@ -436,6 +475,14 @@ describe("conversation runtime", () => {
             heading: "依据",
             snippet: "原文",
             score: 0.9,
+            event_refs: [
+              {
+                id: "event-1",
+                title: "真实事件标题",
+                summary: "真实事件摘要。",
+                category: "产品动态",
+              },
+            ],
           },
         ],
         prompt_preview: "【系统指令】\n规则\n\n【当前问题】\n核验资料",
@@ -445,7 +492,21 @@ describe("conversation runtime", () => {
     const terminal = conversations.getSessionSnapshot(sessionId).messages.at(-1);
     expect(terminal).toMatchObject({
       content: "已核验结论 [1]",
-      citations: [{ n: 1, chunk_id: "chunk-1", source_id: "source-1" }],
+      citations: [
+        {
+          n: 1,
+          chunk_id: "chunk-1",
+          source_id: "source-1",
+          event_refs: [
+            {
+              id: "event-1",
+              title: "真实事件标题",
+              summary: "真实事件摘要。",
+              category: "产品动态",
+            },
+          ],
+        },
+      ],
     });
     await vi.advanceTimersByTimeAsync(100);
     expect(conversations.getSessionSnapshot(sessionId).messages.at(-1)?.content).toBe(

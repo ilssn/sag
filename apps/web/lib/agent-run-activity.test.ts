@@ -204,7 +204,7 @@ describe("agent run activity", () => {
     expect(steps[0]).toMatchObject({ status: "error", error: "已停止" });
   });
 
-  it("normalizes citation artifacts and merges by citation number", () => {
+  it("normalizes and merges internal and external citation artifacts", () => {
     const first = {
       n: 1,
       chunk_id: "chunk-1",
@@ -212,12 +212,65 @@ describe("agent run activity", () => {
       snippet: "旧内容",
       score: 0.8,
       source_id: "source-1",
+      event_refs: [
+        {
+          id: "event-1",
+          title: "真实事件",
+          summary: "真实事件摘要",
+          category: "发布",
+        },
+        { id: "invalid", title: "" },
+      ],
     };
     const replacement = { ...first, heading: "新标题" };
     const second = { ...first, n: 2, chunk_id: "chunk-2" };
 
-    expect(citationsFromArtifacts({ citations: [first, null, { n: "bad" }] })).toEqual([first]);
+    expect(citationsFromArtifacts({ citations: [first, null, { n: "bad" }] })).toEqual([
+      {
+        ...first,
+        kind: "internal",
+        event_refs: [first.event_refs[0]],
+      },
+    ]);
     expect(mergeCitations([first], [second, replacement])).toEqual([replacement, second]);
+
+    const external = {
+      n: 1,
+      kind: "external",
+      url: "https://example.com/report",
+      title: "行业报告",
+      source: "Example Research",
+      summary: "报告摘要",
+      mapped: false,
+      claim_level: "run",
+    };
+    expect(
+      citationsFromArtifacts({
+        citations: [external, { ...external, n: 2, url: "javascript:alert(1)" }],
+      }),
+    ).toEqual([
+      {
+        ...external,
+        chunk_id: null,
+        heading: "行业报告",
+        snippet: "",
+        score: 0,
+        source_id: null,
+        source_name: "Example Research",
+      },
+    ]);
+
+    const normalizedExternal = citationsFromArtifacts({ citations: [external] });
+    expect(mergeCitations([first], normalizedExternal)).toMatchObject([
+      { n: 1, source_id: "source-1" },
+      { kind: "external", n: 1, url: "https://example.com/report" },
+    ]);
+
+    expect(
+      citationsFromArtifacts({
+        citations: [{ ...first, event_refs: undefined, summary: "旧版片段摘要" }],
+      })[0],
+    ).not.toHaveProperty("summary");
   });
 
   it("formats bounded tool arguments", () => {

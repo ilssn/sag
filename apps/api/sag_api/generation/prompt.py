@@ -7,6 +7,53 @@ from typing import Any
 from sag_api.branding import DEFAULT_AGENT_NAME
 from sag_api.sag import RetrievedSection
 
+
+def _citation_excerpt(content: str) -> str:
+    """Return a bounded source excerpt without assigning it event semantics."""
+    text = " ".join(content.split())
+    if not text:
+        return ""
+    excerpt_limit = 720
+    excerpt = text[:excerpt_limit].strip()
+    if len(text) > excerpt_limit:
+        excerpt = excerpt.rstrip("…") + "…"
+    return excerpt
+
+
+def _field(value: Any, name: str) -> Any:
+    return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
+
+
+def _event_refs_by_section(events: list[Any] | None) -> dict[tuple[str, str], list[dict[str, str]]]:
+    """Index traceable extracted events by source config and chunk.
+
+    Event order comes from ``graph_for_sections`` and is preserved.  The
+    composite key is required because chunk identifiers are only source-local.
+    """
+
+    grouped: dict[tuple[str, str], list[dict[str, str]]] = {}
+    seen: dict[tuple[str, str], set[str]] = {}
+    for event in events or []:
+        source_config_id = str(_field(event, "source_config_id") or "").strip()
+        chunk_id = str(_field(event, "chunk_id") or "").strip()
+        event_id = str(_field(event, "id") or "").strip()
+        title = " ".join(str(_field(event, "title") or "").split())
+        if not source_config_id or not chunk_id or not event_id or not title:
+            continue
+        key = (source_config_id, chunk_id)
+        if event_id in seen.setdefault(key, set()):
+            continue
+        seen[key].add(event_id)
+        ref = {
+            "id": event_id,
+            "title": title[:500],
+            "summary": " ".join(str(_field(event, "summary") or "").split())[:800],
+            "category": " ".join(str(_field(event, "category") or "").split())[:100],
+        }
+        grouped.setdefault(key, []).append(ref)
+    return grouped
+
+
 _GUIDANCE = {
     "zh": (
         "【工作目标】\n"
@@ -31,6 +78,9 @@ _GUIDANCE = {
         "发生冲突时比较资料的直接性、权威性、发布时间和目标时间范围。只有低质量、冲突或无法打开的"
         "证据时继续检索，仍无法确认就明确标为未核实，不用看似合理的模型记忆补齐。\n"
         "【工具使用】\n"
+        "- 工具只在任务确实需要时使用。寒暄、致谢、告别、身份询问应直接回答，不调用检索。"
+        "纯创作、简单计算，以及仅处理用户已提供内容的翻译、改写或总结，也不要为了补充信息而检索；"
+        "请求存在会改变结果的歧义时先澄清，不能用搜索代替澄清。\n"
         "- 涉及本地知识库、上传文档或 @ 范围时使用 search_context；必要时从不同角度改写查询，"
         "并用 get_entity 做实体消歧和形成后续检索词；关键事实仍须由 search_context 或带可追溯来源的工具"
         "确认。没有合适工具或工具失败时，说明无法核查的部分和已知边界。\n"
@@ -71,6 +121,10 @@ _GUIDANCE = {
         "weak, conflicting, or inaccessible evidence remains, keep researching or mark the claim unverified; do "
         "not fill the gap with plausible model memory.\n"
         "[Tool use]\n"
+        "- Use tools only when the task actually requires them. Answer greetings, thanks, farewells, and "
+        "identity questions directly without retrieval. Do not retrieve for pure creation, simple arithmetic, "
+        "or translation, rewriting, and summarization based only on content the user supplied. Clarify material "
+        "ambiguity first; search is not a substitute for clarification.\n"
         "- Use search_context for local knowledge, uploads, or an @ scope; reformulate from another angle and use "
         "get_entity only to disambiguate entities and shape later searches. Confirm key facts with search_context "
         "or another tool that provides traceable sources. State verification limits when no suitable tool works.\n"
@@ -245,27 +299,34 @@ def build_prompt_preview(messages: list[dict[str, Any]], *, limit: int = 6000) -
 def build_citations(
     sections: list[RetrievedSection],
     source_refs: dict[str, dict[str, str]] | None = None,
+    events: list[Any] | None = None,
 ) -> list[dict[str, Any]]:
     """由检索段落确定性地构造引用列表（编号与 prompt 中一致）。
 
     `source_refs`：{sag_source_config_id: {"id": sag 信源 id, "name": 信源名}}。
+    `events`：`graph_for_sections` 返回的真实抽取事件；按
+    `(source_config_id, chunk_id)` 关联，每条引用最多附带三个事件。
     对外的 `source_id` 一律指 **sag 信源 id**（可直接路由 / 取原文），不泄漏引擎内部 id。
+    `snippet` 仅是可定位的原文证据，不从分块正文推断或伪造事件摘要。
     """
     citations = []
+    event_refs = _event_refs_by_section(events)
     for i, s in enumerate(sections, start=1):
-        snippet = s.content.strip().replace("\n", " ")
-        if len(snippet) > 240:
-            snippet = snippet[:240].rstrip() + "…"
+        snippet = _citation_excerpt(s.content)
         ref = (source_refs or {}).get(s.source_config_id or "") or {}
-        citations.append(
-            {
-                "n": i,
-                "chunk_id": s.chunk_id,
-                "heading": s.heading,
-                "snippet": snippet,
-                "score": round(s.score, 4),
-                "source_id": ref.get("id"),
-                "source_name": ref.get("name"),
-            }
-        )
+        citation = {
+            "kind": "internal",
+            "n": i,
+            "chunk_id": s.chunk_id,
+            "heading": s.heading,
+            "snippet": snippet,
+            "score": round(s.score, 4),
+            "source_id": ref.get("id"),
+            "source_name": ref.get("name"),
+        }
+        event_key = ((s.source_config_id or "").strip(), (s.chunk_id or "").strip())
+        matched_events = event_refs.get(event_key, [])[:3]
+        if matched_events:
+            citation["event_refs"] = matched_events
+        citations.append(citation)
     return citations

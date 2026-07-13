@@ -3,11 +3,19 @@
 import * as React from "react";
 import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
-import { Grip } from "lucide-react";
+import { Cpu, Grip } from "lucide-react";
 import { motion } from "motion/react";
 
 import { api, ApiError } from "@/lib/api";
 import { clearToken, getToken } from "@/lib/auth";
+import {
+  APP_INITIALIZATION_DEFAULTS,
+  dismissQuickModelSetup,
+  persistWorkspaceInitialization,
+  readInitialWorkspace,
+  shouldShowQuickModelSetup,
+  type WorkspacePanelMode,
+} from "@/lib/app-initialization";
 import { DEFAULT_AGENT_AVATAR, DEFAULT_AGENT_NAME } from "@/lib/branding";
 import type { ConversationTransport } from "@/lib/conversation-runtime";
 import { DEFAULT_TIME_ZONE } from "@/lib/format";
@@ -16,11 +24,14 @@ import {
   DEFAULT_SEARCH_STRATEGY,
   isSearchStrategy,
 } from "@/lib/retrieval-config";
-import { SIDEBAR_THREADS_PAGE_SIZE } from "@/lib/settings-config";
+import {
+  SIDEBAR_THREADS_PAGE_SIZE,
+  settingsTabHref,
+  type SettingsTab,
+} from "@/lib/settings-config";
 import { streamAgentAsk } from "@/lib/sse";
 import type { Agent, Capabilities, Thread, User } from "@/lib/types";
 import {
-  isWorkspaceSection,
   type WorkspaceSection,
   workspaceSectionFromPathname,
 } from "@/lib/workspace";
@@ -48,6 +59,7 @@ import { SearchProvider } from "@/components/features/search/search-provider";
 import { SpaceBackdrop } from "@/components/features/space-backdrop";
 import { SiteHeader } from "@/components/features/site-header";
 import { ThemeToggle } from "@/components/features/theme-toggle";
+import { Button } from "@/components/ui/button";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -64,14 +76,11 @@ const KnowledgeUniverse = dynamic(
 );
 
 type WindowMode = "full" | "window";
-export type WorkspacePanelMode = "hidden" | "mini" | "normal";
+export type { WorkspacePanelMode } from "@/lib/app-initialization";
 type WindowSize = { width: number; height: number };
 
 const WINDOW_MODE_KEY = "sag:window";
 const WINDOW_SIZE_KEY = "sag:window-size";
-const WORKSPACE_PANEL_KEY = "sag:workspace-panel";
-const WORKSPACE_SECTION_KEY = "sag:workspace-section";
-const LEGACY_WORKSPACE_MINI_KEY = "sag:workspace-mini-mode";
 const DEFAULT_WINDOW_MODE: WindowMode = "window";
 const DEFAULT_WINDOW_SIZE: WindowSize = { width: 1360, height: 860 };
 const MIN_WINDOW_SIZE: WindowSize = { width: 900, height: 560 };
@@ -113,40 +122,6 @@ const CONVERSATION_TRANSPORT: ConversationTransport = {
   deleteMessage: ({ agentId, threadId, messageId }) =>
     api.deleteMessage(agentId, threadId, messageId),
 };
-
-function readWorkspacePanel(): WorkspacePanelMode {
-  if (typeof window === "undefined") return "hidden";
-  try {
-    const saved = window.localStorage.getItem(WORKSPACE_PANEL_KEY);
-    if (saved === "hidden" || saved === "mini" || saved === "normal") return saved;
-  } catch {
-    /* The knowledge universe remains the first-entry default. */
-  }
-  return "hidden";
-}
-
-function readWorkspaceSection(): WorkspaceSection {
-  if (typeof window === "undefined") return "search";
-  try {
-    const saved = window.localStorage.getItem(WORKSPACE_SECTION_KEY);
-    if (isWorkspaceSection(saved)) return saved;
-
-    // 兼容旧版 mini 状态，迁移后只维护与形态无关的 section。
-    const legacy = window.localStorage.getItem(LEGACY_WORKSPACE_MINI_KEY);
-    return legacy === "answer" ? "answer" : "search";
-  } catch {
-    return "search";
-  }
-}
-
-function persistWorkspace(panel: WorkspacePanelMode, section?: WorkspaceSection) {
-  try {
-    window.localStorage.setItem(WORKSPACE_PANEL_KEY, panel);
-    if (section) window.localStorage.setItem(WORKSPACE_SECTION_KEY, section);
-  } catch {
-    /* Keep the in-memory state when storage is unavailable. */
-  }
-}
 
 function readWindowMode(): WindowMode {
   if (typeof window === "undefined") return DEFAULT_WINDOW_MODE;
@@ -219,6 +194,7 @@ interface AppCtx {
   panelMode: WorkspacePanelMode;
   workspaceSection: WorkspaceSection;
   openMiniWorkspace: (section: WorkspaceSection) => void;
+  openSettings: (tab?: SettingsTab, section?: string) => void;
   expandWorkspace: () => void;
   minimizeWorkspace: () => void;
   hideWorkspace: () => void;
@@ -243,9 +219,10 @@ const AppContext = React.createContext<AppCtx>({
   collapseThreads: () => {},
   windowMode: DEFAULT_WINDOW_MODE,
   toggleWindowMode: () => {},
-  panelMode: "hidden",
-  workspaceSection: "search",
+  panelMode: APP_INITIALIZATION_DEFAULTS.workspacePanel,
+  workspaceSection: APP_INITIALIZATION_DEFAULTS.workspaceSection,
   openMiniWorkspace: () => {},
+  openSettings: () => {},
   expandWorkspace: () => {},
   minimizeWorkspace: () => {},
   hideWorkspace: () => {},
@@ -306,8 +283,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [threadsExpanded, setThreadsExpanded] = React.useState(false);
   const [loadingMoreThreads, setLoadingMoreThreads] = React.useState(false);
   const [windowMode, setWindowMode] = React.useState<WindowMode>(DEFAULT_WINDOW_MODE);
-  const [panelMode, setPanelMode] = React.useState<WorkspacePanelMode>("hidden");
-  const [workspaceSection, setWorkspaceSection] = React.useState<WorkspaceSection>("search");
+  const [panelMode, setPanelMode] = React.useState<WorkspacePanelMode>(
+    APP_INITIALIZATION_DEFAULTS.workspacePanel,
+  );
+  const [workspaceSection, setWorkspaceSection] = React.useState<WorkspaceSection>(
+    APP_INITIALIZATION_DEFAULTS.workspaceSection,
+  );
   const [windowSize, setWindowSize] = React.useState<WindowSize>(DEFAULT_WINDOW_SIZE);
   const [sidebarOpen, setSidebarOpen] = React.useState(true);
   const [isDesktop, setIsDesktop] = React.useState(true);
@@ -328,12 +309,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return () => mq.removeEventListener("change", update);
   }, []);
 
-  // 窗口形态：首次启动默认小窗，已有用户沿用已保存的偏好。
+  // 首屏：新用户进入星空 + mini 问答；已有用户沿用明确保存的工作台偏好。
   React.useEffect(() => {
+    const workspace = readInitialWorkspace(window.localStorage);
     setWindowMode(readWindowMode());
     setWindowSize(readWindowSize());
-    setPanelMode(/^\/chat\/[^/]+/.test(pathname) ? "normal" : readWorkspacePanel());
-    setWorkspaceSection(readWorkspaceSection());
+    setPanelMode(/^\/chat\/[^/]+/.test(pathname) ? "normal" : workspace.panel);
+    setWorkspaceSection(workspace.section);
   }, [pathname]);
   const toggleWindowMode = React.useCallback(() => {
     setWindowMode((m) => {
@@ -346,21 +328,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const openMiniWorkspace = React.useCallback((section: WorkspaceSection) => {
     setWorkspaceSection(section);
     setPanelMode("mini");
-    persistWorkspace("mini", section);
+    persistWorkspaceInitialization(window.localStorage, "mini", section);
   }, []);
+  const openSettings = React.useCallback((tab: SettingsTab = "account", section?: string) => {
+    setPanelMode("normal");
+    persistWorkspaceInitialization(window.localStorage, "normal");
+    router.push(settingsTabHref(tab, section));
+  }, [router]);
   const expandWorkspace = React.useCallback(() => {
     setPanelMode("normal");
-    persistWorkspace("normal");
+    persistWorkspaceInitialization(window.localStorage, "normal");
   }, []);
   const minimizeWorkspace = React.useCallback(() => {
     const nextSection = workspaceSectionFromPathname(pathname) ?? workspaceSection;
     setWorkspaceSection(nextSection);
     setPanelMode("mini");
-    persistWorkspace("mini", nextSection);
+    persistWorkspaceInitialization(window.localStorage, "mini", nextSection);
   }, [pathname, workspaceSection]);
   const hideWorkspace = React.useCallback(() => {
     setPanelMode("hidden");
-    persistWorkspace("hidden");
+    persistWorkspaceInitialization(window.localStorage, "hidden");
   }, []);
 
   React.useEffect(() => {
@@ -368,7 +355,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       if (panelMode === "hidden") {
         setWorkspaceSection("search");
         setPanelMode("mini");
-        persistWorkspace("mini", "search");
+        persistWorkspaceInitialization(window.localStorage, "mini", "search");
       }
     };
     const revealAsk = () => openMiniWorkspace("answer");
@@ -534,7 +521,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         setCapabilities(c);
         setTimezone(c.timezone || DEFAULT_TIME_ZONE);
         setAgent(a);
-        setQuickSetupOpen(Boolean(setup?.required));
+        setQuickSetupOpen(
+          shouldShowQuickModelSetup(Boolean(setup?.required), window.localStorage),
+        );
         threadLimitRef.current = SIDEBAR_THREADS_PAGE_SIZE;
         loadThreadLimit(a, SIDEBAR_THREADS_PAGE_SIZE).catch(() => {});
       } catch (e) {
@@ -597,6 +586,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         panelMode,
         workspaceSection,
         openMiniWorkspace,
+        openSettings,
         expandWorkspace,
         minimizeWorkspace,
         hideWorkspace,
@@ -622,7 +612,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           >
             <QuickModelSetupDialog
               open={quickSetupOpen}
-              onOpenChange={setQuickSetupOpen}
+              onOpenChange={(nextOpen) => {
+                setQuickSetupOpen(nextOpen);
+                if (!nextOpen) dismissQuickModelSetup(window.localStorage);
+              }}
               onConfigured={(nextCapabilities) => {
                 setCapabilities(nextCapabilities);
                 setTimezone(nextCapabilities.timezone || DEFAULT_TIME_ZONE);
@@ -640,14 +633,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <KnowledgeUniverse
                   interactive={panelMode !== "normal"}
                   workspacePanel={panelMode}
+                  onOpenWorkspace={expandWorkspace}
                 />
                 {panelMode !== "normal" && (
                   <motion.div
                     initial={{ opacity: 0, scale: 0.92, y: -4 }}
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     transition={{ duration: 0.18 }}
-                    className="absolute right-4 top-4 z-30 rounded-md border border-border/60 bg-background/70 shadow-soft backdrop-blur-md"
+                    className="absolute right-4 top-4 z-30 flex items-center rounded-md border border-border/60 bg-background/70 shadow-soft backdrop-blur-md"
                   >
+                    {capabilities && !capabilities.llm_configured && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 gap-1.5 rounded-r-none border-r border-border/60 px-2.5 text-xs"
+                        onClick={() => openSettings("model")}
+                      >
+                        <Cpu className="size-3.5" />
+                        配置模型
+                      </Button>
+                    )}
                     <ThemeToggle />
                   </motion.div>
                 )}

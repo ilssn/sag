@@ -10,8 +10,10 @@ import {
   GitBranch,
   Info,
   Loader2,
+  LockKeyhole,
   LocateFixed,
   MessageCircleQuestion,
+  PanelRightOpen,
   RefreshCw,
   RotateCcw,
   Sparkles,
@@ -21,6 +23,7 @@ import {
 import { api, ApiError } from "@/lib/api";
 import type {
   UniverseActivation,
+  UniverseActivationOrigin,
   UniverseGraphPatch,
   UniverseManifest,
   UniverseNodeKind,
@@ -41,10 +44,18 @@ import {
   mergeUniverseGraphPatch,
   replaceUniverseWorkingSet,
   sourceTimelinePageTargetForLod,
+  trimUniverseWorkingSet,
   universeAnchorProgress,
   universeNodeKey,
   type UniverseWorkingSet,
 } from "@/lib/universe-working-set";
+import {
+  effectiveUniverseBudget,
+  projectUniverseWorkingSet,
+  publishUniverseEntityCategories,
+  shouldAutoLoadUniverseTimeline,
+  useUniverseViewPreferences,
+} from "@/lib/universe-view-preferences";
 import { cn } from "@/lib/utils";
 import {
   UniverseScene,
@@ -114,6 +125,19 @@ interface SourceLoadProgress {
 }
 
 const PARTITION_RENDER_LIMIT = { desktop: 160, mobile: 64 } as const;
+
+function waitForAbortableDelay(duration: number, signal: AbortSignal) {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const finish = () => {
+      window.clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = window.setTimeout(finish, duration);
+    signal.addEventListener("abort", finish, { once: true });
+  });
+}
 
 function stableUnit(value: string) {
   let hash = 2166136261;
@@ -218,9 +242,11 @@ function LoadProgressRow({
 function UniverseLoadProgressPanel({
   progress,
   reducedMotion,
+  clickOnly,
 }: {
   progress: SourceLoadProgress;
   reducedMotion: boolean;
+  clickOnly: boolean;
 }) {
   const started = progress.events.loaded > 0 || progress.entities.loaded > 0;
   const status = progress.allDone
@@ -228,8 +254,8 @@ function UniverseLoadProgressPanel({
     : progress.loading
       ? "正在从星系中心显现"
       : started
-        ? "继续拉近，加载更早内容"
-        : "拉近星系，开始探索";
+        ? clickOnly ? "点击节点继续探索" : "继续拉近，加载更早内容"
+        : clickOnly ? "点击节点开始探索" : "拉近星系，开始探索";
   return (
     <motion.div
       data-universe-load-progress="true"
@@ -331,21 +357,24 @@ function IconControl({
 export function KnowledgeUniverse({
   interactive = true,
   workspacePanel = "hidden",
+  onOpenWorkspace,
 }: {
   interactive?: boolean;
   workspacePanel?: "hidden" | "mini" | "normal";
+  onOpenWorkspace: () => void;
 }) {
   const reducedMotion = useReducedMotion();
   const { resolvedTheme } = useTheme();
   const darkTheme = resolvedTheme === "dark";
   const containerRef = React.useRef<HTMLDivElement>(null);
   const graphRef = React.useRef<UniverseSceneHandle | null>(null);
+  const interactiveRef = React.useRef(interactive);
+  interactiveRef.current = interactive;
   const stageTimerRef = React.useRef<number | null>(null);
   const focusTimerRef = React.useRef<number | null>(null);
   const cameraFrameRef = React.useRef<number | null>(null);
   const epochRef = React.useRef(0);
   const workingRef = React.useRef<UniverseWorkingSet>(emptyUniverseWorkingSet());
-  const budgetEpochRef = React.useRef(0);
   const budgetRef = React.useRef<{ nodes: number; edges: number }>(
     UNIVERSE_SCENE_BUDGET.mobile,
   );
@@ -359,12 +388,13 @@ export function KnowledgeUniverse({
   const sourceTimelinePagesRef = React.useRef(new Map<string, SourceTimelinePageState>());
   const sourceContentLedgerRef = React.useRef(new Map<string, SourceContentLedger>());
   const completedSourcesRef = React.useRef(new Set<string>());
-  const searchActivationRef = React.useRef(false);
+  const activationOriginRef = React.useRef<UniverseActivationOrigin>("browse");
   const viewportSourceRef = React.useRef<string | null>(null);
   const previousWorkspacePanelRef = React.useRef(workspacePanel);
   const cursorsRef = React.useRef(new Map<string, string>());
   const expandedAnchorsRef = React.useRef(new Set<string>());
   const nodeByIdRef = React.useRef(new Map<string, Universe3DNode>());
+  const { preferences: viewPreferences } = useUniverseViewPreferences();
   const [dimensions, setDimensions] = React.useState({ width: 1, height: 1 });
   const [manifest, setManifest] = React.useState<UniverseManifest | null>(null);
   const [working, setWorking] = React.useState<UniverseWorkingSet>(emptyUniverseWorkingSet());
@@ -379,6 +409,8 @@ export function KnowledgeUniverse({
   const [summary, setSummary] = React.useState<ActivationSummary | null>(null);
   const [expandingKey, setExpandingKey] = React.useState<string | null>(null);
   const [moreHint, setMoreHint] = React.useState("");
+  const [activationOrigin, setActivationOrigin] =
+    React.useState<UniverseActivationOrigin>("browse");
   const [, setLoadProgressRevision] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
   const [rebuilding, setRebuilding] = React.useState(false);
@@ -386,7 +418,7 @@ export function KnowledgeUniverse({
   const [webglAvailable, setWebglAvailable] = React.useState<boolean | null>(null);
 
   const mobile = dimensions.width < 768;
-  const budget = React.useMemo(
+  const policyBudget = React.useMemo(
     () => manifest
       ? mobile
         ? {
@@ -402,15 +434,15 @@ export function KnowledgeUniverse({
         : UNIVERSE_SCENE_BUDGET.desktop,
     [manifest, mobile],
   );
-  if (budgetEpochRef.current !== epochRef.current) {
-    budgetEpochRef.current = epochRef.current;
-    budgetRef.current = budget;
-  } else {
-    budgetRef.current = {
-      nodes: Math.max(budgetRef.current.nodes, budget.nodes),
-      edges: Math.max(budgetRef.current.edges, budget.edges),
-    };
-  }
+  const budget = React.useMemo(
+    () => effectiveUniverseBudget(
+      policyBudget,
+      viewPreferences.maxNodes,
+      viewPreferences.edgeDensity,
+    ),
+    [policyBudget, viewPreferences.edgeDensity, viewPreferences.maxNodes],
+  );
+  budgetRef.current = budget;
 
   const refreshLoadProgress = React.useCallback(() => {
     setLoadProgressRevision((current) => current + 1);
@@ -468,11 +500,12 @@ export function KnowledgeUniverse({
   }, []);
 
   React.useEffect(() => {
+    if (!interactive) return;
     void loadManifest();
-  }, [loadManifest]);
+  }, [interactive, loadManifest]);
 
   React.useEffect(() => {
-    if (manifest?.status !== "building") return;
+    if (!interactive || manifest?.status !== "building") return;
     let alive = true;
     const timer = window.setInterval(() => {
       void api.universeManifest().then((next) => {
@@ -483,7 +516,7 @@ export function KnowledgeUniverse({
       alive = false;
       window.clearInterval(timer);
     };
-  }, [manifest?.status]);
+  }, [interactive, manifest?.status]);
 
   const sourcePartitions = React.useMemo(
     () => manifest?.partitions.filter((partition) => partition.kind === "source") ?? [],
@@ -532,7 +565,16 @@ export function KnowledgeUniverse({
     const ranked = [...sourcePartitions].sort(
       (left, right) => right.importance - left.importance || left.id.localeCompare(right.id),
     );
-    const rendered = ranked.slice(0, limit);
+    const relevantSourceIds = activationOrigin === "search"
+      ? new Set([
+          ...sourceHits.map((hit) => hit.source_id),
+          ...working.nodes.map((node) => node.source_id).filter(Boolean),
+        ])
+      : null;
+    const candidates = relevantSourceIds?.size
+      ? ranked.filter((partition) => relevantSourceIds.has(partition.source_id))
+      : ranked;
+    const rendered = candidates.slice(0, limit);
     if (activePartition && !rendered.some((item) => item.source_id === activePartition)) {
       const active = sourceById.get(activePartition);
       if (active) {
@@ -541,7 +583,15 @@ export function KnowledgeUniverse({
       }
     }
     return rendered;
-  }, [activePartition, mobile, sourceById, sourcePartitions]);
+  }, [
+    activationOrigin,
+    activePartition,
+    mobile,
+    sourceById,
+    sourceHits,
+    sourcePartitions,
+    working.nodes,
+  ]);
 
   const focusOverview = React.useCallback(() => {
     graphRef.current?.focusOverview();
@@ -588,6 +638,24 @@ export function KnowledgeUniverse({
     }
   }, []);
 
+  React.useEffect(() => {
+    const current = workingRef.current;
+    const next = trimUniverseWorkingSet(
+      current,
+      budget,
+      selectedKey ? [selectedKey] : [],
+    );
+    const unchanged = next.nodes.length === current.nodes.length
+      && next.relations.length === current.relations.length
+      && next.node_order?.every((key, index) => key === current.node_order?.[index]);
+    if (unchanged) return;
+    workingRef.current = next;
+    pruneExpansionState(next.nodes);
+    setWorking(next);
+    visibleCountRef.current = Math.min(visibleCountRef.current, next.nodes.length);
+    setVisibleCount((count) => Math.min(count, next.nodes.length));
+  }, [budget, pruneExpansionState, selectedKey]);
+
   const stageTo = React.useCallback(
     (_from: number, target: number) => {
       clearStageTimer();
@@ -621,18 +689,21 @@ export function KnowledgeUniverse({
       visibleCountRef.current = 0;
       setVisibleCount(0);
       setSummary(null);
-      searchActivationRef.current = false;
+      activationOriginRef.current = "browse";
+      setActivationOrigin("browse");
       setSelectedKey(null);
       setHoveredConcreteKey(null);
       setSourceHits([]);
       setActivePartition(null);
       setExpandingKey(null);
       setMoreHint("");
-      const resetEpoch = epoch;
-      cameraFrameRef.current = window.requestAnimationFrame(() => {
-        cameraFrameRef.current = null;
-        if (epochRef.current === resetEpoch) focusOverview();
-      });
+      if (interactiveRef.current) {
+        const resetEpoch = epoch;
+        cameraFrameRef.current = window.requestAnimationFrame(() => {
+          cameraFrameRef.current = null;
+          if (epochRef.current === resetEpoch) focusOverview();
+        });
+      }
     },
     [clearCameraSchedule, clearStageTimer, focusOverview, refreshLoadProgress],
   );
@@ -660,7 +731,9 @@ export function KnowledgeUniverse({
       setSelectedKey(null);
       setHoveredConcreteKey(null);
       setSourceHits(activation.source_hits ?? []);
-      searchActivationRef.current = true;
+      const origin = activation.origin ?? "assistant";
+      activationOriginRef.current = origin;
+      setActivationOrigin(origin);
       setMoreHint("");
       setSummary({
         query: activation.query,
@@ -675,7 +748,7 @@ export function KnowledgeUniverse({
       const sourceId = dominantSource(activation);
       setActivePartition(sourceId);
       stageTo(0, next.nodes.length);
-      if (sourceId) {
+      if (sourceId && interactiveRef.current) {
         const activationEpoch = epoch;
         focusTimerRef.current = window.setTimeout(() => {
           focusTimerRef.current = null;
@@ -697,7 +770,7 @@ export function KnowledgeUniverse({
       const node = nodeByIdRef.current.get(exactKey);
       if (!node) return;
       setSelectedKey(node.id);
-      focusNode(node);
+      if (interactiveRef.current) focusNode(node);
     };
     window.addEventListener(UNIVERSE_ACTIVATE_EVENT, onActivate);
     window.addEventListener(UNIVERSE_RESET_EVENT, onReset);
@@ -743,6 +816,7 @@ export function KnowledgeUniverse({
       entityCount: partition.entity_count,
       relationCount: partition.relation_count,
       relatedCount: partition.relation_count,
+      relatedCountKnown: true,
       importance: partition.importance,
       statsReady: Boolean(manifest?.version),
       state: "active",
@@ -753,26 +827,42 @@ export function KnowledgeUniverse({
     }));
     const links: Universe3DLink[] = [];
 
+    const projectedWorking = projectUniverseWorkingSet(working, viewPreferences);
+    const relationsByEvent = new Map<string, UniverseWorkingSet["relations"]>();
+    const relationsByEntity = new Map<string, UniverseWorkingSet["relations"]>();
+    const relationSourceByEvent = new Map<string, string>();
+    const relationSourceByEntity = new Map<string, string>();
+    projectedWorking.relations.forEach((relation) => {
+      const eventKey = universeNodeKey("event", relation.from_id, relation.source_id);
+      const eventRelations = relationsByEvent.get(eventKey) ?? [];
+      eventRelations.push(relation);
+      relationsByEvent.set(eventKey, eventRelations);
+      relationSourceByEvent.set(relation.from_id, relation.source_id);
+      if (relation.kind === "mentions") {
+        const entityKey = universeNodeKey("entity", relation.to_id, relation.source_id);
+        const entityRelations = relationsByEntity.get(entityKey) ?? [];
+        entityRelations.push(relation);
+        relationsByEntity.set(entityKey, entityRelations);
+        relationSourceByEntity.set(relation.to_id, relation.source_id);
+      }
+    });
     const workingNodeByKey = new Map(
-      working.nodes.map((node) => [
+      projectedWorking.nodes.map((node) => [
         universeNodeKey(node.kind, node.id, node.source_id),
         node,
       ]),
     );
-    const visibleNodes = working.nodes.slice(
+    const visibleNodes = projectedWorking.nodes.slice(
       0,
-      Math.min(visibleCount, working.nodes.length),
+      Math.min(visibleCount, projectedWorking.nodes.length),
     ).map((node) => workingNodeByKey.get(
       universeNodeKey(node.kind, node.id, node.source_id),
     ) ?? node);
     const resolvedSource = (kind: UniverseNodeKind, id: string, sourceId: string) => {
       if (sourceId) return sourceId;
-      const relation = working.relations.find(
-        (item) =>
-          (kind === "event" && item.from_id === id)
-          || (kind === "entity" && item.kind === "mentions" && item.to_id === id),
-      );
-      return relation?.source_id || activePartition || "";
+      return (kind === "event"
+        ? relationSourceByEvent.get(id)
+        : relationSourceByEntity.get(id)) || activePartition || "";
     };
     const exactByRaw = new Map<string, string>();
     const positionByRaw = new Map<string, Position3D>();
@@ -809,6 +899,7 @@ export function KnowledgeUniverse({
         entityCount: 0,
         relationCount: 0,
         relatedCount: node.related_count ?? 0,
+        relatedCountKnown: node.related_count !== undefined,
         importance: node.importance ?? 0.5,
         statsReady: true,
         state: node.state ?? "active",
@@ -825,12 +916,9 @@ export function KnowledgeUniverse({
     visibleNodes
       .filter((node) => node.root && node.kind === "entity")
       .forEach((node) => {
-        const relation = working.relations.find(
-          (item) =>
-            item.source_id === node.source_id
-            && item.kind === "mentions"
-            && item.to_id === node.id,
-        );
+        const relation = relationsByEntity.get(
+          universeNodeKey("entity", node.id, node.source_id),
+        )?.[0];
         addExactNode(
           node,
           relation
@@ -841,11 +929,10 @@ export function KnowledgeUniverse({
     visibleNodes
       .filter((node) => !node.root)
       .forEach((node) => {
-        const relation = working.relations.find((item) =>
-          item.source_id === node.source_id && (node.kind === "entity"
-            ? item.kind === "mentions" && item.to_id === node.id
-            : item.from_id === node.id),
-        );
+        const key = universeNodeKey(node.kind, node.id, node.source_id);
+        const relation = (node.kind === "entity"
+          ? relationsByEntity.get(key)
+          : relationsByEvent.get(key))?.[0];
         const anchor = relation
           ? node.kind === "entity"
             ? positionByRaw.get(
@@ -858,7 +945,7 @@ export function KnowledgeUniverse({
         addExactNode(node, anchor);
       });
 
-    working.relations.forEach((relation) => {
+    projectedWorking.relations.forEach((relation) => {
       const source = exactByRaw.get(
         universeNodeKey("event", relation.from_id, relation.source_id),
       );
@@ -883,6 +970,7 @@ export function KnowledgeUniverse({
     renderedSourcePartitions,
     sourceById,
     visibleCount,
+    viewPreferences,
     working,
   ]);
   const selectedNode = React.useMemo(
@@ -900,6 +988,24 @@ export function KnowledgeUniverse({
     const node = graphData.nodes.find((item) => item.id === hoveredConcreteKey) ?? null;
     return isConcreteUniverseNode(node) ? node : null;
   }, [graphData.nodes, hoveredConcreteKey]);
+  const visibleGraphCounts = React.useMemo(() => ({
+    events: graphData.nodes.filter((node) => node.kind === "event").length,
+    entities: graphData.nodes.filter((node) => node.kind === "entity").length,
+    relations: graphData.links.length,
+  }), [graphData.links.length, graphData.nodes]);
+  const entityCategories = React.useMemo(
+    () => [...new Set(working.nodes
+      .filter((node) => node.kind === "entity")
+      .map((node) => node.category?.trim())
+      .filter((category): category is string => Boolean(category)))]
+      .sort((left, right) => left.localeCompare(right, "zh-CN")),
+    [working.nodes],
+  );
+  React.useEffect(() => {
+    if (entityCategories.length > 0) {
+      publishUniverseEntityCategories(entityCategories);
+    }
+  }, [entityCategories]);
   const inspectorNode = hoveredConcreteNode ?? selectedConcreteNode;
   const inspectorProgress = inspectorNode
     ? universeAnchorProgress(
@@ -912,7 +1018,10 @@ export function KnowledgeUniverse({
   const inspectorTotal = inspectorNode
     ? Math.max(inspectorProgress, inspectorNode.relatedCount)
     : 0;
-  const inspectorRemaining = Math.max(0, inspectorTotal - inspectorProgress);
+  const inspectorTotalKnown = Boolean(inspectorNode?.relatedCountKnown);
+  const inspectorRemaining = inspectorTotalKnown
+    ? Math.max(0, inspectorTotal - inspectorProgress)
+    : null;
   const inspectorAnchorKey = inspectorNode
     ? universeNodeKey(inspectorNode.kind, inspectorNode.rawId, inspectorNode.sourceId)
     : null;
@@ -921,7 +1030,8 @@ export function KnowledgeUniverse({
     && expandedAnchorsRef.current.has(inspectorAnchorKey)
     && !cursorsRef.current.has(inspectorAnchorKey),
   );
-  const inspectorCanExpand = inspectorRemaining > 0 && !inspectorExhausted;
+  const inspectorCanExpand = !inspectorExhausted
+    && (!inspectorTotalKnown || (inspectorRemaining ?? 0) > 0);
 
   const requestExpansion = React.useCallback(
     (
@@ -947,10 +1057,14 @@ export function KnowledgeUniverse({
             node_kind: node.kind,
             node_id: node.rawId,
             limit: node.kind === "event"
-              ? manifest?.policy.event_entity_limit ?? 96
+              ? Math.min(
+                  manifest?.policy.event_entity_limit ?? budgetRef.current.nodes,
+                  Math.max(1, budgetRef.current.nodes - 1),
+                )
               : Math.min(
                   manifest?.policy.timeline_event_page_size ?? 8,
                   mobile ? 4 : 8,
+                  Math.max(1, budgetRef.current.nodes - 1),
                 ),
             cursor,
           },
@@ -976,6 +1090,7 @@ export function KnowledgeUniverse({
 
   const expandNode = React.useCallback(
     async (node: Universe3DNode) => {
+      if (!interactiveRef.current) return;
       if ((node.kind !== "event" && node.kind !== "entity") || !node.sourceId) return;
       const exactNode = node as Universe3DNode & { kind: "event" | "entity" };
       const anchorKey = universeNodeKey(exactNode.kind, exactNode.rawId, exactNode.sourceId);
@@ -993,7 +1108,11 @@ export function KnowledgeUniverse({
           cursor,
           controller.signal,
         );
-        if (patch.epoch !== epochRef.current || controller.signal.aborted) return;
+        if (
+          patch.epoch !== epochRef.current
+          || controller.signal.aborted
+          || !interactiveRef.current
+        ) return;
         recordLoadedContent(patch.nodes, exactNode.sourceId);
         dispatchUniversePatch(patch);
         const previousCount = workingRef.current.nodes.length;
@@ -1043,7 +1162,7 @@ export function KnowledgeUniverse({
 
   const loadSourceTimeline = React.useCallback(
     async (sourceId: string, requestedPages: number) => {
-      if (!manifest) return;
+      if (!manifest || !interactiveRef.current) return;
       let state = sourceTimelinePagesRef.current.get(sourceId);
       if (!state) {
         state = { cursor: null, pages: 0, targetPages: 0, done: false, loading: false };
@@ -1083,7 +1202,11 @@ export function KnowledgeUniverse({
             },
             controller.signal,
           );
-          if (page.epoch !== epochRef.current || controller.signal.aborted) return;
+          if (
+            page.epoch !== epochRef.current
+            || controller.signal.aborted
+            || !interactiveRef.current
+          ) return;
           recordLoadedContent(page.nodes, sourceId);
           const previousCount = workingRef.current.nodes.length;
           const next = mergeUniverseActivation(
@@ -1115,7 +1238,7 @@ export function KnowledgeUniverse({
               }, reducedMotion ? 40 : 720);
             });
           }
-          if (!searchActivationRef.current) {
+          if (activationOriginRef.current === "browse") {
             setSummary({
               query: source?.label ?? "知识时间轴",
               events: next.nodes.filter((item) => item.kind === "event").length,
@@ -1130,7 +1253,9 @@ export function KnowledgeUniverse({
         setMoreHint(
           state.done
             ? `已抵达 ${source?.label ?? "这个星系"} 的时间轴起点`
-            : `已显现 ${loadedEvents} 个事件，继续拉近可查看更早内容`,
+            : activationOriginRef.current === "browse"
+              ? `已显现 ${loadedEvents} 个事件，继续拉近可查看更早内容`
+              : `已显现 ${loadedEvents} 个事件，点击节点可继续探索关联`,
         );
       } catch (reason) {
         if (reason instanceof ApiError && reason.code === "aborted") return;
@@ -1164,19 +1289,29 @@ export function KnowledgeUniverse({
 
   const handleSourceLod = React.useCallback(
     (sourceId: string, level: 0 | 1 | 2 | 3) => {
+      if (!interactiveRef.current) return;
       if (level < 1) return;
       setActivePartition(sourceId);
-      if (level >= 2) {
-        const timelinePages = sourceTimelinePagesRef.current.get(sourceId)?.pages ?? 0;
-        const requestedTimelinePages = sourceTimelinePageTargetForLod(level, timelinePages);
-        void loadSourceTimeline(sourceId, requestedTimelinePages);
-      }
+      if (!shouldAutoLoadUniverseTimeline(
+        activationOriginRef.current,
+        level,
+        viewPreferences.browseAutoExpand,
+      )) return;
+      const timelinePages = sourceTimelinePagesRef.current.get(sourceId)?.pages ?? 0;
+      const autoPageLimit = Math.max(0, manifest?.policy.auto_page_limit ?? 0);
+      if (timelinePages >= autoPageLimit) return;
+      const requestedTimelinePages = Math.min(
+        autoPageLimit,
+        sourceTimelinePageTargetForLod(level, timelinePages),
+      );
+      void loadSourceTimeline(sourceId, requestedTimelinePages);
     },
-    [loadSourceTimeline],
+    [loadSourceTimeline, manifest?.policy.auto_page_limit, viewPreferences.browseAutoExpand],
   );
 
   const handleSceneViewChange = React.useCallback(
     (view: UniverseSceneView) => {
+      if (!interactiveRef.current) return;
       dispatchUniverseView({
         mode: view.mode,
         source_id: view.sourceId,
@@ -1202,7 +1337,7 @@ export function KnowledgeUniverse({
       const exact = node as Universe3DNode & { kind: "event" | "entity" };
       setSelectedKey(exact.id);
       graphRef.current?.lockNode(exact.id);
-      if (exact.kind === "event") {
+      if (exact.kind === "event" && exact.relatedCountKnown) {
         const loadedEntities = universeAnchorProgress(
           workingRef.current,
           "event",
@@ -1224,9 +1359,24 @@ export function KnowledgeUniverse({
   );
 
   const clearSelection = React.useCallback(() => {
+    graphRef.current?.unlockNode();
     setSelectedKey(null);
     setHoveredConcreteKey(null);
   }, []);
+
+  const resetUniversePresentation = React.useCallback(() => {
+    graphRef.current?.resetOverview();
+    viewportSourceRef.current = null;
+    setViewportSourceId(null);
+    setActivePartition(null);
+    setSelectedKey(null);
+    setHoveredConcreteKey(null);
+  }, []);
+
+  React.useEffect(() => {
+    if (!selectedKey || graphData.nodes.some((node) => node.id === selectedKey)) return;
+    clearSelection();
+  }, [clearSelection, graphData.nodes, selectedKey]);
 
   const handleSceneHover = React.useCallback((value: UniverseSceneHover | null) => {
     if (!value || value.node.kind === "source") {
@@ -1238,30 +1388,36 @@ export function KnowledgeUniverse({
   }, []);
 
   React.useEffect(() => {
-    if (!manifest || !webglAvailable) return;
+    if (!interactive || !manifest || !webglAvailable) return;
     const frame = window.requestAnimationFrame(() => {
       focusOverview();
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [focusOverview, manifest, webglAvailable]);
+  }, [focusOverview, interactive, manifest, webglAvailable]);
 
   React.useEffect(() => {
     const previous = previousWorkspacePanelRef.current;
     previousWorkspacePanelRef.current = workspacePanel;
     if (previous === workspacePanel || workspacePanel === "normal") return;
     const timer = window.setTimeout(() => {
-      if (summary) graphRef.current?.focusResult();
+      if (previous === "normal") resetUniversePresentation();
+      else if (summary) graphRef.current?.focusResult();
       else graphRef.current?.focusOverview();
     }, workspacePanel === "hidden" ? 220 : 80);
     return () => window.clearTimeout(timer);
-  }, [summary, workspacePanel]);
+  }, [resetUniversePresentation, summary, workspacePanel]);
 
   React.useEffect(() => {
-    const graph = graphRef.current;
-    if (!graph) return;
-    if (interactive && document.visibilityState === "visible") graph.resume();
-    else graph.pause();
-  }, [interactive]);
+    if (interactive) return;
+    resetUniversePresentation();
+    graphRef.current?.pause();
+    expandAbortRef.current?.abort();
+    timelineAbortRef.current?.abort();
+    rebuildAbortRef.current?.abort();
+    clearStageTimer();
+    clearCameraSchedule();
+    setHoveredConcreteKey(null);
+  }, [clearCameraSchedule, clearStageTimer, interactive, resetUniversePresentation]);
 
   React.useEffect(() => {
     if (!viewportLoadProgress) return;
@@ -1302,6 +1458,7 @@ export function KnowledgeUniverse({
   );
 
   const rebuild = React.useCallback(async () => {
+    if (!interactiveRef.current) return;
     rebuildAbortRef.current?.abort();
     const controller = new AbortController();
     rebuildAbortRef.current = controller;
@@ -1309,10 +1466,11 @@ export function KnowledgeUniverse({
     setError("");
     try {
       const queued = await api.rebuildUniverse(controller.signal);
+      if (controller.signal.aborted || !interactiveRef.current) return;
       setMoreHint("统计刷新已进入后台队列");
       for (let attempt = 0; attempt < 80; attempt += 1) {
-        await new Promise((resolve) => window.setTimeout(resolve, 750));
-        if (controller.signal.aborted) return;
+        await waitForAbortableDelay(750, controller.signal);
+        if (controller.signal.aborted || !interactiveRef.current) return;
         const job = await api.getJob(queued.id, controller.signal);
         if (job.status === "failed") {
           throw new ApiError(0, "rebuild_failed", job.error || "知识宇宙统计刷新失败");
@@ -1349,10 +1507,18 @@ export function KnowledgeUniverse({
     <div
       ref={containerRef}
       className={cn(
-        "sag-knowledge-universe absolute inset-0 z-[2] overflow-hidden",
-        !interactive && "pointer-events-none",
+        "sag-knowledge-universe absolute inset-0 z-[2] origin-center overflow-hidden transition-[opacity,transform] duration-200 ease-out",
+        interactive
+          ? "scale-100 opacity-100"
+          : "pointer-events-none scale-[0.985] opacity-0",
       )}
       aria-label="SAG 动态知识宇宙"
+      aria-hidden={!interactive}
+      data-universe-suspended={!interactive}
+      data-universe-workspace-panel={workspacePanel}
+      data-universe-activation-origin={activationOrigin}
+      data-universe-search-locked={activationOrigin === "search"}
+      data-universe-node-budget={budget.nodes}
     >
       {webglAvailable === true && manifest ? (
         <div className="sag-universe-graph absolute inset-0">
@@ -1365,6 +1531,7 @@ export function KnowledgeUniverse({
             darkTheme={darkTheme}
             interactive={interactive}
             reducedMotion={Boolean(reducedMotion)}
+            viewPreferences={viewPreferences}
             onNodeClick={handleNodeClick}
             onHover={handleSceneHover}
             onViewChange={handleSceneViewChange}
@@ -1441,7 +1608,7 @@ export function KnowledgeUniverse({
                 </span>
                 {summary ? (
                   <span className="min-w-0 max-w-64 truncate border-l border-border/70 pl-2 tabular-nums sm:pl-3" title={summary.query}>
-                    {summary.events} 事件 · {summary.entities} 实体 · {summary.relations} 关系
+                    {visibleGraphCounts.events} 事件 · {visibleGraphCounts.entities} 实体 · {visibleGraphCounts.relations} 关系
                   </span>
                 ) : manifest ? (
                   <span className="min-w-0 truncate border-l border-border/70 pl-2 tabular-nums sm:pl-3">
@@ -1486,6 +1653,15 @@ export function KnowledgeUniverse({
             )}
           </AnimatePresence>
           {expandingKey && <Loader2 className="size-3 animate-spin" />}
+          {activationOrigin === "search" && (
+            <span
+              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-500/25 bg-amber-500/10 px-1.5 py-1 text-[9px] text-amber-700 dark:text-amber-300"
+              title="搜索视图不会随滚轮加载更多数据，只能点击节点拓展"
+            >
+              <LockKeyhole className="size-2.5" />
+              <span className="hidden sm:inline">仅点击拓展</span>
+            </span>
+          )}
         </div>
 
         <AnimatePresence initial={false}>
@@ -1494,6 +1670,7 @@ export function KnowledgeUniverse({
               key={viewportLoadProgress.sourceId}
               progress={viewportLoadProgress}
               reducedMotion={Boolean(reducedMotion)}
+              clickOnly={activationOrigin !== "browse"}
             />
           )}
         </AnimatePresence>
@@ -1603,14 +1780,14 @@ export function KnowledgeUniverse({
                     inspectorNode.kind === "entity" ? "bg-cyan-400/75" : "bg-amber-400/75",
                   )}
                   style={{
-                    width: `${inspectorTotal > 0
+                    width: `${inspectorTotalKnown && inspectorTotal > 0
                       ? Math.min(100, Math.max(3, inspectorProgress / inspectorTotal * 100))
-                      : 0}%`,
+                      : inspectorProgress > 0 ? 35 : 0}%`,
                   }}
                 />
               </div>
               <span className="shrink-0 tabular-nums">
-                {inspectorProgress} / {inspectorTotal}
+                {inspectorProgress} / {inspectorTotalKnown ? inspectorTotal : "?"}
               </span>
             </div>
             <div className="mt-2 flex min-h-7 items-center justify-between gap-3">
@@ -1618,8 +1795,10 @@ export function KnowledgeUniverse({
                 {expandingKey === inspectorNode.id
                   ? "正在拓展下一批关联"
                   : inspectorCanExpand
-                    ? `还有 ${inspectorRemaining} 个关联可探索`
-                    : inspectorExhausted && inspectorRemaining > 0
+                    ? inspectorTotalKnown
+                      ? `还有 ${inspectorRemaining} 个关联可探索`
+                      : "点击探索关联内容"
+                    : inspectorExhausted && (inspectorRemaining ?? 0) > 0
                       ? "已到达当前时间范围的起点"
                     : inspectorTotal > 0
                       ? "关联内容已全部呈现"
@@ -1654,6 +1833,9 @@ export function KnowledgeUniverse({
       {interactive && (
         <TooltipProvider delayDuration={240}>
           <div className="absolute bottom-5 right-5 z-10 flex flex-col gap-1.5">
+            <IconControl label="打开完整面板" onClick={onOpenWorkspace}>
+              <PanelRightOpen className="size-3.5" />
+            </IconControl>
             <IconControl
               label="回到当前结果"
               onClick={focusResult}

@@ -90,6 +90,170 @@ function patch(epoch: number, index: number): UniverseGraphPatch {
 }
 
 describe("universe working set", () => {
+  it("evicts nodes in exact FIFO order", () => {
+    let current = emptyUniverseWorkingSet(1);
+    for (const id of ["a", "b", "c", "d", "e"]) {
+      current = mergeUniverseActivation(current, {
+        epoch: 1,
+        query: id,
+        nodes: [{ id, kind: "entity", source_id: "source-a", label: id }],
+        relations: [],
+      }, { nodes: 3, edges: 3 });
+    }
+
+    expect(current.node_order).toEqual([
+      "source-a:entity:c",
+      "source-a:entity:d",
+      "source-a:entity:e",
+    ]);
+    expect(current.nodes.map((node) => node.id)).toEqual(["c", "d", "e"]);
+  });
+
+  it("updates an existing node without moving it to the FIFO tail", () => {
+    let current = mergeUniverseActivation(emptyUniverseWorkingSet(2), {
+      epoch: 2,
+      query: "initial",
+      nodes: ["a", "b", "c"].map((id) => ({
+        id,
+        kind: "entity" as const,
+        source_id: "source-a",
+        label: id,
+      })),
+      relations: [],
+    }, { nodes: 3, edges: 3 });
+    current = mergeUniverseActivation(current, {
+      epoch: 2,
+      query: "update",
+      nodes: [{ id: "b", kind: "entity", source_id: "source-a", label: "B updated" }],
+      relations: [],
+    }, { nodes: 3, edges: 3 });
+
+    expect(current.node_order).toEqual([
+      "source-a:entity:a",
+      "source-a:entity:b",
+      "source-a:entity:c",
+    ]);
+    expect(current.nodes.find((node) => node.id === "b")?.label).toBe("B updated");
+
+    for (const id of ["d", "e"]) {
+      current = mergeUniverseActivation(current, {
+        epoch: 2,
+        query: id,
+        nodes: [{ id, kind: "entity", source_id: "source-a", label: id }],
+        relations: [],
+      }, { nodes: 3, edges: 3 });
+    }
+    expect(current.nodes.map((node) => node.id)).toEqual(["c", "d", "e"]);
+  });
+
+  it("protects a newly inserted batch while evicting enough oldest nodes", () => {
+    const current = mergeUniverseActivation(emptyUniverseWorkingSet(3), {
+      epoch: 3,
+      query: "initial",
+      nodes: ["a", "b", "c", "d"].map((id) => ({
+        id,
+        kind: "entity" as const,
+        source_id: "source-a",
+        label: id,
+      })),
+      relations: [],
+    }, { nodes: 4, edges: 4 });
+    const merged = mergeUniverseActivation(current, {
+      epoch: 3,
+      query: "batch",
+      nodes: ["e", "f"].map((id) => ({
+        id,
+        kind: "entity" as const,
+        source_id: "source-a",
+        label: id,
+      })),
+      relations: [],
+    }, { nodes: 4, edges: 4 });
+
+    expect(merged.nodes.map((node) => node.id)).toEqual(["c", "d", "e", "f"]);
+  });
+
+  it("admits a clicked expansion after initial roots fill the whole budget", () => {
+    const current = replaceUniverseWorkingSet({
+      epoch: 4,
+      query: "roots",
+      nodes: ["root", "old-a", "old-b", "old-c"].map((id) => ({
+        id,
+        kind: "event" as const,
+        source_id: "source-a",
+        label: id,
+      })),
+      relations: [],
+    }, { nodes: 4, edges: 4 });
+    const nextPatch = patch(4, 99);
+    nextPatch.anchor = { ...nextPatch.anchor, id: "root" };
+    nextPatch.relations = [{
+      source_id: "source-a",
+      from_id: "root",
+      to_id: "entity-99",
+      kind: "mentions",
+      weight: 1,
+      description: "",
+    }];
+
+    const merged = mergeUniverseGraphPatch(current, nextPatch, { nodes: 4, edges: 4 });
+    expect(merged.nodes.map((node) => node.id)).toEqual([
+      "root",
+      "old-b",
+      "old-c",
+      "entity-99",
+    ]);
+    expect(merged.root_keys).not.toContain("source-a:event:old-a");
+  });
+
+  it("shrinks immediately and can temporarily protect a selected old node", () => {
+    const current = mergeUniverseActivation(emptyUniverseWorkingSet(5), {
+      epoch: 5,
+      query: "large",
+      nodes: ["a", "b", "c", "d", "e"].map((id) => ({
+        id,
+        kind: "entity" as const,
+        source_id: "source-a",
+        label: id,
+      })),
+      relations: [],
+    }, { nodes: 5, edges: 5 });
+
+    const shrunk = trimUniverseWorkingSet(current, { nodes: 3, edges: 3 });
+    expect(shrunk.nodes.map((node) => node.id)).toEqual(["c", "d", "e"]);
+
+    const protectedShrink = trimUniverseWorkingSet(
+      current,
+      { nodes: 3, edges: 3 },
+      ["source-a:entity:a"],
+    );
+    expect(protectedShrink.nodes.map((node) => node.id)).toEqual(["a", "d", "e"]);
+  });
+
+  it("keeps the newest valid edges when the edge budget is exceeded", () => {
+    let current = replaceUniverseWorkingSet({
+      epoch: 6,
+      query: "root",
+      nodes: [{
+        id: "root-event",
+        kind: "event",
+        source_id: "source-a",
+        label: "root",
+      }],
+      relations: [],
+    }, { nodes: 10, edges: 2 });
+    for (let index = 0; index < 3; index += 1) {
+      current = mergeUniverseGraphPatch(current, patch(6, index), { nodes: 10, edges: 2 });
+    }
+
+    expect(current.relations.map((relation) => relation.to_id)).toEqual([
+      "entity-1",
+      "entity-2",
+    ]);
+    const withoutEdges = trimUniverseWorkingSet(current, { nodes: 10, edges: 0 });
+    expect(withoutEdges.relations).toEqual([]);
+  });
+
   it("advances deep LOD one page at a time", () => {
     expect(sourceTimelinePageTargetForLod(1, 0)).toBe(0);
     expect(sourceTimelinePageTargetForLod(2, 0)).toBe(1);
