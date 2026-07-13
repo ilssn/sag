@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   APP_INITIALIZATION_DEFAULTS,
   APP_INITIALIZATION_STORAGE_KEYS,
+  rememberThemeBeforeWorkspaceCollapse,
+  restoreThemeBeforeWorkspaceCollapse,
   dismissQuickModelSetup,
   persistPetCollapsed,
   persistPetEnabled,
@@ -14,11 +16,14 @@ import {
   type InitializationStorage,
 } from "./app-initialization";
 
-function memoryStorage(initial: Record<string, string> = {}): InitializationStorage {
+function memoryStorage(initial: Record<string, string> = {}): InitializationStorage & {
+  removeItem: (key: string) => void;
+} {
   const values = new Map(Object.entries(initial));
   return {
     getItem: (key) => values.get(key) ?? null,
     setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key),
   };
 }
 
@@ -94,6 +99,18 @@ describe("app initialization", () => {
     expect(readInitialWorkspace(storage)).toEqual({ panel: "normal", section: "knowledge" });
     expect(readInitialPetEnabled(storage)).toBe(false);
     expect(readInitialPetCollapsed(storage)).toBe(false);
+  });
+
+  it("restores only the theme captured before collapsing the workspace", () => {
+    const storage = memoryStorage();
+
+    expect(rememberThemeBeforeWorkspaceCollapse(storage, "light")).toBe("light");
+    expect(rememberThemeBeforeWorkspaceCollapse(storage, "dark")).toBe("light");
+    expect(restoreThemeBeforeWorkspaceCollapse(storage)).toBe("light");
+    expect(restoreThemeBeforeWorkspaceCollapse(storage)).toBeNull();
+
+    expect(rememberThemeBeforeWorkspaceCollapse(storage, "dark")).toBe("dark");
+    expect(restoreThemeBeforeWorkspaceCollapse(storage)).toBe("dark");
   });
 
   it("shows model setup once and respects an explicit skip", () => {

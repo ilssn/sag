@@ -100,7 +100,7 @@ async def test_302_quick_model_setup(monkeypatch: pytest.MonkeyPatch):
                 body = response.json()
                 config = body["config"]
                 assert config == {
-                    "llm_base_url": "https://api.302.ai/v1",
+                    "llm_base_url": "https://api.302ai.cn/v1",
                     "llm_model": "qwen3.6-flash",
                     "llm_temperature": 0.3,
                     "llm_max_tokens": 2048,
@@ -111,12 +111,12 @@ async def test_302_quick_model_setup(monkeypatch: pytest.MonkeyPatch):
                     "document_chunk_mode": "standard",
                     "llm_api_key_set": True,
                     "embedding_model": "Qwen/Qwen3-Embedding-4B",
-                    "embedding_base_url": "https://api.302.ai/v1",
+                    "embedding_base_url": "https://api.302ai.cn/v1",
                     "embedding_dimensions": 1024,
                     "embedding_api_key_set": True,
                     "document_parser": "auto",
                     "effective_document_parser": "mineru",
-                    "mineru_base_url": "https://api.302.ai",
+                    "mineru_base_url": "https://api.302ai.cn",
                     "mineru_version": "2.5",
                     "mineru_api_key_set": True,
                     "document_extract_concurrency": 5,

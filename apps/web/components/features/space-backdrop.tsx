@@ -15,6 +15,7 @@ import {
   readUniverseView,
   type UniverseViewState,
 } from "@/lib/universe-events";
+import { ParticleGalaxy } from "@/components/features/particle-galaxy";
 
 const SpaceParticles = dynamic(
   () => import("@/components/features/space-particles").then((module) => module.SpaceParticles),
@@ -55,11 +56,10 @@ export function SpaceBackdrop() {
     restDelta: 0.001,
   });
   const renderedProgress = reducedMotion ? viewProgress : springProgress;
-  const moonX = useTransform(renderedProgress, [0, 0.55, 1], ["0%", "22%", "68%"]);
-  const moonY = useTransform(renderedProgress, [0, 0.55, 1], ["0%", "-14%", "-52%"]);
-  const moonScale = useTransform(renderedProgress, [0, 0.55, 1], [1, 0.96, 0.82]);
-  const moonRotate = useTransform(renderedProgress, [0, 0.55, 1], [0, 2.5, 7]);
-  const moonOpacity = useTransform(renderedProgress, [0, 0.55, 1], [1, 0.58, 0.015]);
+  const galaxyX = useTransform(renderedProgress, [0, 0.55, 1], ["0%", "12%", "36%"]);
+  const galaxyY = useTransform(renderedProgress, [0, 0.55, 1], ["0%", "-8%", "-24%"]);
+  const galaxyScale = useTransform(renderedProgress, [0, 0.55, 1], [1, 0.98, 0.9]);
+  const galaxyOpacity = useTransform(renderedProgress, [0, 0.55, 1], [1, 0.72, 0.16]);
 
   React.useEffect(() => {
     const applyView = (view: UniverseViewState) => {
@@ -148,27 +148,15 @@ export function SpaceBackdrop() {
         <span ref={cursorMeteorRef} className="sag-space-cursor-meteor" data-active="false" />
       )}
       <motion.span
-        className="sag-space-moon-orbit"
+        className="sag-space-galaxy-orbit"
         style={{
-          x: moonX,
-          y: moonY,
-          scale: moonScale,
-          rotate: moonRotate,
-          opacity: moonOpacity,
+          x: galaxyX,
+          y: galaxyY,
+          scale: galaxyScale,
+          opacity: galaxyOpacity,
         }}
       >
-        <span className="sag-space-moon">
-          <span className="sag-space-moon__crater sag-space-moon__crater--one" />
-          <span className="sag-space-moon__crater sag-space-moon__crater--two" />
-          <span className="sag-space-moon__crater sag-space-moon__crater--three" />
-          <span className="sag-space-moon__crater sag-space-moon__crater--four" />
-          <span className="sag-space-moon__crater sag-space-moon__crater--five" />
-          <span className="sag-space-moon__crater sag-space-moon__crater--six" />
-          <span className="sag-space-moon__crater sag-space-moon__crater--seven" />
-          <span className="sag-space-moon__crater sag-space-moon__crater--eight" />
-          <span className="sag-space-moon__crater sag-space-moon__crater--nine" />
-          <span className="sag-space-moon__crater sag-space-moon__crater--ten" />
-        </span>
+        <ParticleGalaxy reducedMotion={Boolean(reducedMotion)} />
       </motion.span>
       <span className="sag-space-dust" />
       <span className="sag-space-meteor sag-space-meteor--one" />

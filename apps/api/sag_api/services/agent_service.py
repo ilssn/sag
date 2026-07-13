@@ -37,16 +37,20 @@ from sag_api.services.agent_domain import (
 )
 from sag_api.tools import ToolContext as HostToolContext
 from sag_api.tools import ToolRegistry
+from sag_api.tools.builtin import WebSearchTool
 from sag_api.tools.mcp import open_agent_mcp_tools
 
 AGENT_MAX_STEPS = 4
 
 _KNOWLEDGE_TOOLS = ["search_context", "get_entity"]
+_WEB_TOOLS = ["web_search", "open_webpage"]
 _ALWAYS_TOOLS = ["get_time"]
 _TOOL_LABELS = {
     "search_context": "检索知识库",
     "get_entity": "查询实体",
     "get_time": "查询时间",
+    "web_search": "联网搜索",
+    "open_webpage": "打开网页",
 }
 
 _DIRECT_INTENT = re.compile(
@@ -345,7 +349,7 @@ def _enabled_tool_names(agent, *, has_sources: bool = False, knowledge_only: boo
         # Keep local, read-only system utilities available while excluding
         # configured/MCP tools and model-knowledge fallbacks.
         return list(dict.fromkeys([*_ALWAYS_TOOLS, *knowledge_tools]))
-    return list(dict.fromkeys([*_ALWAYS_TOOLS, *knowledge_tools, *configured]))
+    return list(dict.fromkeys([*_ALWAYS_TOOLS, *knowledge_tools, *_WEB_TOOLS, *configured]))
 
 
 def _adapt_tool(host_tool, host_context: HostToolContext, citations: list[dict]) -> AgentTool:
@@ -380,10 +384,14 @@ def _adapt_tool(host_tool, host_context: HostToolContext, citations: list[dict])
             }
             for citation in result.citations[:6]
         ]
-        details: dict[str, Any] = {
-            "count": count,
-            "sources": [{"id": source.id, "name": source.name} for source in host_context.sources],
-        }
+        details: dict[str, Any] = {"count": count}
+        if host_tool.meta.name in _KNOWLEDGE_TOOLS:
+            details["scope"] = "knowledge"
+            details["sources"] = [
+                {"id": source.id, "name": source.name} for source in host_context.sources
+            ]
+        elif host_tool.meta.name in _WEB_TOOLS:
+            details["scope"] = "internet"
         if matches:
             details["matches"] = matches
         elif result.content:
@@ -567,6 +575,16 @@ async def generate_stream(
                         "问题依赖外部或知识库资料时，应明确说明当前没有可用依据。"
                     )
                 scene_notes.append(offline_rule)
+            elif WebSearchTool.configured():
+                scene_notes.append(
+                    "本轮联网已开启。凡回答依赖实时、最新或外部事实，必须调用 web_search 获取网页证据，"
+                    "并在结论附近保留可点击的 Markdown 来源链接；search_context 只用于用户的本地知识库，"
+                    "不得用它代替互联网搜索。需要最新信息时，查询中应包含绝对日期，并将 time_range 设为 "
+                    "day 或 week；搜索摘要不足以核验精确结论时，必须用 open_webpage 打开最相关的可信来源。"
+                    "web_search 或 open_webpage 已成功返回结果后，不得声称无法联网、无法访问实时信息或无法访问网页；"
+                    "如果结果不够新或不足以支持结论，只能明确说明本次搜索没有找到足以核验的结果，并说明证据日期，"
+                    "不得把证据不足描述成系统能力不足。"
+                )
             if plan.source_ids and sources:
                 scene_notes.append(
                     "用户已通过 @ 将本轮知识范围限定为："

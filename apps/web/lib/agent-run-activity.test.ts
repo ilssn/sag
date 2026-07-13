@@ -6,6 +6,7 @@ import {
   mergeCitations,
   reduceAgentRunSteps,
   toolArgumentsPreview,
+  toolScope,
   type LiveStep,
 } from "./agent-run-activity";
 
@@ -278,5 +279,42 @@ describe("agent run activity", () => {
       "query=现在几点; top_k=8",
     );
     expect(toolArgumentsPreview({ query: "一段很长的查询文本" }, 12)).toHaveLength(13);
+  });
+
+  it("treats web search as internet scope even for legacy traces with mounted sources", () => {
+    expect(
+      toolScope({
+        kind: "tool",
+        step: 1,
+        name: "web_search",
+        details: {
+          sources: [
+            { id: "source-1", name: "西游记" },
+            { id: "source-2", name: "SAG" },
+          ],
+        },
+      }),
+    ).toEqual({ kind: "internet", sources: [] });
+
+    expect(
+      toolScope({
+        kind: "tool",
+        step: 1,
+        name: "search_context",
+        details: { sources: [{ id: "source-1", name: "西游记" }] },
+      }),
+    ).toEqual({
+      kind: "knowledge",
+      sources: [{ id: "source-1", name: "西游记" }],
+    });
+
+    expect(
+      toolScope({
+        kind: "tool",
+        step: 1,
+        name: "get_time",
+        details: { sources: [{ id: "source-1", name: "西游记" }] },
+      }),
+    ).toEqual({ kind: null, sources: [] });
   });
 });

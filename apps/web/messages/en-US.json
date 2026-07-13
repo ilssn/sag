@@ -566,6 +566,7 @@
   "AppShell": {
     "loading": "Loading…",
     "configureModel": "Configure model",
+    "exitExplore": "Exit exploration",
     "resizeWindow": "Resize window"
   },
   "ChatPage": {
@@ -613,7 +614,7 @@
     "enabled": "On",
     "disabled": "Off",
     "web": "Web",
-    "webEnabledDescription": "On: configured web search tools may be used",
+    "webEnabledDescription": "On: use built-in 302.AI web search and configured external tools",
     "webDisabledDescription": "Off: use knowledge-base content only",
     "unconfiguredModel": "No model configured",
     "currentModel": "Current model: {model}",
@@ -666,6 +667,7 @@
     "query": "Query",
     "entity": "Entity",
     "scope": "Scope",
+    "internet": "Internet",
     "separator": ", ",
     "matches": "Matches",
     "passage": "Passage",
@@ -689,7 +691,9 @@
     "tools": {
       "searchContext": "Search knowledge",
       "getEntity": "Look up entity",
-      "getTime": "Check time"
+      "getTime": "Check time",
+      "webSearch": "Search the web",
+      "openWebPage": "Open webpage"
     }
   },
   "Search": {
@@ -1053,7 +1057,6 @@
       "exploreMore": "Explore more"
     },
     "controls": {
-      "openPanel": "Open full workspace",
       "currentResult": "Return to current result",
       "overview": "Return to full universe",
       "reset": "Reset exploration and view",

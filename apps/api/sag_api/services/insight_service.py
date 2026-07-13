@@ -54,6 +54,7 @@ async def get_source_graph(
         source=source,
         event_limit=event_limit,
         entity_limit=entity_limit,
+        expected_event_count=sum(document.event_count for document in documents),
     )
 
     document_nodes = [

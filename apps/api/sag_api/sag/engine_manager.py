@@ -964,6 +964,7 @@ class EngineManager:
         source: Source | None = None,
         event_limit: int = 1_000,
         entity_limit: int = 1_000,
+        expected_event_count: int | None = None,
     ) -> SourceGraphInfo:
         """按展示预算读取一个按文档均衡的事件—实体图谱。
 
@@ -971,7 +972,7 @@ class EngineManager:
         避免单篇长文占满配额；关联边覆盖优先并限制密度，避免高基数图谱拖垮浏览器。
         """
         await self._slot(source_config_id, source)
-        from sqlalchemy import func, select
+        from sqlalchemy import func, select, update
         from zleap.sag.db import get_session_factory
         from zleap.sag.db.models import Entity, EventEntity, SourceEvent
 
@@ -985,6 +986,39 @@ class EngineManager:
             )
             if not source_ids:
                 return SourceGraphInfo(total_entities=total_entities)
+
+            event_scope = (
+                SourceEvent.source_config_id == source_config_id,
+                SourceEvent.source_id.in_(source_ids),
+            )
+            visible_event = SourceEvent.status.is_(None) | (SourceEvent.status != "DELETED")
+
+            # 旧版断点抽取逐块保存，上游却把每次保存都视为整篇替换，导致先前块被隐藏。
+            # 只有 Web 完成数能证明引擎中的全部事件属于本次抽取时才修复，避免恢复旧版本。
+            if expected_event_count and expected_event_count > 0:
+                total_event_count, visible_event_count = (
+                    await s.execute(
+                        select(
+                            func.count(SourceEvent.id),
+                            func.count(SourceEvent.id).filter(visible_event),
+                        ).where(*event_scope)
+                    )
+                ).one()
+                if (
+                    int(visible_event_count or 0) < expected_event_count
+                    and int(total_event_count or 0) == expected_event_count
+                ):
+                    repaired = await s.execute(
+                        update(SourceEvent)
+                        .where(*event_scope, SourceEvent.status == "DELETED")
+                        .values(status="COMPLETED")
+                    )
+                    await s.commit()
+                    log.warning(
+                        "已恢复分块抽取中被上游隐藏的事件 source_config_id=%s count=%d",
+                        source_config_id,
+                        int(repaired.rowcount or 0),
+                    )
 
             # 每个文档先取 rank 较小的事件，再在文档之间轮询，兼顾层级根节点与覆盖面。
             source_rank = (
@@ -1010,9 +1044,8 @@ class EngineManager:
                     source_rank,
                 )
                 .where(
-                    SourceEvent.source_config_id == source_config_id,
-                    SourceEvent.source_id.in_(source_ids),
-                    (SourceEvent.status.is_(None) | (SourceEvent.status != "DELETED")),
+                    *event_scope,
+                    visible_event,
                 )
                 .subquery()
             )

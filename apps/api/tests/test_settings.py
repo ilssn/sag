@@ -61,6 +61,15 @@ def test_timezone_defaults_to_beijing_and_rejects_invalid(monkeypatch):
         Settings(_env_file=None)
 
 
+def test_provider_base_urls_default_to_302_china_endpoint(monkeypatch):
+    for name in ("SAG_LLM_BASE_URL", "SAG_EMBEDDING_BASE_URL", "SAG_MINERU_BASE_URL"):
+        monkeypatch.delenv(name, raising=False)
+    configured = Settings(_env_file=None)
+    assert configured.llm_base_url == "https://api.302ai.cn/v1"
+    assert configured.embedding_base_url == "https://api.302ai.cn/v1"
+    assert configured.mineru_base_url == "https://api.302ai.cn"
+
+
 @pytest.mark.asyncio
 async def test_legacy_atomic_db_strategy_is_migrated():
     from sqlalchemy import delete, select
@@ -70,7 +79,15 @@ async def test_legacy_atomic_db_strategy_is_migrated():
     from sag_api.services.settings_service import apply_startup_overrides
 
     await init_db()
-    previous = settings.search_strategy
+    previous = {
+        field: getattr(settings, field)
+        for field in (
+            "search_strategy",
+            "llm_base_url",
+            "embedding_base_url",
+            "mineru_base_url",
+        )
+    }
     try:
         async with SessionLocal() as session:
             await session.execute(
@@ -80,13 +97,21 @@ async def test_legacy_atomic_db_strategy_is_migrated():
                 Setting(
                     scope="global",
                     key="model_config",
-                    value={"search_strategy": "atomic"},
+                    value={
+                        "search_strategy": "atomic",
+                        "llm_base_url": "https://api.302.ai/v1",
+                        "embedding_base_url": "https://api.302.ai/v1",
+                        "mineru_base_url": "https://api.302.ai",
+                    },
                 )
             )
             await session.commit()
 
         await apply_startup_overrides(SessionLocal)
         assert settings.search_strategy == "multi"
+        assert settings.llm_base_url == "https://api.302ai.cn/v1"
+        assert settings.embedding_base_url == "https://api.302ai.cn/v1"
+        assert settings.mineru_base_url == "https://api.302ai.cn"
 
         async with SessionLocal() as session:
             row = await session.scalar(
@@ -94,13 +119,17 @@ async def test_legacy_atomic_db_strategy_is_migrated():
             )
             assert row is not None
             assert row.value["search_strategy"] == "multi"
+            assert row.value["llm_base_url"] == "https://api.302ai.cn/v1"
+            assert row.value["embedding_base_url"] == "https://api.302ai.cn/v1"
+            assert row.value["mineru_base_url"] == "https://api.302ai.cn"
     finally:
         async with SessionLocal() as session:
             await session.execute(
                 delete(Setting).where(Setting.scope == "global", Setting.key == "model_config")
             )
             await session.commit()
-        settings.search_strategy = previous
+        for field, value in previous.items():
+            setattr(settings, field, value)
 
 
 async def _register(c, email):
@@ -197,13 +226,14 @@ async def test_model_config_crud_masking_and_test():
                         "llm_api_key": "sk-fake-xyz",
                     },
                 )
+                assert r.json()["config"]["llm_base_url"] == "https://api.302ai.cn/v1"
                 assert r.json()["config"]["llm_api_key_set"] is True
                 assert "sk-fake" not in r.text
 
                 # 升级前已配置 302 的用户可在服务端复用旧 Key，一键补齐 MinerU。
                 r = await c.post("/api/v1/system/model-config/mineru/302", headers=A)
                 assert r.status_code == 200
-                assert r.json()["config"]["mineru_base_url"] == "https://api.302.ai"
+                assert r.json()["config"]["mineru_base_url"] == "https://api.302ai.cn"
                 assert r.json()["config"]["mineru_api_key_set"] is True
                 assert "sk-fake" not in r.text
                 # 留空提交 → 保留原 key（仍 set），同时更新其他字段

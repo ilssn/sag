@@ -58,7 +58,7 @@ _NULLABLE_FIELDS = frozenset(
 )
 
 QUICK_SETUP_302 = {
-    "llm_base_url": "https://api.302.ai/v1",
+    "llm_base_url": "https://api.302ai.cn/v1",
     "llm_model": "qwen3.6-flash",
     "llm_temperature": 0.3,
     "llm_max_tokens": 2048,
@@ -66,10 +66,10 @@ QUICK_SETUP_302 = {
     "llm_timeout_ms": 60_000,
     "llm_max_retries": 2,
     "embedding_model": "Qwen/Qwen3-Embedding-4B",
-    "embedding_base_url": "https://api.302.ai/v1",
+    "embedding_base_url": "https://api.302ai.cn/v1",
     "embedding_dimensions": 1024,
     "document_parser": "auto",
-    "mineru_base_url": "https://api.302.ai",
+    "mineru_base_url": "https://api.302ai.cn",
     "mineru_version": "2.5",
     "document_extract_concurrency": 5,
     "document_chunk_max_tokens": 1_000,
@@ -77,6 +77,11 @@ QUICK_SETUP_302 = {
     "search_strategy": "vector",
     "search_top_k": 8,
     "sag_language": "zh",
+}
+
+_LEGACY_302_BASE_URLS = {
+    "https://api.302.ai": "https://api.302ai.cn",
+    "https://api.302.ai/v1": "https://api.302ai.cn/v1",
 }
 
 
@@ -89,6 +94,10 @@ async def _load_row(session: AsyncSession, key: str = _KEY) -> Setting | None:
 def _normalize_overrides(overrides: dict) -> dict:
     """清理持久化配置，确保已下线或非法策略不会进入运行时。"""
     normalized = dict(overrides)
+    for field in ("llm_base_url", "embedding_base_url", "mineru_base_url"):
+        value = normalized.get(field)
+        if isinstance(value, str):
+            normalized[field] = _LEGACY_302_BASE_URLS.get(value.rstrip("/"), value)
     strategy = normalized.get("search_strategy")
     if strategy == "atomic":
         normalized["search_strategy"] = normalize_search_strategy(strategy)
@@ -230,6 +239,8 @@ async def save_model_config(session: AsyncSession, patch: dict) -> dict:
             continue
         stored[key] = value
 
+    stored = _normalize_overrides(stored)
+
     if row is None:
         session.add(Setting(scope=_SCOPE, key=_KEY, value=stored))
     else:
@@ -264,12 +275,11 @@ async def save_302_mineru_setup(session: AsyncSession) -> dict:
         host = (parsed.hostname or "").lower()
         if host not in {"api.302.ai", "api.302ai.cn"} or not api_key:
             continue
-        root = f"https://{host}"
         return await save_model_config(
             session,
             {
                 "document_parser": "auto",
-                "mineru_base_url": root,
+                "mineru_base_url": "https://api.302ai.cn",
                 "mineru_api_key": api_key,
                 "mineru_version": "2.5",
             },

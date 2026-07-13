@@ -16,6 +16,7 @@ import { AnimatePresence, motion } from "motion/react";
 
 import { relativeTime } from "@/lib/format";
 import type { Source } from "@/lib/types";
+import { dispatchUniverseSourceFocus } from "@/lib/universe-events";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/components/features/app-shell";
 import { CreateSourceDialog } from "@/components/features/create-source-dialog";
@@ -258,9 +259,10 @@ export function KnowledgeWorkspace({
                     <CompactSourceRow
                       key={source.id}
                       source={source}
-                      onOpen={(item) =>
-                        setSelectedSource({ id: item.id, initialScreen: "documents" })
-                      }
+                      onOpen={(item) => {
+                        dispatchUniverseSourceFocus(item.id);
+                        setSelectedSource({ id: item.id, initialScreen: "documents" });
+                      }}
                     />
                   ))}
                 </div>

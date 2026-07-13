@@ -173,6 +173,39 @@ describe("universe working set", () => {
     expect(merged.nodes.map((node) => node.id)).toEqual(["c", "d", "e", "f"]);
   });
 
+  it("keeps the selected node when a later timeline page exceeds the budget", () => {
+    const current = mergeUniverseActivation(emptyUniverseWorkingSet(3), {
+      epoch: 3,
+      query: "first page",
+      nodes: ["selected", "old-a", "old-b"].map((id) => ({
+        id,
+        kind: "event" as const,
+        source_id: "source-a",
+        label: id,
+      })),
+      relations: [],
+    }, { nodes: 3, edges: 3 });
+    const merged = mergeUniverseActivation(
+      current,
+      {
+        epoch: 3,
+        query: "next page",
+        nodes: ["new-a", "new-b", "new-c"].map((id) => ({
+          id,
+          kind: "event" as const,
+          source_id: "source-a",
+          label: id,
+        })),
+        relations: [],
+      },
+      { nodes: 3, edges: 3 },
+      1,
+      { protectedKeys: ["source-a:event:selected"] },
+    );
+
+    expect(merged.nodes.map((node) => node.id)).toEqual(["selected", "new-a", "new-b"]);
+  });
+
   it("admits a clicked expansion after initial roots fill the whole budget", () => {
     const current = replaceUniverseWorkingSet({
       epoch: 4,

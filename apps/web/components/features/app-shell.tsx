@@ -3,6 +3,7 @@
 import * as React from "react";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
+import { useTheme } from "next-themes";
 import { usePathname, useRouter } from "next/navigation";
 import { Cpu, Grip } from "lucide-react";
 import { motion } from "motion/react";
@@ -13,8 +14,12 @@ import {
   APP_INITIALIZATION_DEFAULTS,
   dismissQuickModelSetup,
   persistWorkspaceInitialization,
+  rememberThemeBeforeWorkspaceCollapse,
   readInitialWorkspace,
+  resolveThemePreference,
+  restoreThemeBeforeWorkspaceCollapse,
   shouldShowQuickModelSetup,
+  type ThemePreference,
   type WorkspacePanelMode,
 } from "@/lib/app-initialization";
 import { DEFAULT_AGENT_AVATAR, DEFAULT_AGENT_NAME } from "@/lib/branding";
@@ -269,6 +274,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const t = useTranslations("AppShell");
   const router = useRouter();
   const pathname = usePathname();
+  const { theme, resolvedTheme, setTheme } = useTheme();
   const petAgent = React.useMemo(
     () =>
       new PetAgent({
@@ -304,6 +310,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const threadLimitRef = React.useRef(SIDEBAR_THREADS_PAGE_SIZE);
   const threadRequestIdRef = React.useRef(0);
   const loadingMoreThreadsRef = React.useRef(false);
+  const previousThemePanelRef = React.useRef<WorkspacePanelMode | null>(null);
+  const themeBeforeCollapseRef = React.useRef<ThemePreference | null>(null);
+  const currentThemeRef = React.useRef<ThemePreference>(
+    resolveThemePreference(theme, resolvedTheme),
+  );
+  currentThemeRef.current = resolveThemePreference(theme, resolvedTheme);
 
   React.useEffect(() => {
     const mq = window.matchMedia("(min-width: 768px)");
@@ -321,6 +333,33 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setPanelMode(/^\/chat\/[^/]+/.test(pathname) ? "normal" : workspace.panel);
     setWorkspaceSection(workspace.section);
   }, [pathname]);
+
+  React.useEffect(() => {
+    if (loading) return;
+    const previousPanel = previousThemePanelRef.current;
+    previousThemePanelRef.current = panelMode;
+
+    if (panelMode !== "normal") {
+      if (previousPanel !== null && previousPanel !== "normal") return;
+      const beforeCollapse = rememberThemeBeforeWorkspaceCollapse(
+        window.localStorage,
+        currentThemeRef.current,
+      );
+      themeBeforeCollapseRef.current = beforeCollapse;
+      currentThemeRef.current = "dark";
+      setTheme("dark");
+      return;
+    }
+
+    if (previousPanel === "normal") return;
+    const beforeCollapse = restoreThemeBeforeWorkspaceCollapse(window.localStorage)
+      ?? themeBeforeCollapseRef.current;
+    themeBeforeCollapseRef.current = null;
+    if (!beforeCollapse) return;
+    currentThemeRef.current = beforeCollapse;
+    setTheme(beforeCollapse);
+  }, [loading, panelMode, setTheme]);
+
   const toggleWindowMode = React.useCallback(() => {
     setWindowMode((m) => {
       const next: WindowMode = m === "full" ? "window" : "full";
@@ -637,7 +676,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <KnowledgeUniverse
                   interactive={panelMode !== "normal"}
                   workspacePanel={panelMode}
-                  onOpenWorkspace={expandWorkspace}
                 />
                 {panelMode !== "normal" && (
                   <motion.div
@@ -658,6 +696,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         {t("configureModel")}
                       </Button>
                     )}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 rounded-none border-r border-border/60 px-2.5 text-xs first:rounded-l-md"
+                      onClick={expandWorkspace}
+                    >
+                      {t("exitExplore")}
+                    </Button>
                     <LanguageToggle />
                     <ThemeToggle />
                   </motion.div>

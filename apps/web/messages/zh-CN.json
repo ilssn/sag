@@ -566,6 +566,7 @@
   "AppShell": {
     "loading": "载入中…",
     "configureModel": "配置模型",
+    "exitExplore": "退出探索模式",
     "resizeWindow": "调整窗口大小"
   },
   "ChatPage": {
@@ -613,7 +614,7 @@
     "enabled": "已开启",
     "disabled": "已关闭",
     "web": "联网",
-    "webEnabledDescription": "已开启：可使用已配置的联网搜索工具",
+    "webEnabledDescription": "已开启：使用 302.AI 内置联网搜索及已配置的外部工具",
     "webDisabledDescription": "已关闭：仅使用知识库内容",
     "unconfiguredModel": "未配置模型",
     "currentModel": "当前模型：{model}",
@@ -666,6 +667,7 @@
     "query": "查询",
     "entity": "实体",
     "scope": "范围",
+    "internet": "互联网",
     "separator": "、",
     "matches": "命中内容",
     "passage": "资料片段",
@@ -689,7 +691,9 @@
     "tools": {
       "searchContext": "检索知识库",
       "getEntity": "查询实体",
-      "getTime": "查询时间"
+      "getTime": "查询时间",
+      "webSearch": "联网搜索",
+      "openWebPage": "打开网页"
     }
   },
   "Search": {
@@ -1053,7 +1057,6 @@
       "exploreMore": "探索更多"
     },
     "controls": {
-      "openPanel": "打开完整面板",
       "currentResult": "回到当前结果",
       "overview": "回到完整宇宙",
       "reset": "重置探索并归位",

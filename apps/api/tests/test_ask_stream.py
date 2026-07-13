@@ -148,6 +148,7 @@ async def test_ask_web_switch_isolates_external_tools_and_records_run_mode(monke
 
     monkeypatch.setattr(agent_service, "resolve_mcp_specs", fake_resolve_mcp_specs)
     monkeypatch.setattr(agent_service, "open_agent_mcp_tools", fake_open_agent_mcp_tools)
+    monkeypatch.setattr(agent_service.WebSearchTool, "configured", staticmethod(lambda: True))
 
     transport = httpx.ASGITransport(app=app)
     async with app.router.lifespan_context(app):
@@ -185,6 +186,7 @@ async def test_ask_web_switch_isolates_external_tools_and_records_run_mode(monke
                 tool.get("function", {}).get("name") for tool in offline_request.tools
             }
             assert {"get_time", "search_context", "get_entity"} <= offline_tools
+            assert "web_search" not in offline_tools
             assert "mcp__web_fixture__search" not in offline_tools
             assert offline_request.metadata["web_enabled"] is False
             assert offline_request.metadata["knowledge_only"] is True
@@ -215,12 +217,15 @@ async def test_ask_web_switch_isolates_external_tools_and_records_run_mode(monke
                 tool.get("function", {}).get("name") for tool in online_request.tools
             }
             assert "mcp__web_fixture__search" in online_tools
+            assert "web_search" in online_tools
             assert online_request.metadata["web_enabled"] is True
             assert online_request.metadata["knowledge_only"] is False
             online_system = next(
                 message.content for message in online_request.messages if message.role == "system"
             )
             assert "本轮联网已关闭" not in online_system
+            assert "open_webpage" in online_system
+            assert "不得把证据不足描述成系统能力不足" in online_system
             assert '"web_enabled": true' in online.text
             assert '"knowledge_only": false' in online.text
             assert resolved_specs == [True]

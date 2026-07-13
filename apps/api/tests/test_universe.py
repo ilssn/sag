@@ -306,6 +306,22 @@ async def test_universe_overview_expand_detail_and_reset_contract():
                 assert partition["time_buckets"][0]["count"] == 1
                 assert all(key in partition for key in ("x", "y", "z", "density"))
 
+                # 快照事件数与信源完成数不一致时，即使脏标记遗漏也必须触发重建。
+                async with SessionLocal() as session:
+                    source = await session.get(Source, source_id)
+                    assert source is not None
+                    source.event_count = 2
+                    await session.commit()
+                drifted = await client.get("/api/v1/universe/manifest", headers=headers)
+                assert drifted.status_code == 200
+                assert drifted.json()["status"] == "stale"
+                assert drifted.json()["stale"] is True
+                async with SessionLocal() as session:
+                    source = await session.get(Source, source_id)
+                    assert source is not None
+                    source.event_count = 1
+                    await session.commit()
+
                 second = await client.post("/api/v1/universe/rebuild", headers=headers)
                 assert second.status_code == 202, second.text
                 assert (await wait_for_job(second.json()["id"]))["status"] == "succeeded"

@@ -37,6 +37,7 @@ export interface UniverseWorkingSet {
 
 export interface MergeUniverseActivationOptions {
   roots?: boolean;
+  protectedKeys?: Iterable<string>;
 }
 
 export function universeNodeKey(
@@ -293,6 +294,6 @@ export function mergeUniverseActivation(
       node_order: nodeOrder,
     },
     budget,
-    newKeys,
+    [...(options.protectedKeys ?? []), ...newKeys],
   );
 }
