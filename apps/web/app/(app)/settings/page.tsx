@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { AccountSettings } from "@/components/features/account-settings";
@@ -44,6 +45,7 @@ function GraphSettings() {
 }
 
 function SettingsPageContent() {
+  const t = useTranslations("Settings");
   const router = useRouter();
   const searchParams = useSearchParams();
   const activeTab = resolveSettingsTab(searchParams.get("tab"));
@@ -69,7 +71,10 @@ function SettingsPageContent() {
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 p-4 md:p-6">
-      <PageHeader title={SETTINGS_PAGE.title} description={SETTINGS_PAGE.description} />
+      <PageHeader
+        title={t(SETTINGS_PAGE.titleKey)}
+        description={t(SETTINGS_PAGE.descriptionKey)}
+      />
 
       <Tabs
         value={activeTab}
@@ -79,13 +84,13 @@ function SettingsPageContent() {
         className="flex flex-col gap-6"
       >
         <TabsList
-          aria-label="设置分类"
+          aria-label={t("categoriesAria")}
           className="h-auto w-full justify-start gap-1 overflow-x-auto rounded-none border-b bg-transparent p-0"
         >
-          {SETTINGS_TABS.map(({ value, label, icon: Icon }) => (
+          {SETTINGS_TABS.map(({ value, labelKey, icon: Icon }) => (
             <TabsTrigger key={value} value={value} className={tabTriggerClassName}>
               <Icon className="size-4" />
-              {label}
+              {t(`tabs.${labelKey}`)}
             </TabsTrigger>
           ))}
         </TabsList>
@@ -126,11 +131,12 @@ function SettingsPageContent() {
 }
 
 export default function SettingsPage() {
+  const t = useTranslations("Settings");
   return (
     <React.Suspense
       fallback={(
         <div className="mx-auto w-full max-w-3xl p-6 text-sm text-muted-foreground">
-          正在载入设置…
+          {t("loading")}
         </div>
       )}
     >

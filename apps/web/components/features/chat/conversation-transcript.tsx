@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 
 import type { Citation } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -89,6 +90,7 @@ export const ConversationMessageItem = React.memo(function ConversationMessageIt
   renderUserAttachments,
   renderAssistantFooter,
 }: ConversationMessageItemProps) {
+  const t = useTranslations("Conversation");
   const handleCitationClick = React.useCallback(
     (citation: Citation) => onCitationClick?.(citation, message),
     [message, onCitationClick],
@@ -134,7 +136,7 @@ export const ConversationMessageItem = React.memo(function ConversationMessageIt
         {waiting && steps.length === 0 ? (
           <div className="flex items-center gap-1.5 py-1 text-sm">
             <span className="size-1.5 animate-blink rounded-full bg-primary" />
-            <span className="text-shimmer">正在思考…</span>
+            <span className="text-shimmer">{t("thinking")}</span>
           </div>
         ) : message.content ? (
           <MarkdownContent

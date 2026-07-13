@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Plug } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { api } from "@/lib/api";
 import type { SourceMcpDescriptor } from "@/lib/types";
@@ -10,6 +11,7 @@ import { CopyButton } from "@/components/features/copy-button";
 import { McpToolList } from "@/components/features/mcp-tool-list";
 
 export function SourceMcpCard({ sourceId }: { sourceId: string }) {
+  const t = useTranslations("SourceMcp");
   const [desc, setDesc] = React.useState<SourceMcpDescriptor | null>(null);
   const [failed, setFailed] = React.useState(false);
 
@@ -40,16 +42,16 @@ export function SourceMcpCard({ sourceId }: { sourceId: string }) {
     <section className="flex flex-col gap-3 rounded-lg border p-4">
       <div className="flex items-center gap-2">
         <Plug className="size-4 text-muted-foreground" />
-        <h2 className="text-sm font-medium">作为 MCP 挂载</h2>
+        <h2 className="text-sm font-medium">{t("title")}</h2>
       </div>
       <p className="text-xs text-muted-foreground">
-        把这个信源接入 Claude Desktop / Cursor 等 MCP 宿主，直接检索它的内容。提供以下只读工具：
+        {t("description")}
       </p>
       <McpToolList tools={desc.tool_details} />
 
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-medium text-muted-foreground">HTTP（Streamable-HTTP）</span>
+          <span className="text-xs font-medium text-muted-foreground">{t("http")}</span>
           <CopyButton text={desc.http.url} label="URL" />
         </div>
         <CodeBlock>{desc.http.url}</CodeBlock>
@@ -58,8 +60,8 @@ export function SourceMcpCard({ sourceId }: { sourceId: string }) {
 
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-medium text-muted-foreground">stdio（配置片段）</span>
-          <CopyButton text={stdioSnippet} label="配置" />
+          <span className="text-xs font-medium text-muted-foreground">{t("stdio")}</span>
+          <CopyButton text={stdioSnippet} label={t("configuration")} />
         </div>
         <CodeBlock>{stdioSnippet}</CodeBlock>
         <p className="text-[11px] text-muted-foreground">{desc.stdio.note}</p>

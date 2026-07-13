@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { useLocale, useTranslations } from "next-intl";
 import { useTheme } from "next-themes";
 import {
   CheckCircle2,
@@ -160,8 +161,8 @@ function stableOffset(key: string, radius: number): Position3D {
   };
 }
 
-function compactCount(value: number) {
-  return new Intl.NumberFormat("zh-CN", {
+function compactCount(value: number, locale: string) {
+  return new Intl.NumberFormat(locale, {
     notation: value >= 10_000 ? "compact" : "standard",
     maximumFractionDigits: 1,
   }).format(value);
@@ -202,6 +203,8 @@ function LoadProgressRow({
   metric: SourceLoadMetric;
   tone: "entity" | "event";
 }) {
+  const locale = useLocale();
+  const t = useTranslations("KnowledgeUniverse");
   const total = Math.max(metric.total, metric.loaded);
   const progress = total > 0
     ? Math.min(100, Math.max(0, metric.loaded / total * 100))
@@ -211,13 +214,13 @@ function LoadProgressRow({
       <div className="flex items-center justify-between gap-3 text-[10px] leading-none">
         <span className="text-muted-foreground">{label}</span>
         <span className="tabular-nums text-foreground/85">
-          {compactCount(metric.loaded)} / {compactCount(total)}
+          {compactCount(metric.loaded, locale)} / {compactCount(total, locale)}
         </span>
       </div>
       <div
         className="h-1.5 overflow-hidden rounded-full bg-foreground/[0.07]"
         role="progressbar"
-        aria-label={`${label}加载进度`}
+        aria-label={t("loadProgress.rowAria", { label })}
         aria-valuemin={0}
         aria-valuemax={total}
         aria-valuenow={Math.min(metric.loaded, total)}
@@ -248,14 +251,15 @@ function UniverseLoadProgressPanel({
   reducedMotion: boolean;
   clickOnly: boolean;
 }) {
+  const t = useTranslations("KnowledgeUniverse");
   const started = progress.events.loaded > 0 || progress.entities.loaded > 0;
   const status = progress.allDone
-    ? "全部内容已加载"
+    ? t("loadProgress.complete")
     : progress.loading
-      ? "正在从星系中心显现"
+      ? t("loadProgress.loading")
       : started
-        ? clickOnly ? "点击节点继续探索" : "继续拉近，加载更早内容"
-        : clickOnly ? "点击节点开始探索" : "拉近星系，开始探索";
+        ? clickOnly ? t("loadProgress.clickContinue") : t("loadProgress.zoomContinue")
+        : clickOnly ? t("loadProgress.clickStart") : t("loadProgress.zoomStart");
   return (
     <motion.div
       data-universe-load-progress="true"
@@ -275,7 +279,7 @@ function UniverseLoadProgressPanel({
       <div className="mb-3 flex min-w-0 items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="truncate text-[11px] font-medium text-foreground/90" title={progress.label}>
-            内容加载进度
+            {t("loadProgress.title")}
           </p>
           <p className="mt-0.5 truncate text-[9px] text-muted-foreground" title={status}>
             {status}
@@ -290,8 +294,8 @@ function UniverseLoadProgressPanel({
         )}
       </div>
       <div className="space-y-2.5">
-        <LoadProgressRow label="已加载事件" metric={progress.events} tone="event" />
-        <LoadProgressRow label="已连接实体" metric={progress.entities} tone="entity" />
+        <LoadProgressRow label={t("loadProgress.events")} metric={progress.events} tone="event" />
+        <LoadProgressRow label={t("loadProgress.entities")} metric={progress.entities} tone="entity" />
       </div>
     </motion.div>
   );
@@ -363,6 +367,8 @@ export function KnowledgeUniverse({
   workspacePanel?: "hidden" | "mini" | "normal";
   onOpenWorkspace: () => void;
 }) {
+  const locale = useLocale();
+  const t = useTranslations("KnowledgeUniverse");
   const reducedMotion = useReducedMotion();
   const { resolvedTheme } = useTheme();
   const darkTheme = resolvedTheme === "dark";
@@ -493,11 +499,11 @@ export function KnowledgeUniverse({
     try {
       setManifest(await api.universeManifest());
     } catch (reason) {
-      setError(reason instanceof ApiError ? reason.message : "知识宇宙暂时无法抵达");
+      setError(reason instanceof ApiError ? reason.message : t("errors.unavailable"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   React.useEffect(() => {
     if (!interactive) return;
@@ -809,7 +815,7 @@ export function KnowledgeUniverse({
       sourceId: partition.source_id,
       label: partition.label,
       description: "",
-      category: "信息源",
+      category: t("nodeKinds.source"),
       radius: visualRadiusBySource.get(partition.source_id) ?? partition.radius,
       density: partition.density,
       eventCount: partition.event_count,
@@ -892,7 +898,7 @@ export function KnowledgeUniverse({
         sourceId,
         label: node.label,
         description: node.description ?? "",
-        category: node.category ?? (node.kind === "event" ? "事件" : "实体"),
+        category: node.category ?? t(`nodeKinds.${node.kind}`),
         radius: 0,
         density: 0,
         eventCount: 0,
@@ -969,6 +975,7 @@ export function KnowledgeUniverse({
     manifest?.version,
     renderedSourcePartitions,
     sourceById,
+    t,
     visibleCount,
     viewPreferences,
     working,
@@ -998,8 +1005,8 @@ export function KnowledgeUniverse({
       .filter((node) => node.kind === "entity")
       .map((node) => node.category?.trim())
       .filter((category): category is string => Boolean(category)))]
-      .sort((left, right) => left.localeCompare(right, "zh-CN")),
-    [working.nodes],
+      .sort((left, right) => left.localeCompare(right, locale)),
+    [locale, working.nodes],
   );
   React.useEffect(() => {
     if (entityCategories.length > 0) {
@@ -1140,16 +1147,18 @@ export function KnowledgeUniverse({
           exactNode.sourceId,
         );
         const totalCount = Math.max(committedCount, patch.anchor.related_count);
-        const relationLabel = exactNode.kind === "entity" ? "关联事件" : "关联实体";
+        const relationLabel = exactNode.kind === "entity"
+          ? t("nodeKinds.relatedEvents")
+          : t("nodeKinds.relatedEntities");
         setMoreHint(
           patch.page.has_more
-            ? `已展示 ${committedCount} / ${totalCount} 个${relationLabel}，再次点击继续向更早内容探索`
-            : `已展示全部 ${totalCount} 个${relationLabel}`,
+            ? t("expansion.pageMore", { committed: committedCount, total: totalCount, relation: relationLabel })
+            : t("expansion.complete", { total: totalCount, relation: relationLabel }),
         );
         stageTo(Math.min(previousCount, next.nodes.length), next.nodes.length);
       } catch (reason) {
         if (reason instanceof ApiError && reason.code === "aborted") return;
-        setMoreHint(reason instanceof ApiError ? reason.message : "关联星点加载失败");
+        setMoreHint(reason instanceof ApiError ? reason.message : t("errors.relatedLoadFailed"));
       } finally {
         if (expandAbortRef.current === controller) {
           expandAbortRef.current = null;
@@ -1157,7 +1166,7 @@ export function KnowledgeUniverse({
         }
       }
     },
-    [pruneExpansionState, recordLoadedContent, requestExpansion, stageTo],
+    [pruneExpansionState, recordLoadedContent, requestExpansion, stageTo, t],
   );
 
   const loadSourceTimeline = React.useCallback(
@@ -1187,7 +1196,7 @@ export function KnowledgeUniverse({
       timelineAbortRef.current?.abort();
       const controller = new AbortController();
       timelineAbortRef.current = controller;
-      setMoreHint("正在沿时间轴显现最近事件与关联实体");
+      setMoreHint(t("timeline.loading"));
       try {
         while (!state.done && state.pages < state.targetPages) {
           const firstPage = state.pages === 0;
@@ -1213,7 +1222,7 @@ export function KnowledgeUniverse({
             workingRef.current,
             {
               epoch,
-              query: source?.label ?? "知识时间轴",
+              query: source?.label ?? t("timeline.defaultTitle"),
               nodes: page.nodes,
               relations: page.relations,
             },
@@ -1240,7 +1249,7 @@ export function KnowledgeUniverse({
           }
           if (activationOriginRef.current === "browse") {
             setSummary({
-              query: source?.label ?? "知识时间轴",
+              query: source?.label ?? t("timeline.defaultTitle"),
               events: next.nodes.filter((item) => item.kind === "event").length,
               entities: next.nodes.filter((item) => item.kind === "entity").length,
               relations: next.relations.length,
@@ -1252,14 +1261,14 @@ export function KnowledgeUniverse({
         ).length;
         setMoreHint(
           state.done
-            ? `已抵达 ${source?.label ?? "这个星系"} 的时间轴起点`
+            ? t("timeline.startReached", { source: source?.label ?? t("timeline.thisGalaxy") })
             : activationOriginRef.current === "browse"
-              ? `已显现 ${loadedEvents} 个事件，继续拉近可查看更早内容`
-              : `已显现 ${loadedEvents} 个事件，点击节点可继续探索关联`,
+              ? t("timeline.loadedZoom", { count: loadedEvents })
+              : t("timeline.loadedClick", { count: loadedEvents }),
         );
       } catch (reason) {
         if (reason instanceof ApiError && reason.code === "aborted") return;
-        setMoreHint(reason instanceof ApiError ? reason.message : "知识时间轴加载失败");
+        setMoreHint(reason instanceof ApiError ? reason.message : t("errors.timelineLoadFailed"));
       } finally {
         state.loading = false;
         refreshLoadProgress();
@@ -1274,6 +1283,7 @@ export function KnowledgeUniverse({
       refreshLoadProgress,
       sourceById,
       stageTo,
+      t,
     ],
   );
 
@@ -1347,15 +1357,15 @@ export function KnowledgeUniverse({
         if (loadedEntities >= exact.relatedCount) {
           setMoreHint(
             exact.relatedCount > 0
-              ? `事件关联的 ${exact.relatedCount} 个实体已全部呈现`
-              : "这个事件暂未抽取到关联实体",
+              ? t("expansion.eventEntitiesComplete", { count: exact.relatedCount })
+              : t("expansion.noEventEntities"),
           );
           return;
         }
       }
       void expandNode(exact);
     },
-    [activatePartition, expandNode],
+    [activatePartition, expandNode, t],
   );
 
   const clearSelection = React.useCallback(() => {
@@ -1429,9 +1439,13 @@ export function KnowledgeUniverse({
     if (completedSourcesRef.current.has(viewportLoadProgress.sourceId)) return;
     completedSourcesRef.current.add(viewportLoadProgress.sourceId);
     setMoreHint(
-      `${viewportLoadProgress.label} 已全部加载：${viewportLoadProgress.events.total} 个事件、${viewportLoadProgress.entities.total} 个实体`,
+      t("loadProgress.sourceComplete", {
+        source: viewportLoadProgress.label,
+        events: viewportLoadProgress.events.total,
+        entities: viewportLoadProgress.entities.total,
+      }),
     );
-  }, [viewportLoadProgress]);
+  }, [t, viewportLoadProgress]);
 
   React.useEffect(() => {
     const onVisibility = () => {
@@ -1467,30 +1481,30 @@ export function KnowledgeUniverse({
     try {
       const queued = await api.rebuildUniverse(controller.signal);
       if (controller.signal.aborted || !interactiveRef.current) return;
-      setMoreHint("统计刷新已进入后台队列");
+      setMoreHint(t("rebuild.queued"));
       for (let attempt = 0; attempt < 80; attempt += 1) {
         await waitForAbortableDelay(750, controller.signal);
         if (controller.signal.aborted || !interactiveRef.current) return;
         const job = await api.getJob(queued.id, controller.signal);
         if (job.status === "failed") {
-          throw new ApiError(0, "rebuild_failed", job.error || "知识宇宙统计刷新失败");
+          throw new ApiError(0, "rebuild_failed", job.error || t("rebuild.failed"));
         }
         if (job.status !== "succeeded") continue;
         setManifest(await api.universeManifest());
-        setMoreHint("统计轮廓已刷新");
+        setMoreHint(t("rebuild.complete"));
         return;
       }
-      throw new ApiError(0, "rebuild_timeout", "统计仍在后台构建，请稍后再看");
+      throw new ApiError(0, "rebuild_timeout", t("rebuild.timeout"));
     } catch (reason) {
       if (reason instanceof ApiError && reason.code === "aborted") return;
-      setError(reason instanceof ApiError ? reason.message : "知识宇宙统计刷新失败");
+      setError(reason instanceof ApiError ? reason.message : t("rebuild.failed"));
     } finally {
       if (rebuildAbortRef.current === controller) {
         rebuildAbortRef.current = null;
         setRebuilding(false);
       }
     }
-  }, []);
+  }, [t]);
 
   React.useEffect(() => {
     if (
@@ -1512,7 +1526,7 @@ export function KnowledgeUniverse({
           ? "scale-100 opacity-100"
           : "pointer-events-none scale-[0.985] opacity-0",
       )}
-      aria-label="SAG 动态知识宇宙"
+      aria-label={t("aria")}
       aria-hidden={!interactive}
       data-universe-suspended={!interactive}
       data-universe-workspace-panel={workspacePanel}
@@ -1542,9 +1556,9 @@ export function KnowledgeUniverse({
       ) : webglAvailable === false ? (
         <div className="absolute inset-0 grid place-items-center p-8">
           <div className="max-w-sm rounded-lg border border-border/70 bg-background/75 p-5 text-center shadow-soft backdrop-blur-md">
-            <p className="text-sm font-medium">当前设备无法启用 WebGL</p>
+            <p className="text-sm font-medium">{t("webgl.title")}</p>
             <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              统计和搜索仍可正常使用；启用硬件加速后可进入 3D 知识宇宙。
+              {t("webgl.description")}
             </p>
           </div>
         </div>
@@ -1578,12 +1592,17 @@ export function KnowledgeUniverse({
                 <span
                   className="min-w-0 max-w-52 truncate border-l border-border/70 pl-2 tabular-nums sm:pl-3"
                   title={manifest?.version
-                    ? `${viewportSource.event_count} 事件 · ${viewportSource.entity_count} 实体`
-                    : `${viewportSource.event_count} 事件 · 实体统计构建中`}
+                    ? t("stats.source", { events: viewportSource.event_count, entities: viewportSource.entity_count })
+                    : t("stats.sourceBuilding", { events: viewportSource.event_count })}
                 >
                   {manifest?.version
-                    ? `${compactCount(viewportSource.event_count)} 事件 · ${compactCount(viewportSource.entity_count)} 实体`
-                    : `${compactCount(viewportSource.event_count)} 事件 · 实体统计构建中`}
+                    ? t("stats.source", {
+                        events: compactCount(viewportSource.event_count, locale),
+                        entities: compactCount(viewportSource.entity_count, locale),
+                      })
+                    : t("stats.sourceBuilding", {
+                        events: compactCount(viewportSource.event_count, locale),
+                      })}
                 </span>
               </motion.div>
             ) : (
@@ -1600,23 +1619,30 @@ export function KnowledgeUniverse({
               >
                 <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap">
                   <CircleDot className="size-3.5 text-cyan-200" />
-                  <span className="hidden sm:inline">主题实体</span>
+                  <span className="hidden sm:inline">{t("legend.entities")}</span>
                 </span>
                 <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap">
                   <Sparkles className="size-3.5 text-amber-300" />
-                  <span className="hidden sm:inline">关联事件</span>
+                  <span className="hidden sm:inline">{t("legend.events")}</span>
                 </span>
                 {summary ? (
                   <span className="min-w-0 max-w-64 truncate border-l border-border/70 pl-2 tabular-nums sm:pl-3" title={summary.query}>
-                    {visibleGraphCounts.events} 事件 · {visibleGraphCounts.entities} 实体 · {visibleGraphCounts.relations} 关系
+                    {t("stats.result", visibleGraphCounts)}
                   </span>
                 ) : manifest ? (
                   <span className="min-w-0 truncate border-l border-border/70 pl-2 tabular-nums sm:pl-3">
                     {manifest.version
-                      ? `${manifest.counts.sources ?? 0} 信息源 · ${compactCount(manifest.counts.entities ?? 0)} 实体 · ${compactCount(manifest.counts.events ?? 0)} 事件`
-                      : `${manifest.counts.sources ?? 0} 信息源 · ${compactCount(manifest.counts.events ?? 0)} 事件 · 实体统计构建中`}
+                      ? t("stats.overview", {
+                          sources: manifest.counts.sources ?? 0,
+                          entities: compactCount(manifest.counts.entities ?? 0, locale),
+                          events: compactCount(manifest.counts.events ?? 0, locale),
+                        })
+                      : t("stats.overviewBuilding", {
+                          sources: manifest.counts.sources ?? 0,
+                          events: compactCount(manifest.counts.events ?? 0, locale),
+                        })}
                     {(manifest.counts.sources ?? 0) > renderedSourcePartitions.length
-                      ? ` · 当前显示 ${renderedSourcePartitions.length} 个高密度轮廓`
+                      ? t("stats.visibleContours", { count: renderedSourcePartitions.length })
                       : ""}
                   </span>
                 ) : null}
@@ -1633,18 +1659,18 @@ export function KnowledgeUniverse({
                           )}
                           role="status"
                           aria-label={manifest.status === "failed"
-                            ? "统计刷新失败"
+                            ? t("rebuild.failed")
                             : manifest.status === "building" || rebuilding
-                              ? "统计正在后台刷新"
-                              : "统计准备刷新"}
+                              ? t("rebuild.running")
+                              : t("rebuild.ready")}
                         />
                       </TooltipTrigger>
                       <TooltipContent side="bottom">
                         {manifest.status === "failed"
-                          ? "统计刷新失败"
+                          ? t("rebuild.failed")
                           : manifest.status === "building" || rebuilding
-                            ? "统计正在后台刷新"
-                            : "统计准备刷新"}
+                            ? t("rebuild.running")
+                            : t("rebuild.ready")}
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
@@ -1656,10 +1682,10 @@ export function KnowledgeUniverse({
           {activationOrigin === "search" && (
             <span
               className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-500/25 bg-amber-500/10 px-1.5 py-1 text-[9px] text-amber-700 dark:text-amber-300"
-              title="搜索视图不会随滚轮加载更多数据，只能点击节点拓展"
+              title={t("searchLocked.description")}
             >
               <LockKeyhole className="size-2.5" />
-              <span className="hidden sm:inline">仅点击拓展</span>
+              <span className="hidden sm:inline">{t("searchLocked.label")}</span>
             </span>
           )}
         </div>
@@ -1704,11 +1730,11 @@ export function KnowledgeUniverse({
                 <div className="flex items-center gap-2">
                   <p className="truncate text-xs font-medium">{inspectorNode.label}</p>
                   {hoveredConcreteNode && (
-                    <span className="shrink-0 text-[9px] text-muted-foreground">悬停</span>
+                    <span className="shrink-0 text-[9px] text-muted-foreground">{t("inspector.hover")}</span>
                   )}
                 </div>
                 <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
-                  {inspectorNode.kind === "entity" ? "实体" : "事件"}
+                  {t(`nodeKinds.${inspectorNode.kind}`)}
                   {" · "}
                   {sourceById.get(inspectorNode.sourceId)?.label ?? inspectorNode.category}
                 </p>
@@ -1726,12 +1752,12 @@ export function KnowledgeUniverse({
                         inspectorNode.rawId,
                         inspectorNode.sourceId,
                       )}
-                      aria-label="查看原文详情"
+                      aria-label={t("inspector.viewSource")}
                     >
                       <Info className="size-3.5" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>查看原文详情</TooltipContent>
+                  <TooltipContent>{t("inspector.viewSource")}</TooltipContent>
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1741,12 +1767,12 @@ export function KnowledgeUniverse({
                       size="icon"
                       className="size-7"
                       onClick={() => dispatchUniverseAsk(inspectorNode)}
-                      aria-label="向宇航员提问"
+                      aria-label={t("inspector.ask")}
                     >
                       <MessageCircleQuestion className="size-3.5" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>向宇航员提问</TooltipContent>
+                  <TooltipContent>{t("inspector.ask")}</TooltipContent>
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1756,20 +1782,20 @@ export function KnowledgeUniverse({
                       size="icon"
                       className="size-7"
                       onClick={clearSelection}
-                      aria-label="取消选择"
+                      aria-label={t("inspector.clear")}
                     >
                       <X className="size-3.5" />
                     </Button>
                   </TooltipTrigger>
-                  <TooltipContent>取消选择</TooltipContent>
+                  <TooltipContent>{t("inspector.clear")}</TooltipContent>
                 </Tooltip>
               </div>
             </div>
             <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-muted-foreground">
               {inspectorNode.description || (
                 inspectorNode.kind === "entity"
-                  ? `${inspectorNode.category}，可继续探索它关联的事件。`
-                  : `${inspectorNode.category}，关联实体已随事件一同呈现。`
+                  ? t("inspector.entityFallback", { category: inspectorNode.category })
+                  : t("inspector.eventFallback", { category: inspectorNode.category })
               )}
             </p>
             <div className="mt-2 flex items-center gap-2 text-[10px] text-muted-foreground">
@@ -1793,16 +1819,16 @@ export function KnowledgeUniverse({
             <div className="mt-2 flex min-h-7 items-center justify-between gap-3">
               <p className="min-w-0 truncate text-[10px] text-muted-foreground">
                 {expandingKey === inspectorNode.id
-                  ? "正在拓展下一批关联"
+                  ? t("inspector.expanding")
                   : inspectorCanExpand
                     ? inspectorTotalKnown
-                      ? `还有 ${inspectorRemaining} 个关联可探索`
-                      : "点击探索关联内容"
+                      ? t("inspector.remaining", { count: inspectorRemaining ?? 0 })
+                      : t("inspector.clickExplore")
                     : inspectorExhausted && (inspectorRemaining ?? 0) > 0
-                      ? "已到达当前时间范围的起点"
+                      ? t("inspector.rangeStart")
                     : inspectorTotal > 0
-                      ? "关联内容已全部呈现"
-                      : "暂无可探索的关联"}
+                      ? t("inspector.allVisible")
+                      : t("inspector.none")}
               </p>
               {inspectorCanExpand && (
                 <Button
@@ -1816,7 +1842,7 @@ export function KnowledgeUniverse({
                   {expandingKey === inspectorNode.id
                     ? <Loader2 className="size-3 animate-spin" />
                     : <GitBranch className="size-3" />}
-                  探索更多
+                  {t("inspector.exploreMore")}
                 </Button>
               )}
             </div>
@@ -1833,27 +1859,27 @@ export function KnowledgeUniverse({
       {interactive && (
         <TooltipProvider delayDuration={240}>
           <div className="absolute bottom-5 right-5 z-10 flex flex-col gap-1.5">
-            <IconControl label="打开完整面板" onClick={onOpenWorkspace}>
+            <IconControl label={t("controls.openPanel")} onClick={onOpenWorkspace}>
               <PanelRightOpen className="size-3.5" />
             </IconControl>
             <IconControl
-              label="回到当前结果"
+              label={t("controls.currentResult")}
               onClick={focusResult}
               disabled={!summary && !selectedKey}
             >
               <LocateFixed className="size-3.5" />
             </IconControl>
-            <IconControl label="回到完整宇宙" onClick={focusOverview} disabled={!manifest}>
+            <IconControl label={t("controls.overview")} onClick={focusOverview} disabled={!manifest}>
               <Focus className="size-3.5" />
             </IconControl>
             <IconControl
-              label="重置探索并归位"
+              label={t("controls.reset")}
               onClick={() => resetScene(epochRef.current + 1)}
               disabled={!working.nodes.length}
             >
               <RotateCcw className="size-3.5" />
             </IconControl>
-            <IconControl label="刷新统计轮廓" onClick={() => void rebuild()} disabled={rebuilding}>
+            <IconControl label={t("controls.refresh")} onClick={() => void rebuild()} disabled={rebuilding}>
               <RefreshCw className={cn("size-3.5", rebuilding && "animate-spin")} />
             </IconControl>
           </div>

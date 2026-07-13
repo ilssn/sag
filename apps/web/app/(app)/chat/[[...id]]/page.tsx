@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import { useParams, usePathname, useRouter } from "next/navigation";
 
 import { DEFAULT_AGENT_AVATAR } from "@/lib/branding";
@@ -14,6 +15,7 @@ import { PetHeadAvatar } from "@/components/features/pet-head-avatar";
 
 /** 对话主入口；会话数据与迷你问答共享，仅保留完整工作台外壳。 */
 export default function ChatPage() {
+  const t = useTranslations("ChatPage");
   const { id } = useParams<{ id?: string | string[] }>();
   const pathname = usePathname();
   const router = useRouter();
@@ -85,12 +87,12 @@ export default function ChatPage() {
         heroNode={heroNode}
         emptyTitle={agent.name}
         suggestions={[
-          "总结一下知识库里最重要的内容",
-          "这份资料的关键结论是什么？",
-          "帮我梳理其中的时间线",
+          t("suggestionSummary"),
+          t("suggestionConclusions"),
+          t("suggestionTimeline"),
         ]}
-        emptyHint={agent.persona?.greeting || "我在。上传资料到知识库，或直接问我任何问题。"}
-        placeholder={`向 ${agent.name} 发送消息，输入 @ 指定知识库`}
+        emptyHint={agent.persona?.greeting || t("emptyHint")}
+        placeholder={t("placeholder", { name: agent.name })}
       />
     </div>
   );

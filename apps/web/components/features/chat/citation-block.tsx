@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { ArrowUpRight, BookOpenText, ChevronDown, Globe2, Library } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import type { Citation } from "@/lib/types";
 import { citationCopy } from "@/lib/citation-presentation";
@@ -40,6 +41,7 @@ function CitationCard({
   onOpen?: () => void;
   url?: string;
 }) {
+  const t = useTranslations("Citations");
   const [excerptExpanded, setExcerptExpanded] = React.useState(false);
   const excerptId = React.useId();
   const copy = citationCopy(citation, fallbackIndex);
@@ -62,24 +64,24 @@ function CitationCard({
                 href={url}
                 target="_blank"
                 rel="noopener noreferrer"
-                aria-label={`访问外部来源：${copy.title}`}
-                title="打开原文"
+                aria-label={t("visitExternal", { title: copy.title })}
+                title={t("openOriginal")}
                 className={sourceActionClass}
               >
                 <ArrowUpRight className="size-3" aria-hidden="true" />
-                原文
+                {t("original")}
               </a>
             ) : (
               <button
                 type="button"
                 onClick={onOpen}
                 disabled={!onOpen}
-                aria-label={`查看内部来源原文：${copy.title}`}
-                title={onOpen ? "查看原文" : "原文暂不可用"}
+                aria-label={t("viewInternal", { title: copy.title })}
+                title={onOpen ? t("viewOriginal") : t("unavailable")}
                 className={sourceActionClass}
               >
                 <ArrowUpRight className="size-3" aria-hidden="true" />
-                原文
+                {t("original")}
               </button>
             )}
           </div>
@@ -95,7 +97,7 @@ function CitationCard({
               id={excerptId}
               className="mt-2 border-l-2 border-primary/15 pl-2.5 animate-in fade-in slide-in-from-top-1 duration-150"
             >
-              <span className="text-[10px] font-medium text-muted-foreground/80">引用片段</span>
+              <span className="text-[10px] font-medium text-muted-foreground/80">{t("excerpt")}</span>
               <p
                 className="mt-0.5 whitespace-pre-wrap break-words text-[11px] leading-[1.7] text-muted-foreground"
               >
@@ -111,11 +113,13 @@ function CitationCard({
                 onClick={() => setExcerptExpanded((value) => !value)}
                 aria-expanded={excerptExpanded}
                 aria-controls={excerptId}
-                aria-label={excerptExpanded ? `收起引用片段：${copy.title}` : `展开引用片段：${copy.title}`}
-                title={excerptExpanded ? "收起" : "展开"}
+                aria-label={excerptExpanded
+                  ? t("collapseExcerpt", { title: copy.title })
+                  : t("expandExcerpt", { title: copy.title })}
+                title={excerptExpanded ? t("collapse") : t("expand")}
                 className={disclosureClass}
               >
-                {excerptExpanded ? "收起" : "展开"}
+                {excerptExpanded ? t("collapse") : t("expand")}
                 <ChevronDown
                   className={cn("size-3 transition-transform", excerptExpanded && "rotate-180")}
                   aria-hidden="true"
@@ -141,6 +145,7 @@ export const CitationBlock = React.memo(function CitationBlock({
   citations: Citation[];
   onCitationClick?: (citation: Citation) => void;
 }) {
+  const t = useTranslations("Citations");
   const panel = useDetailPanel();
   const [expanded, setExpanded] = React.useState(false);
   const contentId = React.useId();
@@ -191,8 +196,13 @@ export const CitationBlock = React.memo(function CitationBlock({
         onClick={() => setExpanded((value) => !value)}
         aria-expanded={expanded}
         aria-controls={contentId}
-        aria-label={`${expanded ? "收起" : "展开"} ${referenceCount} 条引用，其中内部来源 ${internal.length} 条，外部引用 ${external.length} 条`}
-        title={expanded ? "收起引用" : "展开引用"}
+        aria-label={t("toggleAria", {
+          action: expanded ? t("collapse") : t("expand"),
+          total: referenceCount,
+          internal: internal.length,
+          external: external.length,
+        })}
+        title={expanded ? t("collapseReferences") : t("expandReferences")}
         className={cn(
           "inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-2 text-[11px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
           expanded
@@ -201,7 +211,7 @@ export const CitationBlock = React.memo(function CitationBlock({
         )}
       >
         <BookOpenText className="size-3" aria-hidden="true" />
-        <span>引用 {referenceCount}</span>
+        <span>{t("referenceCount", { count: referenceCount })}</span>
         <ChevronDown
           className={cn("size-3 opacity-60 transition-transform", expanded && "rotate-180")}
           aria-hidden="true"
@@ -211,11 +221,11 @@ export const CitationBlock = React.memo(function CitationBlock({
       {expanded && (
         <section
           id={contentId}
-          aria-label="引用来源"
+          aria-label={t("sources")}
           className="order-last mt-1.5 w-full basis-full overflow-hidden rounded-xl border border-border/70 bg-muted/20 animate-in fade-in slide-in-from-top-1 duration-150"
         >
           <div className="flex items-center justify-between gap-3 px-3 py-2.5">
-            <span className="text-xs font-semibold text-foreground">引用来源</span>
+            <span className="text-xs font-semibold text-foreground">{t("sources")}</span>
             <span className="shrink-0 rounded-full bg-background px-1.5 py-0.5 font-mono text-[10px] font-medium tabular-nums text-muted-foreground">
               {referenceCount}
             </span>
@@ -226,7 +236,7 @@ export const CitationBlock = React.memo(function CitationBlock({
               <div className="flex items-center justify-between px-1.5 py-1.5">
                 <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-foreground">
                   <Library className="size-3.5" aria-hidden="true" />
-                  内部来源
+                  {t("internal")}
                 </span>
                 <span className="font-mono text-[10px] font-normal tabular-nums text-muted-foreground">
                   {internal.length}
@@ -253,7 +263,7 @@ export const CitationBlock = React.memo(function CitationBlock({
               <div className="flex items-center justify-between px-1.5 py-1.5">
                 <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-foreground">
                   <Globe2 className="size-3.5" aria-hidden="true" />
-                  外部引用
+                  {t("external")}
                 </span>
                 <span className="font-mono text-[10px] font-normal tabular-nums text-muted-foreground">
                   {external.length}

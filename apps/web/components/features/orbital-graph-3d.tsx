@@ -3,6 +3,7 @@
 import * as React from "react";
 import * as THREE from "three";
 import { Globe2, Maximize2, Minimize2, Orbit, RotateCcw } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
   CSS2DObject,
@@ -525,6 +526,7 @@ export function OrbitalEventEntityGraph({
   emptyTitle?: string;
   emptyDescription?: string;
 }) {
+  const t = useTranslations("OrbitalGraph");
   const mountRef = React.useRef<HTMLDivElement>(null);
   const sceneApiRef = React.useRef<OrbitalSceneApi | null>(null);
   const autoRotateRef = React.useRef(false);
@@ -584,7 +586,7 @@ export function OrbitalEventEntityGraph({
         powerPreference: "high-performance",
       });
     } catch {
-      setRenderError("当前浏览器无法启动双球 3D 图谱，请切换到其他图谱模式。");
+      setRenderError(t("unsupported"));
       return;
     }
     setRenderError("");
@@ -603,8 +605,8 @@ export function OrbitalEventEntityGraph({
     renderer.domElement.setAttribute(
       "aria-label",
       eventSurfaceMode === "plates"
-        ? "事件大陆板块星球与实体轨道 3D 图谱，可用方向键选择板块或节点，回车查看详情"
-        : "事件内核与实体轨道双球 3D 图谱，可用方向键选择节点，回车查看详情",
+        ? t("platesAria")
+        : t("nodesAria"),
     );
     renderer.domElement.setAttribute("role", "application");
 
@@ -839,7 +841,7 @@ export function OrbitalEventEntityGraph({
         if (!geometry) return;
         registerPlateNode({
           id,
-          labelText: event.title || "未命名事件",
+          labelText: event.title || t("unnamedEvent"),
           color: eventColors.get(event.id) ?? PLATE_COLORS[0],
           geometry,
         });
@@ -862,7 +864,7 @@ export function OrbitalEventEntityGraph({
         registerDiscNode({
           id,
           kind: "event",
-          labelText: event.title || "未命名事件",
+          labelText: event.title || t("unnamedEvent"),
           color: eventColors.get(event.id) ?? EVENT_COLORS[0],
           size: 42 + Math.min(21, Math.log2(degree + 1) * 6.5),
         });
@@ -875,7 +877,7 @@ export function OrbitalEventEntityGraph({
       registerDiscNode({
         id,
         kind: "entity",
-        labelText: entity.name || "未命名实体",
+        labelText: entity.name || t("unnamedEntity"),
         color: nodeColor("entity", entity.type || entity.id),
         size:
           (42 + Math.min(21, Math.log2(degree + 1) * 6.5)) * ENTITY_SIZE_RATIO,
@@ -1100,7 +1102,7 @@ export function OrbitalEventEntityGraph({
 
     const onContextLost = (event: Event) => {
       event.preventDefault();
-      setRenderError("双球 3D 图谱渲染已中断，请刷新页面或切换图谱模式。");
+      setRenderError(t("interrupted"));
     };
     renderer.domElement.addEventListener("webglcontextlost", onContextLost);
 
@@ -1207,11 +1209,11 @@ export function OrbitalEventEntityGraph({
       renderer.forceContextLoss();
       mount.replaceChildren();
     };
-  }, [empty, eventSurfaceMode, layout, refreshKey, slice]);
+  }, [empty, eventSurfaceMode, layout, refreshKey, slice, t]);
 
-  const resolvedEmptyTitle = emptyTitle ?? "还没有可展示的双球关系";
+  const resolvedEmptyTitle = emptyTitle ?? t("emptyTitle");
   const resolvedEmptyDescription =
-    emptyDescription ?? "只有已建立事件—实体关系的数据会进入双球轨道图。";
+    emptyDescription ?? t("emptyDescription");
   const toolButtonClass =
     "grid size-8 place-items-center rounded-md border border-white/15 bg-[#0b1020]/90 text-white/65 shadow-lg outline-none backdrop-blur-md transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-blue-400 disabled:pointer-events-none disabled:opacity-35";
 
@@ -1271,16 +1273,21 @@ export function OrbitalEventEntityGraph({
                 eventSurfaceMode === "plates" ? "rounded-sm" : "rounded-full",
               )}
             />
-            {eventSurfaceMode === "plates" ? "大陆" : "内核"} · 事件 {slice.events.length}
-            {graph.truncated ? ` / ${graph.counts.events}` : ""}
+            {t("eventStats", {
+              surface: eventSurfaceMode === "plates" ? t("plates") : t("core"),
+              shown: slice.events.length,
+              total: graph.truncated ? t("totalSuffix", { total: graph.counts.events }) : "",
+            })}
           </span>
           <span className="inline-flex items-center gap-1.5 text-[10px]">
             <span className="size-2 rounded-full border border-white/60 bg-[#6383ff]" />
-            外轨 · 实体 {slice.entities.length}
-            {graph.truncated ? ` / ${graph.counts.entities}` : ""}
+            {t("entityStats", {
+              shown: slice.entities.length,
+              total: graph.truncated ? t("totalSuffix", { total: graph.counts.entities }) : "",
+            })}
           </span>
           <span className="text-[10px] tabular-nums text-white/45">
-            {slice.relations.length} 关系
+            {t("relations", { count: slice.relations.length })}
           </span>
         </div>
       </div>
@@ -1293,10 +1300,10 @@ export function OrbitalEventEntityGraph({
           }
           disabled={empty || Boolean(renderError)}
           aria-label={
-            eventSurfaceMode === "plates" ? "切换为事件小球" : "切换为大陆板块星球"
+            eventSurfaceMode === "plates" ? t("switchToNodes") : t("switchToPlates")
           }
           aria-pressed={eventSurfaceMode === "plates"}
-          title={eventSurfaceMode === "plates" ? "切换为事件小球" : "大陆板块星球"}
+          title={eventSurfaceMode === "plates" ? t("switchToNodes") : t("platesPlanet")}
           className={cn(
             toolButtonClass,
             eventSurfaceMode === "plates" && "bg-white/15 text-white",
@@ -1308,9 +1315,9 @@ export function OrbitalEventEntityGraph({
           type="button"
           onClick={() => setAutoRotate((value) => !value)}
           disabled={empty || Boolean(renderError)}
-          aria-label={autoRotate ? "暂停轨道旋转" : "开启轨道旋转"}
+          aria-label={autoRotate ? t("pauseRotation") : t("startRotation")}
           aria-pressed={autoRotate}
-          title={autoRotate ? "暂停旋转" : "开启旋转"}
+          title={autoRotate ? t("pause") : t("start")}
           className={cn(toolButtonClass, autoRotate && "bg-white/15 text-white")}
         >
           <Orbit className="size-4" />
@@ -1319,8 +1326,8 @@ export function OrbitalEventEntityGraph({
           type="button"
           onClick={() => sceneApiRef.current?.resetCamera()}
           disabled={empty || Boolean(renderError)}
-          aria-label="重置双球视角"
-          title="重置视角"
+          aria-label={t("resetAria")}
+          title={t("reset")}
           className={toolButtonClass}
         >
           <RotateCcw className="size-4" />
@@ -1333,8 +1340,8 @@ export function OrbitalEventEntityGraph({
         <button
           type="button"
           onClick={() => setExpanded((value) => !value)}
-          aria-label={expanded ? "退出双球图谱全屏" : "全屏查看双球图谱"}
-          title={expanded ? "退出全屏" : "全屏查看"}
+          aria-label={expanded ? t("exitFullscreenAria") : t("fullscreenAria")}
+          title={expanded ? t("exitFullscreen") : t("fullscreen")}
           className={toolButtonClass}
         >
           {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
@@ -1360,7 +1367,7 @@ export function OrbitalEventEntityGraph({
         ) : (
           <Orbit className="size-3" />
         )}
-        {eventSurfaceMode === "plates" ? "大陆星球" : "双球轨道"}
+        {eventSurfaceMode === "plates" ? t("continentPlanet") : t("dualOrbit")}
       </div>
     </div>
   );

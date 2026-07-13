@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
+import { useLocale, useTranslations } from "next-intl";
 import { type Edge, type Node, type NodeProps } from "@xyflow/react";
 import {
   forceCollide,
@@ -70,18 +71,25 @@ interface GraphNodeData extends Record<string, unknown> {
   entity?: Entity;
 }
 
+interface GraphLabels {
+  timedEvent: string;
+  extractedEvent: string;
+  unnamedEntity: string;
+  uncategorized: string;
+}
+
 const KIND_META: Record<
   GraphKind,
-  { title: string; width: number; className: string; header: string }
+  { titleKey: "event" | "entity"; width: number; className: string; header: string }
 > = {
   event: {
-    title: "事件",
+    titleKey: "event",
     width: 196,
     className: "border-amber-500/30",
     header: "bg-amber-500/12 text-amber-700 dark:text-amber-300",
   },
   entity: {
-    title: "实体",
+    titleKey: "entity",
     width: 148,
     className: "border-dashed border-violet-500/35",
     header: "bg-violet-500/10 text-violet-700 dark:text-violet-300",
@@ -89,6 +97,7 @@ const KIND_META: Record<
 };
 
 function GraphNode({ data, selected }: NodeProps) {
+  const t = useTranslations("SourceGraph");
   const node = data as GraphNodeData;
   const meta = KIND_META[node.kind];
   return (
@@ -107,7 +116,7 @@ function GraphNode({ data, selected }: NodeProps) {
         ) : (
           <Users className="size-3 shrink-0" />
         )}
-        {meta.title}
+        {t(meta.titleKey)}
       </div>
       <div className="px-2.5 py-2">
         <div
@@ -128,7 +137,11 @@ function GraphNode({ data, selected }: NodeProps) {
 
 const nodeTypes = { sourceGraph: GraphNode };
 
-function makeNodes(slice: EventEntityGraphSlice, positions: Map<string, GraphPoint>): Node[] {
+function makeNodes(
+  slice: EventEntityGraphSlice,
+  positions: Map<string, GraphPoint>,
+  labels: GraphLabels,
+): Node[] {
   const fallback = { x: 0, y: 0 };
   return [
     ...slice.events.map((event) => ({
@@ -138,7 +151,7 @@ function makeNodes(slice: EventEntityGraphSlice, positions: Map<string, GraphPoi
       data: {
         kind: "event",
         label: event.title,
-        subtitle: event.category || (event.start_time ? "有时间信息" : "已抽取事件"),
+        subtitle: event.category || (event.start_time ? labels.timedEvent : labels.extractedEvent),
         event,
       } satisfies GraphNodeData,
     })),
@@ -148,8 +161,8 @@ function makeNodes(slice: EventEntityGraphSlice, positions: Map<string, GraphPoi
       position: positions.get(eventEntityNodeId("entity", entity.id)) ?? fallback,
       data: {
         kind: "entity",
-        label: entity.name || "未命名实体",
-        subtitle: entity.type || "未分类",
+        label: entity.name || labels.unnamedEntity,
+        subtitle: entity.type || labels.uncategorized,
         entity,
       } satisfies GraphNodeData,
     })),
@@ -192,7 +205,7 @@ function linkedEventPositions(
     .filter((position): position is GraphPoint => Boolean(position));
 }
 
-function buildTreePositions(slice: EventEntityGraphSlice) {
+function buildTreePositions(slice: EventEntityGraphSlice, locale: string) {
   const positions = new Map<string, GraphPoint>();
   const eventGap = 260;
   const eventStart = -((slice.events.length - 1) * eventGap) / 2;
@@ -213,7 +226,7 @@ function buildTreePositions(slice: EventEntityGraphSlice) {
           : 0,
       };
     })
-    .sort((a, b) => a.desiredX - b.desiredX || a.entity.name.localeCompare(b.entity.name, "zh-CN"));
+    .sort((a, b) => a.desiredX - b.desiredX || a.entity.name.localeCompare(b.entity.name, locale));
   let previousX = -Infinity;
   entities.forEach(({ entity, desiredX }) => {
     const x = Math.max(desiredX, previousX + 174);
@@ -239,7 +252,7 @@ function normalizeAngle(angle: number) {
   return ((angle % tau) + tau) % tau;
 }
 
-function buildRadialPositions(slice: EventEntityGraphSlice) {
+function buildRadialPositions(slice: EventEntityGraphSlice, locale: string) {
   const tau = Math.PI * 2;
   const positions = new Map<string, GraphPoint>();
   const eventCount = slice.events.length;
@@ -269,7 +282,7 @@ function buildRadialPositions(slice: EventEntityGraphSlice) {
         : -Math.PI / 2 + (index * tau) / Math.max(slice.entities.length, 1);
       return { entity, angle: normalizeAngle(desired) };
     })
-    .sort((a, b) => a.angle - b.angle || a.entity.name.localeCompare(b.entity.name, "zh-CN"));
+    .sort((a, b) => a.angle - b.angle || a.entity.name.localeCompare(b.entity.name, locale));
 
   const minGap = Math.min(0.18, (tau * 0.88) / Math.max(entities.length, 1));
   let previousAngle = -Infinity;
@@ -301,17 +314,19 @@ function collisionRadius(kind: GraphKind) {
 function buildNetwork(
   slice: EventEntityGraphSlice,
   layout: GraphLayout,
+  labels: GraphLabels,
+  locale: string,
 ): { nodes: Node[]; edges: Edge[] } {
   if (layout === "tree") {
-    const positions = buildTreePositions(slice);
+    const positions = buildTreePositions(slice, locale);
     return {
-      nodes: makeNodes(slice, positions),
+      nodes: makeNodes(slice, positions, labels),
       edges: makeEdges(slice, positions, layout),
     };
   }
 
-  const radialPositions = buildRadialPositions(slice);
-  const radialNodes = makeNodes(slice, radialPositions);
+  const radialPositions = buildRadialPositions(slice, locale);
+  const radialNodes = makeNodes(slice, radialPositions, labels);
   if (layout === "radial") {
     return {
       nodes: radialNodes,
@@ -393,7 +408,7 @@ function buildNetwork(
     simNodes.map((node) => [node.id, { x: node.x ?? 0, y: node.y ?? 0 }]),
   );
   return {
-    nodes: makeNodes(slice, positions),
+    nodes: makeNodes(slice, positions, labels),
     edges: makeEdges(slice, positions, layout),
   };
 }
@@ -415,6 +430,8 @@ export function EventEntityGraph({
   emptyDescription?: string;
   flowClassName?: string;
 }) {
+  const t = useTranslations("SourceGraph");
+  const locale = useLocale();
   const [selection, setSelection] = React.useState<EventEntitySelection | null>(null);
   const [layout, setLayout] = React.useState<GraphLayout>("force");
 
@@ -434,18 +451,27 @@ export function EventEntityGraph({
   React.useEffect(() => setSelection(null), [graph]);
 
   const slice = React.useMemo(() => sliceEventEntityGraph(graph), [graph]);
-  const network = React.useMemo(() => buildNetwork(slice, layout), [layout, slice]);
+  const labels = React.useMemo<GraphLabels>(() => ({
+    timedEvent: t("timedEvent"),
+    extractedEvent: t("extractedEvent"),
+    unnamedEntity: t("unnamedEntity"),
+    uncategorized: t("uncategorized"),
+  }), [t]);
+  const network = React.useMemo(
+    () => buildNetwork(slice, layout, labels, locale),
+    [labels, layout, locale, slice],
+  );
   const empty = slice.relations.length === 0;
   const resolvedEmptyTitle =
     emptyTitle ??
     (graph.documents.length === 0 && graph.events.length === 0
-      ? "还没有可展示的文档"
-      : "还没有事件—实体关系");
+      ? t("emptyDocuments")
+      : t("emptyRelations"));
   const resolvedEmptyDescription =
     emptyDescription ??
     (graph.documents.length === 0 && graph.events.length === 0
-      ? "添加文档后，图谱会随解析结果自动出现。"
-      : "只有已建立事件关联的实体会显示在这里。");
+      ? t("emptyDocumentsDescription")
+      : t("emptyRelationsDescription"));
 
   return (
     <GraphCanvas
@@ -457,9 +483,9 @@ export function EventEntityGraph({
       legend={
         <GraphLegend
           items={[
-            { label: "事件", className: "bg-amber-500" },
+            { label: t("event"), className: "bg-amber-500" },
             {
-              label: "实体",
+              label: t("entity"),
               className: "border border-dashed border-violet-500 bg-violet-500/20",
             },
           ]}
@@ -472,9 +498,19 @@ export function EventEntityGraph({
           >
             {graph.truncated && <AlertTriangle className="size-3 shrink-0" />}
             <span>
-              {slice.events.length}
-              {graph.truncated ? ` / ${graph.counts.events}` : ""} 事件 · {slice.entities.length}
-              {graph.truncated ? ` / ${graph.counts.entities}` : ""} 实体 · {slice.relations.length} 关系
+              {graph.truncated
+                ? t("statsTruncated", {
+                    shownEvents: slice.events.length,
+                    events: graph.counts.events,
+                    shownEntities: slice.entities.length,
+                    entities: graph.counts.entities,
+                    relations: slice.relations.length,
+                  })
+                : t("stats", {
+                    events: slice.events.length,
+                    entities: slice.entities.length,
+                    relations: slice.relations.length,
+                  })}
             </span>
           </div>
         </GraphLegend>
@@ -488,7 +524,7 @@ export function EventEntityGraph({
       elementsSelectable
       onlyRenderVisibleElements
       refreshKey={`${slice.relations.length}-${String(refreshKey)}`}
-      ariaLabel="事件与实体关系图谱"
+      ariaLabel={t("aria")}
       flowClassName={flowClassName}
       onPaneClick={() => setSelection(null)}
       onNodeClick={(_event, node) => {
@@ -529,6 +565,7 @@ export function SourceGraph({
   refreshKey: string;
   mode?: "2d" | "3d";
 }) {
+  const t = useTranslations("SourceGraph");
   const { open } = useDetailPanel();
   const [graph, setGraph] = React.useState<SourceGraphResponse | null>(null);
   const [error, setError] = React.useState("");
@@ -548,7 +585,7 @@ export function SourceGraph({
       })
       .catch((reason) => {
         if (!alive) return;
-        setError(reason instanceof ApiError ? reason.message : "图谱加载失败");
+        setError(reason instanceof ApiError ? reason.message : t("loadFailed"));
       })
       .finally(() => {
         if (alive) setRefreshing(false);
@@ -559,7 +596,7 @@ export function SourceGraph({
     };
     // graph 不能加入依赖；刷新时保留旧画面，避免闪烁。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source.id, refreshKey, refreshVersion]);
+  }, [source.id, refreshKey, refreshVersion, t]);
 
   if (!graph && !error) {
     return (
@@ -576,7 +613,7 @@ export function SourceGraph({
     return (
       <div className="flex h-full min-h-0 flex-col items-center justify-center rounded-lg border border-dashed bg-card/40 px-6 text-center">
         <Network className="size-8 text-muted-foreground/60" />
-        <p className="mt-3 text-sm font-medium text-foreground">无法加载信息源图谱</p>
+        <p className="mt-3 text-sm font-medium text-foreground">{t("sourceLoadFailed")}</p>
         <p className="mt-1 text-xs text-muted-foreground">{error}</p>
         <Button
           variant="outline"
@@ -585,7 +622,7 @@ export function SourceGraph({
           onClick={() => setRefreshVersion((value) => value + 1)}
         >
           <RefreshCw className="mr-1.5 size-3.5" />
-          重试
+          {t("retry")}
         </Button>
       </div>
     );
@@ -600,8 +637,8 @@ export function SourceGraph({
       className="size-8 bg-card/95 shadow-soft backdrop-blur-sm"
       onClick={() => setRefreshVersion((value) => value + 1)}
       disabled={refreshing}
-      aria-label="刷新图谱"
-      title="刷新图谱"
+      aria-label={t("refresh")}
+      title={t("refresh")}
     >
       <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
     </Button>

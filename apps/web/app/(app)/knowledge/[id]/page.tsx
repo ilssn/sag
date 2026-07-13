@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -41,6 +42,7 @@ import { cn } from "@/lib/utils";
 type ContentView = "list" | "graph" | "graph3d";
 
 export default function SourceDetailPage() {
+  const t = useTranslations("Knowledge");
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { capabilities } = useApp();
@@ -85,7 +87,7 @@ export default function SourceDetailPage() {
             className="mb-2 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
           >
             <ArrowLeft className="size-3.5" />
-            全部信源
+            {t("allSources")}
           </Link>
           {source ? (
             <>
@@ -93,7 +95,11 @@ export default function SourceDetailPage() {
                 {source.name}
               </h1>
               <p className="mt-1.5 text-sm text-muted-foreground">
-                {source.document_count} 文档 · {source.chunk_count} 块 · {source.event_count} 事件
+                {t("sourceStats", {
+                  documents: source.document_count,
+                  chunks: source.chunk_count,
+                  events: source.event_count,
+                })}
                 {source.description ? ` · ${source.description}` : ""}
               </p>
             </>
@@ -109,8 +115,8 @@ export default function SourceDetailPage() {
                 size="icon"
                 onClick={() => setAddOpen(true)}
                 disabled={!source}
-                aria-label={isFileSource ? "添加文档" : "同步信源"}
-                title={isFileSource ? "添加文档" : "同步信源"}
+                aria-label={isFileSource ? t("addDocument") : t("syncSource")}
+                title={isFileSource ? t("addDocument") : t("syncSource")}
               >
                 {isFileSource ? (
                   <Plus className="size-4" />
@@ -120,7 +126,7 @@ export default function SourceDetailPage() {
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              {isFileSource ? "添加文档" : "同步信源"}
+              {isFileSource ? t("addDocument") : t("syncSource")}
             </TooltipContent>
           </Tooltip>
           <Tooltip>
@@ -130,28 +136,28 @@ export default function SourceDetailPage() {
                 size="icon"
                 onClick={() => setRetrievalOpen(true)}
                 disabled={!source}
-                aria-label="检索测试"
-                title="检索测试"
+                aria-label={t("retrievalTest")}
+                title={t("retrievalTest")}
               >
                 <FlaskConical className="size-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom">检索测试</TooltipContent>
+            <TooltipContent side="bottom">{t("retrievalTest")}</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 asChild
                 size="icon"
-                aria-label="搜索此信息源"
-                title="搜索此信息源"
+                aria-label={t("searchSource")}
+                title={t("searchSource")}
               >
                 <Link href={source ? `/search?source=${source.id}` : "/search"}>
                   <Search className="size-4" />
                 </Link>
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom">搜索此信息源</TooltipContent>
+            <TooltipContent side="bottom">{t("searchSource")}</TooltipContent>
           </Tooltip>
         </div>
       </div>
@@ -167,13 +173,13 @@ export default function SourceDetailPage() {
         {capabilities && !capabilities.llm_configured && (
           <Alert>
             <TriangleAlert className="size-4" />
-            <AlertTitle>尚未配置模型</AlertTitle>
+            <AlertTitle>{t("modelNotConfigured")}</AlertTitle>
             <AlertDescription>
-              文档仍可上传并解析入库，但<strong>事件抽取</strong>与<strong>问答</strong>需要在
+              {t("modelWarningBefore")}<strong>{t("eventExtraction")}</strong>{t("and")}<strong>{t("qa")}</strong>{t("modelWarningSettings")}
               <Link href="/settings" className="font-medium underline underline-offset-2">
-                设置
+                {t("settings")}
               </Link>
-              中配置 LLM。
+              {t("modelWarningAfter")}
             </AlertDescription>
           </Alert>
         )}
@@ -182,11 +188,11 @@ export default function SourceDetailPage() {
           <div className="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-3">
             <h2 className="text-sm font-medium text-muted-foreground">
               {contentView === "list"
-                ? "文档"
+                ? t("documents")
                 : contentView === "graph3d"
-                  ? "3D 图谱"
-                  : "2D 图谱"}{" "}
-              {documents ? `（${documents.length}）` : ""}
+                  ? t("graph3d")
+                  : t("graph2d")}{" "}
+              {documents ? t("parenthesizedCount", { count: documents.length }) : ""}
             </h2>
             <ToggleGroup
               type="single"
@@ -196,34 +202,34 @@ export default function SourceDetailPage() {
               onValueChange={(value) =>
                 value && changeContentView(value as ContentView)
               }
-              aria-label="内容展示方式"
+              aria-label={t("contentViewAria")}
               className="rounded-md bg-card max-sm:w-full"
             >
               <ToggleGroupItem
                 value="list"
                 className="gap-1.5 px-3 max-sm:flex-1 max-sm:px-2"
-                aria-label="列表视图"
+                aria-label={t("listView")}
               >
                 <List className="size-3.5" />
-                列表
+                {t("list")}
               </ToggleGroupItem>
               <ToggleGroupItem
                 value="graph"
                 className="gap-1.5 px-3 max-sm:flex-1 max-sm:px-2"
-                aria-label="2D 图谱视图"
+                aria-label={t("graph2dView")}
               >
                 <Network className="size-3.5" />
                 <span className="sm:hidden">2D</span>
-                <span className="hidden sm:inline">2D 图谱</span>
+                <span className="hidden sm:inline">{t("graph2d")}</span>
               </ToggleGroupItem>
               <ToggleGroupItem
                 value="graph3d"
                 className="gap-1.5 px-3 max-sm:flex-1 max-sm:px-2"
-                aria-label="3D 图谱视图"
+                aria-label={t("graph3dView")}
               >
                 <Orbit className="size-3.5" />
                 <span className="sm:hidden">3D</span>
-                <span className="hidden sm:inline">3D 图谱</span>
+                <span className="hidden sm:inline">{t("graph3d")}</span>
               </ToggleGroupItem>
             </ToggleGroup>
           </div>
@@ -246,8 +252,8 @@ export default function SourceDetailPage() {
           ) : documents.length === 0 ? (
             <EmptyState
               icon={FileText}
-              title="还没有文档"
-              description="点击右上角添加文档，SAG 会自动解析、分块、向量化并抽取事件与实体。"
+              title={t("emptyDocuments")}
+              description={t("emptyDocumentsDescription")}
             />
           ) : (
             <DocumentList sourceId={id} documents={documents} onChange={refresh} />
@@ -260,12 +266,12 @@ export default function SourceDetailPage() {
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>
-              {isFileSource ? "添加文档" : "同步信源"}
+              {isFileSource ? t("addDocument") : t("syncSource")}
             </DialogTitle>
             <DialogDescription>
               {isFileSource
-                ? "添加后会自动解析、分块并抽取事件与实体。"
-                : "抓取连接器中的最新内容并更新信息源。"}
+                ? t("addDialogDescription")
+                : t("syncDialogDescription")}
             </DialogDescription>
           </DialogHeader>
           {source &&

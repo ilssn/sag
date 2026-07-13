@@ -32,7 +32,7 @@ describe("workspace sections", () => {
     expect(isWorkspaceSection("knowledge")).toBe(true);
     expect(isWorkspaceSection("explore")).toBe(false);
     expect(workspaceSectionDefinition("answer")).toMatchObject({
-      label: "问答",
+      id: "answer",
       href: "/chat",
     });
   });

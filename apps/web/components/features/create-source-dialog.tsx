@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Plus } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import type { Source } from "@/lib/types";
 import { SourceCreateForm } from "@/components/features/source-create-form";
@@ -22,6 +23,7 @@ export function CreateSourceDialog({
   onCreated: (s: Source) => void;
   trigger?: React.ReactNode;
 }) {
+  const t = useTranslations("SourceForm");
   const [open, setOpen] = React.useState(false);
 
   return (
@@ -30,16 +32,14 @@ export function CreateSourceDialog({
         {trigger ?? (
           <Button>
             <Plus className="size-4" />
-            新建信源
+            {t("new")}
           </Button>
         )}
       </DialogTrigger>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>新建信源</DialogTitle>
-          <DialogDescription>
-            信源用来装内容。创建后上传文档，SAG 会自动解析、分块并抽取事件。
-          </DialogDescription>
+          <DialogTitle>{t("new")}</DialogTitle>
+          <DialogDescription>{t("dialogDescription")}</DialogDescription>
         </DialogHeader>
 
         <SourceCreateForm

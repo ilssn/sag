@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 
 import { api, ApiError } from "@/lib/api";
 import type { Doc, Source } from "@/lib/types";
@@ -13,6 +14,7 @@ const PROCESSING_DOCUMENT_STATES = new Set(["pending", "loading", "extracting"])
  * remain identical in both panel shapes.
  */
 export function useSourceContent(sourceId: string, active = true) {
+  const t = useTranslations("Knowledge");
   const [source, setSource] = React.useState<Source | null>(null);
   const [documents, setDocuments] = React.useState<Doc[] | null>(null);
   const [error, setError] = React.useState("");
@@ -36,15 +38,15 @@ export function useSourceContent(sourceId: string, active = true) {
       setNotFound(missing);
       setError(
         missing
-          ? "这个信源已不存在"
+          ? t("sourceGone")
           : reason instanceof ApiError
             ? reason.message
-            : "信源内容加载失败",
+            : t("sourceContentFailed"),
       );
     } finally {
       setRefreshing(false);
     }
-  }, [sourceId]);
+  }, [sourceId, t]);
 
   React.useEffect(() => {
     setSource(null);

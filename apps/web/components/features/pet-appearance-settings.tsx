@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { ChevronLeft, ChevronRight, Plus, RotateCcw, X } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { DEFAULT_AGENT_AVATAR } from "@/lib/branding";
 import {
@@ -24,6 +25,7 @@ export function PetAppearanceSettings({
 }: {
   agentFace?: string;
 }) {
+  const t = useTranslations("PetAppearance");
   const { preferences, update, reset } = usePetAppearancePreferences();
   const displayFace = resolvePetFace(preferences, agentFace);
   const canAddPreset =
@@ -56,23 +58,23 @@ export function PetAppearanceSettings({
       className="scroll-mt-4 outline-none"
     >
       <SettingsSection
-        title="助手形象"
-        description="配置桌面宇航员的面罩、动作和动态效果；修改会立即同步。"
+        title={t("title")}
+        description={t("description")}
         footer={
           <div className="flex items-center justify-between gap-3">
             <p className="text-xs text-muted-foreground">
-              这些偏好只保存在当前浏览器。
+              {t("savedLocally")}
             </p>
             <Button type="button" variant="outline" size="sm" onClick={reset}>
               <RotateCcw />
-              恢复默认
+              {t("reset")}
             </Button>
           </div>
         }
       >
         <SettingsRow
-          title="面罩表情"
-          description="跟随助手头像，或使用单独的字符表情；留空会关闭面罩文字。"
+          title={t("face.title")}
+          description={t("face.description")}
         >
           <div className="grid gap-4 sm:grid-cols-[5rem_minmax(0,1fr)] sm:items-start">
             <div className="flex justify-center rounded-lg border bg-muted/30 py-3">
@@ -84,26 +86,26 @@ export function PetAppearanceSettings({
                   active={preferences.faceMode === "agent"}
                   onClick={() => update({ faceMode: "agent" })}
                 >
-                  跟随头像
+                  {t("face.agent")}
                 </FaceModeButton>
                 <FaceModeButton
                   active={preferences.faceMode === "custom" && Boolean(displayFace)}
                   onClick={() => setCustomFace(displayFace || "^_^")}
                 >
-                  自定义
+                  {t("face.custom")}
                 </FaceModeButton>
                 <FaceModeButton
                   active={preferences.faceMode === "custom" && !displayFace}
                   onClick={() => setCustomFace("")}
                 >
-                  留空
+                  {t("face.empty")}
                 </FaceModeButton>
               </div>
               <div className="flex items-center gap-2">
                 <Input
                   value={displayFace}
                   onChange={(event) => setCustomFace(event.target.value)}
-                  aria-label="自定义面罩字符"
+                  aria-label={t("face.customAria")}
                   placeholder="@_@"
                   className="min-w-0 text-center font-mono font-semibold"
                 />
@@ -113,8 +115,8 @@ export function PetAppearanceSettings({
                   size="icon"
                   onClick={() => updatePresets([...preferences.facePresets, displayFace])}
                   disabled={!canAddPreset}
-                  aria-label="添加到表情库"
-                  title="添加到表情库"
+                  aria-label={t("presets.add")}
+                  title={t("presets.add")}
                 >
                   <Plus />
                 </Button>
@@ -124,8 +126,8 @@ export function PetAppearanceSettings({
         </SettingsRow>
 
         <SettingsRow
-          title="表情库"
-          description="点击即可应用；也可以调整顺序或删除不常用的表情。"
+          title={t("presets.title")}
+          description={t("presets.description")}
         >
           {preferences.facePresets.length > 0 ? (
             <div className="grid gap-2 sm:grid-cols-2">
@@ -147,21 +149,21 @@ export function PetAppearanceSettings({
                     {preset}
                   </button>
                   <PresetButton
-                    label={`向前移动 ${preset}`}
+                    label={t("presets.moveForward", { preset })}
                     disabled={index === 0}
                     onClick={() => movePreset(preset, -1)}
                   >
                     <ChevronLeft />
                   </PresetButton>
                   <PresetButton
-                    label={`向后移动 ${preset}`}
+                    label={t("presets.moveBack", { preset })}
                     disabled={index === preferences.facePresets.length - 1}
                     onClick={() => movePreset(preset, 1)}
                   >
                     <ChevronRight />
                   </PresetButton>
                   <PresetButton
-                    label={`删除 ${preset}`}
+                    label={t("presets.delete", { preset })}
                     onClick={() => updatePresets(
                       preferences.facePresets.filter((value) => value !== preset),
                     )}
@@ -174,41 +176,41 @@ export function PetAppearanceSettings({
             </div>
           ) : (
             <div className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
-              表情库为空，可在上方输入面罩字符后添加。
+              {t("presets.empty")}
             </div>
           )}
         </SettingsRow>
 
         <SettingsRow
-          title="尺寸与动态"
-          description="控制宇航员占用空间以及空闲时的动作节奏。"
+          title={t("motion.title")}
+          description={t("motion.description")}
         >
           <div className="grid gap-x-8 gap-y-5 sm:grid-cols-2">
             <PreferenceSlider
-              label="角色尺寸"
+              label={t("motion.size")}
               value={`${Math.round(preferences.size * 100)}%`}
               sliderValue={preferences.size}
               limits={PET_APPEARANCE_LIMITS.size}
               onChange={(size) => update({ size })}
             />
             <PreferenceSlider
-              label="悬浮幅度"
+              label={t("motion.float")}
               value={`${Math.round(preferences.floatStrength * 100)}%`}
               sliderValue={preferences.floatStrength}
               limits={PET_APPEARANCE_LIMITS.floatStrength}
               onChange={(floatStrength) => update({ floatStrength })}
             />
             <PreferenceSlider
-              label="随机动作频率"
+              label={t("motion.actionRate")}
               value={preferences.actionRate < 0.05
-                ? "关闭"
+                ? t("motion.off")
                 : `${Math.round(preferences.actionRate * 100)}%`}
               sliderValue={preferences.actionRate}
               limits={PET_APPEARANCE_LIMITS.actionRate}
               onChange={(actionRate) => update({ actionRate })}
             />
             <PreferenceSlider
-              label="待机表情间隔"
+              label={t("motion.expressionDelay")}
               value={`${preferences.expressionDelay.toFixed(1)}×`}
               sliderValue={preferences.expressionDelay}
               limits={PET_APPEARANCE_LIMITS.expressionDelay}
@@ -218,14 +220,14 @@ export function PetAppearanceSettings({
         </SettingsRow>
 
         <SettingsRow
-          title="减少动态"
-          description="停止悬浮、待机表情轮换和随机动作，同时保留必要状态反馈。"
+          title={t("reduceMotion.title")}
+          description={t("reduceMotion.description")}
           layout="inline"
         >
           <Switch
             checked={preferences.reduceMotion}
             onCheckedChange={(reduceMotion) => update({ reduceMotion })}
-            aria-label="减少助手动态"
+            aria-label={t("reduceMotion.aria")}
           />
         </SettingsRow>
       </SettingsSection>

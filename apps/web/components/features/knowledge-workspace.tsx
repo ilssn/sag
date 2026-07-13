@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useLocale, useTranslations } from "next-intl";
 import {
   ArrowLeft,
   ChevronRight,
@@ -32,6 +33,8 @@ type View = "grid" | "list";
 type KnowledgeWorkspaceVariant = "normal" | "compact";
 
 function SourceRow({ source, first }: { source: Source; first: boolean }) {
+  const t = useTranslations("Knowledge");
+  const locale = useLocale();
   const { timezone } = useApp();
   return (
     <Link
@@ -51,10 +54,10 @@ function SourceRow({ source, first }: { source: Source; first: boolean }) {
         )}
       </div>
       <div className="hidden shrink-0 items-center gap-4 text-xs tabular-nums text-muted-foreground sm:flex">
-        <span>{source.document_count} 文档</span>
-        <span>{source.chunk_count} 分块</span>
-        <span>{source.event_count} 事件</span>
-        <span>{relativeTime(source.updated_at, timezone)}</span>
+        <span>{t("documentsCount", { count: source.document_count })}</span>
+        <span>{t("chunksCount", { count: source.chunk_count })}</span>
+        <span>{t("eventsCount", { count: source.event_count })}</span>
+        <span>{relativeTime(source.updated_at, timezone, locale)}</span>
       </div>
       <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
     </Link>
@@ -68,6 +71,8 @@ function CompactSourceRow({
   source: Source;
   onOpen: (source: Source) => void;
 }) {
+  const t = useTranslations("Knowledge");
+  const locale = useLocale();
   const { timezone } = useApp();
   return (
     <button
@@ -81,11 +86,11 @@ function CompactSourceRow({
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{source.name}</div>
         <div className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-muted-foreground">
-          <span>{source.document_count} 文档</span>
+          <span>{t("documentsCount", { count: source.document_count })}</span>
           <span>·</span>
-          <span>{source.event_count} 事件</span>
+          <span>{t("eventsCount", { count: source.event_count })}</span>
           <span>·</span>
-          <span>{relativeTime(source.updated_at, timezone)}</span>
+          <span>{relativeTime(source.updated_at, timezone, locale)}</span>
         </div>
       </div>
       <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/70 transition-transform group-hover/source:translate-x-0.5" />
@@ -100,6 +105,7 @@ export function KnowledgeWorkspace({
   variant?: KnowledgeWorkspaceVariant;
   active?: boolean;
 }) {
+  const t = useTranslations("Knowledge");
   const { sources, error, ensureLoaded, refresh, addSource } = useKnowledgeWorkspace();
   const [view, setView] = React.useState<View>("grid");
   const [creating, setCreating] = React.useState(false);
@@ -148,18 +154,18 @@ export function KnowledgeWorkspace({
                 size="icon"
                 className="size-7"
                 onClick={() => setCreating(false)}
-                aria-label="返回知识库"
+                aria-label={t("back")}
               >
                 <ArrowLeft className="size-3.5" />
               </Button>
-              <span className="min-w-0 flex-1 truncate text-xs font-medium">新建信源</span>
+              <span className="min-w-0 flex-1 truncate text-xs font-medium">{t("newSource")}</span>
             </>
           ) : (
             <>
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium">知识库</p>
+                <p className="text-xs font-medium">{t("title")}</p>
                 <p className="text-[10px] text-muted-foreground">
-                  {sources === null ? "正在同步" : `${sources.length} 个信源`}
+                  {sources === null ? t("syncing") : t("sourcesCount", { count: sources.length })}
                 </p>
               </div>
               <Button
@@ -168,8 +174,8 @@ export function KnowledgeWorkspace({
                 size="icon"
                 className="size-7"
                 onClick={() => void refresh()}
-                aria-label="刷新知识库"
-                title="刷新知识库"
+                aria-label={t("refresh")}
+                title={t("refresh")}
               >
                 <RotateCw className="size-3.5" />
               </Button>
@@ -179,8 +185,8 @@ export function KnowledgeWorkspace({
                 size="icon"
                 className="size-7"
                 onClick={() => setCreating(true)}
-                aria-label="新建信源"
-                title="新建信源"
+                aria-label={t("newSource")}
+                title={t("newSource")}
               >
                 <Plus className="size-3.5" />
               </Button>
@@ -198,7 +204,7 @@ export function KnowledgeWorkspace({
               className="min-h-0 flex-1 overflow-y-auto p-4"
             >
               <p className="mb-4 text-xs leading-5 text-muted-foreground">
-                创建后会进入完整管理页继续上传文档。
+                {t("compactCreateDescription")}
               </p>
               <SourceCreateForm
                 compact
@@ -222,7 +228,7 @@ export function KnowledgeWorkspace({
                 <div className="mb-2 flex items-center justify-between gap-2 rounded-md bg-destructive/8 px-3 py-2 text-xs text-destructive">
                   <span className="truncate">{error}</span>
                   <button type="button" onClick={() => void refresh()} className="font-medium">
-                    重试
+                    {t("retry")}
                   </button>
                 </div>
               )}
@@ -237,13 +243,13 @@ export function KnowledgeWorkspace({
                   <div className="grid size-10 place-items-center rounded-xl bg-muted text-muted-foreground">
                     <Layers className="size-4" />
                   </div>
-                  <p className="mt-3 text-sm font-medium">还没有信源</p>
+                  <p className="mt-3 text-sm font-medium">{t("emptyTitle")}</p>
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                    新建信源并上传资料，搜索和问答即可使用。
+                    {t("emptyCompactDescription")}
                   </p>
                   <Button size="sm" className="mt-4" onClick={() => setCreating(true)}>
                     <Plus className="size-3.5" />
-                    新建信源
+                    {t("newSource")}
                   </Button>
                 </div>
               ) : (
@@ -269,8 +275,8 @@ export function KnowledgeWorkspace({
   return (
     <div className="flex flex-col gap-6 p-4 md:p-6">
       <PageHeader
-        title="知识库"
-        description="你的信息源：上传文档，自动解析入库，对话与搜索即刻可用。"
+        title={t("title")}
+        description={t("description")}
         actions={
           <>
             <ToggleGroup
@@ -279,19 +285,19 @@ export function KnowledgeWorkspace({
               size="sm"
               value={view}
               onValueChange={(value) => value && changeView(value as View)}
-              aria-label="展示方式"
+              aria-label={t("viewAria")}
             >
-              <ToggleGroupItem value="grid" aria-label="卡片视图">
+              <ToggleGroupItem value="grid" aria-label={t("gridView")}>
                 <LayoutGrid />
               </ToggleGroupItem>
-              <ToggleGroupItem value="list" aria-label="列表视图">
+              <ToggleGroupItem value="list" aria-label={t("listView")}>
                 <List />
               </ToggleGroupItem>
             </ToggleGroup>
             <CreateSourceDialog
               onCreated={addSource}
               trigger={
-                <Button size="icon" aria-label="新建信源" title="新建信源">
+                <Button size="icon" aria-label={t("newSource")} title={t("newSource")}>
                   <Plus />
                 </Button>
               }
@@ -305,7 +311,7 @@ export function KnowledgeWorkspace({
           <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-destructive/20 bg-destructive/8 px-4 py-3 text-sm text-destructive">
             <span>{error}</span>
             <Button variant="outline" size="sm" onClick={() => void refresh()}>
-              重试
+              {t("retry")}
             </Button>
           </div>
         )}
@@ -318,8 +324,8 @@ export function KnowledgeWorkspace({
         ) : sources.length === 0 ? (
           <EmptyState
             icon={Layers}
-            title="还没有信源"
-            description="新建一个信源并上传文档，SAG 会解析入库，让内容可被搜索与问答。"
+            title={t("emptyTitle")}
+            description={t("emptyDescription")}
             action={<CreateSourceDialog onCreated={addSource} />}
           />
         ) : view === "grid" ? (

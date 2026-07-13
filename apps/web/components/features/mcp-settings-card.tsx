@@ -10,6 +10,7 @@ import {
   Terminal,
   X,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { useApp } from "@/components/features/app-shell";
@@ -44,6 +45,7 @@ function connectionIcon(mode: ParsedMcpServer["mode"]) {
 
 /** 默认助手挂载的外部 MCP 服务。 */
 export function McpSettingsCard() {
+  const t = useTranslations("McpSettings");
   const { agent } = useApp();
   const [bindings, setBindings] = React.useState<Binding[] | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
@@ -66,9 +68,9 @@ export function McpSettingsCard() {
       const all = await api.listBindings(agent.id);
       setBindings(all.filter((binding) => binding.target_type === "mcp_server"));
     } catch (error) {
-      setLoadError(error instanceof ApiError ? error.message : "无法加载已挂载服务");
+      setLoadError(error instanceof ApiError ? error.message : t("loadFailed"));
     }
-  }, [agent]);
+  }, [agent, t]);
 
   React.useEffect(() => {
     setBindings(null);
@@ -110,7 +112,9 @@ export function McpSettingsCard() {
     } catch (error) {
       setParsedJson(null);
       setJsonError(
-        error instanceof McpConfigError ? error.message : "无法识别这段 MCP 配置",
+        error instanceof McpConfigError
+          ? t(`errors.${error.code}`, error.values)
+          : t("invalidConfig"),
       );
     }
   }
@@ -129,14 +133,14 @@ export function McpSettingsCard() {
         });
         mounted += 1;
       } catch (error) {
-        const message = error instanceof ApiError ? error.message : "挂载失败";
-        failed.push(`${server.name}：${message}`);
+        const message = error instanceof ApiError ? error.message : t("mountFailed");
+        failed.push(t("serverError", { name: server.name, error: message }));
       }
     }
     await load();
     setImporting(false);
-    if (mounted) toast.success(`已挂载 ${mounted} 个 MCP 服务`);
-    if (failed.length) toast.error(failed.slice(0, 2).join("；"));
+    if (mounted) toast.success(t("mountedCount", { count: mounted }));
+    if (failed.length) toast.error(failed.slice(0, 2).join(t("errorSeparator")));
     if (!failed.length) parseJson("");
   }
 
@@ -161,9 +165,9 @@ export function McpSettingsCard() {
       setCommand("");
       setArgs("");
       await load();
-      toast.success("服务已挂载，可在对话中调用");
+      toast.success(t("mounted"));
     } catch (error) {
-      toast.error(error instanceof ApiError ? error.message : "挂载失败");
+      toast.error(error instanceof ApiError ? error.message : t("mountFailed"));
     } finally {
       setMounting(false);
     }
@@ -175,25 +179,25 @@ export function McpSettingsCard() {
     try {
       await api.removeBinding(agent.id, binding.id);
       await load();
-      toast.success("服务已卸载");
+      toast.success(t("unmounted"));
     } catch (error) {
-      toast.error(error instanceof ApiError ? error.message : "卸载失败");
+      toast.error(error instanceof ApiError ? error.message : t("unmountFailed"));
     } finally {
       setUnmountingId(null);
     }
   }
 
   return (
-    <SettingsSection title="外部工具" description="为默认助手连接可在对话中调用的 MCP 服务。">
-      <SettingsRow title="已挂载服务" description="这些服务可在对话中被助手调用。">
+    <SettingsSection title={t("title")} description={t("description")}>
+      <SettingsRow title={t("mountedServices")} description={t("mountedDescription")}>
         {loadError ? (
           <Alert variant="destructive">
-            <AlertTitle>加载失败</AlertTitle>
+            <AlertTitle>{t("loadErrorTitle")}</AlertTitle>
             <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
               <span>{loadError}</span>
               <Button type="button" variant="outline" size="sm" onClick={() => void load()}>
                 <RotateCw />
-                重试
+                {t("retry")}
               </Button>
             </AlertDescription>
           </Alert>
@@ -203,7 +207,7 @@ export function McpSettingsCard() {
             <Skeleton className="h-7 w-32" />
           </div>
         ) : bindings.length === 0 ? (
-          <p className="text-sm text-muted-foreground">尚未挂载外部工具服务。</p>
+          <p className="text-sm text-muted-foreground">{t("empty")}</p>
         ) : (
           <div className="flex min-h-8 flex-wrap items-center gap-2">
             {bindings.map((binding) => {
@@ -222,8 +226,8 @@ export function McpSettingsCard() {
                     onClick={() => void unmount(binding)}
                     disabled={unmounting}
                     className="rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-destructive disabled:pointer-events-none disabled:opacity-50"
-                    aria-label={`卸载 ${label}`}
-                    title="卸载"
+                    aria-label={t("unmountAria", { name: label })}
+                    title={t("unmount")}
                   >
                     {unmounting ? <Spinner className="size-3" /> : <X className="size-3" />}
                   </button>
@@ -234,7 +238,7 @@ export function McpSettingsCard() {
         )}
       </SettingsRow>
 
-      <SettingsRow title="添加服务" description="粘贴标准配置，或手动填写一个连接。">
+      <SettingsRow title={t("addService")} description={t("addDescription")}>
         <div className="grid gap-5">
           <Field data-invalid={Boolean(jsonError)}>
             <FieldLabel htmlFor="mcp-json">
@@ -262,7 +266,7 @@ export function McpSettingsCard() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2 text-sm font-medium">
                   <CheckCircle2 className="size-4" />
-                  已识别 {parsedJson.servers.length} 个服务
+                  {t("recognizedCount", { count: parsedJson.servers.length })}
                 </div>
                 <Button
                   type="button"
@@ -272,10 +276,10 @@ export function McpSettingsCard() {
                 >
                   {importing ? <Spinner /> : <Plug />}
                   {importing
-                    ? "挂载中…"
+                    ? t("mounting")
                     : pendingImported.length
-                      ? `挂载 ${pendingImported.length} 个服务`
-                      : "已全部挂载"}
+                      ? t("mountCount", { count: pendingImported.length })
+                      : t("allMounted")}
                 </Button>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -289,20 +293,20 @@ export function McpSettingsCard() {
                     >
                       {connectionIcon(server.mode)}
                       <span className="truncate">{server.name}</span>
-                      {exists ? "· 已挂载" : null}
+                      {exists ? t("mountedSuffix") : null}
                     </Badge>
                   );
                 })}
               </div>
               {parsedJson.skipped.length ? (
                 <p className="text-xs text-muted-foreground">
-                  已忽略停用服务：{parsedJson.skipped.join("、")}
+                  {t("skipped", { names: parsedJson.skipped.join(t("nameSeparator")) })}
                 </p>
               ) : null}
             </div>
           ) : null}
 
-          <FieldSeparator>或手动填写</FieldSeparator>
+          <FieldSeparator>{t("manualSeparator")}</FieldSeparator>
 
           <form
             onSubmit={(event) => {
@@ -313,14 +317,14 @@ export function McpSettingsCard() {
           >
             <div className="grid gap-4 sm:grid-cols-[auto_minmax(0,1fr)] sm:items-end">
               <Field>
-                <FieldLabel>连接方式</FieldLabel>
+                <FieldLabel>{t("connectionMode")}</FieldLabel>
                 <ToggleGroup
                   type="single"
                   variant="outline"
                   size="sm"
                   value={mode}
                   onValueChange={(value) => value && setMode(value as typeof mode)}
-                  aria-label="MCP 连接方式"
+                  aria-label={t("connectionModeAria")}
                   className="justify-start"
                 >
                   <ToggleGroupItem value="http">
@@ -329,36 +333,36 @@ export function McpSettingsCard() {
                   </ToggleGroupItem>
                   <ToggleGroupItem value="stdio">
                     <Terminal />
-                    本地命令
+                    {t("localCommand")}
                   </ToggleGroupItem>
                 </ToggleGroup>
               </Field>
               <Field>
-                <FieldLabel htmlFor="mcp-name">服务名称</FieldLabel>
+                <FieldLabel htmlFor="mcp-name">{t("serviceName")}</FieldLabel>
                 <Input
                   id="mcp-name"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
-                  placeholder="可选，如 filesystem"
+                  placeholder={t("serviceNamePlaceholder")}
                 />
               </Field>
             </div>
 
             {mode === "http" ? (
               <Field>
-                <FieldLabel htmlFor="mcp-url">HTTP 端点</FieldLabel>
+                <FieldLabel htmlFor="mcp-url">{t("httpEndpoint")}</FieldLabel>
                 <Input
                   id="mcp-url"
                   value={url}
                   onChange={(event) => setUrl(event.target.value)}
                   placeholder="https://host/mcp"
                 />
-                <FieldDescription>Streamable HTTP MCP 地址。</FieldDescription>
+                <FieldDescription>{t("httpDescription")}</FieldDescription>
               </Field>
             ) : (
               <div className="grid gap-4 sm:grid-cols-[minmax(8rem,12rem)_minmax(0,1fr)]">
                 <Field>
-                  <FieldLabel htmlFor="mcp-command">命令</FieldLabel>
+                  <FieldLabel htmlFor="mcp-command">{t("command")}</FieldLabel>
                   <Input
                     id="mcp-command"
                     value={command}
@@ -367,7 +371,7 @@ export function McpSettingsCard() {
                   />
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="mcp-args">参数</FieldLabel>
+                  <FieldLabel htmlFor="mcp-args">{t("arguments")}</FieldLabel>
                   <Input
                     id="mcp-args"
                     value={args}
@@ -385,7 +389,7 @@ export function McpSettingsCard() {
                 disabled={mounting || (mode === "http" ? !url.trim() : !command.trim())}
               >
                 {mounting ? <Spinner /> : <Plug />}
-                {mounting ? "挂载中…" : "挂载服务"}
+                {mounting ? t("mounting") : t("mountService")}
               </Button>
             </div>
           </form>

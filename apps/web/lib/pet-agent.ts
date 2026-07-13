@@ -1,4 +1,5 @@
 import { DEFAULT_AGENT_AVATAR, DEFAULT_AGENT_NAME } from "./branding";
+import { clientErrorMessage } from "../i18n/client-errors";
 
 export type PetAgentFacing = "left" | "right";
 
@@ -256,30 +257,30 @@ export class PetAgent {
     return this;
   }
 
-  think(text = "正在思考下一步", options: PetAgentActivityOptions = {}) {
+  think(text = clientErrorMessage("petThinking"), options: PetAgentActivityOptions = {}) {
     return this.setActivity("thinking", text, options);
   }
 
-  search(text = "正在翻找知识背包", options: PetAgentActivityOptions = {}) {
+  search(text = clientErrorMessage("petSearching"), options: PetAgentActivityOptions = {}) {
     return this.setActivity("searching", text, options);
   }
 
-  work(text = "正在使用工具处理", options: PetAgentActivityOptions = {}) {
+  work(text = clientErrorMessage("petWorking"), options: PetAgentActivityOptions = {}) {
     return this.setActivity("working", text, options);
   }
 
-  answer(text = "正在组织回答", options: PetAgentActivityOptions = {}) {
+  answer(text = clientErrorMessage("petAnswering"), options: PetAgentActivityOptions = {}) {
     return this.setActivity("answering", text, options);
   }
 
-  complete(text = "回答完成，来看看吧", options: PetAgentActivityOptions = {}) {
+  complete(text = clientErrorMessage("petComplete"), options: PetAgentActivityOptions = {}) {
     const duration = options.duration === undefined ? 6_200 : options.duration;
     this.setActivity("done", text, { ...options, duration });
     this.sequence({ motion: "jump" }, { motion: "wave" });
     return this;
   }
 
-  fail(text = "这次没有顺利完成", options: PetAgentActivityOptions = {}) {
+  fail(text = clientErrorMessage("petFailed"), options: PetAgentActivityOptions = {}) {
     const duration = options.duration === undefined ? 6_200 : options.duration;
     return this.setActivity("error", text, { ...options, duration });
   }

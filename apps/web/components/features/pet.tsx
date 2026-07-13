@@ -3,6 +3,7 @@
 import * as React from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { useTranslations } from "next-intl";
 import {
   ArrowLeft,
   ArrowRight,
@@ -82,7 +83,10 @@ function nameplateStyle(value: string): React.CSSProperties {
   return { fontSize: 5 };
 }
 
-function deriveActivity(state: ConversationSessionSnapshot | null): PetActivity {
+function deriveActivity(
+  state: ConversationSessionSnapshot | null,
+  labels: { thinking: string; answering: string; working: string },
+): PetActivity {
   const steps = state?.run?.steps ?? [];
   const active = [...steps].reverse().find((step) => step.status === "active");
   const failed = Boolean(state?.error) && !state?.run;
@@ -101,7 +105,7 @@ function deriveActivity(state: ConversationSessionSnapshot | null): PetActivity 
     return {
       streaming: true,
       mode: "thinking",
-      label: "正在思考下一步",
+      label: labels.thinking,
       threadId: state.threadId,
       runKey: `${state.sessionId}:${state.run.requestId}`,
       failed,
@@ -111,7 +115,7 @@ function deriveActivity(state: ConversationSessionSnapshot | null): PetActivity 
     return {
       streaming: true,
       mode: "answering",
-      label: "正在组织回答",
+      label: labels.answering,
       threadId: state.threadId,
       runKey: `${state.sessionId}:${state.run.requestId}`,
       failed,
@@ -120,7 +124,7 @@ function deriveActivity(state: ConversationSessionSnapshot | null): PetActivity 
   return {
     streaming: true,
     mode: "working",
-    label: active.label || active.name || "正在使用工具处理",
+    label: active.label || active.name || labels.working,
     threadId: state.threadId,
     runKey: `${state.sessionId}:${state.run.requestId}`,
     failed,
@@ -128,11 +132,16 @@ function deriveActivity(state: ConversationSessionSnapshot | null): PetActivity 
 }
 
 function usePetActivity() {
+  const t = useTranslations("Pet");
   const index = useOptionalConversationIndex();
   const session = useOptionalConversationSession(
     index.activeRunSessionId ?? index.activeSessionId,
   );
-  return React.useMemo(() => deriveActivity(session), [session]);
+  return React.useMemo(() => deriveActivity(session, {
+    thinking: t("status.thinking"),
+    answering: t("status.answering"),
+    working: t("status.working"),
+  }), [session, t]);
 }
 
 interface PetProps {
@@ -205,6 +214,7 @@ export function Pet({
   syncIdentity,
   visible = true,
 }: PetProps = {}) {
+  const t = useTranslations("Pet");
   const {
     agent,
     threads,
@@ -464,8 +474,8 @@ export function Pet({
             if (typeof oldest === "string") notifiedRunKeysRef.current.delete(oldest);
           }
         }
-        if (activity.failed) character.fail("这次没有顺利完成", { ...options, duration: 3_600 });
-        else character.complete("回答已完成", { ...options, duration: 3_200 });
+        if (activity.failed) character.fail(t("status.failed"), { ...options, duration: 3_600 });
+        else character.complete(t("status.complete"), { ...options, duration: 3_200 });
       }
       activeRunKeyRef.current = null;
     }
@@ -480,6 +490,7 @@ export function Pet({
     activity.streaming,
     activity.threadId,
     character,
+    t,
   ]);
 
   React.useEffect(() => {
@@ -971,12 +982,12 @@ export function Pet({
           >
             <div className="flex h-11 items-center border-b px-3">
               <Hand className="size-3.5 text-muted-foreground" />
-              <span className="ml-2 flex-1 text-sm font-medium">动作</span>
+              <span className="ml-2 flex-1 text-sm font-medium">{t("actions.title")}</span>
               <button
                 type="button"
                 onClick={() => setPetOverlay("none")}
-                aria-label="收起动作"
-                title="收起"
+                aria-label={t("actions.collapseAria")}
+                title={t("actions.collapse")}
                 className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
               >
                 <X className="size-3.5" />
@@ -984,10 +995,10 @@ export function Pet({
             </div>
             <div className="grid grid-cols-2 gap-1.5 p-2.5">
               {[
-                { label: "挥手", icon: Hand, run: triggerWave },
-                { label: "升空", icon: Rocket, run: triggerFlight },
-                { label: "漫游", icon: Route, run: triggerRoam },
-                { label: "跳舞", icon: Music2, run: triggerDance },
+                { label: t("actions.wave"), icon: Hand, run: triggerWave },
+                { label: t("actions.fly"), icon: Rocket, run: triggerFlight },
+                { label: t("actions.roam"), icon: Route, run: triggerRoam },
+                { label: t("actions.dance"), icon: Music2, run: triggerDance },
               ].map(({ label, icon: Icon, run }) => (
                 <button
                   key={label}
@@ -1005,8 +1016,8 @@ export function Pet({
               ))}
             </div>
             <div className="flex items-center gap-2 border-t px-2.5 py-2">
-              <span className="mr-auto text-[11px] text-muted-foreground">形态切换</span>
-              <div className="inline-flex rounded-md bg-muted p-0.5" role="group" aria-label="形态切换">
+              <span className="mr-auto text-[11px] text-muted-foreground">{t("form.title")}</span>
+              <div className="inline-flex rounded-md bg-muted p-0.5" role="group" aria-label={t("form.aria")}>
                 <button
                   type="button"
                   aria-pressed={collapsed}
@@ -1021,7 +1032,7 @@ export function Pet({
                     collapsed && "bg-background text-foreground shadow-sm",
                   )}
                 >
-                  简单
+                  {t("form.simple")}
                 </button>
                 <button
                   type="button"
@@ -1036,17 +1047,17 @@ export function Pet({
                     !collapsed && "bg-background text-foreground shadow-sm",
                   )}
                 >
-                  完整
+                  {t("form.full")}
                 </button>
               </div>
             </div>
             <div className="flex items-center gap-1.5 border-t px-2.5 py-2">
-              <span className="mr-auto text-[11px] text-muted-foreground">朝向</span>
+              <span className="mr-auto text-[11px] text-muted-foreground">{t("facing.title")}</span>
               <button
                 type="button"
                 onClick={() => setFacing("left")}
-                aria-label="面向左侧"
-                title="面向左侧"
+                aria-label={t("facing.left")}
+                title={t("facing.left")}
                 className={cn(
                   "grid size-7 place-items-center rounded-md border text-muted-foreground hover:bg-muted hover:text-foreground",
                   characterState.facing === "left" && "bg-muted text-foreground",
@@ -1057,8 +1068,8 @@ export function Pet({
               <button
                 type="button"
                 onClick={() => setFacing("right")}
-                aria-label="面向右侧"
-                title="面向右侧"
+                aria-label={t("facing.right")}
+                title={t("facing.right")}
                 className={cn(
                   "grid size-7 place-items-center rounded-md border text-muted-foreground hover:bg-muted hover:text-foreground",
                   characterState.facing === "right" && "bg-muted text-foreground",
@@ -1072,7 +1083,7 @@ export function Pet({
                 className="ml-1 inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
               >
                 <RotateCcw className="size-3" />
-                重置位置
+                {t("facing.reset")}
               </button>
             </div>
           </motion.div>
@@ -1097,13 +1108,13 @@ export function Pet({
             data-pet-toolbar="true"
             data-visibility-policy={panelMode === "normal" ? "hover-focus" : "contextual"}
             role="toolbar"
-            aria-label="宇航员快捷入口"
+            aria-label={t("toolbar.aria")}
             onPointerEnter={showCommands}
             onPointerLeave={scheduleCommandClose}
           >
             <PetActionButton
               slot="search"
-              label="搜索知识库"
+              label={t("toolbar.search")}
               onClick={() => {
                 setCurious(false);
                 openMiniWorkspace("search");
@@ -1113,7 +1124,7 @@ export function Pet({
             </PetActionButton>
             <PetActionButton
               slot="answer"
-              label="问答"
+              label={t("toolbar.answer")}
               onClick={() => {
                 setCurious(false);
                 openMiniWorkspace("answer");
@@ -1123,7 +1134,7 @@ export function Pet({
             </PetActionButton>
             <PetActionButton
               slot="knowledge"
-              label="知识库"
+              label={t("toolbar.knowledge")}
               onClick={() => {
                 setCurious(false);
                 openMiniWorkspace("knowledge");
@@ -1133,14 +1144,14 @@ export function Pet({
             </PetActionButton>
             <PetActionButton
               slot="appearance"
-              label="设置"
+              label={t("toolbar.settings")}
               onClick={openAppearanceSettings}
             >
               <SlidersHorizontal />
             </PetActionButton>
             <PetActionButton
               slot="actions"
-              label="动作"
+              label={t("toolbar.actions")}
               onClick={() => setPetOverlay("actions")}
             >
               <WandSparkles />
@@ -1159,19 +1170,19 @@ export function Pet({
             data-pet-toolbar="true"
             data-visibility-policy={panelMode === "normal" ? "hover-focus" : "contextual"}
             role="toolbar"
-            aria-label="宇航员快捷入口"
+            aria-label={t("toolbar.aria")}
             onPointerEnter={showCommands}
             onPointerLeave={scheduleCommandClose}
           >
             {ambient ? (
-              <PetActionButton slot="wave" label="挥手" onClick={triggerWave} disabled={!canAct}>
+              <PetActionButton slot="wave" label={t("actions.wave")} onClick={triggerWave} disabled={!canAct}>
                 <Hand />
               </PetActionButton>
             ) : (
               <>
                 <PetActionButton
                   slot="search"
-                  label="搜索知识库"
+                  label={t("toolbar.search")}
                   onClick={() => {
                     setCurious(false);
                     setPetOverlay("none");
@@ -1182,7 +1193,7 @@ export function Pet({
                 </PetActionButton>
                 <PetActionButton
                   slot="answer"
-                  label="问答"
+                  label={t("toolbar.answer")}
                   onClick={() => {
                     setCurious(false);
                     setPetOverlay("none");
@@ -1193,7 +1204,7 @@ export function Pet({
                 </PetActionButton>
                 <PetActionButton
                   slot="knowledge"
-                  label="知识库"
+                  label={t("toolbar.knowledge")}
                   onClick={() => {
                     setCurious(false);
                     setPetOverlay("none");
@@ -1204,14 +1215,14 @@ export function Pet({
                 </PetActionButton>
                 <PetActionButton
                   slot="appearance"
-                  label="设置"
+                  label={t("toolbar.settings")}
                   onClick={openAppearanceSettings}
                 >
                   <SlidersHorizontal />
                 </PetActionButton>
                 <PetActionButton
                   slot="actions"
-                  label="动作"
+                  label={t("toolbar.actions")}
                   onClick={() => setPetOverlay("actions")}
                 >
                   <WandSparkles />
@@ -1241,8 +1252,11 @@ export function Pet({
                 expandFromHead();
               }
             }}
-            aria-label={`${characterState.identity.name} 简单形态，点击切换为完整${statusText ? `，${statusText}` : ""}`}
-            title="切换为完整形态"
+            aria-label={t("form.simpleAria", {
+              name: characterState.identity.name,
+              status: statusText ? t("form.statusSuffix", { status: statusText }) : "",
+            })}
+            title={t("form.switchToFull")}
             style={characterStyle}
             className="sag-pet-collapsed relative cursor-grab outline-none active:cursor-grabbing"
           >
@@ -1314,7 +1328,10 @@ export function Pet({
                 else openMiniWorkspace(workspaceSection);
               }
             }}
-            aria-label={`${characterState.identity.name} 完整形态${statusText ? `，${statusText}` : ""}`}
+            aria-label={t("form.fullAria", {
+              name: characterState.identity.name,
+              status: statusText ? t("form.statusSuffix", { status: statusText }) : "",
+            })}
             title={characterState.identity.name}
             style={characterStyle}
             className="sag-pet-astronaut relative h-full w-full cursor-grab outline-none active:cursor-grabbing"
