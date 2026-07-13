@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { ArrowLeft, FileText, Plus, RefreshCw, RotateCw } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { AnimatePresence, motion } from "motion/react";
 
 import { cn } from "@/lib/utils";
@@ -29,6 +30,7 @@ export function KnowledgeSourceWorkspace({
   onBack: () => void;
   onSourceChanged?: () => void | Promise<void>;
 }) {
+  const t = useTranslations("Knowledge");
   const { capabilities } = useApp();
   const {
     source,
@@ -68,19 +70,19 @@ export function KnowledgeSourceWorkspace({
   };
 
   const title = documentId
-    ? source?.name || "文档详情"
+    ? source?.name || t("documentDetails")
     : screen === "add"
       ? isFileSource
-        ? "添加文档"
-        : "同步信源"
-      : source?.name || "信源";
+        ? t("addDocument")
+        : t("syncSource")
+      : source?.name || t("source");
   const subtitle = documentId
-    ? "文档详情"
+    ? t("documentDetails")
     : screen === "add"
-      ? source?.name || "正在载入"
+      ? source?.name || t("loading")
       : documents === null
-        ? "正在同步"
-        : `${documents.length} 个文档`;
+        ? t("syncing")
+        : t("documentsCount", { count: documents.length });
 
   return (
     <motion.div
@@ -96,8 +98,8 @@ export function KnowledgeSourceWorkspace({
           size="icon"
           className="size-7"
           onClick={goBack}
-          aria-label={documentId || screen === "add" ? "返回信源" : "返回知识库"}
-          title="返回"
+          aria-label={documentId || screen === "add" ? t("backToSource") : t("back")}
+          title={t("backAction")}
         >
           <ArrowLeft className="size-3.5" />
         </Button>
@@ -114,8 +116,8 @@ export function KnowledgeSourceWorkspace({
               className="size-7"
               onClick={() => setScreen("add")}
               disabled={!source}
-              aria-label={isFileSource ? "添加文档" : "同步信源"}
-              title={isFileSource ? "添加文档" : "同步信源"}
+              aria-label={isFileSource ? t("addDocument") : t("syncSource")}
+              title={isFileSource ? t("addDocument") : t("syncSource")}
             >
               {isFileSource ? (
                 <Plus className="size-3.5" />
@@ -130,8 +132,8 @@ export function KnowledgeSourceWorkspace({
               className="size-7"
               onClick={() => void refresh()}
               disabled={refreshing}
-              aria-label="刷新文档"
-              title="刷新文档"
+              aria-label={t("refreshDocuments")}
+              title={t("refreshDocuments")}
             >
               <RotateCw className={cn("size-3.5", refreshing && "animate-spin")} />
             </Button>
@@ -163,8 +165,8 @@ export function KnowledgeSourceWorkspace({
           >
             <p className="mb-3 text-xs leading-5 text-muted-foreground">
               {isFileSource
-                ? "文件会在后台解析，完成后即可用于搜索和问答。"
-                : "同步最新内容后，文档列表会自动更新。"}
+                ? t("uploadDescription")
+                : t("syncDescription")}
             </p>
             {source &&
               (isFileSource ? (
@@ -192,16 +194,16 @@ export function KnowledgeSourceWorkspace({
                 <span className="min-w-0 flex-1">{error}</span>
                 {!notFound && (
                   <button type="button" onClick={() => void refresh()} className="font-medium">
-                    重试
+                    {t("retry")}
                   </button>
                 )}
               </div>
             )}
             {notFound ? (
               <div className="flex min-h-48 flex-col items-center justify-center px-6 text-center">
-                <p className="text-sm font-medium">信源不存在</p>
+                <p className="text-sm font-medium">{t("sourceNotFound")}</p>
                 <Button size="sm" variant="outline" className="mt-3" onClick={onBack}>
-                  返回知识库
+                  {t("back")}
                 </Button>
               </div>
             ) : documents === null || !source ? (
@@ -215,9 +217,9 @@ export function KnowledgeSourceWorkspace({
                 <div className="grid size-10 place-items-center rounded-xl bg-muted text-muted-foreground">
                   <FileText className="size-4" />
                 </div>
-                <p className="mt-3 text-sm font-medium">还没有文档</p>
+                <p className="mt-3 text-sm font-medium">{t("emptyDocuments")}</p>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  {isFileSource ? "上传资料后即可搜索和问答。" : "同步信源以获取最新内容。"}
+                  {isFileSource ? t("emptyDocumentsUpload") : t("emptyDocumentsSync")}
                 </p>
                 <Button size="sm" className="mt-4" onClick={() => setScreen("add")}>
                   {isFileSource ? (
@@ -225,7 +227,7 @@ export function KnowledgeSourceWorkspace({
                   ) : (
                     <RefreshCw className="size-3.5" />
                   )}
-                  {isFileSource ? "添加文档" : "同步信源"}
+                  {isFileSource ? t("addDocument") : t("syncSource")}
                 </Button>
               </div>
             ) : (

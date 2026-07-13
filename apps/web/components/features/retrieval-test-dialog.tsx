@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { FlaskConical, Search } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
@@ -29,6 +30,7 @@ export function RetrievalTestDialog({
   open: boolean;
   onOpenChange: (o: boolean) => void;
 }) {
+  const t = useTranslations("RetrievalTest");
   const [query, setQuery] = React.useState("");
   const [topK, setTopK] = React.useState(8);
   const [results, setResults] = React.useState<Section[] | null>(null);
@@ -48,7 +50,7 @@ export function RetrievalTestDialog({
       const r = await api.globalSearch({ query, source_ids: [sourceId], top_k: topK });
       setResults(r.sections);
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "检索失败");
+      toast.error(err instanceof ApiError ? err.message : t("failed"));
     } finally {
       setBusy(false);
     }
@@ -60,21 +62,21 @@ export function RetrievalTestDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FlaskConical className="size-4 text-foreground" />
-            检索测试 · {sourceName}
+            {t("title", { source: sourceName })}
           </DialogTitle>
           <DialogDescription>
-            用真实查询验证召回效果——所见即所得，先看看能捞回哪些片段。
+            {t("description")}
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={run} className="flex items-end gap-2">
           <div className="flex flex-1 flex-col gap-1.5">
-            <Label htmlFor="rt-q">查询</Label>
+            <Label htmlFor="rt-q">{t("query")}</Label>
             <Input
               id="rt-q"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="输入一个真实问题，看看能召回什么"
+              placeholder={t("queryPlaceholder")}
               autoFocus
             />
           </div>
@@ -91,20 +93,20 @@ export function RetrievalTestDialog({
           </div>
           <Button type="submit" disabled={busy || !query.trim()}>
             {busy ? <Spinner /> : <Search className="size-4" />}
-            检索
+            {t("run")}
           </Button>
         </form>
 
         {results && (
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>召回 {results.length} 条</span>
+              <span>{t("resultCount", { count: results.length })}</span>
             </div>
 
             <div className="max-h-[22rem] overflow-y-auto rounded-lg border">
               {results.length === 0 ? (
                 <p className="px-3 py-8 text-center text-sm text-muted-foreground">
-                  没有召回任何内容。换个说法，或确认文档已处理完成。
+                  {t("empty")}
                 </p>
               ) : (
                 results.map((s, i) => (
@@ -114,7 +116,7 @@ export function RetrievalTestDialog({
                         {i + 1}
                       </span>
                       <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-                        {s.heading || "片段"}
+                        {s.heading || t("section")}
                       </span>
                       <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
                         {s.score.toFixed(4)}

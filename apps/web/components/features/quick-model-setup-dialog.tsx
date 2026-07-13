@@ -11,6 +11,7 @@ import {
   Search,
   Sparkles,
 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
@@ -42,17 +43,18 @@ interface QuickModelSetupDialogProps {
 }
 
 const PRESET_ROWS = [
-  { icon: Cpu, label: "生成模型", value: "qwen3.6-flash" },
-  { icon: Sparkles, label: "向量模型", value: "Qwen3-Embedding-4B · 1024 维" },
-  { icon: FileText, label: "文档解析", value: "MinerU 2.5" },
-  { icon: Search, label: "检索模式", value: "快速模式 · 纯向量" },
-];
+  { icon: Cpu, labelKey: "generationModel", valueKey: "generationValue" },
+  { icon: Sparkles, labelKey: "embeddingModel", valueKey: "embeddingValue" },
+  { icon: FileText, labelKey: "documentParsing", valueKey: "parsingValue" },
+  { icon: Search, labelKey: "retrievalMode", valueKey: "retrievalValue" },
+] as const;
 
 export function QuickModelSetupDialog({
   open,
   onOpenChange,
   onConfigured,
 }: QuickModelSetupDialogProps) {
+  const t = useTranslations("QuickSetup");
   const [apiKey, setApiKey] = React.useState("");
   const [showKey, setShowKey] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -74,7 +76,7 @@ export function QuickModelSetupDialog({
     event.preventDefault();
     const key = apiKey.trim();
     if (!key) {
-      setError("请输入 302.AI API Key");
+      setError(t("keyRequired"));
       inputRef.current?.focus();
       return;
     }
@@ -86,9 +88,9 @@ export function QuickModelSetupDialog({
       setApiKey("");
       setShowKey(false);
       onConfigured(result.capabilities);
-      toast.success("302.AI 已配置，可以开始使用了");
+      toast.success(t("configured"));
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : "配置失败，请稍后重试");
+      setError(cause instanceof ApiError ? cause.message : t("failed"));
     } finally {
       setSaving(false);
     }
@@ -106,23 +108,22 @@ export function QuickModelSetupDialog({
             <div className="mb-2 grid size-10 place-items-center rounded-lg border bg-muted/50 text-foreground">
               <KeyRound className="size-5" />
             </div>
-            <DialogTitle>用 302.AI 快速开始问答</DialogTitle>
+            <DialogTitle>{t("title")}</DialogTitle>
             <DialogDescription className="max-w-[34rem] leading-6">
-              推荐新用户使用：填写一个 API Key，即可完成生成模型、向量模型、
-              MinerU 文档解析和检索配置。也可以先跳过，稍后在设置中自行配置。
+              {t("description")}
             </DialogDescription>
           </DialogHeader>
 
           <div className="border-y bg-muted/25 px-6">
-            {PRESET_ROWS.map(({ icon: Icon, label, value }) => (
+            {PRESET_ROWS.map(({ icon: Icon, labelKey, valueKey }) => (
               <div
-                key={label}
+                key={labelKey}
                 className="grid min-h-12 grid-cols-[20px_88px_minmax(0,1fr)] items-center gap-2 border-b py-2.5 last:border-b-0"
               >
                 <Icon className="size-4 text-muted-foreground" aria-hidden="true" />
-                <span className="text-sm text-muted-foreground">{label}</span>
+                <span className="text-sm text-muted-foreground">{t(labelKey)}</span>
                 <span className="min-w-0 text-right text-sm font-medium text-foreground">
-                  {value}
+                  {t(valueKey)}
                 </span>
               </div>
             ))}
@@ -156,18 +157,18 @@ export function QuickModelSetupDialog({
                         type="button"
                         onClick={() => setShowKey((value) => !value)}
                         disabled={saving}
-                        aria-label={showKey ? "隐藏 API Key" : "显示 API Key"}
+                        aria-label={showKey ? t("hideApiKey") : t("showApiKey")}
                         className="absolute right-1 top-1 grid size-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
                       >
                         {showKey ? <EyeOff /> : <Eye />}
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent>{showKey ? "隐藏 Key" : "显示 Key"}</TooltipContent>
+                    <TooltipContent>{showKey ? t("hideKey") : t("showKey")}</TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               </div>
               <FieldDescription id="quick-setup-key-help">
-                Key 仅保存到当前部署的本地配置，读取时不会回显。
+                {t("keyDescription")}
               </FieldDescription>
               {error && <FieldError>{error}</FieldError>}
             </Field>
@@ -175,7 +176,7 @@ export function QuickModelSetupDialog({
             <Alert className="border-border/80 bg-background py-2.5">
               <Check className="size-4" />
               <AlertDescription className="text-muted-foreground">
-                默认启用 MinerU 2.5（按页计费）、128K 上下文、1024 维向量和纯向量快速检索。
+                {t("defaults")}
               </AlertDescription>
             </Alert>
           </div>
@@ -187,11 +188,11 @@ export function QuickModelSetupDialog({
               onClick={() => onOpenChange(false)}
               disabled={saving}
             >
-              跳过，稍后配置
+              {t("skip")}
             </Button>
             <Button type="submit" disabled={saving || !apiKey.trim()} className="min-w-28">
-              {saving ? <Spinner aria-label="正在配置" /> : <Sparkles />}
-              {saving ? "配置中…" : "快速启用"}
+              {saving ? <Spinner aria-label={t("configuringAria")} /> : <Sparkles />}
+              {saving ? t("configuring") : t("enable")}
             </Button>
           </DialogFooter>
         </form>

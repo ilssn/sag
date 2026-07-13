@@ -7,6 +7,7 @@ import {
   type LiveStep,
 } from "./agent-run-activity";
 import type { AgentEvent, AgentRunOutcome } from "./sse";
+import { clientErrorMessage } from "../i18n/client-errors";
 import type {
   Citation,
   Message,
@@ -194,7 +195,7 @@ interface ActiveOperation {
 
 export class ConversationBusyError extends Error {
   constructor() {
-    super("已有回答正在生成，请等待完成或先停止");
+    super(clientErrorMessage("conversationBusy"));
     this.name = "ConversationBusyError";
   }
 }
@@ -525,7 +526,7 @@ export class ConversationRuntime {
         history: {
           ...snapshot.history,
           status: "error",
-          error: errorMessage(reason, "加载对话失败"),
+          error: errorMessage(reason, clientErrorMessage("historyLoadFailed")),
         },
       }));
     } finally {
@@ -540,7 +541,9 @@ export class ConversationRuntime {
     this.record(sessionId);
     const query = input.query.trim();
     const attachmentIds = [...(input.attachmentIds ?? [])];
-    if (!query && !attachmentIds.length) throw new Error("问题或附件至少提供一项");
+    if (!query && !attachmentIds.length) {
+      throw new Error(clientErrorMessage("queryOrAttachmentRequired"));
+    }
     if (this.activeOperation) throw new ConversationBusyError();
 
     const startedAt = this.now();
@@ -613,7 +616,7 @@ export class ConversationRuntime {
       if (!snapshot.threadId) {
         const thread = await this.transport.createThread({
           agentId: this.agentId,
-          title: (input.title ?? query).slice(0, 80) || "新会话",
+          title: (input.title ?? query).slice(0, 80) || clientErrorMessage("newConversation"),
           signal: controller.signal,
         });
         if (!this.isCurrentOperation(operation)) throw new DOMException("Aborted", "AbortError");
@@ -622,7 +625,7 @@ export class ConversationRuntime {
         this.notifyActivity();
       }
       const threadId = snapshot.threadId;
-      if (!threadId) throw new Error("创建会话失败");
+      if (!threadId) throw new Error(clientErrorMessage("conversationCreateFailed"));
 
       this.updateSession(sessionId, (current) =>
         current.run?.requestId === requestId
@@ -649,7 +652,10 @@ export class ConversationRuntime {
         : {
             status: "failed",
             runId: operation.runId ?? "",
-            error: { code: "stream_error", message: errorMessage(reason, "连接中断") },
+            error: {
+              code: "stream_error",
+              message: errorMessage(reason, clientErrorMessage("connectionInterrupted")),
+            },
           };
       await this.finishOperation(operation, outcome);
       if (cancelled) {
@@ -694,26 +700,32 @@ export class ConversationRuntime {
     await this.resolveApproval(sessionId, toolCallId, true);
   }
 
-  async reject(sessionId: string, toolCallId: string, reason = "用户拒绝执行"): Promise<void> {
+  async reject(
+    sessionId: string,
+    toolCallId: string,
+    reason = clientErrorMessage("userRejected"),
+  ): Promise<void> {
     await this.resolveApproval(sessionId, toolCallId, false, reason);
   }
 
   async retry(sessionId: string, assistantMessageId: string): Promise<ConversationSendResult> {
     const snapshot = this.getSessionSnapshot(sessionId);
     const index = snapshot.messages.findIndex((message) => message.id === assistantMessageId);
-    if (index < 0) throw new Error("消息不存在");
+    if (index < 0) throw new Error(clientErrorMessage("messageMissing"));
     const user = [...snapshot.messages.slice(0, index)]
       .reverse()
       .find((message) => message.role === "user");
-    if (!user) throw new Error("找不到原始问题");
+    if (!user) throw new Error(clientErrorMessage("originalQuestionMissing"));
     return this.send(sessionId, { query: user.content });
   }
 
   async deleteMessage(sessionId: string, messageId: string): Promise<void> {
     this.assertAvailable();
     const snapshot = this.getSessionSnapshot(sessionId);
-    if (!snapshot.threadId) throw new Error("会话尚未创建");
-    if (!this.transport.deleteMessage) throw new Error("当前 transport 不支持删除消息");
+    if (!snapshot.threadId) throw new Error(clientErrorMessage("conversationNotCreated"));
+    if (!this.transport.deleteMessage) {
+      throw new Error(clientErrorMessage("deleteMessageUnsupported"));
+    }
     await this.transport.deleteMessage({
       agentId: this.agentId,
       threadId: snapshot.threadId,
@@ -763,7 +775,9 @@ export class ConversationRuntime {
 
   private bindThread(sessionId: string, threadId: string): void {
     const mapped = this.sessionsByThread.get(threadId);
-    if (mapped && mapped !== sessionId) throw new Error("thread 已绑定到其他 conversation session");
+    if (mapped && mapped !== sessionId) {
+      throw new Error(clientErrorMessage("threadAlreadyBound"));
+    }
     const snapshot = this.getSessionSnapshot(sessionId);
     if (snapshot.threadId && snapshot.threadId !== threadId) {
       this.sessionsByThread.delete(snapshot.threadId);
@@ -862,7 +876,7 @@ export class ConversationRuntime {
     } else if (event.type === "tool.approval_required") {
       pendingApproval = {
         toolCallId: String(event.payload.tool_call_id ?? ""),
-        label: String(event.payload.label ?? event.payload.name ?? "工具"),
+        label: String(event.payload.label ?? event.payload.name ?? clientErrorMessage("tool")),
         risk: String(event.payload.risk ?? "write"),
         arguments: objectValue(event.payload.arguments),
         resolving: false,
@@ -888,8 +902,8 @@ export class ConversationRuntime {
       const failure = objectValue(event.payload.error);
       error =
         event.type === "run.cancelled"
-          ? "已停止"
-          : String(failure.message ?? "生成失败");
+          ? clientErrorMessage("stopped")
+          : String(failure.message ?? clientErrorMessage("generationFailed"));
     }
 
     const runId = operation.runId ?? snapshot.run.runId;
@@ -993,7 +1007,11 @@ export class ConversationRuntime {
     this.flushTokens(operation);
 
     const snapshot = this.getSessionSnapshot(operation.sessionId);
-    const failure = outcome.error?.message ?? (outcome.status === "cancelled" ? "已停止" : "生成失败");
+    const failure = outcome.error?.message ?? (
+      outcome.status === "cancelled"
+        ? clientErrorMessage("stopped")
+        : clientErrorMessage("generationFailed")
+    );
     const liveSteps = snapshot.run?.requestId === operation.requestId ? snapshot.run.steps : [];
     const steps =
       outcome.status === "completed"
@@ -1002,7 +1020,7 @@ export class ConversationRuntime {
             liveSteps,
             this.now(),
             "error",
-            outcome.status === "cancelled" ? "已停止" : failure,
+            outcome.status === "cancelled" ? clientErrorMessage("stopped") : failure,
           );
     const delivery: ConversationDelivery =
       outcome.status === "completed"
@@ -1025,7 +1043,7 @@ export class ConversationRuntime {
             content:
               message.content ||
               (outcome.status === "cancelled"
-                ? "已停止"
+                ? clientErrorMessage("stopped")
                 : outcome.status === "failed"
                   ? `⚠︎ ${failure}`
                   : ""),
@@ -1068,7 +1086,7 @@ export class ConversationRuntime {
       !approval ||
       approval.toolCallId !== toolCallId
     ) {
-      throw new Error("工具审批已失效");
+      throw new Error(clientErrorMessage("approvalExpired"));
     }
     this.updateSession(sessionId, (current) =>
       current.run?.pendingApproval?.toolCallId === toolCallId
@@ -1110,7 +1128,7 @@ export class ConversationRuntime {
           current.run?.pendingApproval?.toolCallId === toolCallId
             ? {
                 ...current,
-                error: errorMessage(failure, "处理工具审批失败"),
+                error: errorMessage(failure, clientErrorMessage("approvalFailed")),
                 run: {
                   ...current.run,
                   pendingApproval: { ...current.run.pendingApproval, resolving: false },
@@ -1177,7 +1195,9 @@ export class ConversationRuntime {
   private record(sessionId: string): SessionRecord {
     this.assertAvailable();
     const record = this.sessions.get(sessionId);
-    if (!record) throw new Error(`conversation session 不存在: ${sessionId}`);
+    if (!record) {
+      throw new Error(clientErrorMessage("sessionMissing", { event: sessionId }));
+    }
     return record;
   }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 
 import { api, ApiError } from "@/lib/api";
 import type { SearchStrategy } from "@/lib/retrieval-config";
@@ -163,6 +164,7 @@ export function SearchProvider({
   defaultStrategy: SearchStrategy;
   children: React.ReactNode;
 }) {
+  const t = useTranslations("Search");
   const [state, setState] = React.useState<SearchWorkspaceState>({
     query: "",
     scoped: [],
@@ -438,7 +440,7 @@ export function SearchProvider({
         }));
         return null;
       }
-      const message = error instanceof ApiError ? error.message : "检索失败";
+      const message = error instanceof ApiError ? error.message : t("failed");
       setState((current) => ({
         ...current,
         ...failSearchLifecycle(current, message, rollback),
@@ -453,7 +455,7 @@ export function SearchProvider({
         activeRequestRef.current = null;
       }
     }
-  }, [clear]);
+  }, [clear, t]);
 
   const setStrategy = React.useCallback((strategy: SearchStrategy) => {
     setState((current) => ({ ...current, strategy }));

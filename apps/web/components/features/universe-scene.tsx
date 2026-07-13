@@ -3,6 +3,7 @@
 import * as React from "react";
 import * as THREE from "three";
 import { forceCollide } from "d3-force";
+import { useLocale, useTranslations } from "next-intl";
 import type {
   ForceGraph3DInstance,
   LinkObject,
@@ -99,6 +100,18 @@ interface UniverseSceneProps {
   onViewChange: (value: UniverseSceneView) => void;
   onSourceLod: (sourceId: string, level: 0 | 1 | 2 | 3) => void;
   onSelectionClear: () => void;
+}
+
+interface UniverseSceneText {
+  locale: string;
+  aria: string;
+  exploreSource: (label: string) => string;
+  sourceStats: (events: number, entities: number) => string;
+  sourceStatsBuilding: (events: number) => string;
+  exploreNode: (kind: "event" | "entity", label: string) => string;
+  kind: (kind: "event" | "entity") => string;
+  relatedEvents: (count: number, category: string) => string;
+  extractedEvent: string;
 }
 
 interface ForceNode extends NodeObject {
@@ -499,11 +512,13 @@ class UniverseForceSceneEngine {
   private resizePending = false;
   private didInitialFocus = false;
   private dataEpoch = 0;
+  private text: UniverseSceneText;
 
   constructor(
     host: HTMLDivElement,
     policy: UniversePolicy,
     viewPreferences: UniverseViewPreferences,
+    text: UniverseSceneText,
     ForceGraph3D: new (
       element: HTMLElement,
       options?: { controlType?: "orbit"; rendererConfig?: THREE.WebGLRendererParameters },
@@ -512,6 +527,7 @@ class UniverseForceSceneEngine {
     this.host = host;
     this.policy = policy;
     this.viewPreferences = viewPreferences;
+    this.text = text;
     this.host.replaceChildren();
     this.host.style.position = "absolute";
     this.host.style.inset = "0";
@@ -662,6 +678,7 @@ class UniverseForceSceneEngine {
     reducedMotion: boolean;
     darkTheme: boolean;
     viewPreferences: UniverseViewPreferences;
+    text: UniverseSceneText;
   }) {
     const themeChanged = this.darkTheme !== options.darkTheme;
     const labelPreferencesChanged =
@@ -672,10 +689,12 @@ class UniverseForceSceneEngine {
     const edgePreferencesChanged =
       this.viewPreferences.edgeDensity !== options.viewPreferences.edgeDensity;
     const leavingInteractiveMode = this.interactive && !options.interactive;
+    const localeChanged = this.text.locale !== options.text.locale;
     this.darkTheme = options.darkTheme;
     this.interactive = options.interactive;
     this.reducedMotion = options.reducedMotion;
     this.viewPreferences = options.viewPreferences;
+    this.text = options.text;
     this.host.dataset.universeReducedMotion = String(options.reducedMotion);
     this.host.dataset.universePriority = options.viewPreferences.priority;
     this.host.dataset.universeLabelDensity = options.viewPreferences.labelDensity;
@@ -700,7 +719,7 @@ class UniverseForceSceneEngine {
       this.edgeVisibilityKey = "";
       this.applyHighlight();
     }
-    if (this.dataReady && labelPreferencesChanged) this.rebuildLabels();
+    if (this.dataReady && (labelPreferencesChanged || localeChanged)) this.rebuildLabels();
     this.updateNebulaMotionState();
     if (this.shouldAnimateNebula()) {
       this.wakeRendering(1400);
@@ -2236,7 +2255,7 @@ class UniverseForceSceneEngine {
       element.type = "button";
       element.className = "sag-nebula-label";
       element.dataset.universeNodeId = node.id;
-      element.setAttribute("aria-label", `探索信息源 ${node.sceneNode.label}`);
+      element.setAttribute("aria-label", this.text.exploreSource(node.sceneNode.label));
       element.style.setProperty(
         "--nebula-color",
         `#${this.sourceVisualColor(node.sourceId).getHexString()}`,
@@ -2253,14 +2272,15 @@ class UniverseForceSceneEngine {
       title.textContent = node.sceneNode.label;
       const meta = document.createElement("small");
       meta.textContent = node.sceneNode.statsReady
-        ? `${node.sceneNode.eventCount} 事件 · ${node.sceneNode.entityCount} 实体`
-        : `${node.sceneNode.eventCount} 事件 · 实体统计中`;
+        ? this.text.sourceStats(node.sceneNode.eventCount, node.sceneNode.entityCount)
+        : this.text.sourceStatsBuilding(node.sceneNode.eventCount);
       copy.append(title, meta);
       element.append(marker, copy);
       this.labelLayer.appendChild(element);
       this.labels.push({ nodeId: node.id, kind: "source", element });
     });
     activeNodes.forEach((node) => {
+      const nodeKind = node.kind === "event" ? "event" : "entity";
       const element = document.createElement("button");
       element.type = "button";
       element.className = "sag-universe-node-label";
@@ -2274,7 +2294,7 @@ class UniverseForceSceneEngine {
       );
       element.setAttribute(
         "aria-label",
-        `探索${node.kind === "event" ? "事件" : "实体"} ${node.sceneNode.label}`,
+        this.text.exploreNode(nodeKind, node.sceneNode.label),
       );
       this.bindLabelInteraction(element, node);
 
@@ -2283,9 +2303,7 @@ class UniverseForceSceneEngine {
       const marker = document.createElement("span");
       marker.className = "sag-universe-node-label__marker";
       const eyebrowText = document.createElement("span");
-      eyebrowText.textContent = `${node.kind === "event" ? "事件" : "实体"} · ${
-        node.sceneNode.category
-      }`;
+      eyebrowText.textContent = `${this.text.kind(nodeKind)} · ${node.sceneNode.category}`;
       eyebrow.append(marker, eyebrowText);
 
       const title = document.createElement("strong");
@@ -2293,8 +2311,8 @@ class UniverseForceSceneEngine {
       title.title = node.sceneNode.label;
       const summary = document.createElement("p");
       const summaryText = node.sceneNode.description || (node.kind === "entity"
-        ? `${node.sceneNode.relatedCount} 个关联事件 · ${node.sceneNode.category}`
-        : node.sceneNode.category || "已抽取事件");
+        ? this.text.relatedEvents(node.sceneNode.relatedCount, node.sceneNode.category)
+        : node.sceneNode.category || this.text.extractedEvent);
       summary.textContent = summaryText;
       summary.title = summaryText;
       element.append(eyebrow, title, summary);
@@ -3201,6 +3219,22 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
     },
     forwardedRef,
   ) {
+    const locale = useLocale();
+    const t = useTranslations("UniverseScene");
+    const text = React.useMemo<UniverseSceneText>(() => ({
+      locale,
+      aria: t("aria"),
+      exploreSource: (label) => t("exploreSource", { label }),
+      sourceStats: (events, entities) => t("sourceStats", { events, entities }),
+      sourceStatsBuilding: (events) => t("sourceStatsBuilding", { events }),
+      exploreNode: (kind, label) => t("exploreNode", {
+        kind: t(`kinds.${kind}`),
+        label,
+      }),
+      kind: (kind) => t(`kinds.${kind}`),
+      relatedEvents: (count, category) => t("relatedEvents", { count, category }),
+      extractedEvent: t("extractedEvent"),
+    }), [locale, t]);
     const hostRef = React.useRef<HTMLDivElement>(null);
     const engineRef = React.useRef<UniverseForceSceneEngine | null>(null);
     const latestRef = React.useRef({
@@ -3217,6 +3251,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
       onViewChange,
       onSourceLod,
       onSelectionClear,
+      text,
     });
     latestRef.current = {
       data,
@@ -3232,6 +3267,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
       onViewChange,
       onSourceLod,
       onSelectionClear,
+      text,
     };
 
     React.useEffect(() => {
@@ -3246,6 +3282,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
             host,
             current.policy,
             current.viewPreferences,
+            current.text,
             ForceGraph3D as unknown as new (
               element: HTMLElement,
               options?: {
@@ -3267,6 +3304,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
             reducedMotion: current.reducedMotion,
             darkTheme: current.darkTheme,
             viewPreferences: current.viewPreferences,
+            text: current.text,
           });
           if (current.interactive) {
             engine.setData(current.data, current.policy, current.sourceHits);
@@ -3300,8 +3338,9 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
         reducedMotion,
         darkTheme,
         viewPreferences,
+        text,
       });
-    }, [darkTheme, interactive, reducedMotion, viewPreferences]);
+    }, [darkTheme, interactive, reducedMotion, text, viewPreferences]);
 
     React.useLayoutEffect(() => {
       if (!interactive) return;
@@ -3344,7 +3383,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
         data-universe-node-count={data.nodes.length}
         data-universe-link-count={data.links.length}
         role="group"
-        aria-label="知识宇宙 3D 图谱"
+        aria-label={text.aria}
       />
     );
   },

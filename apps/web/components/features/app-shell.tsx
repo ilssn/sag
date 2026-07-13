@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
+import { useTranslations } from "next-intl";
 import { usePathname, useRouter } from "next/navigation";
 import { Cpu, Grip } from "lucide-react";
 import { motion } from "motion/react";
@@ -59,6 +60,7 @@ import { SearchProvider } from "@/components/features/search/search-provider";
 import { SpaceBackdrop } from "@/components/features/space-backdrop";
 import { SiteHeader } from "@/components/features/site-header";
 import { ThemeToggle } from "@/components/features/theme-toggle";
+import { LanguageToggle } from "@/components/features/language-toggle";
 import { Button } from "@/components/ui/button";
 import {
   ResizableHandle,
@@ -243,6 +245,7 @@ export function usePetAgent() {
 }
 
 function FullLoader() {
+  const t = useTranslations("AppShell");
   return (
     <div className="bg-space-field grid h-screen place-items-center">
       <SpaceBackdrop />
@@ -256,13 +259,14 @@ function FullLoader() {
           size="lg"
           className="sag-full-loader__avatar"
         />
-        <span className="text-sm text-muted-foreground">载入中…</span>
+        <span className="text-sm text-muted-foreground">{t("loading")}</span>
       </div>
     </div>
   );
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const t = useTranslations("AppShell");
   const router = useRouter();
   const pathname = usePathname();
   const petAgent = React.useMemo(
@@ -651,9 +655,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         onClick={() => openSettings("model")}
                       >
                         <Cpu className="size-3.5" />
-                        配置模型
+                        {t("configureModel")}
                       </Button>
                     )}
+                    <LanguageToggle />
                     <ThemeToggle />
                   </motion.div>
                 )}
@@ -697,8 +702,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   {windowed && (
                     <button
                       type="button"
-                      aria-label="调整窗口大小"
-                      title="调整窗口大小"
+                      aria-label={t("resizeWindow")}
+                      title={t("resizeWindow")}
                       onPointerDown={startWindowResize}
                       className="absolute bottom-1.5 right-1.5 z-20 hidden size-7 cursor-nwse-resize items-center justify-center rounded-md text-muted-foreground/55 transition-colors hover:bg-muted hover:text-foreground md:flex"
                     >

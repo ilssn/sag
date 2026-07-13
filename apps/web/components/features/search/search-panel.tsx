@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
+import { useTranslations } from "next-intl";
 import {
   ArrowUpRight,
   ChevronDown,
@@ -70,6 +71,7 @@ function removeMentionTerm(query: string): string {
 
 /** 检索扫描动画：骨架行 1→N 铺开、随机高亮、清空、再来——「翻找数据」的具象化。 */
 function SearchScanning() {
+  const t = useTranslations("Search");
   const [rows, setRows] = React.useState(1);
   const [lit, setLit] = React.useState<Set<number>>(new Set());
   React.useEffect(() => {
@@ -89,7 +91,7 @@ function SearchScanning() {
       className="flex flex-col gap-1.5 overflow-hidden rounded-lg border p-3"
       role="status"
       aria-live="polite"
-      aria-label="检索中"
+      aria-label={t("searching")}
     >
       {Array.from({ length: 6 }).map((_, i) => (
         <div
@@ -103,7 +105,7 @@ function SearchScanning() {
           )}
         />
       ))}
-      <p className="pt-1 text-center text-xs text-muted-foreground">正在翻找知识库…</p>
+      <p className="pt-1 text-center text-xs text-muted-foreground">{t("scanning")}</p>
     </div>
   );
 }
@@ -123,6 +125,7 @@ function ActivityCard({
   interactive: boolean;
   onOpen?: (item: ActivityItem) => void;
 }) {
+  const t = useTranslations("Search");
   const { open } = useDetailPanel();
   const Icon = FileText;
   const cardClass = cn(
@@ -143,7 +146,7 @@ function ActivityCard({
           {item.status && <DocStatusBadge status={item.status} />}
         </span>
         <span className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-          {item.subtitle || "文档"}
+          {item.subtitle || t("document")}
         </span>
       </span>
       {interactive && (
@@ -151,7 +154,7 @@ function ActivityCard({
           <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
         ) : (
           <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground transition-colors group-hover:text-foreground">
-            查看详情
+            {t("viewDetails")}
             <ArrowUpRight className="size-3" />
           </span>
         )
@@ -203,6 +206,7 @@ function ActivityTimeline({
   interactive: boolean;
   onItemOpen?: (item: ActivityItem) => void;
 }) {
+  const t = useTranslations("Search");
   const [visibleCount, setVisibleCount] = React.useState(ACTIVITY_PAGE_SIZE);
   const orderedItems = React.useMemo(() => {
     if (!items) return [];
@@ -234,8 +238,8 @@ function ActivityTimeline({
     return (
       <EmptyState
         icon={Clock}
-        title="还没有最近动态"
-        description="上传文档或开始对话后，这里会按时间展示最近产生的事件。"
+        title={t("noRecentActivity")}
+        description={t("recentActivityDescription")}
       />
     );
   }
@@ -268,9 +272,9 @@ function ActivityTimeline({
               )
             }
             className="flex h-8 w-full items-center justify-center gap-1.5 rounded-md text-xs text-muted-foreground outline-none transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label={`查看更多最近动态，剩余 ${remaining} 条`}
+            aria-label={t("moreActivityAria", { count: remaining })}
           >
-            查看更多
+            {t("viewMore")}
             <ChevronDown className="size-3.5" />
           </button>
         </div>
@@ -292,6 +296,7 @@ function SearchHistoryList({
   onRemove: (query: string) => void;
   onClear: () => void;
 }) {
+  const t = useTranslations("Search");
   const pageSize = 5;
   const [visibleCount, setVisibleCount] = React.useState(pageSize);
   const [clearConfirmOpen, setClearConfirmOpen] = React.useState(false);
@@ -300,8 +305,8 @@ function SearchHistoryList({
     return (
       <EmptyState
         icon={History}
-        title="还没有查询历史"
-        description="完成一次搜索后，查询词会保存在当前设备中。"
+        title={t("noHistory")}
+        description={t("historyDescription")}
       />
     );
   }
@@ -314,14 +319,14 @@ function SearchHistoryList({
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-3 px-1">
         <span className="text-xs text-muted-foreground">
-          {queries.length} 条本地记录
+          {t("localRecords", { count: queries.length })}
         </span>
         <button
           type="button"
           onClick={() => setClearConfirmOpen(true)}
           className="rounded px-1.5 py-1 text-xs text-muted-foreground outline-none transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring"
         >
-          清空全部
+          {t("clearAll")}
         </button>
       </div>
       <div className="overflow-hidden rounded-lg border border-border/70 bg-card/45">
@@ -352,8 +357,8 @@ function SearchHistoryList({
               type="button"
               onClick={() => onRemove(query)}
               className="mr-2 grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground/65 outline-none transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label={`删除查询历史：${query}`}
-              title="删除"
+              aria-label={t("deleteHistoryAria", { query })}
+              title={t("delete")}
             >
               <Trash2 className="size-3.5" />
             </button>
@@ -373,12 +378,12 @@ function SearchHistoryList({
         >
           {remaining > 0 ? (
             <>
-              展开更多
+              {t("expandMore")}
               <ChevronDown className="size-3.5" />
             </>
           ) : (
             <>
-              收起
+              {t("collapse")}
               <ChevronUp className="size-3.5" />
             </>
           )}
@@ -387,9 +392,9 @@ function SearchHistoryList({
       <ConfirmDialog
         open={clearConfirmOpen}
         onOpenChange={setClearConfirmOpen}
-        title="清空查询历史？"
-        description={`将删除当前设备保存的 ${queries.length} 条查询记录，此操作无法撤销。`}
-        confirmLabel="清空全部"
+        title={t("clearHistoryTitle")}
+        description={t("clearHistoryDescription", { count: queries.length })}
+        confirmLabel={t("clearAll")}
         onConfirm={onClear}
       />
     </div>
@@ -419,13 +424,14 @@ function ResultList({
   onCitationClick?: (citation: Citation, result: SearchResponse) => void;
   compact: boolean;
 }) {
+  const t = useTranslations("Search");
   const { open } = useDetailPanel();
   if (result.events.length === 0 && result.sections.length === 0) {
     return (
       <EmptyState
         icon={SearchIcon}
-        title="没有找到足够相关的证据"
-        description="换个更具体的说法，或通过 @ 缩小知识库范围。"
+        title={t("noEvidence")}
+        description={t("noEvidenceDescription")}
       />
     );
   }
@@ -465,7 +471,7 @@ function ResultList({
               <span className="min-w-0 flex-1">
                 <span className="flex min-w-0 items-center gap-2">
                   <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                    {section.heading || "相关资料"}
+                    {section.heading || t("relatedMaterial")}
                   </span>
                   <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-muted-foreground">
                     {section.score.toFixed(3)}
@@ -514,7 +520,7 @@ function ResultList({
           <span className="min-w-0 flex-1">
             <span className="flex min-w-0 items-center gap-2">
               <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                {event.title || "未命名事件"}
+                {event.title || t("unnamedEvent")}
               </span>
               {!compact && event.category && (
                 <span className="shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-300">
@@ -531,12 +537,12 @@ function ResultList({
               </span>
             </span>
             <span className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-              {event.summary || "暂无事件摘要"}
+              {event.summary || t("noEventSummary")}
             </span>
           </span>
           {!compact && event.chunk_id && event.source_id && (
             <span className="mt-1 inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground transition-colors group-hover:text-foreground">
-              查看原文
+              {t("viewOriginal")}
               <ArrowUpRight className="size-3" />
             </span>
           )}
@@ -559,6 +565,7 @@ function SearchSummaryCard({
   streaming: boolean;
   onCitationClick: (citation: Citation) => void;
 }) {
+  const t = useTranslations("Search");
   const [expanded, setExpanded] = React.useState(streaming);
   const [canExpand, setCanExpand] = React.useState(false);
   const [expandedScrollable, setExpandedScrollable] = React.useState(false);
@@ -663,7 +670,7 @@ function SearchSummaryCard({
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-300">
           <Sparkles className="size-3.5 shrink-0" />
-          <span className="truncate">基于相关证据的回答</span>
+          <span className="truncate">{t("evidenceAnswer")}</span>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {streaming && (
@@ -672,7 +679,7 @@ function SearchSummaryCard({
               role="status"
             >
               <Spinner className="size-3" />
-              生成中
+              {t("generating")}
             </span>
           )}
           {streaming && expanded && !following && (
@@ -681,7 +688,7 @@ function SearchSummaryCard({
               onClick={scrollToLatest}
               className="inline-flex h-7 items-center rounded-md px-2 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
             >
-              跟随输出
+              {t("followOutput")}
             </button>
           )}
           {(canExpand || streaming || (streamLayoutLocked && expanded)) && (
@@ -699,7 +706,7 @@ function SearchSummaryCard({
               aria-describedby={collapsed ? hintId : undefined}
               className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
             >
-              {expanded ? "收起" : "展开回答"}
+              {expanded ? t("collapse") : t("expandAnswer")}
               {expanded ? (
                 <ChevronUp className="size-3.5" />
               ) : (
@@ -714,7 +721,7 @@ function SearchSummaryCard({
         id={contentId}
         inert={collapsed || undefined}
         aria-hidden={collapsed || undefined}
-        aria-label={expandedScrollRegion ? "完整回答，可滚动" : undefined}
+        aria-label={expandedScrollRegion ? t("fullAnswerScrollable") : undefined}
         role={expandedScrollRegion ? "region" : undefined}
         tabIndex={expandedScrollRegion ? 0 : undefined}
         onScroll={(event) => {
@@ -750,14 +757,14 @@ function SearchSummaryCard({
           ) : streaming ? (
             <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
               <Spinner className="size-3.5" />
-              正在根据入选证据组织回答…
+              {t("composingAnswer")}
             </div>
           ) : null}
         </div>
       </div>
       {collapsed && (
         <span id={hintId} className="sr-only">
-          {accessiblePreviewExcerpt} 回答当前为折叠预览，展开后可访问完整内容和引用。
+          {t("collapsedPreview", { preview: accessiblePreviewExcerpt })}
         </span>
       )}
     </div>
@@ -806,6 +813,8 @@ export function SearchPanel({
   onCitationClick,
   className,
 }: SearchPanelProps) {
+  const t = useTranslations("Search");
+  const searchStrategies = useTranslations("SearchStrategies");
   const search = useSearchWorkspace();
   const ensureSources = search.ensureSources;
   const { open } = useDetailPanel();
@@ -841,13 +850,13 @@ export function SearchPanel({
         if (result) onSearchComplete?.(result);
         return result;
       } catch (error) {
-        const message = error instanceof Error ? error.message : "检索失败";
+        const message = error instanceof Error ? error.message : t("failed");
         if (onSearchError) onSearchError(message);
         else if (options.intent === "load-more") toast.error(message);
         return null;
       }
     },
-    [changeContentView, onSearchComplete, onSearchError, onSearchStart, search],
+    [changeContentView, onSearchComplete, onSearchError, onSearchStart, search, t],
   );
 
   React.useEffect(() => {
@@ -964,13 +973,13 @@ export function SearchPanel({
     [search.result],
   );
   const resultStatus = search.phase === "loading-more"
-    ? "正在补充更多证据…"
+    ? t("loadingMoreEvidence")
     : search.phase === "streaming"
-      ? "正在生成回答…"
+      ? t("generatingAnswer")
       : search.busy
-        ? "正在检索证据…"
+        ? t("retrievingEvidence")
         : search.result
-          ? `入选 ${search.result.sections.length} 条相关证据`
+          ? t("selectedEvidence", { count: search.result.sections.length })
           : "";
 
   return (
@@ -995,7 +1004,7 @@ export function SearchPanel({
             >
               <button
                 type="submit"
-                aria-label="搜索"
+                aria-label={t("search")}
                 disabled={!search.query.trim() || search.busy}
                 className="absolute left-2 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none"
               >
@@ -1011,7 +1020,7 @@ export function SearchPanel({
                     <span className="truncate">{sc.name}</span>
                     <button
                       type="button"
-                      aria-label={`移除 ${sc.name}`}
+                      aria-label={t("removeSource", { name: sc.name })}
                       onClick={() => search.removeSource(sc.id)}
                       className="rounded-sm text-primary/70 hover:bg-primary/15 hover:text-primary"
                     >
@@ -1062,7 +1071,7 @@ export function SearchPanel({
                       setMentionIndex(0);
                     }
                   }}
-                  placeholder={search.scoped.length ? "继续输入关键词…" : "搜索知识库 · 输入 @ 限定范围"}
+                  placeholder={search.scoped.length ? t("continueKeywords") : t("placeholder")}
                   className="min-w-[8ch] flex-1 bg-transparent py-0.5 text-sm outline-none placeholder:text-muted-foreground"
                 />
               </div>
@@ -1076,7 +1085,7 @@ export function SearchPanel({
                     setMentionOpen(false);
                     inputRef.current?.focus();
                   }}
-                  aria-label="清空"
+                  aria-label={t("clear")}
                   className="grid size-5 shrink-0 place-items-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <X className="size-3.5" />
@@ -1092,11 +1101,11 @@ export function SearchPanel({
               <div className="absolute left-0 top-full z-20 mt-2 w-full">
                 <div className="overflow-hidden rounded-lg border bg-card shadow-lift">
                   <div className="border-b px-3 py-2 text-xs font-medium text-muted-foreground">
-                    知识库范围
+                    {t("knowledgeScope")}
                   </div>
                   <div className="max-h-64 overflow-y-auto p-1" role="listbox">
                     {filteredSources.length === 0 ? (
-                      <p className="px-3 py-5 text-center text-sm text-muted-foreground">没有匹配的信源</p>
+                      <p className="px-3 py-5 text-center text-sm text-muted-foreground">{t("noMatchingSources")}</p>
                     ) : (
                       filteredSources.map((s, index) => {
                         const on = search.scoped.some((x) => x.id === s.id);
@@ -1117,7 +1126,7 @@ export function SearchPanel({
                           >
                             <Library className="size-3.5 shrink-0 text-muted-foreground" />
                             <span className="min-w-0 flex-1 truncate">{s.name}</span>
-                            {on && <span className="text-xs text-muted-foreground">已选</span>}
+                            {on && <span className="text-xs text-muted-foreground">{t("selected")}</span>}
                           </button>
                         );
                       })
@@ -1137,7 +1146,7 @@ export function SearchPanel({
               }}
               className="shrink-0 rounded-md px-2 py-1.5 text-sm text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
             >
-              取消
+              {t("cancel")}
             </button>
           )}
         </div>
@@ -1153,7 +1162,7 @@ export function SearchPanel({
             onValueChange={(value) =>
               value && changeContentView(value as SearchContentView)
             }
-            aria-label="搜索内容面板"
+            aria-label={t("contentPanelAria")}
           >
             <ToggleGroupItem
               value="history"
@@ -1161,7 +1170,7 @@ export function SearchPanel({
               disabled={search.busy}
             >
               <History className="size-3.5" />
-              查询历史
+              {t("history")}
             </ToggleGroupItem>
             <ToggleGroupItem
               value="activity"
@@ -1169,7 +1178,7 @@ export function SearchPanel({
               disabled={search.busy}
             >
               <List className="size-3.5" />
-              最近动态
+              {t("recentActivity")}
             </ToggleGroupItem>
           </ToggleGroup>
         </div>
@@ -1190,13 +1199,15 @@ export function SearchPanel({
         >
           <div className="flex items-center justify-between gap-3 px-1">
             <h2 className="flex items-center gap-2 text-sm font-medium">
-              检索结果
+              {t("results")}
               <span
                 className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground"
                 aria-live="polite"
               >
                 {search.busy && <Spinner className="size-3" />}
-                {getSearchStrategy(search.busy ? search.strategy : search.lastStrategy).label}
+                {searchStrategies(
+                  getSearchStrategy(search.busy ? search.strategy : search.lastStrategy).labelKey,
+                )}
               </span>
             </h2>
             <div className="flex items-center gap-3">
@@ -1210,12 +1221,12 @@ export function SearchPanel({
                   size="sm"
                   value={view}
                   onValueChange={(v) => v && setView(v as typeof view)}
-                  aria-label="结果视图"
+                  aria-label={t("resultViewAria")}
                 >
-                  <ToggleGroupItem value="list" aria-label="列表视图">
+                  <ToggleGroupItem value="list" aria-label={t("listView")}>
                     <List />
                   </ToggleGroupItem>
-                  <ToggleGroupItem value="graph" aria-label="图谱视图">
+                  <ToggleGroupItem value="graph" aria-label={t("graphView")}>
                     <Waypoints />
                   </ToggleGroupItem>
                 </ToggleGroup>
@@ -1249,14 +1260,14 @@ export function SearchPanel({
               role="alert"
               className="flex items-center justify-between gap-3 rounded-lg border border-destructive/25 bg-destructive/[0.04] px-3 py-2 text-xs text-destructive"
             >
-              <span className="min-w-0">补充结果失败：{search.error}</span>
+              <span className="min-w-0">{t("loadMoreFailed", { error: search.error })}</span>
               {search.canLoadMore && (
                 <button
                   type="button"
                   onClick={() => void loadMore()}
                   className="shrink-0 rounded-md border border-destructive/25 px-2 py-1 font-medium outline-none hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  重试
+                  {t("retry")}
                 </button>
               )}
             </div>
@@ -1290,7 +1301,7 @@ export function SearchPanel({
                     disabled={!search.canLoadMore}
                     className="rounded-full border bg-card px-4 py-1.5 text-xs text-muted-foreground shadow-soft outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
                   >
-                    {search.busy ? "加载中…" : "显示更多结果"}
+                    {search.busy ? t("loading") : t("showMoreResults")}
                   </button>
                 </div>
               )}
@@ -1301,7 +1312,7 @@ export function SearchPanel({
         <div className="mx-auto w-full max-w-3xl">
           <EmptyState
             icon={SearchIcon}
-            title="检索没有完成"
+            title={t("incomplete")}
             description={search.error}
             action={(
               <button
@@ -1309,7 +1320,7 @@ export function SearchPanel({
                 onClick={() => void run()}
                 className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground outline-none hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring"
               >
-                重新检索
+                {t("searchAgain")}
               </button>
             )}
           />
@@ -1340,9 +1351,9 @@ export function SearchPanel({
         <div className="mx-auto flex w-full max-w-3xl flex-1 items-center justify-center px-6 text-center">
           <div>
             <SearchIcon className="mx-auto size-6 text-muted-foreground/55" />
-            <p className="mt-2 text-sm font-medium">输入问题开始搜索</p>
+            <p className="mt-2 text-sm font-medium">{t("startTitle")}</p>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">
-              回答只会使用经过相关性重排的证据，并保留可点击引用。
+              {t("startDescription")}
             </p>
           </div>
         </div>

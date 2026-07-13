@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { FileText, Pause, Play, RefreshCw, Trash2 } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
@@ -25,6 +26,8 @@ export function DocumentList({
   variant?: "normal" | "compact";
   onOpenDocument?: (document: Doc) => void;
 }) {
+  const t = useTranslations("DocumentList");
+  const locale = useLocale();
   const [pending, setPending] = React.useState<string | null>(null);
   const { open } = useDetailPanel();
   const { timezone } = useApp();
@@ -33,10 +36,10 @@ export function DocumentList({
     setPending(d.id);
     try {
       await api.reprocessDocument(sourceId, d.id);
-      toast.success("已重新加入处理队列");
+      toast.success(t("requeued"));
       onChange();
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "操作失败");
+      toast.error(err instanceof ApiError ? err.message : t("operationFailed"));
     } finally {
       setPending(null);
     }
@@ -46,10 +49,10 @@ export function DocumentList({
     setPending(d.id);
     try {
       await api.deleteDocument(sourceId, d.id);
-      toast.success("文档已删除");
+      toast.success(t("deleted"));
       onChange();
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "删除失败");
+      toast.error(err instanceof ApiError ? err.message : t("deleteFailed"));
     } finally {
       setPending(null);
     }
@@ -59,10 +62,10 @@ export function DocumentList({
     setPending(d.id);
     try {
       await api.pauseDocument(sourceId, d.id);
-      toast.success("正在停止，当前分块完成后将保存断点");
+      toast.success(t("pausing"));
       onChange();
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "停止失败");
+      toast.error(err instanceof ApiError ? err.message : t("pauseFailed"));
     } finally {
       setPending(null);
     }
@@ -72,10 +75,10 @@ export function DocumentList({
     setPending(d.id);
     try {
       await api.resumeDocument(sourceId, d.id);
-      toast.success("已从断点继续抽取");
+      toast.success(t("resumed"));
       onChange();
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "继续失败");
+      toast.error(err instanceof ApiError ? err.message : t("resumeFailed"));
     } finally {
       setPending(null);
     }
@@ -93,7 +96,7 @@ export function DocumentList({
               else open({ kind: "document", sourceId, documentId: document.id });
             }}
             className="group/document flex w-full items-center gap-3 rounded-lg px-2.5 py-2.5 text-left outline-none transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
-            title="查看文档"
+            title={t("viewDocument")}
           >
             <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground transition-colors group-hover/document:text-foreground">
               <FileText className="size-4" />
@@ -103,13 +106,13 @@ export function DocumentList({
                 {document.filename}
               </div>
               <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-                <span>{formatBytes(document.size_bytes)}</span>
+                <span>{formatBytes(document.size_bytes, locale)}</span>
                 <span>·</span>
-                <span>{relativeTime(document.created_at, timezone)}</span>
+                <span>{relativeTime(document.created_at, timezone, locale)}</span>
                 {document.status === "ready" && (
                   <>
                     <span>·</span>
-                    <span className="truncate">{document.event_count} 事件</span>
+                    <span className="truncate">{t("events", { count: document.event_count })}</span>
                   </>
                 )}
               </div>
@@ -144,27 +147,30 @@ export function DocumentList({
               type="button"
               onClick={() => open({ kind: "document", sourceId, documentId: d.id })}
               className="min-w-0 flex-1 rounded-md text-left outline-none focus-visible:bg-muted/60"
-              title="查看详情与原文预览"
+              title={t("viewDetails")}
             >
               <div className="truncate text-sm font-medium text-foreground">{d.filename}</div>
               <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-                <span>{formatBytes(d.size_bytes)}</span>
+                <span>{formatBytes(d.size_bytes, locale)}</span>
                 <span>·</span>
-                <span>{relativeTime(d.created_at, timezone)}</span>
+                <span>{relativeTime(d.created_at, timezone, locale)}</span>
                 {d.status === "ready" && (
                   <>
                     <span>·</span>
                     <span>
-                      {d.chunk_count} 块 / {d.event_count} 事件
+                      {t("chunksAndEvents", {
+                        chunks: d.chunk_count,
+                        events: d.event_count,
+                      })}
                     </span>
                     <span>·</span>
-                    <span>100% · {formatTokenCount(d.token_usage)} tokens</span>
+                    <span>100% · {t("tokens", { count: formatTokenCount(d.token_usage, locale) })}</span>
                   </>
                 )}
                 {showMetrics && (
                   <>
                     <span>·</span>
-                    <span>{progress}% · {formatTokenCount(d.token_usage)} tokens</span>
+                    <span>{progress}% · {t("tokens", { count: formatTokenCount(d.token_usage, locale) })}</span>
                   </>
                 )}
                 {d.status === "failed" && d.error && (
@@ -193,7 +199,7 @@ export function DocumentList({
                 <Button
                   variant="ghost"
                   size="icon"
-                  title="停止抽取"
+                  title={t("pause")}
                   disabled={pending === d.id}
                   onClick={() => pause(d)}
                 >
@@ -204,7 +210,7 @@ export function DocumentList({
                 <Button
                   variant="ghost"
                   size="icon"
-                  title="继续抽取"
+                  title={t("resume")}
                   disabled={pending === d.id}
                   onClick={() => resume(d)}
                 >
@@ -215,7 +221,7 @@ export function DocumentList({
                 <Button
                   variant="ghost"
                   size="icon"
-                  title="重新处理"
+                  title={t("reprocess")}
                   disabled={pending === d.id}
                   onClick={() => reprocess(d)}
                 >
@@ -225,7 +231,7 @@ export function DocumentList({
               <Button
                 variant="ghost"
                 size="icon"
-                title="删除"
+                title={t("delete")}
                 disabled={pending === d.id}
                 onClick={() => remove(d)}
                 className="text-muted-foreground hover:text-destructive"

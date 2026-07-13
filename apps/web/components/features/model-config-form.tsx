@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Check, Plug, RotateCw, Save, Sparkles, X } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { useApp } from "@/components/features/app-shell";
@@ -34,6 +35,7 @@ function is302Api(url: string | null) {
 }
 
 export function ModelConfigForm() {
+  const t = useTranslations("ModelConfig");
   const { refreshCapabilities } = useApp();
   const [cfg, setCfg] = React.useState<ModelConfig | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
@@ -85,9 +87,9 @@ export function ModelConfigForm() {
     try {
       hydrate(await api.getModelConfig());
     } catch (error) {
-      setLoadError(error instanceof ApiError ? error.message : "无法加载模型配置");
+      setLoadError(error instanceof ApiError ? error.message : t("loadFailed"));
     }
-  }, [hydrate]);
+  }, [hydrate, t]);
 
   React.useEffect(() => {
     void load();
@@ -119,9 +121,9 @@ export function ModelConfigForm() {
       const { config } = await api.saveModelConfig(patch);
       hydrate(config);
       await refreshCapabilities();
-      toast.success("配置已保存并生效");
+      toast.success(t("saved"));
     } catch (error) {
-      toast.error(error instanceof ApiError ? error.message : "保存失败");
+      toast.error(error instanceof ApiError ? error.message : t("saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -135,7 +137,7 @@ export function ModelConfigForm() {
     } catch (error) {
       setTestResult({
         ok: false,
-        message: error instanceof ApiError ? error.message : "测试失败",
+        message: error instanceof ApiError ? error.message : t("testFailed"),
       });
     } finally {
       setTesting(false);
@@ -148,9 +150,9 @@ export function ModelConfigForm() {
       const { config } = await api.setup302MinerU();
       hydrate(config);
       await refreshCapabilities();
-      toast.success("已复用现有 302.AI Key 启用 MinerU 2.5");
+      toast.success(t("mineruEnabled"));
     } catch (error) {
-      toast.error(error instanceof ApiError ? error.message : "MinerU 配置失败");
+      toast.error(error instanceof ApiError ? error.message : t("mineruFailed"));
     } finally {
       setSaving(false);
     }
@@ -158,15 +160,15 @@ export function ModelConfigForm() {
 
   if (loadError) {
     return (
-      <SettingsSection title="模型配置" description="生成、向量和解析模型参数。">
+      <SettingsSection title={t("title")} description={t("description")}>
         <div className="p-4 sm:p-5">
           <Alert variant="destructive">
-            <AlertTitle>加载失败</AlertTitle>
+            <AlertTitle>{t("loadErrorTitle")}</AlertTitle>
             <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
               <span>{loadError}</span>
               <Button type="button" variant="outline" size="sm" onClick={() => void load()}>
                 <RotateCw />
-                重试
+                {t("retry")}
               </Button>
             </AlertDescription>
           </Alert>
@@ -179,9 +181,9 @@ export function ModelConfigForm() {
     return (
       <div className="flex flex-col gap-6">
         {[
-          ["生成模型", "正在加载模型连接。"],
-          ["向量模型", "正在加载向量化配置。"],
-          ["解析模型", "正在加载文件解析模型。"],
+          [t("generationTitle"), t("generationLoading")],
+          [t("embeddingTitle"), t("embeddingLoading")],
+          [t("parserTitle"), t("parserLoading")],
         ].map(([title, description]) => (
           <SettingsSection key={title} title={title} description={description}>
             <div className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5">
@@ -194,15 +196,15 @@ export function ModelConfigForm() {
     );
   }
 
-  const keyPlaceholder = (isSet: boolean) => (isSet ? "已配置，留空保持不变" : "sk-…");
+  const keyPlaceholder = (isSet: boolean) => (isSet ? t("keyConfigured") : "sk-…");
   const canReuse302Key =
     (cfg.llm_api_key_set && is302Api(cfg.llm_base_url)) ||
     (cfg.embedding_api_key_set && is302Api(cfg.embedding_base_url));
 
   return (
     <div className="flex flex-col gap-6">
-      <SettingsSection title="生成模型" description="用于答案生成和信息抽取的 OpenAI 兼容端点。">
-        <SettingsRow title="连接信息" description="服务地址和访问密钥。">
+      <SettingsSection title={t("generationTitle")} description={t("generationDescription")}>
+        <SettingsRow title={t("connectionTitle")} description={t("connectionDescription")}>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field>
               <FieldLabel htmlFor="llm-url">Base URL</FieldLabel>
@@ -212,7 +214,7 @@ export function ModelConfigForm() {
                 onChange={(event) => setLlmBaseUrl(event.target.value)}
                 placeholder="https://api.openai.com/v1"
               />
-              <FieldDescription>填写 OpenAI 兼容的 API 地址。</FieldDescription>
+              <FieldDescription>{t("baseUrlDescription")}</FieldDescription>
             </Field>
             <Field>
               <FieldLabel htmlFor="llm-key">API Key</FieldLabel>
@@ -228,10 +230,10 @@ export function ModelConfigForm() {
           </div>
         </SettingsRow>
 
-        <SettingsRow title="生成参数" description="控制模型、上下文与请求策略。">
+        <SettingsRow title={t("generationParams")} description={t("generationParamsDescription")}>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field>
-              <FieldLabel htmlFor="llm-model">模型</FieldLabel>
+              <FieldLabel htmlFor="llm-model">{t("model")}</FieldLabel>
               <Input
                 id="llm-model"
                 value={llmModel}
@@ -240,7 +242,7 @@ export function ModelConfigForm() {
               />
             </Field>
             <Field>
-              <FieldLabel htmlFor="llm-ctxwin">上下文窗口</FieldLabel>
+              <FieldLabel htmlFor="llm-ctxwin">{t("contextWindow")}</FieldLabel>
               <Input
                 id="llm-ctxwin"
                 type="number"
@@ -251,10 +253,10 @@ export function ModelConfigForm() {
                   setCtxWindow(Math.max(1024, Number(event.target.value) || 1024))
                 }
               />
-              <FieldDescription>模型可处理的总 token 数。</FieldDescription>
+              <FieldDescription>{t("contextWindowDescription")}</FieldDescription>
             </Field>
             <Field>
-              <FieldLabel htmlFor="llm-maxtok">最大输出 tokens</FieldLabel>
+              <FieldLabel htmlFor="llm-maxtok">{t("maxOutputTokens")}</FieldLabel>
               <Input
                 id="llm-maxtok"
                 type="number"
@@ -267,7 +269,7 @@ export function ModelConfigForm() {
               />
             </Field>
             <Field>
-              <FieldLabel>{`温度 · ${temperature.toFixed(1)}`}</FieldLabel>
+              <FieldLabel>{t("temperature", { value: temperature.toFixed(1) })}</FieldLabel>
               <div className="flex h-9 items-center">
                 <Slider
                   value={[temperature]}
@@ -277,10 +279,10 @@ export function ModelConfigForm() {
                   onValueChange={([value]) => setTemperature(value)}
                 />
               </div>
-              <FieldDescription>越低越稳定，越高越发散。</FieldDescription>
+              <FieldDescription>{t("temperatureDescription")}</FieldDescription>
             </Field>
             <Field>
-              <FieldLabel htmlFor="llm-timeout">请求超时（毫秒）</FieldLabel>
+              <FieldLabel htmlFor="llm-timeout">{t("timeout")}</FieldLabel>
               <Input
                 id="llm-timeout"
                 type="number"
@@ -294,10 +296,10 @@ export function ModelConfigForm() {
                   )
                 }
               />
-              <FieldDescription>单次模型请求的等待上限。</FieldDescription>
+              <FieldDescription>{t("timeoutDescription")}</FieldDescription>
             </Field>
             <Field>
-              <FieldLabel htmlFor="llm-retries">重试次数</FieldLabel>
+              <FieldLabel htmlFor="llm-retries">{t("retries")}</FieldLabel>
               <Input
                 id="llm-retries"
                 type="number"
@@ -309,17 +311,17 @@ export function ModelConfigForm() {
                   setMaxRetries(Math.min(10, Math.max(0, Number(event.target.value) || 0)))
                 }
               />
-              <FieldDescription>请求失败后自动重试的次数。</FieldDescription>
+              <FieldDescription>{t("retriesDescription")}</FieldDescription>
             </Field>
           </div>
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection title="向量模型" description="用于文档向量化和语义检索。">
-        <SettingsRow title="模型与连接" description="端点或密钥留空时复用生成模型配置。">
+      <SettingsSection title={t("embeddingTitle")} description={t("embeddingDescription")}>
+        <SettingsRow title={t("modelAndConnection")} description={t("embeddingConnectionDescription")}>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field>
-              <FieldLabel htmlFor="emb-model">模型</FieldLabel>
+              <FieldLabel htmlFor="emb-model">{t("model")}</FieldLabel>
               <Input
                 id="emb-model"
                 value={embModel}
@@ -328,7 +330,7 @@ export function ModelConfigForm() {
               />
             </Field>
             <Field>
-              <FieldLabel htmlFor="emb-dims">向量维度（可选）</FieldLabel>
+              <FieldLabel htmlFor="emb-dims">{t("dimensions")}</FieldLabel>
               <Input
                 id="emb-dims"
                 type="number"
@@ -336,20 +338,20 @@ export function ModelConfigForm() {
                 max={8192}
                 value={embDims}
                 onChange={(event) => setEmbDims(event.target.value)}
-                placeholder="使用模型默认值"
+                placeholder={t("modelDefault")}
               />
             </Field>
             <Field>
-              <FieldLabel htmlFor="emb-url">Base URL（可选）</FieldLabel>
+              <FieldLabel htmlFor="emb-url">{t("optionalBaseUrl")}</FieldLabel>
               <Input
                 id="emb-url"
                 value={embBaseUrl}
                 onChange={(event) => setEmbBaseUrl(event.target.value)}
-                placeholder="复用生成模型"
+                placeholder={t("reuseGeneration")}
               />
             </Field>
             <Field>
-              <FieldLabel htmlFor="emb-key">API Key（可选）</FieldLabel>
+              <FieldLabel htmlFor="emb-key">{t("optionalApiKey")}</FieldLabel>
               <Input
                 id="emb-key"
                 type="password"
@@ -357,7 +359,7 @@ export function ModelConfigForm() {
                 value={embKey}
                 onChange={(event) => setEmbKey(event.target.value)}
                 placeholder={
-                  cfg.embedding_api_key_set ? "已配置，留空保持不变" : "复用生成模型"
+                  cfg.embedding_api_key_set ? t("keyConfigured") : t("reuseGeneration")
                 }
               />
             </Field>
@@ -366,13 +368,13 @@ export function ModelConfigForm() {
       </SettingsSection>
 
       <SettingsSection
-        title="解析模型"
-        description="配置 PDF 等文件的解析方式；MinerU 未配置或解析失败时自动回退 MarkItDown。"
+        title={t("parserTitle")}
+        description={t("parserDescription")}
       >
-        <SettingsRow title="解析引擎" description="选择默认引擎，并配置可选的 MinerU 服务。">
+        <SettingsRow title={t("parserEngine")} description={t("parserEngineDescription")}>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field>
-              <FieldLabel htmlFor="document-parser">解析方式</FieldLabel>
+              <FieldLabel htmlFor="document-parser">{t("parserMethod")}</FieldLabel>
               <Select
                 value={documentParser}
                 onValueChange={(value) =>
@@ -383,21 +385,21 @@ export function ModelConfigForm() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="auto">Auto（推荐）</SelectItem>
+                  <SelectItem value="auto">{t("autoRecommended")}</SelectItem>
                   <SelectItem value="markitdown">MarkItDown</SelectItem>
                   <SelectItem value="mineru">MinerU</SelectItem>
                 </SelectContent>
               </Select>
               <FieldDescription>
                 {documentParser === "auto"
-                  ? "配置 MinerU 后优先使用；服务异常或解析失败时回退 MarkItDown。"
+                  ? t("autoDescription")
                   : documentParser === "markitdown"
-                    ? "使用内置 MarkItDown 解析文件，无需额外配置。"
-                    : "PDF 优先使用 MinerU，失败时回退；其他格式仍由 MarkItDown 解析。"}
+                    ? t("markitdownDescription")
+                    : t("mineruDescription")}
               </FieldDescription>
             </Field>
             <Field>
-              <FieldLabel htmlFor="mineru-version">MinerU 版本</FieldLabel>
+              <FieldLabel htmlFor="mineru-version">{t("mineruVersion")}</FieldLabel>
               <Select
                 value={mineruVersion}
                 onValueChange={(value) =>
@@ -421,7 +423,7 @@ export function ModelConfigForm() {
                 onChange={(event) => setMineruBaseUrl(event.target.value)}
                 placeholder="https://api.302.ai"
               />
-              <FieldDescription>302 MinerU 按 PDF 页数计费，请以服务商价格为准。</FieldDescription>
+              <FieldDescription>{t("mineruPricing")}</FieldDescription>
               {canReuse302Key && !cfg.mineru_api_key_set && (
                 <Button
                   type="button"
@@ -432,7 +434,7 @@ export function ModelConfigForm() {
                   className="w-fit"
                 >
                   <Sparkles />
-                  复用现有 302 Key
+                  {t("reuse302Key")}
                 </Button>
               )}
             </Field>
@@ -446,7 +448,7 @@ export function ModelConfigForm() {
                 onChange={(event) => setMineruKey(event.target.value)}
                 placeholder={keyPlaceholder(cfg.mineru_api_key_set)}
               />
-              <FieldDescription>密钥不会回显，留空保持当前配置不变。</FieldDescription>
+              <FieldDescription>{t("secretDescription")}</FieldDescription>
             </Field>
           </div>
         </SettingsRow>
@@ -469,11 +471,11 @@ export function ModelConfigForm() {
         <div className="flex flex-wrap items-center gap-2">
           <Button type="button" onClick={test} variant="outline" disabled={testing || saving}>
             {testing ? <Spinner /> : <Plug />}
-            {testing ? "测试中…" : "测试生成模型"}
+            {testing ? t("testing") : t("testGeneration")}
           </Button>
           <Button type="button" onClick={save} disabled={saving || testing}>
             {saving ? <Spinner /> : <Save />}
-            {saving ? "保存中…" : "保存并生效"}
+            {saving ? t("saving") : t("save")}
           </Button>
         </div>
       </div>
