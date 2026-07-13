@@ -232,6 +232,7 @@ async def delete_document(
     document_id: str,
     *,
     engine_manager: EngineManager,
+    job_queue: JobQueue | None = None,
 ) -> None:
     document = await get_document(session, source, document_id)
     path = document.storage_path
@@ -285,3 +286,11 @@ async def delete_document(
                     os.remove(candidate)
             except OSError:
                 pass
+    from sag_api.services.universe_service import schedule_universe_refresh
+
+    await schedule_universe_refresh(
+        session,
+        job_queue,
+        source_id=source.id,
+        reason="document_deleted",
+    )

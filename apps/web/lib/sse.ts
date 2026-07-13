@@ -1,5 +1,7 @@
 import { API_BASE } from "./api";
 import { getToken } from "./auth";
+import { readClientLocale } from "../i18n/client";
+import { clientErrorMessage, serverErrorMessage } from "../i18n/client-errors";
 
 export type AgentEventType =
   | "run.started"
@@ -15,7 +17,8 @@ export type AgentEventType =
   | "tool.progress"
   | "tool.approval_required"
   | "tool.completed"
-  | "tool.failed";
+  | "tool.failed"
+  | "universe.activation";
 
 export interface AgentErrorPayload {
   code: string;
@@ -77,7 +80,9 @@ function toOutcome(event: AgentEvent): AgentRunOutcome {
   return {
     status: event.type === "run.cancelled" ? "cancelled" : "failed",
     runId: event.run_id,
-    error,
+    error: error
+      ? { ...error, message: serverErrorMessage(error.code, error.message) }
+      : undefined,
   };
 }
 
@@ -96,10 +101,10 @@ function parseFrame(frame: string): AgentEvent | null {
   try {
     value = JSON.parse(dataLines.join("\n"));
   } catch {
-    throw new AgentStreamProtocolError("服务端返回了无法解析的 Agent 事件");
+    throw new AgentStreamProtocolError(clientErrorMessage("unreadableAgentEvent"));
   }
   if (!value || typeof value !== "object") {
-    throw new AgentStreamProtocolError("Agent 事件必须是对象");
+    throw new AgentStreamProtocolError(clientErrorMessage("agentEventNotObject"));
   }
   const event = value as AgentEvent;
   if (
@@ -110,10 +115,10 @@ function parseFrame(frame: string): AgentEvent | null {
     !event.payload ||
     typeof event.payload !== "object"
   ) {
-    throw new AgentStreamProtocolError("Agent 事件缺少必需字段");
+    throw new AgentStreamProtocolError(clientErrorMessage("agentEventMissingFields"));
   }
   if (wireType && wireType !== event.type) {
-    throw new AgentStreamProtocolError("SSE 事件名与 Agent 事件类型不一致");
+    throw new AgentStreamProtocolError(clientErrorMessage("agentEventTypeMismatch"));
   }
   return event;
 }
@@ -129,6 +134,7 @@ async function streamPost(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      "Accept-Language": readClientLocale(),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(body),
@@ -136,7 +142,7 @@ async function streamPost(
   });
 
   if (!response.ok || !response.body) {
-    let message = "生成失败";
+    let message = clientErrorMessage("generationFailed");
     let code = "http_error";
     try {
       const value = await response.json();
@@ -146,7 +152,11 @@ async function streamPost(
     } catch {
       // Keep the stable fallback when a proxy returns HTML or an empty body.
     }
-    throw new AgentHttpError(message, code, response.status);
+    throw new AgentHttpError(
+      serverErrorMessage(code, message, response.status),
+      code,
+      response.status,
+    );
   }
 
   const reader = response.body.getReader();
@@ -158,7 +168,7 @@ async function streamPost(
     const event = parseFrame(frame);
     if (!event) return;
     if (terminal) {
-      throw new AgentStreamProtocolError("终态事件之后又收到了额外事件");
+      throw new AgentStreamProtocolError(clientErrorMessage("eventAfterTerminal"));
     }
     onEvent(event);
     if (terminalTypes.has(event.type)) terminal = toOutcome(event);
@@ -180,7 +190,7 @@ async function streamPost(
   buffer += decoder.decode();
   if (buffer.trim()) dispatch(buffer);
   if (!terminal) {
-    throw new AgentStreamProtocolError("连接提前结束，未收到 Agent 终态事件");
+    throw new AgentStreamProtocolError(clientErrorMessage("missingTerminalEvent"));
   }
   return terminal;
 }
@@ -188,9 +198,20 @@ async function streamPost(
 export function streamAgentAsk(
   agentId: string,
   threadId: string,
-  body: { query: string; attachments?: string[]; source_ids?: string[] },
+  body: {
+    query: string;
+    attachments?: string[];
+    source_ids?: string[];
+    knowledge_only?: boolean;
+    web_enabled: boolean;
+  },
   onEvent: (event: AgentEvent) => void,
   signal?: AbortSignal,
 ): Promise<AgentRunOutcome> {
-  return streamPost(`/api/v1/agents/${agentId}/threads/${threadId}/ask`, body, onEvent, signal);
+  return streamPost(
+    `/api/v1/agents/${agentId}/threads/${threadId}/ask`,
+    body,
+    onEvent,
+    signal,
+  );
 }

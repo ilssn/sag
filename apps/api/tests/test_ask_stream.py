@@ -1,12 +1,18 @@
 """/ask SSE full path: model turns, tools, terminal errors, and persistence."""
 
 import asyncio
+from contextlib import asynccontextmanager
 
 import httpx
 import pytest
 
 from sag_agent import Agent, AgentTool, EventType, ModelChunk, RunStatus, ToolCall, ToolResult, ToolSpec
 from sag_api.core.errors import UpstreamError
+from sag_api.schemas.agent import AskRequest
+from sag_api.tools.base import Tool as HostTool
+from sag_api.tools.base import ToolMeta
+from sag_api.tools.base import ToolResult as HostToolResult
+from sag_api.tools.mcp import MCPToolsBundle
 
 
 class AgenticLLM:
@@ -70,6 +76,34 @@ class GreedyLLM(AgenticLLM):
         )
 
 
+class ToolSchemaLLM:
+    """Capture the exact tool schema, messages and run metadata sent to the model."""
+
+    def __init__(self):
+        self.requests = []
+
+    @property
+    def configured(self):
+        return True
+
+    async def stream_turn(self, request, cancellation):
+        self.requests.append(request)
+        cancellation.raise_if_cancelled()
+        yield ModelChunk(text_delta="已处理", finish_reason="stop")
+
+
+class WebSearchFixtureTool(HostTool):
+    meta = ToolMeta(
+        name="mcp__web_fixture__search",
+        description="测试用外部网页搜索工具",
+        parameters={"type": "object", "properties": {"query": {"type": "string"}}},
+    )
+
+    async def invoke(self, args, ctx):
+        del args, ctx
+        return HostToolResult(content="external")
+
+
 async def _setup(c):
     r = await c.post(
         "/api/v1/auth/register", json={"email": f"stream{id(c)}@t.com", "password": "password123"}
@@ -78,6 +112,119 @@ async def _setup(c):
     a = (await c.get("/api/v1/agents/default", headers=H)).json()
     th = (await c.post(f"/api/v1/agents/{a['id']}/threads", headers=H, json={})).json()
     return H, a, th
+
+
+def test_ask_request_web_switch_defaults_off_and_accepts_legacy_field():
+    assert AskRequest(query="问题").effective_web_enabled is False
+    assert AskRequest(query="问题", web_enabled=True).effective_web_enabled is True
+    assert AskRequest(query="问题", knowledge_only=True).effective_web_enabled is False
+    assert AskRequest(query="问题", knowledge_only=False).effective_web_enabled is True
+    # The explicit new field wins when a transitional client happens to send both.
+    assert (
+        AskRequest(query="问题", web_enabled=False, knowledge_only=False).effective_web_enabled
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_ask_web_switch_isolates_external_tools_and_records_run_mode(monkeypatch):
+    """Off is local-only by construction; on exposes the Agent's resolved MCP tools."""
+
+    from sag_api.main import app
+    from sag_api.services import agent_service
+
+    resolved_specs = []
+    opened_specs = []
+
+    async def fake_resolve_mcp_specs(session, agent):
+        del session, agent
+        resolved_specs.append(True)
+        return [("web-fixture", {"url": "https://fixture.invalid/mcp"})]
+
+    @asynccontextmanager
+    async def fake_open_agent_mcp_tools(specs):
+        opened_specs.append(list(specs))
+        yield MCPToolsBundle(tools=[WebSearchFixtureTool()] if specs else [])
+
+    monkeypatch.setattr(agent_service, "resolve_mcp_specs", fake_resolve_mcp_specs)
+    monkeypatch.setattr(agent_service, "open_agent_mcp_tools", fake_open_agent_mcp_tools)
+
+    transport = httpx.ASGITransport(app=app)
+    async with app.router.lifespan_context(app):
+        llm = ToolSchemaLLM()
+        app.state.llm = llm
+        async with httpx.AsyncClient(transport=transport, base_url="http://t", timeout=60) as c:
+            register = await c.post(
+                "/api/v1/auth/register",
+                json={"email": "web-toggle@t.com", "password": "password123"},
+            )
+            headers = {"Authorization": f"Bearer {register.json()['access_token']}"}
+            source = (await c.post("/api/v1/sources", headers=headers, json={"name": "本地资料"})).json()
+            agent = (
+                await c.post(
+                    "/api/v1/agents",
+                    headers=headers,
+                    json={"name": "联网开关助手"},
+                )
+            ).json()
+            binding = await c.post(
+                f"/api/v1/agents/{agent['id']}/bindings",
+                headers=headers,
+                json={"target_type": "source", "target_id": source["id"]},
+            )
+            assert binding.status_code == 201
+            thread = (
+                await c.post(f"/api/v1/agents/{agent['id']}/threads", headers=headers, json={})
+            ).json()
+            endpoint = f"/api/v1/agents/{agent['id']}/threads/{thread['id']}/ask"
+
+            offline = await c.post(endpoint, headers=headers, json={"query": "介绍这项资料"})
+            assert offline.status_code == 200
+            offline_request = llm.requests[-1]
+            offline_tools = {
+                tool.get("function", {}).get("name") for tool in offline_request.tools
+            }
+            assert {"get_time", "search_context", "get_entity"} <= offline_tools
+            assert "mcp__web_fixture__search" not in offline_tools
+            assert offline_request.metadata["web_enabled"] is False
+            assert offline_request.metadata["knowledge_only"] is True
+            assert offline_request.tool_choice == {
+                "type": "function",
+                "function": {"name": "search_context"},
+            }
+            offline_system = next(
+                message.content for message in offline_request.messages if message.role == "system"
+            )
+            assert "本轮联网已关闭" in offline_system
+            assert "不得调用或声称使用网页、MCP 或其他外部搜索" in offline_system
+            assert "联网关闭不代表每轮都要检索" in offline_system
+            assert "不得使用模型自身知识补充" in offline_system
+            assert '"web_enabled": false' in offline.text
+            assert '"knowledge_only": true' in offline.text
+            assert resolved_specs == []
+            assert opened_specs == [[]]
+
+            online = await c.post(
+                endpoint,
+                headers=headers,
+                json={"query": "介绍这项资料", "web_enabled": True},
+            )
+            assert online.status_code == 200
+            online_request = llm.requests[-1]
+            online_tools = {
+                tool.get("function", {}).get("name") for tool in online_request.tools
+            }
+            assert "mcp__web_fixture__search" in online_tools
+            assert online_request.metadata["web_enabled"] is True
+            assert online_request.metadata["knowledge_only"] is False
+            online_system = next(
+                message.content for message in online_request.messages if message.role == "system"
+            )
+            assert "本轮联网已关闭" not in online_system
+            assert '"web_enabled": true' in online.text
+            assert '"knowledge_only": false' in online.text
+            assert resolved_specs == [True]
+            assert opened_specs[-1] == [("web-fixture", {"url": "https://fixture.invalid/mcp"})]
 
 
 @pytest.mark.asyncio
@@ -105,9 +252,10 @@ async def test_ask_stream_agentic_events_and_trace():
                 "event: run.completed",
             ]:
                 assert marker in body, marker
+            assert '"user_message_id":' in body
             msgs = (
                 await c.get(f"/api/v1/agents/{a['id']}/threads/{th['id']}/messages", headers=H)
-            ).json()
+            ).json()["items"]
             asst = [m for m in msgs if m["role"] == "assistant"][-1]
             kinds = [s["kind"] for s in asst["steps"]]
             assert "tool" in kinds and "thinking" in kinds and "answer" in kinds  # 全程轨迹落库
@@ -137,7 +285,7 @@ async def test_ask_stream_provider_failure_has_terminal_error():
             assert "event: run.completed" not in body
             msgs = (
                 await c.get(f"/api/v1/agents/{a['id']}/threads/{th['id']}/messages", headers=H)
-            ).json()
+            ).json()["items"]
             assert not any(m["role"] == "assistant" for m in msgs)
 
 
@@ -166,7 +314,7 @@ async def test_ask_stream_exhausts_max_steps_then_answers(monkeypatch):
             assert '"forced_final": true' in body
             msgs = (
                 await c.get(f"/api/v1/agents/{a['id']}/threads/{th['id']}/messages", headers=H)
-            ).json()
+            ).json()["items"]
             asst = [m for m in msgs if m["role"] == "assistant"][-1]
             assert asst["content"] == "答案"
             kinds = [s["kind"] for s in asst["steps"]]
@@ -175,12 +323,17 @@ async def test_ask_stream_exhausts_max_steps_then_answers(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ask_stream_greeting_skips_tools():
-    """agent-first：模型判定无需检索（寒暄）→ 零工具调用直答，不再「打个招呼也 RAG」。"""
+    """宿主把高置信寒暄设为 none，不把「是否 RAG」交给模型碰运气。"""
     from sag_api.main import app
 
     class DirectLLM(AgenticLLM):
+        def __init__(self):
+            super().__init__()
+            self.requests = []
+
         async def stream_turn(self, request, cancellation):
             self.calls += 1
+            self.requests.append(request)
             yield ModelChunk(text_delta="你好呀", finish_reason="stop")
 
     transport = httpx.ASGITransport(app=app)
@@ -196,11 +349,16 @@ async def test_ask_stream_greeting_skips_tools():
             )
             body = ask.text
             assert llm.calls == 1                       # 一轮决策即收
+            assert llm.requests[0].tool_choice == "none"
+            assert any(
+                tool.get("function", {}).get("name") == "search_context"
+                for tool in llm.requests[0].tools
+            )
             assert "event: tool.started" not in body
             assert "event: message.delta" in body and "event: run.completed" in body
             msgs = (
                 await c.get(f"/api/v1/agents/{a['id']}/threads/{th['id']}/messages", headers=H)
-            ).json()
+            ).json()["items"]
             asst = [m for m in msgs if m["role"] == "assistant"][-1]
             assert asst["content"] == "你好呀"
             kinds = [x["kind"] for x in asst["steps"]]

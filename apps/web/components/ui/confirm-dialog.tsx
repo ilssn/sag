@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 
 import {
   AlertDialog,
@@ -35,6 +36,7 @@ export function ConfirmDialog({
   onConfirm: () => void | Promise<void>;
   destructive?: boolean;
 }) {
+  const t = useTranslations("Common");
   const [busy, setBusy] = React.useState(false);
 
   async function confirm() {
@@ -55,14 +57,14 @@ export function ConfirmDialog({
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={busy}>取消</AlertDialogCancel>
+          <AlertDialogCancel disabled={busy}>{t("cancel")}</AlertDialogCancel>
           <Button
             variant={destructive ? "destructive" : "default"}
             onClick={confirm}
             disabled={busy}
           >
             {busy && <Spinner />}
-            {busy ? "处理中…" : confirmLabel}
+            {busy ? t("processing") : confirmLabel}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

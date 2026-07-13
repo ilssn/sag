@@ -24,7 +24,9 @@ sag 的后端服务：FastAPI + `zleap-sag`。
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env
-uvicorn sag_api.main:app --reload
+uvicorn sag_api.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 文档 UI：http://localhost:8000/docs
+
+也可以在仓库根目录运行 `make api`。开发服务器默认监听全部本机网卡，便于从局域网地址访问 Web；生产环境请通过反向代理与访问控制暴露服务。

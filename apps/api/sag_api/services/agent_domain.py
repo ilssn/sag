@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
+import hmac
+import json
+import re
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from sag_api.branding import DEFAULT_AGENT_AVATAR, DEFAULT_AGENT_NAME
@@ -14,8 +22,109 @@ from sag_api.db.models import Agent, AgentBinding, Message, Source, Thread
 from sag_api.enums import BindingTargetType, MessageRole
 from sag_api.generation import build_agent_messages, build_prompt_preview
 from sag_api.generation.prompt import estimate_tokens
+from sag_api.services.source_service import search_source_candidates
 
 _DEFAULT_TITLES = {"新会话", "New chat"}
+THREAD_PAGE_DEFAULT = 6
+THREAD_PAGE_MAX = 100
+MESSAGE_PAGE_DEFAULT = 40
+MESSAGE_PAGE_MAX = 100
+MESSAGE_CURSOR_MAX_LENGTH = 2048
+_MESSAGE_CURSOR_ID = re.compile(r"[0-9a-f]{32}\Z")
+
+
+@dataclass(frozen=True, slots=True)
+class MessagePage:
+    items: list[Message]
+    next_cursor: str | None
+    has_more: bool
+
+
+def _message_cursor_scope(thread_id: str) -> str:
+    return hashlib.sha256(thread_id.encode("utf-8")).hexdigest()[:24]
+
+
+def _urlsafe_encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def _urlsafe_decode(value: str) -> bytes:
+    if not value:
+        raise ValueError("empty base64 value")
+    padded = f"{value}{'=' * (-len(value) % 4)}".encode("ascii")
+    decoded = base64.b64decode(padded, altchars=b"-_", validate=True)
+    if _urlsafe_encode(decoded) != value:
+        raise ValueError("non-canonical base64 value")
+    return decoded
+
+
+def _reject_json_constant(value: str) -> Any:
+    raise ValueError(f"invalid JSON constant: {value}")
+
+
+def _encode_message_cursor(thread_id: str, message: Message) -> str:
+    payload = {
+        "v": 1,
+        "kind": "messages",
+        "scope": _message_cursor_scope(thread_id),
+        "created_at": message.created_at.astimezone(UTC).isoformat(timespec="microseconds"),
+        "id": message.id,
+    }
+    raw = json.dumps(
+        payload,
+        ensure_ascii=True,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    signature = hmac.new(settings.secret_key.encode("utf-8"), raw, hashlib.sha256).digest()
+    return f"{_urlsafe_encode(raw)}.{_urlsafe_encode(signature)}"
+
+
+def _decode_message_cursor(thread_id: str, value: str) -> tuple[datetime, str]:
+    def invalid() -> ValidationError:
+        return ValidationError("消息游标无效", code="invalid_cursor")
+
+    if not value or len(value) > MESSAGE_CURSOR_MAX_LENGTH or value.count(".") != 1:
+        raise invalid()
+    try:
+        encoded_payload, encoded_signature = value.split(".", 1)
+        raw = _urlsafe_decode(encoded_payload)
+        signature = _urlsafe_decode(encoded_signature)
+        if len(raw) > 512 or len(signature) != hashlib.sha256().digest_size:
+            raise ValueError("invalid cursor size")
+        expected = hmac.new(settings.secret_key.encode("utf-8"), raw, hashlib.sha256).digest()
+        if not hmac.compare_digest(signature, expected):
+            raise ValueError("invalid cursor signature")
+        payload = json.loads(raw.decode("utf-8"), parse_constant=_reject_json_constant)
+        expected_keys = {"v", "kind", "scope", "created_at", "id"}
+        if not isinstance(payload, dict) or set(payload) != expected_keys:
+            raise ValueError("invalid cursor payload")
+        if (
+            not isinstance(payload["v"], int)
+            or isinstance(payload["v"], bool)
+            or payload["v"] != 1
+            or payload["kind"] != "messages"
+            or payload["scope"] != _message_cursor_scope(thread_id)
+            or not isinstance(payload["created_at"], str)
+            or not isinstance(payload["id"], str)
+            or _MESSAGE_CURSOR_ID.fullmatch(payload["id"]) is None
+        ):
+            raise ValueError("invalid cursor scope or values")
+        created_at = datetime.fromisoformat(payload["created_at"])
+        if created_at.tzinfo is None or created_at.utcoffset() is None:
+            raise ValueError("cursor timestamp must include a timezone")
+        return created_at.astimezone(UTC), payload["id"]
+    except (
+        UnicodeEncodeError,
+        UnicodeDecodeError,
+        binascii.Error,
+        json.JSONDecodeError,
+        KeyError,
+        TypeError,
+        ValueError,
+    ) as error:
+        raise invalid() from error
 
 
 # ── CRUD ────────────────────────────────────────────────────────────
@@ -31,9 +140,7 @@ async def get_agent(session: AsyncSession, agent_id: str) -> Agent:
     return agent
 
 
-async def create_agent(
-    session: AsyncSession, *, name: str, avatar: str = "", persona: dict | None = None
-) -> Agent:
+async def create_agent(session: AsyncSession, *, name: str, avatar: str = "", persona: dict | None = None) -> Agent:
     name = name.strip()
     if not name:
         raise ValidationError("Agent 名称不能为空")
@@ -70,11 +177,7 @@ _DEFAULT_PERSONA = {"greeting": _DEFAULT_GREETING, "system_prompt": ""}
 
 def _is_legacy_default_agent(agent: Agent) -> bool:
     """仅识别旧版本完全未自定义的默认助手，避免覆盖用户修改。"""
-    return (
-        agent.name == "sag"
-        and agent.avatar in {"s", "S"}
-        and (agent.persona or {}) == _DEFAULT_PERSONA
-    )
+    return agent.name == "sag" and agent.avatar in {"s", "S"} and (agent.persona or {}) == _DEFAULT_PERSONA
 
 
 async def get_default_agent(session: AsyncSession) -> Agent:
@@ -136,9 +239,7 @@ async def add_binding(
     )
     if exists is not None:
         raise ConflictError("已绑定该目标")
-    binding = AgentBinding(
-        agent_id=agent.id, target_type=target_type, target_id=target_id, config=config
-    )
+    binding = AgentBinding(agent_id=agent.id, target_type=target_type, target_id=target_id, config=config)
     session.add(binding)
     await session.commit()
     await session.refresh(binding)
@@ -160,23 +261,18 @@ async def resolve_sources(
 ) -> list[Source]:
     """解析本轮可见信源。
 
-    显式 `source_ids` 来自输入框的 @ 范围，优先于持久绑定；未指定时，默认 Agent
-    使用全部信源，自定义 Agent 使用自己的 source bindings。
+    显式 `source_ids` 来自输入框的 @ 范围，优先于持久绑定；所有入口共用同一
+    候选上限，避免默认 Agent 或大量绑定造成无界 fan-out。
     """
     if source_ids:
-        ordered_ids = list(dict.fromkeys(source_ids))
-        rows = await session.execute(select(Source).where(Source.id.in_(ordered_ids)))
-        by_id = {source.id: source for source in rows.scalars().all()}
-        return [by_id[source_id] for source_id in ordered_ids if source_id in by_id]
+        return await search_source_candidates(session, source_ids)
     if agent.is_default:
-        rows = await session.execute(select(Source).order_by(Source.created_at))
-        return list(rows.scalars().all())
+        return await search_source_candidates(session)
     bindings = await list_bindings(session, agent)
     src_ids = [b.target_id for b in bindings if b.target_type == BindingTargetType.SOURCE]
     if not src_ids:
         return []
-    rows = await session.execute(select(Source).where(Source.id.in_(src_ids)))
-    return list(rows.scalars().all())
+    return await search_source_candidates(session, src_ids)
 
 
 async def resolve_mcp_specs(session: AsyncSession, agent: Agent) -> list[tuple[str, dict]]:
@@ -197,7 +293,7 @@ async def list_threads(
     agent_id: str,
     *,
     archived: bool = False,
-    limit: int | None = None,
+    limit: int = THREAD_PAGE_DEFAULT,
     offset: int = 0,
 ) -> list[Thread]:
     statement = (
@@ -207,8 +303,7 @@ async def list_threads(
     )
     if offset:
         statement = statement.offset(offset)
-    if limit is not None:
-        statement = statement.limit(limit)
+    statement = statement.limit(max(1, min(int(limit), THREAD_PAGE_MAX)))
     rows = await session.execute(statement)
     return list(rows.scalars().all())
 
@@ -252,29 +347,65 @@ async def delete_thread(session: AsyncSession, agent_id: str, thread_id: str) ->
     await session.commit()
 
 
-async def list_messages(session: AsyncSession, thread_id: str) -> list[Message]:
-    rows = await session.execute(
-        select(Message).where(Message.thread_id == thread_id).order_by(Message.created_at)
+async def list_messages_page(
+    session: AsyncSession,
+    thread_id: str,
+    *,
+    limit: int = MESSAGE_PAGE_DEFAULT,
+    cursor: str | None = None,
+) -> MessagePage:
+    """返回最近一页消息，页内保持正向时间顺序。
+
+    数据库以 `(created_at, id)` 倒序做 keyset 读取，只取 `limit + 1`
+    判断是否还有更旧消息；不做 COUNT 扫描。
+    """
+    if limit < 1 or limit > MESSAGE_PAGE_MAX:
+        raise ValidationError(
+            f"消息页大小必须在 1 到 {MESSAGE_PAGE_MAX} 之间",
+            code="invalid_page_limit",
+        )
+
+    statement = select(Message).where(Message.thread_id == thread_id)
+    if cursor:
+        created_at, message_id = _decode_message_cursor(thread_id, cursor)
+        statement = statement.where(
+            or_(
+                Message.created_at < created_at,
+                and_(Message.created_at == created_at, Message.id < message_id),
+            )
+        )
+    rows = await session.execute(statement.order_by(Message.created_at.desc(), Message.id.desc()).limit(limit + 1))
+    candidates = list(rows.scalars().all())
+    has_more = len(candidates) > limit
+    page_desc = candidates[:limit]
+    next_cursor = _encode_message_cursor(thread_id, page_desc[-1]) if has_more and page_desc else None
+    return MessagePage(
+        items=list(reversed(page_desc)),
+        next_cursor=next_cursor,
+        has_more=has_more,
     )
-    return list(rows.scalars().all())
 
 
 async def _history(session: AsyncSession, thread_id: str, exclude_id: str) -> list[dict[str, str]]:
-    messages = await list_messages(session, thread_id)
-    return [
-        {"role": m.role.value, "content": m.content}
-        for m in messages
-        if m.id != exclude_id and m.role in (MessageRole.USER, MessageRole.ASSISTANT)
-    ]
+    rows = await session.execute(
+        select(Message)
+        .where(
+            Message.thread_id == thread_id,
+            Message.id != exclude_id,
+            Message.role.in_((MessageRole.USER, MessageRole.ASSISTANT)),
+        )
+        .order_by(Message.created_at.desc(), Message.id.desc())
+        .limit(settings.history_load_limit)
+    )
+    messages = list(reversed(rows.scalars().all()))
+    return [{"role": m.role.value, "content": m.content} for m in messages]
 
 
 def _history_tokens(history: list[dict[str, str]]) -> int:
     return sum(estimate_tokens(m["content"]) for m in history)
 
 
-async def compress_history(
-    history: list[dict[str, str]], *, llm=None, budget_tokens: int
-) -> list[dict[str, str]]:
+async def compress_history(history: list[dict[str, str]], *, llm=None, budget_tokens: int) -> list[dict[str, str]]:
     """上下文阈值压缩：超预算时把较早消息压成一段摘要，仅保留最近 N 条原文。
 
     有 LLM → 摘要旧段（保留事实/结论/称呼/待办）；无 LLM/失败 → 按预算从尾部裁剪。
@@ -289,17 +420,14 @@ async def compress_history(
         return recent
 
     if llm is not None and getattr(llm, "configured", False):
-        transcript = "\n".join(
-            f"{'用户' if m['role'] == 'user' else '助手'}：{m['content']}" for m in older
-        )[:12000]
+        transcript = "\n".join(f"{'用户' if m['role'] == 'user' else '助手'}：{m['content']}" for m in older)[:12000]
         try:
             summary = await llm.complete(
                 [
                     {
                         "role": "system",
                         "content": (
-                            "把以下对话压缩为要点摘要（≤400字）："
-                            "保留事实、结论、数字、人物称呼与未决事项；不要评论。"
+                            "把以下对话压缩为要点摘要（≤400字）：保留事实、结论、数字、人物称呼与未决事项；不要评论。"
                         ),
                     },
                     {"role": "user", "content": transcript},
@@ -329,10 +457,12 @@ async def compress_history(
 class AskPlan:
     """一次问答的提示词计划（agent-first：检索由循环内工具按需完成，不预置资料区）。"""
 
+    query: str = ""
     messages: list[dict[str, str]] = field(default_factory=list)
     citations: list[dict] = field(default_factory=list)
     prompt_preview: str = ""
     source_ids: list[str] | None = None  # @范围：限定循环内检索工具可见的信源
+    user_message_id: str | None = None
 
 
 def build_ask_context(
@@ -350,9 +480,11 @@ def build_ask_context(
         query,
         history=history,
         language=settings.sag_language,
+        timezone=settings.timezone,
         attachments=attachments,
     )
     return AskPlan(
+        query=query,
         messages=messages,
         prompt_preview=build_prompt_preview(messages),
         source_ids=source_ids or None,
@@ -378,8 +510,13 @@ async def prepare_ask(
         if path is None:
             raise ValidationError(f"附件不存在或已过期：{aid}")
         ext = aid.rsplit(".", 1)[-1].lower()
-        media_type = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
-                      "webp": "image/webp", "gif": "image/gif"}.get(ext, "image/png")
+        media_type = {
+            "png": "image/png",
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "webp": "image/webp",
+            "gif": "image/gif",
+        }.get(ext, "image/png")
         resolved.append({"id": aid, "media_type": media_type, "path": path})
 
     user_msg = Message(
@@ -397,16 +534,16 @@ async def prepare_ask(
 
     history = await _history(session, thread.id, exclude_id=user_msg.id)
     # 历史预算 = 上下文窗口的 40%（其余留给工具轮/回答）
-    history = await compress_history(
-        history, llm=llm, budget_tokens=int(settings.llm_context_window * 0.4)
-    )
-    return build_ask_context(
+    history = await compress_history(history, llm=llm, budget_tokens=int(settings.llm_context_window * 0.4))
+    plan = build_ask_context(
         agent=agent,
         query=query,
         history=history,
         attachments=resolved or None,
         source_ids=source_ids,
     )
+    plan.user_message_id = user_msg.id
+    return plan
 
 
 async def delete_message(session: AsyncSession, agent_id: str, thread_id: str, message_id: str) -> None:
@@ -424,6 +561,7 @@ async def persist_answer(
     answer: str,
     citations: list[dict],
     steps: list[dict] | None = None,
+    prompt_preview: str = "",
 ) -> str:
     async with session_factory() as session:
         message = Message(
@@ -432,6 +570,7 @@ async def persist_answer(
             content=answer,
             citations=citations,
             steps=steps or [],
+            prompt_preview=prompt_preview,
         )
         session.add(message)
         await session.commit()

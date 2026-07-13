@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import BigInteger, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, ForeignKey, Index, Integer, String, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -10,6 +10,9 @@ from sag_api.enums import DocumentStatus
 
 class Document(IDMixin, TimestampMixin, Base):
     __tablename__ = "documents"
+    __table_args__ = (
+        Index("ix_documents_source_sag_source", "source_id", "sag_source_id"),
+    )
 
     source_id: Mapped[str] = mapped_column(
         ForeignKey("sources.id", ondelete="CASCADE"), index=True

@@ -1,20 +1,19 @@
 "use client";
 
 import * as React from "react";
-import type { Container, ISourceOptions } from "@tsparticles/engine";
+import type { ISourceOptions } from "@tsparticles/engine";
 import Particles, { ParticlesProvider } from "@tsparticles/react";
 import { loadSlim } from "@tsparticles/slim";
 import { useTheme } from "next-themes";
 
-const BASE_PARTICLE_COUNT = 86;
-const STAR_DENSITY_MULTIPLIER = 5;
+const BASE_PARTICLE_COUNT = 104;
 
-function createParticleOptions(dark: boolean): ISourceOptions {
+function createParticleOptions(dark: boolean, reducedMotion: boolean): ISourceOptions {
   return {
     autoPlay: true,
     background: { color: { value: "transparent" } },
     detectRetina: true,
-    fpsLimit: 45,
+    fpsLimit: 24,
     fullScreen: { enable: false },
     pauseOnBlur: true,
     pauseOnOutsideViewport: true,
@@ -26,21 +25,21 @@ function createParticleOptions(dark: boolean): ISourceOptions {
       },
       move: {
         direction: "none",
-        enable: true,
+        enable: !reducedMotion,
         outModes: { default: "out" },
         random: true,
-        speed: { min: 0.025, max: 0.11 },
+        speed: { min: 0.012, max: 0.045 },
         straight: false,
       },
       number: {
         density: { enable: true, height: 800, width: 1200 },
-        value: BASE_PARTICLE_COUNT * STAR_DENSITY_MULTIPLIER,
+        value: BASE_PARTICLE_COUNT,
       },
       opacity: {
         animation: {
           destroy: "none",
-          enable: true,
-          speed: 0.22,
+          enable: false,
+          speed: 0,
           startValue: "random",
           sync: false,
         },
@@ -50,8 +49,8 @@ function createParticleOptions(dark: boolean): ISourceOptions {
       size: {
         animation: {
           destroy: "none",
-          enable: true,
-          speed: 0.16,
+          enable: false,
+          speed: 0,
           startValue: "random",
           sync: false,
         },
@@ -61,11 +60,14 @@ function createParticleOptions(dark: boolean): ISourceOptions {
   };
 }
 
-export function SpaceParticles() {
+export function SpaceParticles({ reducedMotion = false }: { reducedMotion?: boolean }) {
   const id = React.useId().replace(/:/g, "");
   const { resolvedTheme } = useTheme();
   const dark = resolvedTheme === "dark";
-  const options = React.useMemo(() => createParticleOptions(dark), [dark]);
+  const options = React.useMemo(
+    () => createParticleOptions(dark, reducedMotion),
+    [dark, reducedMotion],
+  );
   const mountedRef = React.useRef(false);
 
   React.useEffect(() => {
@@ -75,8 +77,11 @@ export function SpaceParticles() {
     };
   }, []);
 
-  const handleParticlesLoaded = React.useCallback((container?: Container) => {
-    // 初始化晚于卸载时，tsparticles 会把兜底 canvas 追加到 body。
+  const handleParticlesLoaded = React.useCallback<
+    NonNullable<React.ComponentProps<typeof Particles>["particlesLoaded"]>
+  >((container) => {
+    // If initialization finishes after unmount, tsparticles otherwise appends
+    // its fallback canvas to document.body and keeps an orphan renderer alive.
     if (!mountedRef.current) container?.destroy();
   }, []);
 

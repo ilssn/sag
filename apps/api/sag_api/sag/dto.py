@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class RetrievedSection(BaseModel):
@@ -103,6 +103,55 @@ class SourceGraphInfo(BaseModel):
     entities: list[EntityInfo] = []
     associations: list[GraphAssociationInfo] = []
     total_entities: int = 0
+
+
+class UniverseTimeBucketInfo(BaseModel):
+    """One bounded bucket in the aggregate universe timeline."""
+
+    start: datetime
+    end: datetime
+    count: int = 0
+
+
+class UniverseSourceStatsInfo(BaseModel):
+    """Aggregate-only source statistics used to draw a virtual partition."""
+
+    event_count: int = 0
+    entity_count: int = 0
+    relation_count: int = 0
+    category_counts: dict[str, int] = Field(default_factory=dict)
+    time_buckets: list[UniverseTimeBucketInfo] = Field(default_factory=list)
+
+
+class UniverseExpansionInfo(BaseModel):
+    """A bounded expansion page whose event nodes carry their factual bundles."""
+
+    anchor: dict[str, Any]
+    neighbors: list[dict[str, Any]] = Field(default_factory=list)
+    relations: list[dict[str, Any]] = Field(default_factory=list)
+    returned: int = 0
+    has_more: bool = False
+    next_cursor: str | None = None
+    as_of: datetime | None = None
+
+
+class UniverseSeedInfo(BaseModel):
+    """A bounded set of recently active entities used to enter a source."""
+
+    nodes: list[dict[str, Any]] = Field(default_factory=list)
+    has_more: bool = False
+    next_cursor: str | None = None
+    as_of: datetime
+
+
+class UniverseTimelineInfo(BaseModel):
+    """A bounded event-time page plus a small factual entity neighborhood."""
+
+    nodes: list[dict[str, Any]] = Field(default_factory=list)
+    relations: list[dict[str, Any]] = Field(default_factory=list)
+    has_more: bool = False
+    next_cursor: str | None = None
+    as_of: datetime
 
 
 class ProcessOutcome(BaseModel):

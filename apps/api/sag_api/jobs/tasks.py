@@ -153,6 +153,15 @@ async def process_document(
         outcome.event_count,
         outcome.token_usage,
     )
+    if job_queue is not None:
+        from sag_api.services.universe_service import schedule_universe_refresh
+
+        await schedule_universe_refresh(
+            session,
+            job_queue,
+            source_id=source.id,
+            reason="document_processed",
+        )
 
 
 async def sync_source(session: AsyncSession, job: Job, *, engine_manager=None, job_queue=None) -> None:
@@ -198,7 +207,26 @@ async def sync_source(session: AsyncSession, job: Job, *, engine_manager=None, j
     log.info("同步完成 source=%s 发现=%d 抓取=%d", source.id, len(discovered), fetched)
 
 
+async def index_universe(
+    session: AsyncSession, job: Job, *, engine_manager: EngineManager, job_queue=None
+) -> None:
+    """Rebuild one user's aggregate universe overview from authoritative graph data."""
+    from sag_api.db.models import User
+    from sag_api.services.universe_service import rebuild_universe_overview
+
+    user_id = str((job.payload or {}).get("user_id") or "")
+    if not user_id or await session.get(User, user_id) is None:
+        raise NotFoundError("知识宇宙所属用户不存在")
+    job.progress = 0.1
+    await session.commit()
+    overview = await rebuild_universe_overview(session, engine_manager, user_id)
+    job.progress = 1.0
+    job.payload = {**(job.payload or {}), "overview_id": overview.id}
+    await session.commit()
+
+
 TASK_HANDLERS: dict[JobType, TaskHandler] = {
     JobType.PROCESS_DOCUMENT: process_document,
     JobType.SYNC_SOURCE: sync_source,
+    JobType.INDEX_UNIVERSE: index_universe,
 }

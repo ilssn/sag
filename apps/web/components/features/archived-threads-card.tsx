@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Archive, ArchiveRestore, ChevronDown, RotateCw, Trash2 } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { useApp } from "@/components/features/app-shell";
@@ -26,7 +27,9 @@ import type { Thread } from "@/lib/types";
 
 /** 归档会话 —— 最近优先、按页加载，并支持恢复或彻底删除。 */
 export function ArchivedThreadsCard() {
-  const { agent, refreshThreads } = useApp();
+  const t = useTranslations("ArchivedThreads");
+  const locale = useLocale();
+  const { agent, refreshThreads, timezone } = useApp();
   const [rows, setRows] = React.useState<Thread[]>([]);
   const [initialLoading, setInitialLoading] = React.useState(true);
   const [loadingMore, setLoadingMore] = React.useState(false);
@@ -38,7 +41,8 @@ export function ArchivedThreadsCard() {
   const loadPage = React.useCallback(
     async (offset: number, append: boolean) => {
       if (!agent) return;
-      append ? setLoadingMore(true) : setInitialLoading(true);
+      if (append) setLoadingMore(true);
+      else setInitialLoading(true);
       setLoadError(null);
 
       try {
@@ -55,12 +59,13 @@ export function ArchivedThreadsCard() {
           return [...current, ...visible.filter((thread) => !knownIds.has(thread.id))];
         });
       } catch (error) {
-        setLoadError(error instanceof ApiError ? error.message : "无法加载归档会话");
+        setLoadError(error instanceof ApiError ? error.message : t("loadFailed"));
       } finally {
-        append ? setLoadingMore(false) : setInitialLoading(false);
+        if (append) setLoadingMore(false);
+        else setInitialLoading(false);
       }
     },
-    [agent],
+    [agent, t],
   );
 
   React.useEffect(() => {
@@ -79,9 +84,9 @@ export function ArchivedThreadsCard() {
       await api.updateThread(agentId, thread.id, { archived: false });
       setRows((current) => current.filter((item) => item.id !== thread.id));
       await refreshThreads();
-      toast.success("会话已恢复到侧栏");
+      toast.success(t("restored"));
     } catch (error) {
-      toast.error(error instanceof ApiError ? error.message : "恢复失败");
+      toast.error(error instanceof ApiError ? error.message : t("restoreFailed"));
     } finally {
       setRestoringId(null);
     }
@@ -91,9 +96,9 @@ export function ArchivedThreadsCard() {
     try {
       await api.deleteThread(agentId, thread.id);
       setRows((current) => current.filter((item) => item.id !== thread.id));
-      toast.success("归档会话已彻底删除");
+      toast.success(t("deleted"));
     } catch (error) {
-      toast.error(error instanceof ApiError ? error.message : "删除失败");
+      toast.error(error instanceof ApiError ? error.message : t("deleteFailed"));
       throw error;
     }
   }
@@ -104,9 +109,9 @@ export function ArchivedThreadsCard() {
         {loadError ? (
           <span className="text-destructive">{loadError}</span>
         ) : hasMore ? (
-          `已显示最近 ${rows.length} 条`
+          t("shownRecent", { count: rows.length })
         ) : (
-          `共 ${rows.length} 条，已全部加载`
+          t("allLoaded", { count: rows.length })
         )}
       </div>
       {hasMore && (
@@ -118,7 +123,7 @@ export function ArchivedThreadsCard() {
           onClick={() => void loadPage(rows.length, true)}
         >
           {loadingMore ? <Spinner /> : loadError ? <RotateCw /> : <ChevronDown />}
-          {loadingMore ? "加载中…" : loadError ? "重试加载" : "加载更多"}
+          {loadingMore ? t("loading") : loadError ? t("retryLoad") : t("loadMore")}
         </Button>
       )}
     </div>
@@ -127,8 +132,8 @@ export function ArchivedThreadsCard() {
   return (
     <>
       <SettingsSection
-        title="归档会话"
-        description="最近归档的会话优先显示，可恢复或永久删除。"
+        title={t("title")}
+        description={t("description")}
         footer={footer}
       >
         {initialLoading ? (
@@ -136,7 +141,7 @@ export function ArchivedThreadsCard() {
         ) : loadError && rows.length === 0 ? (
           <div className="p-4 sm:p-5">
             <Alert variant="destructive">
-              <AlertTitle>加载失败</AlertTitle>
+              <AlertTitle>{t("loadErrorTitle")}</AlertTitle>
               <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
                 <span>{loadError}</span>
                 <Button
@@ -146,7 +151,7 @@ export function ArchivedThreadsCard() {
                   onClick={() => void loadPage(0, false)}
                 >
                   <RotateCw />
-                  重试
+                  {t("retry")}
                 </Button>
               </AlertDescription>
             </Alert>
@@ -157,8 +162,8 @@ export function ArchivedThreadsCard() {
               <EmptyMedia variant="icon">
                 <Archive />
               </EmptyMedia>
-              <EmptyTitle className="text-base">暂无归档会话</EmptyTitle>
-              <EmptyDescription>从侧栏归档的会话会出现在这里。</EmptyDescription>
+              <EmptyTitle className="text-base">{t("emptyTitle")}</EmptyTitle>
+              <EmptyDescription>{t("emptyDescription")}</EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : (
@@ -178,7 +183,7 @@ export function ArchivedThreadsCard() {
                       {thread.title}
                     </div>
                     <div className="mt-0.5 text-xs tabular-nums text-muted-foreground">
-                      {relativeTime(thread.updated_at)}
+                      {relativeTime(thread.updated_at, timezone, locale)}
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
@@ -191,13 +196,13 @@ export function ArchivedThreadsCard() {
                           className="size-8"
                           disabled={restoring}
                           onClick={() => void restore(thread)}
-                          aria-label={`恢复 ${thread.title}`}
-                          title="恢复会话"
+                          aria-label={t("restoreAria", { title: thread.title })}
+                          title={t("restore")}
                         >
                           {restoring ? <Spinner /> : <ArchiveRestore />}
                         </Button>
                       </TooltipTrigger>
-                      <TooltipContent>恢复会话</TooltipContent>
+                      <TooltipContent>{t("restore")}</TooltipContent>
                     </Tooltip>
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -208,13 +213,13 @@ export function ArchivedThreadsCard() {
                           className="size-8 text-muted-foreground hover:text-destructive"
                           disabled={restoring}
                           onClick={() => setDeleteTarget(thread)}
-                          aria-label={`彻底删除 ${thread.title}`}
-                          title="彻底删除"
+                          aria-label={t("deleteAria", { title: thread.title })}
+                          title={t("deletePermanently")}
                         >
                           <Trash2 />
                         </Button>
                       </TooltipTrigger>
-                      <TooltipContent>彻底删除</TooltipContent>
+                      <TooltipContent>{t("deletePermanently")}</TooltipContent>
                     </Tooltip>
                   </div>
                 </div>
@@ -227,9 +232,11 @@ export function ArchivedThreadsCard() {
       <ConfirmDialog
         open={!!deleteTarget}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
-        title="彻底删除会话"
-        description={`「${deleteTarget?.title ?? "此会话"}」及其消息会被永久删除，无法恢复。`}
-        confirmLabel="彻底删除"
+        title={t("deleteDialogTitle")}
+        description={t("deleteDialogDescription", {
+          title: deleteTarget?.title ?? t("thisConversation"),
+        })}
+        confirmLabel={t("deletePermanently")}
         onConfirm={() => (deleteTarget ? remove(deleteTarget) : undefined)}
       />
     </>
@@ -237,8 +244,9 @@ export function ArchivedThreadsCard() {
 }
 
 function ArchivedThreadsSkeleton() {
+  const t = useTranslations("ArchivedThreads");
   return (
-    <div aria-label="正在加载归档会话">
+    <div aria-label={t("loadingAria")}>
       {Array.from({ length: 3 }).map((_, index) => (
         <div
           key={index}

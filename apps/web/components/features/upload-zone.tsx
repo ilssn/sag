@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { UploadCloud } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
@@ -14,12 +15,15 @@ export function UploadZone({
   onUploaded,
   maxMb = 25,
   allowedExts,
+  compact = false,
 }: {
   sourceId: string;
   onUploaded: () => void;
   maxMb?: number;
   allowedExts?: string[];
+  compact?: boolean;
 }) {
+  const t = useTranslations("UploadZone");
   const inputRef = React.useRef<HTMLInputElement>(null);
   const [drag, setDrag] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
@@ -38,7 +42,7 @@ export function UploadZone({
     for (const file of Array.from(files)) {
       // 客户端先行拦截：不支持的扩展名即时提示，省一次往返
       if (allowedExts && allowedExts.length > 0 && !allowedExts.includes(extOf(file.name))) {
-        toast.error(`${file.name}：不支持的文件类型`);
+        toast.error(t("unsupportedType", { name: file.name }));
         continue;
       }
       try {
@@ -49,13 +53,16 @@ export function UploadZone({
         );
         ok += 1;
       } catch (err) {
-        toast.error(`${file.name}：${err instanceof ApiError ? err.message : "上传失败"}`);
+        toast.error(t("fileFailed", {
+          name: file.name,
+          error: err instanceof ApiError ? err.message : t("uploadFailed"),
+        }));
       }
     }
     setBusy(false);
     setProgress(null);
     if (ok > 0) {
-      toast.success(`已上传 ${ok} 个文件，正在后台处理`);
+      toast.success(t("uploaded", { count: ok }));
       onUploaded();
     }
   }
@@ -77,7 +84,8 @@ export function UploadZone({
         handleFiles(e.dataTransfer.files);
       }}
       className={cn(
-        "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed px-6 py-10 text-center transition-colors",
+        "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed text-center transition-colors",
+        compact ? "px-4 py-6" : "px-6 py-10",
         drag ? "border-border bg-muted" : "bg-card/40 hover:border-border",
       )}
     >
@@ -89,11 +97,20 @@ export function UploadZone({
         className="hidden"
         onChange={(e) => handleFiles(e.target.files)}
       />
-      <div className="grid size-10 place-items-center rounded-full bg-muted text-foreground">
-        {busy ? <Spinner className="size-5" /> : <UploadCloud className="size-5" />}
+      <div
+        className={cn(
+          "grid place-items-center rounded-full bg-muted text-foreground",
+          compact ? "size-9" : "size-10",
+        )}
+      >
+        {busy ? (
+          <Spinner className={compact ? "size-4" : "size-5"} />
+        ) : (
+          <UploadCloud className={compact ? "size-4" : "size-5"} />
+        )}
       </div>
       <div className="text-sm font-medium text-foreground">
-        {busy ? "上传中…" : "拖拽文件到此处，或点击选择"}
+        {busy ? t("uploading") : t("prompt")}
       </div>
       {busy && progress ? (
         <div className="flex w-full max-w-xs flex-col gap-1.5">
@@ -108,7 +125,7 @@ export function UploadZone({
         </div>
       ) : (
         <div className="text-xs text-muted-foreground">
-          支持 Markdown / 文本 / PDF 等 · 单文件 ≤ {maxMb}MB
+          {t("support", { maxMb })}
         </div>
       )}
     </div>

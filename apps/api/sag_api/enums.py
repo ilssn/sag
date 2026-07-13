@@ -3,6 +3,15 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Literal
+
+SearchStrategy = Literal["vector", "multi"]
+SEARCH_STRATEGIES = frozenset({"vector", "multi"})
+
+
+def normalize_search_strategy(value: str) -> str:
+    """把已下线的原子检索迁移到精确检索；其他值交给调用方校验。"""
+    return "multi" if value == "atomic" else value
 
 
 class SourceType(StrEnum):
@@ -43,6 +52,7 @@ class DocumentStatus(StrEnum):
 class JobType(StrEnum):
     PROCESS_DOCUMENT = "process_document"
     SYNC_SOURCE = "sync_source"
+    INDEX_UNIVERSE = "index_universe"
 
 
 class JobStatus(StrEnum):

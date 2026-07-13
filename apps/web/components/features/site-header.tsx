@@ -1,11 +1,16 @@
 "use client";
 
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { usePathname } from "next/navigation";
-import { Expand, Shrink, TriangleAlert } from "lucide-react";
+import { Expand, Minimize2, Shrink, TriangleAlert } from "lucide-react";
 
 import { PRODUCT_NAME } from "@/lib/branding";
+import {
+  workspaceSectionFromPathname,
+} from "@/lib/workspace";
 import { useApp } from "@/components/features/app-shell";
+import { LanguageToggle } from "@/components/features/language-toggle";
 import { ThemeToggle } from "@/components/features/theme-toggle";
 import {
   Breadcrumb,
@@ -20,22 +25,27 @@ import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
-const SECTION: Record<string, string> = {
-  "/chat": "对话",
-  "/search": "搜索",
-  "/knowledge": "知识",
-  "/settings": "设置",
-};
-
-function sectionLabel(pathname: string): string {
-  const key = Object.keys(SECTION).find((k) => pathname === k || pathname.startsWith(k + "/"));
-  return key ? SECTION[key] : PRODUCT_NAME;
+function sectionLabel(
+  pathname: string,
+  labels: { search: string; answer: string; knowledge: string; settings: string },
+): string {
+  const workspaceSection = workspaceSectionFromPathname(pathname);
+  if (workspaceSection) return labels[workspaceSection];
+  if (pathname === "/settings" || pathname.startsWith("/settings/")) return labels.settings;
+  return PRODUCT_NAME;
 }
 
 export function SiteHeader() {
+  const t = useTranslations("SiteHeader");
+  const nav = useTranslations("Navigation");
   const pathname = usePathname();
-  const { capabilities, windowMode, toggleWindowMode } = useApp();
-  const label = sectionLabel(pathname);
+  const { capabilities, windowMode, toggleWindowMode, minimizeWorkspace } = useApp();
+  const label = sectionLabel(pathname, {
+    search: nav("search"),
+    answer: nav("answer"),
+    knowledge: nav("knowledge"),
+    settings: nav("settings"),
+  });
   const windowed = windowMode === "window";
 
   return (
@@ -63,10 +73,11 @@ export function SiteHeader() {
             className="hidden items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10 sm:inline-flex"
           >
             <TriangleAlert className="size-3.5" />
-            未配置模型
+            {t("modelNotConfigured")}
           </Link>
         )}
 
+        <LanguageToggle />
         <ThemeToggle />
         <Tooltip>
           <TooltipTrigger asChild>
@@ -74,13 +85,29 @@ export function SiteHeader() {
               variant="ghost"
               size="icon"
               className="hidden size-8 md:inline-flex"
+              onClick={minimizeWorkspace}
+              aria-label={t("minimizeAria")}
+            >
+              <Minimize2 />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{t("minimize")}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="hidden size-8 md:inline-flex"
               onClick={toggleWindowMode}
-              aria-label={windowed ? "切换为满屏" : "切换为窗口"}
+              aria-label={windowed ? t("fullscreenAria") : t("windowAria")}
             >
               {windowed ? <Expand /> : <Shrink />}
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">{windowed ? "满屏显示" : "窗口显示"}</TooltipContent>
+          <TooltipContent side="bottom">
+            {windowed ? t("fullscreen") : t("window")}
+          </TooltipContent>
         </Tooltip>
       </div>
     </header>

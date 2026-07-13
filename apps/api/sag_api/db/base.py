@@ -19,7 +19,12 @@ class Base(DeclarativeBase):
 
 
 class UTCDateTime(TypeDecorator[datetime]):
-    """数据库统一存 UTC，读取时保证 datetime 带有明确的 UTC 时区。"""
+    """Store instants in UTC and always return timezone-aware datetimes.
+
+    SQLite drops timezone metadata for ``DateTime`` values. The decorator keeps
+    its persisted value in UTC and restores the missing UTC tzinfo on reads;
+    timezone-aware databases retain their native timestamp semantics.
+    """
 
     impl = DateTime
     cache_ok = True
@@ -31,7 +36,7 @@ class UTCDateTime(TypeDecorator[datetime]):
         if value is None:
             return None
         if value.tzinfo is None:
-            return value.replace(tzinfo=UTC)
+            value = value.replace(tzinfo=UTC)
         return value.astimezone(UTC)
 
     def process_result_value(self, value: datetime | None, _dialect) -> datetime | None:

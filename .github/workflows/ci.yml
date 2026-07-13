@@ -43,5 +43,9 @@ jobs:
         run: npm ci
       - name: 类型检查
         run: npx tsc --noEmit
+      - name: Lint（ESLint）
+        run: npm run lint
+      - name: 单元测试
+        run: npm run test:unit
       - name: 生产构建
         run: npm run build

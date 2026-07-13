@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useLocale, useTranslations } from "next-intl";
 
 import { api } from "@/lib/api";
 import { getToken } from "@/lib/auth";
@@ -21,6 +22,8 @@ export function AuthImage({
   alt?: string;
   className?: string;
 }) {
+  const t = useTranslations("Markdown");
+  const locale = useLocale();
   const [src, setSrc] = React.useState<string | null>(url ?? (id ? cache.get(id) ?? null : null));
 
   React.useEffect(() => {
@@ -35,7 +38,12 @@ export function AuthImage({
       return;
     }
     let alive = true;
-    fetch(api.attachmentUrl(id), { headers: { Authorization: `Bearer ${getToken() ?? ""}` } })
+    fetch(api.attachmentUrl(id), {
+      headers: {
+        Authorization: `Bearer ${getToken() ?? ""}`,
+        "Accept-Language": locale,
+      },
+    })
       .then((r) => (r.ok ? r.blob() : Promise.reject(new Error(String(r.status)))))
       .then((b) => {
         const obj = URL.createObjectURL(b);
@@ -46,9 +54,9 @@ export function AuthImage({
     return () => {
       alive = false;
     };
-  }, [id, url]);
+  }, [id, locale, url]);
 
   if (!src) return <div className={cn("animate-pulse rounded-md bg-muted", className)} />;
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={src} alt={alt ?? "图片"} className={className} />;
+  return <img src={src} alt={alt ?? t("image")} className={className} />;
 }

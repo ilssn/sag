@@ -21,7 +21,7 @@ def _ensure_sqlite_dir(url: str) -> None:
     """SQLite 文件所在目录不存在时先创建。"""
     marker = "sqlite+aiosqlite:///"
     if url.startswith(marker):
-        path = url[len(marker):]
+        path = url[len(marker) :]
         if path and path not in (":memory:",):
             os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
 
@@ -64,8 +64,21 @@ _COLUMN_UPGRADES: dict[str, dict[str, str]] = {
         "token_usage": "BIGINT NOT NULL DEFAULT 0",
     },
     "threads": {"archived": "BOOLEAN NOT NULL DEFAULT 0"},
-    "messages": {"attachments_json": "JSON", "steps_json": "JSON"},
+    "messages": {
+        "attachments_json": "JSON",
+        "steps_json": "JSON",
+        "prompt_preview": "TEXT NOT NULL DEFAULT ''",
+    },
+    "universe_dirty_sources": {"revision": "INTEGER NOT NULL DEFAULT 1"},
 }
+
+# Existing tables also need newly introduced hot-path indexes. Keep these
+# idempotent for local/embedded upgrades; production deployments can express
+# the same DDL in their migration runner.
+_INDEX_UPGRADES = (
+    "CREATE INDEX IF NOT EXISTS ix_messages_thread_created_id ON messages (thread_id, created_at, id)",
+    "CREATE INDEX IF NOT EXISTS ix_documents_source_sag_source ON documents (source_id, sag_source_id)",
+)
 
 
 async def _ensure_columns() -> None:
@@ -87,6 +100,12 @@ async def _ensure_columns() -> None:
                     await conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
 
 
+async def _ensure_indexes() -> None:
+    async with engine.begin() as conn:
+        for ddl in _INDEX_UPGRADES:
+            await conn.exec_driver_sql(ddl)
+
+
 async def init_db() -> None:
     """开发态建表（生产用 Alembic）。导入 models 以注册到 metadata。"""
     from sag_api.db import models  # noqa: F401
@@ -94,6 +113,7 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await _ensure_columns()
+    await _ensure_indexes()
 
 
 async def dispose_db() -> None:

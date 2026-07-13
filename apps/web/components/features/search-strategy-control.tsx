@@ -1,6 +1,7 @@
 "use client";
 
-import { Check, ChevronDown, ListFilter, Network, ScanSearch } from "lucide-react";
+import { Check, ChevronDown, Sparkles, Zap } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import {
   DropdownMenu,
@@ -17,9 +18,8 @@ import {
 } from "@/lib/retrieval-config";
 
 const STRATEGY_ICONS = {
-  multi: Network,
-  vector: ScanSearch,
-  atomic: ListFilter,
+  vector: Zap,
+  multi: Sparkles,
 } as const;
 
 export function SearchStrategyControl({
@@ -31,6 +31,7 @@ export function SearchStrategyControl({
   defaultValue: SearchStrategy;
   onValueChange: (value: SearchStrategy) => void;
 }) {
+  const t = useTranslations("SearchStrategies");
   const currentStrategy = getSearchStrategy(value);
   const CurrentIcon = STRATEGY_ICONS[currentStrategy.value];
 
@@ -39,17 +40,17 @@ export function SearchStrategyControl({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          aria-label={`检索模式：${currentStrategy.label}`}
+          aria-label={t("modeAria", { strategy: t(currentStrategy.labelKey) })}
           data-testid="search-strategy"
           className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:bg-muted data-[state=open]:text-foreground"
         >
           <CurrentIcon className="size-3.5" />
-          <span>{currentStrategy.label}</span>
+          <span>{t(currentStrategy.labelKey)}</span>
           <ChevronDown className="size-3 opacity-60" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-72 p-1.5">
-        <DropdownMenuLabel className="px-2 pb-1 pt-1 text-[11px]">检索模式</DropdownMenuLabel>
+        <DropdownMenuLabel className="px-2 pb-1 pt-1 text-[11px]">{t("mode")}</DropdownMenuLabel>
         {SEARCH_STRATEGIES.map((strategy) => {
           const Icon = STRATEGY_ICONS[strategy.value];
           const selected = strategy.value === value;
@@ -64,15 +65,15 @@ export function SearchStrategyControl({
               <Icon className="mt-0.5 size-3.5 shrink-0" />
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5 text-xs font-medium text-foreground">
-                  {strategy.label}
+                  {t(strategy.labelKey)}
                   {isDefault && (
                     <span className="rounded bg-muted px-1 py-0.5 text-[10px] font-normal leading-none text-muted-foreground">
-                      默认
+                      {t("default")}
                     </span>
                   )}
                 </span>
                 <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground">
-                  {strategy.description}
+                  {t(strategy.descriptionKey)}
                 </span>
               </span>
               <Check

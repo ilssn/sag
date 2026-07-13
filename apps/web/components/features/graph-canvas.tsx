@@ -18,6 +18,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { ListTree, Maximize2, Minimize2, Orbit, RotateCcw, Share2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { cn } from "@/lib/utils";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -130,6 +131,7 @@ function GraphLayoutToggle({
   value: GraphLayout;
   onValueChange: (layout: GraphLayout) => void;
 }) {
+  const t = useTranslations("Graph");
   return (
     <ToggleGroup
       type="single"
@@ -137,16 +139,16 @@ function GraphLayoutToggle({
       size="sm"
       value={value}
       onValueChange={(next) => next && onValueChange(next as GraphLayout)}
-      aria-label="图谱布局"
+      aria-label={t("layout")}
       className="rounded-md bg-card/95 shadow-soft backdrop-blur-sm"
     >
-      <ToggleGroupItem value="force" aria-label="力导布局" title="力导布局">
+      <ToggleGroupItem value="force" aria-label={t("forceLayout")} title={t("forceLayout")}>
         <Share2 />
       </ToggleGroupItem>
-      <ToggleGroupItem value="radial" aria-label="辐射布局" title="辐射布局">
+      <ToggleGroupItem value="radial" aria-label={t("radialLayout")} title={t("radialLayout")}>
         <Orbit />
       </ToggleGroupItem>
-      <ToggleGroupItem value="tree" aria-label="层级布局" title="层级布局">
+      <ToggleGroupItem value="tree" aria-label={t("treeLayout")} title={t("treeLayout")}>
         <ListTree />
       </ToggleGroupItem>
     </ToggleGroup>
@@ -188,11 +190,11 @@ function FitViewOnChange({
   return null;
 }
 
-const LAYOUT_LABEL: Record<GraphLayout, string> = {
-  radial: "辐射布局",
-  tree: "层级布局",
-  force: "力导网状",
-};
+const LAYOUT_LABEL_KEY = {
+  radial: "radialLayout",
+  tree: "treeLayout",
+  force: "forceNetwork",
+} as const;
 
 const LAYOUT_ICON = {
   radial: Orbit,
@@ -245,6 +247,7 @@ export function GraphCanvas({
   onNodeClick?: ReactFlowProps["onNodeClick"];
   onPaneClick?: ReactFlowProps["onPaneClick"];
 }) {
+  const t = useTranslations("Graph");
   const [mounted, setMounted] = React.useState(false);
   const [expanded, setExpanded] = React.useState(false);
   const [flowNodes, setFlowNodes, onNodesChange] = useNodesState(nodes);
@@ -339,8 +342,8 @@ export function GraphCanvas({
           type="button"
           onClick={resetNodePositions}
           disabled={nodes.length === 0}
-          aria-label="重置节点位置"
-          title="重置节点位置"
+          aria-label={t("resetPositions")}
+          title={t("resetPositions")}
           className="grid size-8 place-items-center rounded-md border bg-card/95 text-muted-foreground shadow-soft outline-none backdrop-blur-sm transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40"
         >
           <RotateCcw className="size-4" />
@@ -349,8 +352,8 @@ export function GraphCanvas({
         <button
           type="button"
           onClick={() => setExpanded((value) => !value)}
-          aria-label={expanded ? "退出图谱全屏" : "全屏查看图谱"}
-          title={expanded ? "退出全屏" : "全屏查看"}
+          aria-label={expanded ? t("exitGraphFullscreen") : t("graphFullscreen")}
+          title={expanded ? t("exitFullscreen") : t("fullscreen")}
           className="grid size-8 place-items-center rounded-md border bg-card/95 text-muted-foreground shadow-soft outline-none backdrop-blur-sm transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
         >
           {expanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
@@ -405,7 +408,7 @@ export function GraphCanvas({
       {children}
       <div className="pointer-events-none absolute bottom-3 right-3 z-10 flex items-center gap-1 rounded-md border bg-card/90 px-2 py-1 text-[10px] text-muted-foreground shadow-soft backdrop-blur-sm">
         <LayoutIcon className="size-3" />
-        {LAYOUT_LABEL[layout]}
+        {t(LAYOUT_LABEL_KEY[layout])}
       </div>
     </div>
   );

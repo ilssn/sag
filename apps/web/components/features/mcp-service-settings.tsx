@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Database, Globe2, LockKeyhole, RotateCw, Terminal } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import { CodeBlock } from "@/components/features/code-block";
 import { CopyButton } from "@/components/features/copy-button";
@@ -42,6 +43,7 @@ function stdioConfig(descriptor: KnowledgeMcpDescriptor) {
 }
 
 export function McpServiceSettings() {
+  const t = useTranslations("McpService");
   const [descriptor, setDescriptor] = React.useState<KnowledgeMcpDescriptor | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [mode, setMode] = React.useState<"http" | "stdio">("http");
@@ -51,9 +53,9 @@ export function McpServiceSettings() {
     try {
       setDescriptor(await api.knowledgeMcp());
     } catch (loadError) {
-      setError(loadError instanceof ApiError ? loadError.message : "无法加载集成配置");
+      setError(loadError instanceof ApiError ? loadError.message : t("loadFailed"));
     }
-  }, []);
+  }, [t]);
 
   React.useEffect(() => {
     void load();
@@ -86,15 +88,15 @@ export function McpServiceSettings() {
 
   if (error) {
     return (
-      <SettingsSection title="知识库 MCP" description="将 SAG 知识库连接到外部 AI 客户端。">
-        <SettingsRow title="服务配置">
+      <SettingsSection title={t("title")} description={t("description")}>
+        <SettingsRow title={t("serviceConfig")}>
           <Alert variant="destructive">
-            <AlertTitle>加载失败</AlertTitle>
+            <AlertTitle>{t("loadErrorTitle")}</AlertTitle>
             <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
               <span>{error}</span>
               <Button type="button" variant="outline" size="sm" onClick={() => void load()}>
                 <RotateCw />
-                重试
+                {t("retry")}
               </Button>
             </AlertDescription>
           </Alert>
@@ -105,14 +107,14 @@ export function McpServiceSettings() {
 
   if (!descriptor || !snippets) {
     return (
-      <SettingsSection title="知识库 MCP" description="将 SAG 知识库连接到外部 AI 客户端。">
-        <SettingsRow title="开放范围">
+      <SettingsSection title={t("title")} description={t("description")}>
+        <SettingsRow title={t("scope")}>
           <div className="flex gap-2">
             <Skeleton className="h-7 w-28" />
             <Skeleton className="h-7 w-20" />
           </div>
         </SettingsRow>
-        <SettingsRow title="连接配置">
+        <SettingsRow title={t("connectionConfig")}>
           <div className="grid gap-3">
             <Skeleton className="h-8 w-44" />
             <Skeleton className="h-52 w-full" />
@@ -127,23 +129,23 @@ export function McpServiceSettings() {
   const note = mode === "http" ? descriptor.http.note : descriptor.stdio.note;
 
   return (
-    <SettingsSection title="知识库 MCP" description="将整个 SAG 知识库连接到外部 AI 客户端。">
+    <SettingsSection title={t("title")} description={t("fullDescription")}>
       <SettingsRow
-        title="开放范围"
-        description="默认覆盖全部信源；外部客户端仍可按 source_id 收窄查询范围。"
+        title={t("scope")}
+        description={t("scopeDescription")}
         layout="inline"
       >
         <div className="flex flex-wrap justify-start gap-2 sm:justify-end">
           <Badge variant="secondary" className="gap-1.5">
             <Database />
-            全部知识库
+            {t("allKnowledge")}
           </Badge>
-          <Badge variant="outline">{descriptor.source_count} 个信源</Badge>
-          <Badge variant="outline">{descriptor.tools.length} 个工具</Badge>
+          <Badge variant="outline">{t("sourceCount", { count: descriptor.source_count })}</Badge>
+          <Badge variant="outline">{t("toolCount", { count: descriptor.tools.length })}</Badge>
         </div>
       </SettingsRow>
 
-      <SettingsRow title="连接配置" description="选择客户端支持的传输方式并复制完整配置。">
+      <SettingsRow title={t("connectionConfig")} description={t("connectionDescription")}>
         <div className="grid gap-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <ToggleGroup
@@ -152,7 +154,7 @@ export function McpServiceSettings() {
               size="sm"
               value={mode}
               onValueChange={(value) => value && setMode(value as typeof mode)}
-              aria-label="知识库 MCP 连接方式"
+              aria-label={t("connectionAria")}
             >
               <ToggleGroupItem value="http">
                 <Globe2 />
@@ -160,10 +162,10 @@ export function McpServiceSettings() {
               </ToggleGroupItem>
               <ToggleGroupItem value="stdio">
                 <Terminal />
-                本地命令
+                {t("localCommand")}
               </ToggleGroupItem>
             </ToggleGroup>
-            <CopyButton text={copyValue} label="MCP 配置" />
+            <CopyButton text={copyValue} label={t("mcpConfig")} />
           </div>
           <CodeBlock>{preview}</CodeBlock>
           <div className="flex items-start gap-2 text-xs leading-5 text-muted-foreground">
@@ -174,14 +176,14 @@ export function McpServiceSettings() {
             )}
             <span>
               {mode === "http"
-                ? `复制时会带入当前访问令牌。${note}`
+                ? t("tokenNote", { note })
                 : note}
             </span>
           </div>
         </div>
       </SettingsRow>
 
-      <SettingsRow title="可用工具" description="外部客户端可调用的只读知识库能力。">
+      <SettingsRow title={t("availableTools")} description={t("toolsDescription")}>
         <McpToolList tools={descriptor.tool_details} />
       </SettingsRow>
     </SettingsSection>

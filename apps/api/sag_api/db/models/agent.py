@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import JSON, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import JSON, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,14 +25,10 @@ class AgentBinding(IDMixin, TimestampMixin, Base):
     """Agent 挂载的东西：一个信源，或一个 MCP server（工具来源）。"""
 
     __tablename__ = "agent_bindings"
-    __table_args__ = (
-        UniqueConstraint("agent_id", "target_type", "target_id", name="uq_agent_binding"),
-    )
+    __table_args__ = (UniqueConstraint("agent_id", "target_type", "target_id", name="uq_agent_binding"),)
 
     agent_id: Mapped[str] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"), index=True)
-    target_type: Mapped[BindingTargetType] = mapped_column(
-        SAEnum(BindingTargetType, native_enum=False, length=16)
-    )
+    target_type: Mapped[BindingTargetType] = mapped_column(SAEnum(BindingTargetType, native_enum=False, length=16))
     target_id: Mapped[str] = mapped_column(String(64), index=True)
     # MCP server 连接配置（url 或 command/args/env）；信源绑定为空
     config: Mapped[dict] = mapped_column("config_json", JSON, default=dict)
@@ -48,10 +44,9 @@ class Thread(IDMixin, TimestampMixin, Base):
 
 class Message(IDMixin, TimestampMixin, Base):
     __tablename__ = "messages"
+    __table_args__ = (Index("ix_messages_thread_created_id", "thread_id", "created_at", "id"),)
 
-    thread_id: Mapped[str] = mapped_column(
-        ForeignKey("threads.id", ondelete="CASCADE"), index=True
-    )
+    thread_id: Mapped[str] = mapped_column(ForeignKey("threads.id", ondelete="CASCADE"))
     # 图片附件 meta：[{id, name, media_type}]（文件在 upload_dir/attachments/）
     attachments: Mapped[list] = mapped_column("attachments_json", JSON, default=list)
     # Agentic 执行轨迹：[{kind:thinking|tool, step, name?, args?, ms, count?}]（助手消息）
@@ -59,3 +54,7 @@ class Message(IDMixin, TimestampMixin, Base):
     role: Mapped[MessageRole] = mapped_column(SAEnum(MessageRole, native_enum=False, length=16))
     content: Mapped[str] = mapped_column(Text, default="")
     citations: Mapped[list] = mapped_column("citations_json", JSON, default=list)
+    # Frozen initial model input for this assistant turn. It deliberately
+    # excludes tool results and the generated answer so historical playback
+    # can audit the same role-separated input that was shown live.
+    prompt_preview: Mapped[str] = mapped_column(Text, default="")

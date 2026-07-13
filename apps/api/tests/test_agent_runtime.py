@@ -96,6 +96,96 @@ async def test_tool_loop_uses_one_model_call_per_turn_and_preserves_messages():
 
 
 @pytest.mark.asyncio
+async def test_initial_required_tool_choice_only_applies_to_first_turn():
+    model = ScriptedModel(
+        [ModelChunk(tool_calls=(ToolCall(id="call-1", name="echo"),))],
+        [ModelChunk(text_delta="grounded")],
+    )
+
+    async def execute(arguments, context):
+        return ToolResult(content="evidence")
+
+    tool = AgentTool(ToolSpec(name="echo", description="Search evidence"), execute)
+    async with AgentRuntime() as runtime:
+        handle = runtime.run(
+            Agent(
+                name="research",
+                model=model,
+                tools=(tool,),
+                initial_tool_choice="required",
+            ),
+            "research this",
+        )
+        await collect(handle)
+        result = await handle.result()
+
+    assert result.output == "grounded"
+    assert model.requests[0].tool_choice == "required"
+    assert model.requests[1].tool_choice is None
+
+
+@pytest.mark.asyncio
+async def test_named_initial_tool_choice_only_forces_that_first_function():
+    model = ScriptedModel(
+        [ModelChunk(tool_calls=(ToolCall(id="clock", name="get_time"),))],
+        [ModelChunk(text_delta="grounded in time")],
+    )
+
+    async def execute(arguments, context):
+        return ToolResult(content="2026-07-13")
+
+    tool = AgentTool(ToolSpec(name="get_time", description="Current time"), execute)
+    choice = {"type": "function", "function": {"name": "get_time"}}
+    async with AgentRuntime() as runtime:
+        handle = runtime.run(
+            Agent(
+                name="temporal research",
+                model=model,
+                tools=(tool,),
+                initial_tool_choice=choice,
+            ),
+            "latest updates",
+        )
+        await collect(handle)
+        result = await handle.result()
+
+    assert result.output == "grounded in time"
+    assert model.requests[0].tool_choice == choice
+    assert model.requests[1].tool_choice is None
+
+
+@pytest.mark.asyncio
+async def test_invalid_named_initial_tool_choice_is_rejected_before_run():
+    model = ScriptedModel([])
+
+    async def execute(arguments, context):
+        return ToolResult(content="ok")
+
+    tool = AgentTool(ToolSpec(name="get_time", description="Current time"), execute)
+    async with AgentRuntime() as runtime:
+        with pytest.raises(ValueError, match="unknown tool"):
+            runtime.run(
+                Agent(
+                    name="bad tool",
+                    model=model,
+                    tools=(tool,),
+                    initial_tool_choice={"type": "function", "function": {"name": "missing"}},
+                ),
+                "go",
+            )
+        with pytest.raises(ValueError, match="string, mapping, or None"):
+            runtime.run(
+                Agent(
+                    name="bad type",
+                    model=model,
+                    tools=(tool,),
+                    initial_tool_choice=42,  # type: ignore[arg-type]
+                ),
+                "go",
+            )
+
+
+@pytest.mark.asyncio
 async def test_tool_failure_is_structured_and_returned_to_model():
     model = ScriptedModel(
         [ModelChunk(tool_calls=(ToolCall(id="call-bad", name="broken"),))],
@@ -359,9 +449,7 @@ async def test_store_append_failure_still_delivers_one_terminal_result():
         result = await handle.result()
 
     terminals = [
-        event
-        for event in events
-        if event.type.value.startswith("run.") and event.type != EventType.RUN_STARTED
+        event for event in events if event.type.value.startswith("run.") and event.type != EventType.RUN_STARTED
     ]
     assert len(terminals) == 1
     assert terminals[0].type == EventType.RUN_FAILED

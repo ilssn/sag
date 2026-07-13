@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field, field_validator
+
+from sag_api.enums import SearchStrategy
 
 
 class QuickModelSetupRequest(BaseModel):
@@ -15,6 +18,20 @@ class QuickModelSetupRequest(BaseModel):
         if not value:
             raise ValueError("API Key 不能为空")
         return value
+
+
+class SystemPreferencesUpdate(BaseModel):
+    timezone: str = Field(min_length=1, max_length=100)
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        normalized = value.strip()
+        try:
+            ZoneInfo(normalized)
+        except (ZoneInfoNotFoundError, ValueError) as error:
+            raise ValueError("必须使用有效的 IANA 时区，例如 Asia/Shanghai") from error
+        return normalized
 
 
 class ModelConfigUpdate(BaseModel):
@@ -45,7 +62,7 @@ class ModelConfigUpdate(BaseModel):
     document_chunk_max_tokens: int | None = Field(default=None, ge=100, le=100_000)
     document_chunk_mode: Literal["standard", "heading_strict"] | None = None
 
-    search_strategy: Literal["multi", "vector", "atomic"] | None = None
+    search_strategy: SearchStrategy | None = None
     search_top_k: int | None = Field(default=None, ge=1, le=50)
     sag_language: Literal["zh", "en"] | None = None
 

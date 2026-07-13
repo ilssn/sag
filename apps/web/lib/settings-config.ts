@@ -4,6 +4,7 @@ import {
   LibraryBig,
   Monitor,
   Moon,
+  Orbit,
   Palette,
   Plug,
   Sun,
@@ -11,23 +12,58 @@ import {
 } from "lucide-react";
 
 export const SETTINGS_PAGE = {
-  title: "设置",
-  description: "管理账户、默认助手、模型连接、知识库参数、集成和界面偏好。",
+  titleKey: "title",
+  descriptionKey: "description",
 } as const;
 
 export const SETTINGS_TABS = [
-  { value: "account", label: "账户", icon: UserRound },
-  { value: "agent", label: "助手", icon: Bot },
-  { value: "model", label: "模型", icon: Cpu },
-  { value: "knowledge", label: "知识库", icon: LibraryBig },
-  { value: "integrations", label: "集成", icon: Plug },
-  { value: "appearance", label: "外观", icon: Palette },
+  { value: "account", labelKey: "account", icon: UserRound },
+  { value: "agent", labelKey: "agent", icon: Bot },
+  { value: "model", labelKey: "model", icon: Cpu },
+  { value: "knowledge", labelKey: "knowledge", icon: LibraryBig },
+  { value: "integrations", labelKey: "integrations", icon: Plug },
+  { value: "appearance", labelKey: "appearance", icon: Palette },
+  { value: "graph", labelKey: "graph", icon: Orbit },
 ] as const;
 
+export type SettingsTab = (typeof SETTINGS_TABS)[number]["value"];
+
+export function isSettingsTab(value: string | null): value is SettingsTab {
+  return SETTINGS_TABS.some((tab) => tab.value === value);
+}
+
+export function resolveSettingsTab(value: string | null): SettingsTab {
+  return isSettingsTab(value) ? value : "account";
+}
+
+/** Canonical URL used by full-size, mini and ambient settings entry points. */
+export function settingsTabHref(tab: SettingsTab, section?: string) {
+  const params = new URLSearchParams({ tab });
+  if (section?.trim()) params.set("section", section.trim());
+  return `/settings?${params.toString()}`;
+}
+
 export const THEME_OPTIONS = [
-  { value: "light", label: "浅色", icon: Sun },
-  { value: "dark", label: "深色", icon: Moon },
-  { value: "system", label: "跟随系统", icon: Monitor },
+  { value: "light", labelKey: "light", icon: Sun },
+  { value: "dark", labelKey: "dark", icon: Moon },
+  { value: "system", labelKey: "system", icon: Monitor },
+] as const;
+
+export const TIMEZONE_OPTIONS = [
+  { value: "Asia/Shanghai", labelKey: "shanghai" },
+  { value: "UTC", labelKey: "utc" },
+  { value: "Asia/Hong_Kong", labelKey: "hongKong" },
+  { value: "Asia/Singapore", labelKey: "singapore" },
+  { value: "Asia/Tokyo", labelKey: "tokyo" },
+  { value: "Asia/Seoul", labelKey: "seoul" },
+  { value: "Asia/Dubai", labelKey: "dubai" },
+  { value: "Europe/London", labelKey: "london" },
+  { value: "Europe/Berlin", labelKey: "berlin" },
+  { value: "America/New_York", labelKey: "newYork" },
+  { value: "America/Chicago", labelKey: "chicago" },
+  { value: "America/Denver", labelKey: "denver" },
+  { value: "America/Los_Angeles", labelKey: "losAngeles" },
+  { value: "Australia/Sydney", labelKey: "sydney" },
 ] as const;
 
 export const ARCHIVED_THREADS_PAGE_SIZE = 5;

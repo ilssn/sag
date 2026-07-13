@@ -210,6 +210,7 @@ async def delete_(
     document_id: str,
     _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
+    job_queue: JobQueue = Depends(get_job_queue),
     engine_manager: EngineManager = Depends(get_engine_manager),
 ) -> Ok:
     source = await get_source(session, source_id)
@@ -218,5 +219,6 @@ async def delete_(
         source,
         document_id,
         engine_manager=engine_manager,
+        job_queue=job_queue,
     )
     return Ok(detail="文档已删除")

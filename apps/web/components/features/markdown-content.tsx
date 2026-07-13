@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -16,9 +17,8 @@ type MdNode = {
   data?: Record<string, unknown>;
 };
 
-function remarkCitationLinks(enabled: boolean) {
+function remarkCitationLinks(validNumbers: ReadonlySet<string>) {
   return () => {
-    if (!enabled) return;
     const visit = (node: MdNode) => {
       if (node.type === "link" || node.type === "code" || node.type === "inlineCode") return;
       if (!node.children) return;
@@ -33,6 +33,10 @@ function remarkCitationLinks(enabled: boolean) {
         let last = 0;
         let match: RegExpExecArray | null;
         while ((match = re.exec(child.value))) {
+          // A bracketed number is only interactive when the backend supplied
+          // traceable metadata for that exact number. Never manufacture a
+          // disabled "citation" control for model-invented references.
+          if (!validNumbers.has(match[1])) continue;
           if (match.index > last) {
             parts.push({ type: "text", value: child.value.slice(last, match.index) });
           }
@@ -59,13 +63,14 @@ function remarkCitationLinks(enabled: boolean) {
 }
 
 function MdImage(props: React.ImgHTMLAttributes<HTMLImageElement>) {
+  const t = useTranslations("Markdown");
   const [broken, setBroken] = React.useState(false);
   const src = typeof props.src === "string" ? props.src : "";
   const external = /^(https?:|data:|blob:)/.test(src);
   if (broken || !external) {
     return (
       <span className="my-1 inline-flex max-w-full items-center gap-1.5 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
-        🖼 图片{props.alt ? `：${props.alt}` : ""}（见原文件）
+        {t("imageUnavailable", { alt: props.alt ?? "" })}
       </span>
     );
   }
@@ -73,7 +78,7 @@ function MdImage(props: React.ImgHTMLAttributes<HTMLImageElement>) {
   return (
     <img
       {...props}
-      alt={props.alt ?? "图片"}
+      alt={props.alt ?? t("image")}
       onError={() => setBroken(true)}
       className="my-2 max-h-80 max-w-full rounded-md border"
     />
@@ -91,11 +96,21 @@ export const MarkdownContent = React.memo(function MarkdownContent({
   onCitationClick?: (citation: Citation) => void;
   streaming?: boolean;
 }) {
+  const t = useTranslations("Markdown");
   const citationByNumber = React.useMemo(() => {
-    return new Map((citations ?? []).map((c) => [String(c.n), c]));
+    return new Map(
+      (citations ?? [])
+        .filter(
+          (citation) => citation.kind !== "external"
+            && Number.isInteger(citation.n)
+            && citation.n > 0
+            && Boolean(citation.chunk_id && citation.source_id),
+        )
+        .map((citation) => [String(citation.n), citation]),
+    );
   }, [citations]);
   const citationPlugin = React.useMemo(
-    () => remarkCitationLinks(citationByNumber.size > 0),
+    () => remarkCitationLinks(new Set(citationByNumber.keys())),
     [citationByNumber],
   );
 
@@ -128,15 +143,15 @@ export const MarkdownContent = React.memo(function MarkdownContent({
                       ? "cursor-pointer hover:bg-muted-foreground/20 hover:text-foreground"
                       : "cursor-default opacity-60",
                   )}
-                  aria-label={citation ? `打开来源 ${n}` : `来源 ${n}`}
-                  title={citation?.heading || `来源 ${n}`}
+                  aria-label={citation ? t("openSource", { number: n }) : t("source", { number: n })}
+                  title={citation?.heading || t("source", { number: n })}
                 >
                   {children}
                 </button>
               );
             }
             return (
-              <a href={href} target="_blank" rel="noreferrer" {...props}>
+              <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
                 {children}
               </a>
             );

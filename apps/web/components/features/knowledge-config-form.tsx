@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { RotateCw, Save } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { useApp } from "@/components/features/app-shell";
@@ -25,6 +26,8 @@ import { SEARCH_STRATEGIES } from "@/lib/retrieval-config";
 import type { ModelConfig, ModelConfigPatch } from "@/lib/types";
 
 export function KnowledgeConfigForm() {
+  const t = useTranslations("KnowledgeConfig");
+  const strategies = useTranslations("SearchStrategies");
   const { refreshCapabilities } = useApp();
   const [loaded, setLoaded] = React.useState(false);
   const [loadError, setLoadError] = React.useState<string | null>(null);
@@ -52,9 +55,9 @@ export function KnowledgeConfigForm() {
     try {
       hydrate(await api.getModelConfig());
     } catch (error) {
-      setLoadError(error instanceof ApiError ? error.message : "无法加载知识库配置");
+      setLoadError(error instanceof ApiError ? error.message : t("loadFailed"));
     }
-  }, [hydrate]);
+  }, [hydrate, t]);
 
   React.useEffect(() => {
     void load();
@@ -74,9 +77,9 @@ export function KnowledgeConfigForm() {
       const { config } = await api.saveModelConfig(patch);
       hydrate(config);
       await refreshCapabilities();
-      toast.success("知识库配置已保存并生效");
+      toast.success(t("saved"));
     } catch (error) {
-      toast.error(error instanceof ApiError ? error.message : "保存失败");
+      toast.error(error instanceof ApiError ? error.message : t("saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -84,15 +87,15 @@ export function KnowledgeConfigForm() {
 
   if (loadError) {
     return (
-      <SettingsSection title="知识库配置" description="解析与检索参数。">
+      <SettingsSection title={t("title")} description={t("description")}>
         <div className="p-4 sm:p-5">
           <Alert variant="destructive">
-            <AlertTitle>加载失败</AlertTitle>
+            <AlertTitle>{t("loadErrorTitle")}</AlertTitle>
             <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
               <span>{loadError}</span>
               <Button type="button" variant="outline" size="sm" onClick={() => void load()}>
                 <RotateCw />
-                重试
+                {t("retry")}
               </Button>
             </AlertDescription>
           </Alert>
@@ -105,8 +108,8 @@ export function KnowledgeConfigForm() {
     return (
       <div className="flex flex-col gap-6">
         {[
-          ["解析", "正在加载切片与抽取参数。"],
-          ["检索", "正在加载检索规则。"],
+          [t("parsingTitle"), t("parsingLoading")],
+          [t("retrievalTitle"), t("retrievalLoading")],
         ].map(([title, description]) => (
           <SettingsSection key={title} title={title} description={description}>
             <div className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5">
@@ -121,11 +124,11 @@ export function KnowledgeConfigForm() {
 
   return (
     <div className="flex flex-col gap-6">
-      <SettingsSection title="解析" description="控制文档进入知识库后的切片与事件抽取。">
-        <SettingsRow title="切片设置" description="确定原文块的大小与边界。">
+      <SettingsSection title={t("parsingTitle")} description={t("parsingDescription")}>
+        <SettingsRow title={t("chunkSettings")} description={t("chunkDescription")}>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field>
-              <FieldLabel htmlFor="kb-chunk-mode">切片模式</FieldLabel>
+              <FieldLabel htmlFor="kb-chunk-mode">{t("chunkMode")}</FieldLabel>
               <Select
                 value={chunkMode}
                 onValueChange={(value) =>
@@ -136,18 +139,18 @@ export function KnowledgeConfigForm() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="standard">智能切片（推荐）</SelectItem>
-                  <SelectItem value="heading_strict">严格按标题</SelectItem>
+                  <SelectItem value="standard">{t("smartChunking")}</SelectItem>
+                  <SelectItem value="heading_strict">{t("strictHeadings")}</SelectItem>
                 </SelectContent>
               </Select>
               <FieldDescription>
                 {chunkMode === "heading_strict"
-                  ? "遇到新标题即开始新块，适合章节结构清晰的文档。"
-                  : "按内容结构聚合短段落，并受最大 token 数约束。"}
+                  ? t("strictHeadingsDescription")
+                  : t("smartChunkingDescription")}
               </FieldDescription>
             </Field>
             <Field>
-              <FieldLabel htmlFor="kb-chunk-max-tokens">每块最大 tokens</FieldLabel>
+              <FieldLabel htmlFor="kb-chunk-max-tokens">{t("maxTokens")}</FieldLabel>
               <Input
                 id="kb-chunk-max-tokens"
                 type="number"
@@ -161,15 +164,15 @@ export function KnowledgeConfigForm() {
                   )
                 }
               />
-              <FieldDescription>默认 1000；修改后需重新处理已有文档。</FieldDescription>
+              <FieldDescription>{t("maxTokensDescription")}</FieldDescription>
             </Field>
           </div>
         </SettingsRow>
 
-        <SettingsRow title="抽取设置" description="控制单篇文档的事件与实体抽取速度。">
+        <SettingsRow title={t("extractionSettings")} description={t("extractionDescription")}>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field>
-              <FieldLabel htmlFor="kb-extract-concurrency">单文档抽取并发</FieldLabel>
+              <FieldLabel htmlFor="kb-extract-concurrency">{t("concurrency")}</FieldLabel>
               <Input
                 id="kb-extract-concurrency"
                 type="number"
@@ -182,17 +185,17 @@ export function KnowledgeConfigForm() {
                   )
                 }
               />
-              <FieldDescription>每篇文档同时抽取的分块数，默认 5。</FieldDescription>
+              <FieldDescription>{t("concurrencyDescription")}</FieldDescription>
             </Field>
           </div>
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection title="检索" description="控制知识召回方式和信息抽取语言。">
-        <SettingsRow title="检索规则" description="调整策略、召回条数和语言。">
+      <SettingsSection title={t("retrievalTitle")} description={t("retrievalDescription")}>
+        <SettingsRow title={t("retrievalRules")} description={t("retrievalRulesDescription")}>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field>
-              <FieldLabel htmlFor="kb-search-strategy">检索策略</FieldLabel>
+              <FieldLabel htmlFor="kb-search-strategy">{t("retrievalStrategy")}</FieldLabel>
               <Select
                 value={strategy}
                 onValueChange={(value) =>
@@ -203,16 +206,16 @@ export function KnowledgeConfigForm() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {SEARCH_STRATEGIES.map(({ value, label }) => (
+                  {SEARCH_STRATEGIES.map(({ value, labelKey }) => (
                     <SelectItem key={value} value={value}>
-                      {label}
+                      {strategies(labelKey)}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </Field>
             <Field>
-              <FieldLabel htmlFor="kb-language">抽取语言</FieldLabel>
+              <FieldLabel htmlFor="kb-language">{t("extractionLanguage")}</FieldLabel>
               <Select
                 value={language}
                 onValueChange={(value) => setLanguage(value as ModelConfig["sag_language"])}
@@ -221,16 +224,16 @@ export function KnowledgeConfigForm() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="zh">中文</SelectItem>
-                  <SelectItem value="en">English</SelectItem>
+                  <SelectItem value="zh">{t("chinese")}</SelectItem>
+                  <SelectItem value="en">{t("english")}</SelectItem>
                 </SelectContent>
               </Select>
             </Field>
             <Field className="sm:col-span-2">
-              <FieldLabel>{`召回条数 · ${topK}`}</FieldLabel>
+              <FieldLabel>{t("topK", { count: topK })}</FieldLabel>
               <div className="flex h-9 items-center">
                 <Slider
-                  aria-label="召回条数"
+                  aria-label={t("topKAria")}
                   value={[topK]}
                   min={1}
                   max={50}
@@ -246,7 +249,7 @@ export function KnowledgeConfigForm() {
       <div className="flex justify-end border-t pt-4">
         <Button type="button" onClick={save} disabled={saving}>
           {saving ? <Spinner /> : <Save />}
-          {saving ? "保存中…" : "保存并生效"}
+          {saving ? t("saving") : t("save")}
         </Button>
       </div>
     </div>

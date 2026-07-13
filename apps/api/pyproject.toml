@@ -23,6 +23,7 @@ dependencies = [
     "trafilatura>=1.8",
     "markitdown[docx,pdf,pptx,xls,xlsx]>=0.1.6,<0.2",
     "mcp>=1.28,<2",
+    "tzdata>=2024.1",
 ]
 
 [project.optional-dependencies]

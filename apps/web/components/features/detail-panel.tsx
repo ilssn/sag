@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useLocale, useTranslations } from "next-intl";
 import { usePathname } from "next/navigation";
 import {
   ArrowUpRight,
@@ -19,17 +20,18 @@ import type { Doc } from "@/lib/types";
 import { formatBytes, formatTokenCount, relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { MarkdownContent } from "@/components/features/markdown-content";
+import { useApp } from "@/components/features/app-shell";
 import { DocStatusBadge } from "@/components/features/status-badge";
 import { Button } from "@/components/ui/button";
 import type { ImperativePanelHandle } from "react-resizable-panels";
 
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@/components/ui/resizable";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -128,8 +130,9 @@ function RenderModeToggle({
   mode: "md" | "raw";
   onChange: (m: "md" | "raw") => void;
 }) {
+  const t = useTranslations("DetailPanel");
   const isPreview = mode === "md";
-  const label = isPreview ? "切换到原始 Markdown" : "切换到预览格式";
+  const label = isPreview ? t("renderMode.raw") : t("renderMode.preview");
 
   return (
     <Tooltip>
@@ -170,6 +173,7 @@ function ChunkView({
 }: {
   target: Extract<DetailTarget, { kind: "chunk" }>;
 }) {
+  const t = useTranslations("DetailPanel");
   const [content, setContent] = React.useState<string | null>(null);
   const [meta, setMeta] = React.useState<{ heading: string; sourceName: string } | null>(null);
   const [mode, setMode] = React.useState<"md" | "raw">("md");
@@ -184,13 +188,13 @@ function ChunkView({
       .then((c) => {
         if (!alive) return;
         setContent(c.content);
-        setMeta({ heading: c.heading || target.heading || "原文片段", sourceName: c.source_name });
+        setMeta({ heading: c.heading || target.heading || t("chunk.fallbackHeading"), sourceName: c.source_name });
       })
-      .catch((e) => alive && setError(e instanceof ApiError ? e.message : "原文加载失败"));
+      .catch((e) => alive && setError(e instanceof ApiError ? e.message : t("chunk.loadFailed")));
     return () => {
       alive = false;
     };
-  }, [target]);
+  }, [t, target]);
 
   if (error) {
     return <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>;
@@ -212,7 +216,7 @@ function ChunkView({
             href={`/knowledge/${target.sourceId}`}
             className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
           >
-            出自 {meta?.sourceName ?? target.sourceName ?? "信源"}
+            {t("chunk.from", { source: meta?.sourceName ?? target.sourceName ?? t("chunk.source") })}
             <ArrowUpRight className="size-3" />
           </Link>
         </div>
@@ -224,6 +228,8 @@ function ChunkView({
 }
 
 function OriginalDocumentPreview({ doc }: { doc: Doc }) {
+  const locale = useLocale();
+  const t = useTranslations("DetailPanel");
   const [state, setState] = React.useState<
     | { phase: "loading" }
     | { phase: "blob"; url: string; kind: "pdf" | "image" }
@@ -242,9 +248,12 @@ function OriginalDocumentPreview({ doc }: { doc: Doc }) {
     (async () => {
       try {
         const res = await fetch(fileUrl, {
-          headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+          headers: {
+            Authorization: `Bearer ${getToken() ?? ""}`,
+            "Accept-Language": locale,
+          },
         });
-        if (!res.ok) throw new Error(`原始文件不可用（${res.status}）`);
+        if (!res.ok) throw new Error(t("original.unavailable", { status: res.status }));
         const ct = (res.headers.get("content-type") || doc.content_type || "").toLowerCase();
         if (ct.includes("pdf")) {
           objectUrl = URL.createObjectURL(await res.blob());
@@ -264,21 +273,24 @@ function OriginalDocumentPreview({ doc }: { doc: Doc }) {
           if (alive) setState({ phase: "none" });
         }
       } catch (e) {
-        if (alive) setState({ phase: "error", message: e instanceof Error ? e.message : "加载失败" });
+        if (alive) setState({ phase: "error", message: e instanceof Error ? e.message : t("original.loadFailed") });
       }
     })();
     return () => {
       alive = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [doc.id, doc.source_id, doc.content_type, fileUrl]);
+  }, [doc.content_type, doc.id, doc.source_id, fileUrl, locale, t]);
 
   async function download() {
     try {
       const res = await fetch(fileUrl, {
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: {
+          Authorization: `Bearer ${getToken() ?? ""}`,
+          "Accept-Language": locale,
+        },
       });
-      if (!res.ok) throw new Error("下载失败");
+      if (!res.ok) throw new Error(t("original.downloadFailed"));
       const url = URL.createObjectURL(await res.blob());
       const a = document.createElement("a");
       a.href = url;
@@ -293,12 +305,12 @@ function OriginalDocumentPreview({ doc }: { doc: Doc }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-muted-foreground">原始文件预览</span>
+        <span className="text-xs font-medium text-muted-foreground">{t("original.title")}</span>
         <span className="flex items-center gap-1.5">
           {state.phase === "text" && <RenderModeToggle mode={textMode} onChange={setTextMode} />}
           <Button variant="ghost" size="sm" className="h-7 gap-1.5 px-2 text-xs" onClick={download}>
             <Download />
-            下载
+            {t("original.download")}
           </Button>
         </span>
       </div>
@@ -314,7 +326,7 @@ function OriginalDocumentPreview({ doc }: { doc: Doc }) {
       )}
       {state.phase === "none" && (
         <p className="rounded-md border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
-          该文件类型暂不支持预览，可下载查看。
+          {t("original.unsupported")}
         </p>
       )}
       {state.phase === "text" && (
@@ -342,6 +354,8 @@ type ParsedPreviewState =
   | { phase: "error"; message: string };
 
 function ParsedDocumentPreview({ doc }: { doc: Doc }) {
+  const locale = useLocale();
+  const t = useTranslations("DetailPanel");
   const [state, setState] = React.useState<ParsedPreviewState>({ phase: "loading" });
   const [textMode, setTextMode] = React.useState<"md" | "raw">("md");
   const parsedUrl = api.documentParsedUrl(doc.source_id, doc.id);
@@ -352,8 +366,8 @@ function ParsedDocumentPreview({ doc }: { doc: Doc }) {
         phase: "none",
         message:
           doc.status === "failed"
-            ? doc.error || "文档解析失败，暂无 Markdown 预览。"
-            : "文档正在解析，完成后即可查看 Markdown 预览。",
+            ? doc.error || t("parsed.failed")
+            : t("parsed.processing"),
       });
       return;
     }
@@ -362,25 +376,28 @@ function ParsedDocumentPreview({ doc }: { doc: Doc }) {
     const controller = new AbortController();
     setState({ phase: "loading" });
     fetch(parsedUrl, {
-      headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+      headers: {
+        Authorization: `Bearer ${getToken() ?? ""}`,
+        "Accept-Language": locale,
+      },
       signal: controller.signal,
     })
       .then(async (res) => {
         if (res.status === 404) {
           if (alive) {
-            setState({ phase: "none", message: "暂未找到解析内容，可重新处理文档后再试。" });
+            setState({ phase: "none", message: t("parsed.notFound") });
           }
           return;
         }
         if (res.status === 409) {
-          if (alive) setState({ phase: "none", message: "文档尚未解析完成。" });
+          if (alive) setState({ phase: "none", message: t("parsed.notReady") });
           return;
         }
-        if (!res.ok) throw new Error(`解析内容不可用（${res.status}）`);
+        if (!res.ok) throw new Error(t("parsed.unavailable", { status: res.status }));
         const text = await res.text();
         if (!alive) return;
         if (!text.trim()) {
-          setState({ phase: "none", message: "解析内容为空，可重新处理文档后再试。" });
+          setState({ phase: "none", message: t("parsed.empty") });
           return;
         }
         const limit = 500_000;
@@ -390,19 +407,19 @@ function ParsedDocumentPreview({ doc }: { doc: Doc }) {
         if (!alive || controller.signal.aborted) return;
         setState({
           phase: "error",
-          message: error instanceof Error ? error.message : "解析内容加载失败",
+          message: error instanceof Error ? error.message : t("parsed.loadFailed"),
         });
       });
     return () => {
       alive = false;
       controller.abort();
     };
-  }, [doc.error, doc.status, parsedUrl]);
+  }, [doc.error, doc.status, locale, parsedUrl, t]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-muted-foreground">解析后的 Markdown</span>
+        <span className="text-xs font-medium text-muted-foreground">{t("parsed.title")}</span>
         {state.phase === "text" && <RenderModeToggle mode={textMode} onChange={setTextMode} />}
       </div>
       {state.phase === "loading" && (
@@ -423,7 +440,7 @@ function ParsedDocumentPreview({ doc }: { doc: Doc }) {
       {state.phase === "text" && (
         <div className="flex min-h-0 flex-1 flex-col gap-2">
           {state.truncated && (
-            <p className="text-xs text-muted-foreground">内容较长，预览仅展示前 50 万字符。</p>
+            <p className="text-xs text-muted-foreground">{t("parsed.truncated")}</p>
           )}
           <TextBody text={state.text} mode={textMode} />
         </div>
@@ -433,6 +450,7 @@ function ParsedDocumentPreview({ doc }: { doc: Doc }) {
 }
 
 function DocumentPreview({ doc }: { doc: Doc }) {
+  const t = useTranslations("DetailPanel");
   const [previewMode, setPreviewMode] = React.useState<"parsed" | "original">(
     doc.status === "ready" ? "parsed" : "original",
   );
@@ -444,8 +462,8 @@ function DocumentPreview({ doc }: { doc: Doc }) {
       className="flex min-h-0 flex-1 flex-col"
     >
       <TabsList className="grid w-full grid-cols-2">
-        <TabsTrigger value="parsed">解析内容</TabsTrigger>
-        <TabsTrigger value="original">原始文件</TabsTrigger>
+        <TabsTrigger value="parsed">{t("tabs.parsed")}</TabsTrigger>
+        <TabsTrigger value="original">{t("tabs.original")}</TabsTrigger>
       </TabsList>
       <TabsContent
         value="parsed"
@@ -463,26 +481,33 @@ function DocumentPreview({ doc }: { doc: Doc }) {
   );
 }
 
-function DocumentView({
-  target,
+export function DocumentDetailContent({
+  sourceId,
+  documentId,
+  compact = false,
 }: {
-  target: Extract<DetailTarget, { kind: "document" }>;
+  sourceId: string;
+  documentId: string;
+  compact?: boolean;
 }) {
+  const locale = useLocale();
+  const t = useTranslations("DetailPanel");
   const [doc, setDoc] = React.useState<Doc | null>(null);
   const [error, setError] = React.useState("");
+  const { timezone } = useApp();
 
   React.useEffect(() => {
     let alive = true;
     setDoc(null);
     setError("");
     api
-      .getDocument(target.sourceId, target.documentId)
+      .getDocument(sourceId, documentId)
       .then((d) => alive && setDoc(d))
-      .catch((e) => alive && setError(e instanceof ApiError ? e.message : "文档加载失败"));
+      .catch((e) => alive && setError(e instanceof ApiError ? e.message : t("document.loadFailed")));
     return () => {
       alive = false;
     };
-  }, [target]);
+  }, [documentId, sourceId, t]);
 
   if (error) {
     return <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>;
@@ -496,40 +521,57 @@ function DocumentView({
     );
   }
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
-      <div className="flex flex-col gap-2">
-        <h3 className="break-all font-display text-base font-medium">{doc.filename}</h3>
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <DocStatusBadge status={doc.status} />
-          <span>{Math.min(100, Math.max(0, Math.round(doc.progress)))}% · {formatTokenCount(doc.token_usage)} tokens</span>
-          <span>·</span>
-          <span>{formatBytes(doc.size_bytes)}</span>
-          <span>·</span>
-          <span>{doc.chunk_count} 分块</span>
-          <span>·</span>
-          <span>{doc.event_count} 事件</span>
-          <span>·</span>
-          <span>{relativeTime(doc.created_at)}</span>
+    <TooltipProvider delayDuration={300}>
+      <div className={cn("flex min-h-0 flex-1 flex-col", compact ? "gap-3" : "gap-4")}>
+        <div className="flex flex-col gap-2">
+          <h3
+            className={cn(
+              "break-all font-display font-medium",
+              compact ? "text-sm" : "text-base",
+            )}
+          >
+            {doc.filename}
+          </h3>
+          <div
+            className={cn(
+              "flex flex-wrap items-center gap-2 text-muted-foreground",
+              compact ? "text-[11px]" : "text-xs",
+            )}
+          >
+            <DocStatusBadge status={doc.status} />
+            <span>
+              {Math.min(100, Math.max(0, Math.round(doc.progress)))}% ·{" "}
+              {t("document.tokens", { count: formatTokenCount(doc.token_usage, locale) })}
+            </span>
+            <span>·</span>
+            <span>{formatBytes(doc.size_bytes, locale)}</span>
+            <span>·</span>
+            <span>{t("document.chunks", { count: doc.chunk_count })}</span>
+            <span>·</span>
+            <span>{t("document.events", { count: doc.event_count })}</span>
+            <span>·</span>
+            <span>{relativeTime(doc.created_at, timezone, locale)}</span>
+          </div>
+          {doc.error && (
+            <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {doc.error}
+            </p>
+          )}
         </div>
-        {doc.error && (
-          <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            {doc.error}
-          </p>
-        )}
+        <DocumentPreview doc={doc} />
       </div>
-      <DocumentPreview doc={doc} />
-    </div>
+    </TooltipProvider>
   );
 }
 
 // ── 面板外壳 ─────────────────────────────────────────────────────────
 
 function PanelBody({ target }: { target: DetailTarget }) {
-  return target.kind === "chunk" ? <ChunkView target={target} /> : <DocumentView target={target} />;
-}
-
-function panelTitle(target: DetailTarget): string {
-  return target.kind === "chunk" ? "原文溯源" : "文档详情";
+  return target.kind === "chunk" ? (
+    <ChunkView target={target} />
+  ) : (
+    <DocumentDetailContent sourceId={target.sourceId} documentId={target.documentId} />
+  );
 }
 
 /** lg 断点（详情栏 内嵌/Sheet 的分界）。 */
@@ -547,12 +589,15 @@ export function useIsLgUp(): boolean {
 
 /** 小屏详情：Sheet 覆盖层。 */
 export function DetailPanelSheet() {
+  const t = useTranslations("DetailPanel");
   const { target, close } = useDetailPanel();
   if (!target) return null;
   return (
     <Sheet open onOpenChange={(o) => !o && close()}>
       <SheetContent side="right" className="flex w-full flex-col gap-4 sm:max-w-lg">
-        <SheetTitle className="text-sm font-medium">{panelTitle(target)}</SheetTitle>
+        <SheetTitle className="text-sm font-medium">
+          {target.kind === "chunk" ? t("panel.chunkTitle") : t("panel.documentTitle")}
+        </SheetTitle>
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           <PanelBody target={target} />
         </div>
@@ -563,13 +608,16 @@ export function DetailPanelSheet() {
 
 /** 桌面详情：Resizable 面板内的内容（宽度由外层官方组件管理）。 */
 export function DetailPanelOutlet() {
+  const t = useTranslations("DetailPanel");
   const { target, maximized, close, toggleMaximize } = useDetailPanel();
   if (!target) return null;
 
   return (
     <aside className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
       <div className="flex h-12 shrink-0 items-center gap-1 border-b px-3">
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">{panelTitle(target)}</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">
+          {target.kind === "chunk" ? t("panel.chunkTitle") : t("panel.documentTitle")}
+        </span>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -577,20 +625,22 @@ export function DetailPanelOutlet() {
               size="icon"
               className="size-7"
               onClick={toggleMaximize}
-              aria-label={maximized ? "还原" : "放大"}
+              aria-label={maximized ? t("panel.restore") : t("panel.maximize")}
             >
               {maximized ? <ChevronsRight /> : <ChevronsLeft />}
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">{maximized ? "还原" : "铺开阅读"}</TooltipContent>
+          <TooltipContent side="bottom">
+            {maximized ? t("panel.restore") : t("panel.expandReading")}
+          </TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="size-7" onClick={close} aria-label="关闭">
+            <Button variant="ghost" size="icon" className="size-7" onClick={close} aria-label={t("panel.close")}>
               <X />
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">关闭</TooltipContent>
+          <TooltipContent side="bottom">{t("panel.close")}</TooltipContent>
         </Tooltip>
       </div>
       <div
