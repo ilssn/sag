@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 
 import type {
   Entity,
@@ -22,6 +23,7 @@ export default function SearchGraph({
   relations: SourceGraphRelation[];
   onOpenEvent?: (event: SearchEvent) => void;
 }) {
+  const t = useTranslations("Search");
   const { open } = useDetailPanel();
   const eventsById = React.useMemo(
     () => new Map(events.map((event) => [event.id, event])),
@@ -51,8 +53,8 @@ export default function SearchGraph({
     <EventEntityGraph
       graph={graph}
       refreshKey={`${events.length}-${relations.length}`}
-      emptyTitle="没有可展示的事件—实体关系"
-      emptyDescription="当前命中的事件尚未关联实体，可切回列表查看事件摘要。"
+      emptyTitle={t("emptyGraph")}
+      emptyDescription={t("emptyGraphDescription")}
       onOpenEvent={(event) => {
         const result = eventsById.get(event.id);
         if (!result) return;

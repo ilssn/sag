@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 
 import { api, ApiError } from "@/lib/api";
 import type { Source } from "@/lib/types";
@@ -16,6 +17,7 @@ interface KnowledgeContextValue {
 const KnowledgeContext = React.createContext<KnowledgeContextValue | null>(null);
 
 export function KnowledgeProvider({ children }: { children: React.ReactNode }) {
+  const t = useTranslations("Knowledge");
   const [sources, setSources] = React.useState<Source[] | null>(null);
   const [error, setError] = React.useState("");
   const loadedRef = React.useRef(false);
@@ -34,7 +36,7 @@ export function KnowledgeProvider({ children }: { children: React.ReactNode }) {
       })
       .catch((reason) => {
         setSources((current) => current ?? []);
-        setError(reason instanceof ApiError ? reason.message : "知识库加载失败");
+        setError(reason instanceof ApiError ? reason.message : t("loadFailed"));
       })
       .finally(() => {
         pendingRef.current = null;
@@ -42,7 +44,7 @@ export function KnowledgeProvider({ children }: { children: React.ReactNode }) {
 
     pendingRef.current = request;
     return request;
-  }, []);
+  }, [t]);
 
   const ensureLoaded = React.useCallback(() => load(false), [load]);
   const refresh = React.useCallback(() => load(true), [load]);

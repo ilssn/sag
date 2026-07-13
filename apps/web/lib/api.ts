@@ -1,4 +1,6 @@
 import { clearToken, getToken } from "./auth";
+import { readClientLocale } from "../i18n/client";
+import { clientErrorMessage, serverErrorMessage } from "../i18n/client-errors";
 import type { SearchStrategy } from "./retrieval-config";
 import type {
   ActivityItem,
@@ -113,7 +115,7 @@ function parseSearchStreamFrame(frame: string): SearchStreamFrame | null {
   try {
     return { event, data: JSON.parse(data.join("\n")) };
   } catch {
-    throw new ApiError(0, "invalid_search_stream", "搜索服务返回了无法解析的流式数据");
+    throw new ApiError(0, "invalid_search_stream", clientErrorMessage("invalidSearchStream"));
   }
 }
 
@@ -144,8 +146,8 @@ async function streamGlobalSearch(
     0,
     "timeout",
     timeoutReason === "first-result"
-      ? "检索准备超时，请重试"
-      : "搜索流长时间无响应，请重试",
+      ? clientErrorMessage("searchPrepareTimeout")
+      : clientErrorMessage("searchIdleTimeout"),
   );
 
   armStreamTimeout("first-result", SEARCH_FIRST_RESULT_TIMEOUT_MS);
@@ -155,6 +157,7 @@ async function streamGlobalSearch(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Accept-Language": readClientLocale(),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify(body),
@@ -164,10 +167,10 @@ async function streamGlobalSearch(
     clearStreamTimeout();
     if (timeoutReason) throw timeoutError();
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new ApiError(0, "aborted", "请求已取消");
+      throw new ApiError(0, "aborted", clientErrorMessage("cancelled"));
     }
-    if (signal?.aborted) throw new ApiError(0, "aborted", "请求已取消");
-    throw new ApiError(0, "network", "网络异常，请稍后重试");
+    if (signal?.aborted) throw new ApiError(0, "aborted", clientErrorMessage("cancelled"));
+    throw new ApiError(0, "network", clientErrorMessage("network"));
   }
 
   if (response.status === 401 && typeof window !== "undefined") {
@@ -177,7 +180,7 @@ async function streamGlobalSearch(
   if (!response.ok || !response.body) {
     clearStreamTimeout();
     let code = "search_stream_error";
-    let message = response.statusText || "检索失败";
+    let message = response.statusText || clientErrorMessage("searchFailed");
     try {
       const value = await response.json();
       code = value?.error?.code ?? code;
@@ -186,7 +189,11 @@ async function streamGlobalSearch(
     } catch {
       /* Keep the stable fallback when a proxy returns HTML or an empty body. */
     }
-    throw new ApiError(response.status, code, message);
+    throw new ApiError(
+      response.status,
+      code,
+      serverErrorMessage(code, message, response.status),
+    );
   }
 
   const reader = response.body.getReader();
@@ -202,7 +209,7 @@ async function streamGlobalSearch(
     if (!frame) return;
     if (frame.event === "result") {
       if (protocolState.stage !== "awaiting-result" || !isSearchResponse(frame.data)) {
-        throw new ApiError(0, "invalid_search_stream", "搜索结果事件顺序或格式无效");
+        throw new ApiError(0, "invalid_search_stream", clientErrorMessage("invalidResult"));
       }
       protocolState.stage = "streaming";
       armStreamTimeout("idle", SEARCH_STREAM_IDLE_TIMEOUT_MS);
@@ -211,18 +218,18 @@ async function streamGlobalSearch(
     }
     if (frame.event === "summary.delta") {
       if (protocolState.stage !== "streaming") {
-        throw new ApiError(0, "invalid_search_stream", "搜索总结出现在检索结果之前");
+        throw new ApiError(0, "invalid_search_stream", clientErrorMessage("summaryBeforeResult"));
       }
       const delta = (frame.data as { delta?: unknown })?.delta;
       if (typeof delta !== "string") {
-        throw new ApiError(0, "invalid_search_stream", "搜索总结增量格式无效");
+        throw new ApiError(0, "invalid_search_stream", clientErrorMessage("invalidSummaryDelta"));
       }
       if (delta) handlers.onSummaryDelta(delta);
       return;
     }
     if (frame.event === "completed") {
       if (protocolState.stage !== "streaming" || !isSearchResponse(frame.data)) {
-        throw new ApiError(0, "invalid_search_stream", "搜索完成事件顺序或格式无效");
+        throw new ApiError(0, "invalid_search_stream", clientErrorMessage("invalidCompleted"));
       }
       completed = frame.data;
       clearStreamTimeout();
@@ -231,13 +238,17 @@ async function streamGlobalSearch(
     }
     if (frame.event === "error") {
       const payload = frame.data as { code?: unknown; message?: unknown };
-      throw new ApiError(
-        0,
-        typeof payload?.code === "string" ? payload.code : "search_stream_error",
-        typeof payload?.message === "string" ? payload.message : "检索失败",
-      );
+      const code = typeof payload?.code === "string" ? payload.code : "search_stream_error";
+      const message = typeof payload?.message === "string"
+        ? payload.message
+        : clientErrorMessage("searchFailed");
+      throw new ApiError(0, code, serverErrorMessage(code, message));
     }
-    throw new ApiError(0, "invalid_search_stream", `未知的搜索流事件：${frame.event || "(empty)"}`);
+    throw new ApiError(
+      0,
+      "invalid_search_stream",
+      clientErrorMessage("unknownSearchEvent", { event: frame.event }),
+    );
   };
 
   const cancelReader = async () => {
@@ -276,9 +287,9 @@ async function streamGlobalSearch(
     await cancelReader();
     if (timeoutReason) throw timeoutError();
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new ApiError(0, "aborted", "请求已取消");
+      throw new ApiError(0, "aborted", clientErrorMessage("cancelled"));
     }
-    if (signal?.aborted) throw new ApiError(0, "aborted", "请求已取消");
+    if (signal?.aborted) throw new ApiError(0, "aborted", clientErrorMessage("cancelled"));
     throw error;
   } finally {
     clearStreamTimeout();
@@ -286,7 +297,7 @@ async function streamGlobalSearch(
   }
 
   if (!completed) {
-    throw new ApiError(0, "search_stream_incomplete", "搜索连接提前结束，请重试");
+    throw new ApiError(0, "search_stream_incomplete", clientErrorMessage("searchIncomplete"));
   }
   return completed;
 }
@@ -298,6 +309,7 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
     headers["Content-Type"] = "application/json";
   }
   if (token) headers["Authorization"] = `Bearer ${token}`;
+  if (!headers["Accept-Language"]) headers["Accept-Language"] = readClientLocale();
 
   // 30s 超时护栏（SSE 流式接口不走此函数，不受影响）
   const timeoutSignal = AbortSignal.timeout(30_000);
@@ -309,12 +321,12 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
     res = await fetch(`${API_BASE}${path}`, { ...opts, headers, signal });
   } catch (e) {
     if (e instanceof DOMException && e.name === "TimeoutError") {
-      throw new ApiError(0, "timeout", "请求超时，请检查网络后重试");
+      throw new ApiError(0, "timeout", clientErrorMessage("requestTimeout"));
     }
     if (e instanceof DOMException && e.name === "AbortError") {
-      throw new ApiError(0, "aborted", "请求已取消");
+      throw new ApiError(0, "aborted", clientErrorMessage("cancelled"));
     }
-    throw new ApiError(0, "network", "网络异常，请稍后重试");
+    throw new ApiError(0, "network", clientErrorMessage("network"));
   }
 
   if (res.status === 401 && typeof window !== "undefined" && !path.includes("/auth/")) {
@@ -324,7 +336,7 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
 
   if (!res.ok) {
     let code = "error";
-    let message = res.statusText || "请求失败";
+    let message = res.statusText || clientErrorMessage("requestFailed");
     try {
       const j = await res.json();
       if (j?.error) {
@@ -336,7 +348,7 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
     } catch {
       /* ignore */
     }
-    throw new ApiError(res.status, code, message);
+    throw new ApiError(res.status, code, serverErrorMessage(code, message, res.status));
   }
 
   if (res.status === 204) return undefined as T;
@@ -405,18 +417,25 @@ export const api = {
       const xhr = new XMLHttpRequest();
       xhr.open("POST", `${API_BASE}/api/v1/sources/${sid}/documents`);
       xhr.setRequestHeader("Authorization", `Bearer ${getToken() ?? ""}`);
+      xhr.setRequestHeader("Accept-Language", readClientLocale());
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
       };
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) resolve(JSON.parse(xhr.responseText));
         else {
-          let msg = "上传失败";
+          let msg = clientErrorMessage("uploadFailed");
           try { msg = JSON.parse(xhr.responseText)?.error?.message ?? msg; } catch { /* noop */ }
-          reject(new ApiError(xhr.status, "upload_failed", msg));
+          reject(new ApiError(
+            xhr.status,
+            "upload_failed",
+            serverErrorMessage("upload_failed", msg, xhr.status),
+          ));
         }
       };
-      xhr.onerror = () => reject(new ApiError(0, "network_error", "网络错误，上传中断"));
+      xhr.onerror = () => reject(
+        new ApiError(0, "network_error", clientErrorMessage("uploadNetwork")),
+      );
       const fd = new FormData();
       fd.append("file", file);
       xhr.send(fd);
@@ -470,10 +489,10 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(b),
     }),
-  createThread: (id: string, title = "新会话", signal?: AbortSignal) =>
+  createThread: (id: string, title?: string, signal?: AbortSignal) =>
     request<Thread>(`/api/v1/agents/${id}/threads`, {
       method: "POST",
-      body: JSON.stringify({ title }),
+      body: JSON.stringify({ title: title ?? clientErrorMessage("newConversation") }),
       signal,
     }),
   deleteMessage: (id: string, tid: string, mid: string) =>
@@ -523,7 +542,9 @@ export const api = {
   // 知识宇宙：统计轮廓 + 有界激活
   universeManifest: () => request<UniverseManifest>("/api/v1/universe/manifest"),
   universeNode: (kind: "event" | "entity", id: string, sourceId?: string | null) => {
-    if (!sourceId) throw new ApiError(0, "missing_source", "知识星点缺少信息源上下文");
+    if (!sourceId) {
+      throw new ApiError(0, "missing_source", clientErrorMessage("missingSource"));
+    }
     const query = `?source_id=${encodeURIComponent(sourceId)}`;
     return request<UniverseNodeDetail>(`/api/v1/universe/nodes/${kind}/${id}${query}`);
   },

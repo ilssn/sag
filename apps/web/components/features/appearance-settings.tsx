@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import { useLocale, useTranslations } from "next-intl";
+import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
 
@@ -14,24 +16,41 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { persistLocale } from "@/i18n/client";
+import type { AppLocale } from "@/i18n/config";
 import { THEME_OPTIONS, TIMEZONE_OPTIONS } from "@/lib/settings-config";
 
 export function AppearanceSettings() {
+  const appearance = useTranslations("Appearance");
+  const language = useTranslations("Language");
+  const theme = useTranslations("Theme");
+
   return (
     <div className="flex flex-col gap-6">
-      <SettingsSection title="界面主题" description="选择适合当前环境的明暗模式。">
-        <SettingsRow title="主题模式" description="控制整个界面的明暗显示。" layout="inline">
+      <SettingsSection title={theme("sectionTitle")} description={theme("sectionDescription")}>
+        <SettingsRow
+          title={theme("modeTitle")}
+          description={theme("modeDescription")}
+          layout="inline"
+        >
           <ThemeSegment />
         </SettingsRow>
       </SettingsSection>
 
       <SettingsSection
-        title="区域与时间"
-        description="数据库统一使用 UTC，界面与 Agent 按这里的时区理解时间。"
+        title={appearance("localeSectionTitle")}
+        description={appearance("localeSectionDescription")}
       >
         <SettingsRow
-          title="系统时区"
-          description="默认使用北京时间；夏令时由 IANA 时区规则自动处理。"
+          title={language("label")}
+          description={language("description")}
+          layout="inline"
+        >
+          <LanguageSegment />
+        </SettingsRow>
+        <SettingsRow
+          title={appearance("timezoneTitle")}
+          description={appearance("timezoneDescription")}
           layout="inline"
         >
           <TimezoneSelect />
@@ -42,13 +61,15 @@ export function AppearanceSettings() {
 }
 
 function TimezoneSelect() {
+  const t = useTranslations("Appearance");
+  const timezones = useTranslations("Timezones");
   const { timezone, updateTimezone } = useApp();
   const [saving, setSaving] = React.useState(false);
   const options = React.useMemo(
     () =>
       TIMEZONE_OPTIONS.some((option) => option.value === timezone)
         ? TIMEZONE_OPTIONS
-        : [{ value: timezone, label: timezone }, ...TIMEZONE_OPTIONS],
+        : [{ value: timezone, labelKey: null }, ...TIMEZONE_OPTIONS],
     [timezone],
   );
 
@@ -57,9 +78,9 @@ function TimezoneSelect() {
     setSaving(true);
     try {
       await updateTimezone(value);
-      toast.success("时区已更新");
+      toast.success(t("timezoneUpdated"));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "时区保存失败");
+      toast.error(error instanceof Error ? error.message : t("timezoneSaveFailed"));
     } finally {
       setSaving(false);
     }
@@ -67,13 +88,13 @@ function TimezoneSelect() {
 
   return (
     <Select value={timezone} onValueChange={changeTimezone} disabled={saving}>
-      <SelectTrigger className="w-full sm:w-72" aria-label="系统时区">
+      <SelectTrigger className="w-full sm:w-72" aria-label={t("timezoneAria")}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
         {options.map((option) => (
           <SelectItem key={option.value} value={option.value}>
-            {option.label}
+            {option.labelKey ? timezones(option.labelKey) : option.value}
           </SelectItem>
         ))}
       </SelectContent>
@@ -82,6 +103,7 @@ function TimezoneSelect() {
 }
 
 function ThemeSegment() {
+  const t = useTranslations("Theme");
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = React.useState(false);
 
@@ -94,20 +116,53 @@ function ThemeSegment() {
       variant="outline"
       value={current}
       onValueChange={(value) => value && setTheme(value)}
-      aria-label="界面主题"
+      aria-label={t("sectionTitle")}
       className="grid w-full grid-cols-3 sm:inline-flex sm:w-auto"
     >
-      {THEME_OPTIONS.map(({ value, label, icon: Icon }) => (
+      {THEME_OPTIONS.map(({ value, labelKey, icon: Icon }) => (
         <ToggleGroupItem
           key={value}
           value={value}
-          aria-label={label}
+          aria-label={t(labelKey)}
           className="gap-1.5 px-3"
         >
           <Icon />
-          {label}
+          {t(labelKey)}
         </ToggleGroupItem>
       ))}
+    </ToggleGroup>
+  );
+}
+
+function LanguageSegment() {
+  const locale = useLocale();
+  const t = useTranslations("Language");
+  const router = useRouter();
+  const [pending, startTransition] = React.useTransition();
+
+  const changeLocale = (value: string) => {
+    if (!value || value === locale || pending) return;
+    persistLocale(value as AppLocale);
+    startTransition(() => router.refresh());
+  };
+
+  return (
+    <ToggleGroup
+      type="single"
+      variant="outline"
+      value={locale}
+      onValueChange={changeLocale}
+      aria-label={t("label")}
+      aria-busy={pending}
+      disabled={pending}
+      className="grid w-full grid-cols-2 sm:inline-flex sm:w-auto"
+    >
+      <ToggleGroupItem value="zh-CN" aria-label={t("chinese")} className="px-4">
+        {t("chinese")}
+      </ToggleGroupItem>
+      <ToggleGroupItem value="en-US" aria-label={t("english")} className="px-4">
+        {t("english")}
+      </ToggleGroupItem>
     </ToggleGroup>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useTranslations } from "next-intl";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -62,13 +63,14 @@ function remarkCitationLinks(validNumbers: ReadonlySet<string>) {
 }
 
 function MdImage(props: React.ImgHTMLAttributes<HTMLImageElement>) {
+  const t = useTranslations("Markdown");
   const [broken, setBroken] = React.useState(false);
   const src = typeof props.src === "string" ? props.src : "";
   const external = /^(https?:|data:|blob:)/.test(src);
   if (broken || !external) {
     return (
       <span className="my-1 inline-flex max-w-full items-center gap-1.5 rounded-md border border-dashed bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
-        🖼 图片{props.alt ? `：${props.alt}` : ""}（见原文件）
+        {t("imageUnavailable", { alt: props.alt ?? "" })}
       </span>
     );
   }
@@ -76,7 +78,7 @@ function MdImage(props: React.ImgHTMLAttributes<HTMLImageElement>) {
   return (
     <img
       {...props}
-      alt={props.alt ?? "图片"}
+      alt={props.alt ?? t("image")}
       onError={() => setBroken(true)}
       className="my-2 max-h-80 max-w-full rounded-md border"
     />
@@ -94,6 +96,7 @@ export const MarkdownContent = React.memo(function MarkdownContent({
   onCitationClick?: (citation: Citation) => void;
   streaming?: boolean;
 }) {
+  const t = useTranslations("Markdown");
   const citationByNumber = React.useMemo(() => {
     return new Map(
       (citations ?? [])
@@ -140,8 +143,8 @@ export const MarkdownContent = React.memo(function MarkdownContent({
                       ? "cursor-pointer hover:bg-muted-foreground/20 hover:text-foreground"
                       : "cursor-default opacity-60",
                   )}
-                  aria-label={citation ? `打开来源 ${n}` : `来源 ${n}`}
-                  title={citation?.heading || `来源 ${n}`}
+                  aria-label={citation ? t("openSource", { number: n }) : t("source", { number: n })}
+                  title={citation?.heading || t("source", { number: n })}
                 >
                   {children}
                 </button>

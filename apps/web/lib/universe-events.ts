@@ -5,6 +5,7 @@ import type {
   UniverseGraphPatch,
   UniverseRelation,
 } from "./types";
+import { clientErrorMessage } from "../i18n/client-errors";
 
 export const UNIVERSE_ACTIVATE_EVENT = "sag:universe-activate";
 export const UNIVERSE_RESET_EVENT = "sag:universe-reset";
@@ -197,8 +198,8 @@ export function dispatchUniverseAsk(node: UniverseAskNode) {
     source_id: node.sourceId,
     label: node.label,
     prompt: node.kind === "entity"
-      ? `围绕“${node.label}”梳理关键事实、相关事件和时间线，并标出知识库依据。`
-      : `解释事件“${node.label}”的背景、关键实体和后续关联，并标出知识库依据。`,
+      ? clientErrorMessage("askEntity", { label: node.label })
+      : clientErrorMessage("askEvent", { label: node.label }),
   };
   pendingUniverseAsk = detail;
   window.dispatchEvent(new CustomEvent<UniverseAskTarget>(UNIVERSE_ASK_EVENT, { detail }));

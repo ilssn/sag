@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Check, ChevronDown, ChevronRight, X } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 import type { MessageStep } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -61,6 +62,7 @@ function ToolRunDetails({
   step: AgentActivityStep;
   onMatchClick?: AgentActivityTimelineProps["onMatchClick"];
 }) {
+  const t = useTranslations("AgentActivity");
   const details = step.details;
   const entries = Object.entries(step.arguments ?? {});
   const sources = details?.sources?.filter((source) => source.name) ?? [];
@@ -75,15 +77,15 @@ function ToolRunDetails({
         <dl className="grid grid-cols-[3rem_minmax(0,1fr)] gap-x-2 gap-y-1">
           {entries.map(([key, value]) => (
             <React.Fragment key={key}>
-              <dt>{key === "query" ? "查询" : key === "name" ? "实体" : key}</dt>
+              <dt>{key === "query" ? t("query") : key === "name" ? t("entity") : key}</dt>
               <dd className="break-words font-mono text-foreground/80">{String(value)}</dd>
             </React.Fragment>
           ))}
           {sources.length > 0 && (
             <>
-              <dt>范围</dt>
+              <dt>{t("scope")}</dt>
               <dd className="break-words text-foreground/80">
-                {sources.map((source) => source.name).join("、")}
+                {sources.map((source) => source.name).join(t("separator"))}
               </dd>
             </>
           )}
@@ -92,7 +94,7 @@ function ToolRunDetails({
 
       {matches.length > 0 && (
         <div className={cn("space-y-1.5", hasHeader && "mt-2 border-t pt-2")}>
-          <div className="font-medium text-foreground/70">命中内容</div>
+          <div className="font-medium text-foreground/70">{t("matches")}</div>
           {matches.map((match, index) => {
             const traceable = Boolean(match.chunk_id && match.source_id && onMatchClick);
             return (
@@ -111,7 +113,7 @@ function ToolRunDetails({
               >
                 <span className="flex min-w-0 items-center gap-1.5 text-foreground/85">
                   <span className="shrink-0 font-mono">[{match.n ?? index + 1}]</span>
-                  <span className="truncate font-medium">{match.heading || "资料片段"}</span>
+                  <span className="truncate font-medium">{match.heading || t("passage")}</span>
                   {typeof match.score === "number" && (
                     <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground/70">
                       {match.score.toFixed(3)}
@@ -143,6 +145,7 @@ export function AgentActivityTimeline({
   onMatchClick,
   className,
 }: AgentActivityTimelineProps) {
+  const t = useTranslations("AgentActivity");
   const [innerCollapsed, setInnerCollapsed] = React.useState(true);
   const [expandedTools, setExpandedTools] = React.useState<Set<string>>(() => new Set());
   const [now, setNow] = React.useState(() => Date.now());
@@ -165,12 +168,12 @@ export function AgentActivityTimeline({
 
   const totalDuration = steps.reduce((total, step) => total + elapsedFor(step, now), 0);
   const actionLabel = active
-    ? "正在处理"
+    ? t("processing")
     : failedRuns.length
-      ? `${failedRuns.length} 项操作未完成`
+      ? t("incomplete", { count: failedRuns.length })
       : toolRuns.length
-        ? `完成了 ${toolRuns.length} 项工具操作`
-        : "已完成思考与回答";
+        ? t("toolsCompleted", { count: toolRuns.length })
+        : t("completed");
   const expanded = active || !collapsed;
 
   const toggleCollapsed = () => {
@@ -192,7 +195,9 @@ export function AgentActivityTimeline({
         disabled={active}
         onClick={toggleCollapsed}
         aria-expanded={expanded}
-        aria-label={active ? actionLabel : `${collapsed ? "展开" : "收起"}${actionLabel}`}
+        aria-label={active
+          ? actionLabel
+          : t("toggleAria", { action: collapsed ? t("expand") : t("collapse"), label: actionLabel })}
         className={cn(
           "inline-flex h-5 items-center gap-1 text-[10px] text-muted-foreground outline-none",
           !active &&
@@ -238,6 +243,13 @@ export function AgentActivityTimeline({
                 Boolean(step.details?.sources?.length) ||
                 Boolean(step.details?.output_preview));
             const expanded = expandedTools.has(key);
+            const toolLabel = step.name === "search_context"
+              ? t("tools.searchContext")
+              : step.name === "get_entity"
+                ? t("tools.getEntity")
+                : step.name === "get_time"
+                  ? t("tools.getTime")
+                  : step.label || step.name || t("tool");
 
             return (
               <div key={key}>
@@ -269,11 +281,18 @@ export function AgentActivityTimeline({
 
                   {step.kind === "thinking" ? (
                     <span className={isActive ? "text-shimmer" : "text-muted-foreground"}>
-                      {isActive ? "正在思考" : "思考"} · 第 {step.step} 轮 · {formatDuration(elapsed)}
+                      {t("thinkingRound", {
+                        state: isActive ? t("thinkingActive") : t("thinking"),
+                        round: step.step,
+                        duration: formatDuration(elapsed),
+                      })}
                     </span>
                   ) : step.kind === "answer" ? (
                     <span className={isActive ? "text-shimmer" : "text-muted-foreground"}>
-                      {isActive ? "正在整理回答" : "整理回答"} · {formatDuration(elapsed)}
+                      {t("answering", {
+                        state: isActive ? t("answeringActive") : t("answeringDone"),
+                        duration: formatDuration(elapsed),
+                      })}
                     </span>
                   ) : (
                     <span
@@ -287,15 +306,15 @@ export function AgentActivityTimeline({
                       )}
                       title={step.error}
                     >
-                      {step.label || step.name || "工具"}
-                      {args ? `「${args}」` : ""}
-                      {isActive && step.progress ? ` · ${step.progress}` : ""}
-                      {isError && step.error ? ` · ${step.error}` : ""}
+                      {toolLabel}
+                      {args ? t("argument", { value: args }) : ""}
+                      {isActive && step.progress ? t("detailSuffix", { value: step.progress }) : ""}
+                      {isError && step.error ? t("detailSuffix", { value: step.error }) : ""}
                       {!isActive && (
                         <>
                           {" · "}
                           {step.name === "search_context" && typeof step.count === "number"
-                            ? `检索到 ${step.count} 条 · `
+                            ? t("retrieved", { count: step.count })
                             : ""}
                           {formatDuration(elapsed)}
                         </>

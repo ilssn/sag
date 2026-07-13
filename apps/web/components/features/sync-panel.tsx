@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Globe, RefreshCw } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
@@ -9,16 +10,17 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
 export function SyncPanel({ sourceId, onSynced }: { sourceId: string; onSynced: () => void }) {
+  const t = useTranslations("SyncPanel");
   const [busy, setBusy] = React.useState(false);
 
   async function sync() {
     setBusy(true);
     try {
       await api.syncSource(sourceId);
-      toast.success("已开始同步，SAG 正在后台抓取网页");
+      toast.success(t("started"));
       onSynced();
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "同步失败");
+      toast.error(err instanceof ApiError ? err.message : t("failed"));
     } finally {
       setBusy(false);
     }
@@ -31,15 +33,13 @@ export function SyncPanel({ sourceId, onSynced }: { sourceId: string; onSynced: 
           <Globe className="size-5" />
         </div>
         <div>
-          <div className="text-sm font-medium text-foreground">网页同步</div>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            抓取信源配置的网页正文，解析入库并抽取事件。可随时重新同步以获取更新。
-          </p>
+          <div className="text-sm font-medium text-foreground">{t("title")}</div>
+          <p className="mt-0.5 text-xs text-muted-foreground">{t("description")}</p>
         </div>
       </div>
       <Button onClick={sync} disabled={busy}>
         <RefreshCw className={cn("size-4", busy && "animate-spin")} />
-        {busy ? "同步中…" : "同步"}
+        {busy ? t("syncing") : t("sync")}
       </Button>
     </div>
   );

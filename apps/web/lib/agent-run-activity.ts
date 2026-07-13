@@ -1,5 +1,6 @@
 import type { AgentEvent } from "./sse";
 import type { Citation, CitationEventRef, MessageStep } from "./types";
+import { clientErrorMessage, serverErrorMessage } from "../i18n/client-errors";
 
 export interface LiveStep extends MessageStep {
   id: string;
@@ -223,7 +224,7 @@ function upsertToolStep(steps: LiveStep[], event: AgentEvent, now: number): Live
       ...existing,
       kind: "tool",
       name: String(payload.name ?? existing.name ?? ""),
-      label: String(payload.label ?? existing.label ?? payload.name ?? "工具"),
+      label: String(payload.label ?? existing.label ?? payload.name ?? clientErrorMessage("tool")),
       args: toolArgumentsPreview(argumentsValue) || existing.args,
       arguments: Object.keys(argumentsValue).length ? argumentsValue : existing.arguments,
       status: "active",
@@ -239,7 +240,7 @@ function upsertToolStep(steps: LiveStep[], event: AgentEvent, now: number): Live
       id,
       kind: "tool",
       name: String(payload.name ?? ""),
-      label: String(payload.label ?? payload.name ?? "工具"),
+      label: String(payload.label ?? payload.name ?? clientErrorMessage("tool")),
       args: toolArgumentsPreview(argumentsValue),
       arguments: argumentsValue,
       step: event.turn,
@@ -275,13 +276,18 @@ function finishToolStep(
       payload.label ??
         (existingIndex >= 0 ? steps[existingIndex].label : undefined) ??
         payload.name ??
-        "工具",
+        clientErrorMessage("tool"),
     ),
     status,
     ms: duration,
     count: Number(details.count ?? 0),
     details,
-    error: status === "error" ? String(failure.message ?? "工具执行失败") : undefined,
+    error: status === "error"
+      ? serverErrorMessage(
+          typeof failure.code === "string" ? failure.code : "tool_failed",
+          String(failure.message ?? clientErrorMessage("toolFailed")),
+        )
+      : undefined,
   };
   if (existingIndex < 0) return [...steps, replacement];
   const next = [...steps];
@@ -402,10 +408,18 @@ export function reduceAgentRunSteps(
     case "run.completed":
       return settleActiveSteps(steps, now);
     case "run.cancelled":
-      return settleActiveSteps(steps, now, "error", "已停止");
+      return settleActiveSteps(steps, now, "error", clientErrorMessage("stopped"));
     case "run.failed": {
       const error = objectValue(event.payload.error);
-      return settleActiveSteps(steps, now, "error", String(error.message ?? "生成失败"));
+      return settleActiveSteps(
+        steps,
+        now,
+        "error",
+        serverErrorMessage(
+          typeof error.code === "string" ? error.code : "generation_failed",
+          String(error.message ?? clientErrorMessage("generationFailed")),
+        ),
+      );
     }
     default:
       return steps;

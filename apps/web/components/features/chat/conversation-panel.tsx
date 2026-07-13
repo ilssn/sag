@@ -2,13 +2,14 @@
 
 import * as React from "react";
 import { ArrowUp, Check, Copy, FileUp, Globe2, ImagePlus, Library, Plus, RotateCcw, Square, Trash2, X } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { toolArgumentsPreview } from "@/lib/agent-run-activity";
 import { api } from "@/lib/api";
 import type { ConversationMessage } from "@/lib/conversation-runtime";
 import { parsePetDraft, PET_DRAFT_EVENT, PET_DRAFT_KEY } from "@/lib/pet-events";
-import { relativeTime } from "@/lib/format";
+import { formatTokenCount, relativeTime } from "@/lib/format";
 import type { Citation, Source } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { copyText } from "@/lib/clipboard";
@@ -68,6 +69,8 @@ function MessageActions({
   onDelete?: () => void;
   onCitationClick?: (citation: Citation) => void;
 }) {
+  const t = useTranslations("Conversation");
+  const locale = useLocale();
   const [done, setDone] = React.useState(false);
   const { timezone } = useApp();
   const btn =
@@ -86,25 +89,25 @@ function MessageActions({
                   setDone(true);
                   setTimeout(() => setDone(false), 1500);
                 } catch {
-                  toast.error("复制失败");
+                  toast.error(t("copyFailed"));
                 }
               }}
               className={btn}
-              aria-label={done ? "已复制" : "复制回答"}
+              aria-label={done ? t("copied") : t("copyAnswer")}
             >
               {done ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
             </button>
           </TooltipTrigger>
-          <TooltipContent>{done ? "已复制" : "复制"}</TooltipContent>
+          <TooltipContent>{done ? t("copied") : t("copy")}</TooltipContent>
         </Tooltip>
         {onRetry && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <button type="button" onClick={onRetry} className={btn} aria-label="重新回答">
+              <button type="button" onClick={onRetry} className={btn} aria-label={t("answerAgain")}>
                 <RotateCcw className="size-3.5" />
               </button>
             </TooltipTrigger>
-            <TooltipContent>重试</TooltipContent>
+            <TooltipContent>{t("retry")}</TooltipContent>
           </Tooltip>
         )}
         {onDelete && (
@@ -114,33 +117,22 @@ function MessageActions({
                 type="button"
                 onClick={onDelete}
                 className={btn + " hover:text-destructive"}
-                aria-label="删除消息"
+                aria-label={t("deleteMessage")}
               >
                 <Trash2 className="size-3.5" />
               </button>
             </TooltipTrigger>
-            <TooltipContent>删除</TooltipContent>
+            <TooltipContent>{t("delete")}</TooltipContent>
           </Tooltip>
         )}
         {createdAt && (
           <span className="px-1.5 text-[11px] tabular-nums text-muted-foreground/70">
-            {relativeTime(createdAt, timezone)}
+            {relativeTime(createdAt, timezone, locale)}
           </span>
         )}
       </div>
     </div>
   );
-}
-
-function formatTokenCount(value: number) {
-  if (value >= 1_000_000) {
-    const n = value / 1_000_000;
-    return `${n >= 10 ? Math.round(n) : n.toFixed(1)}M`;
-  }
-  if (value >= 1000) {
-    return `${Math.round(value / 1000)}K`;
-  }
-  return String(value);
 }
 
 export interface ConversationPanelProps {
@@ -179,7 +171,7 @@ export function ConversationPanel({
   emptyTitle,
   emptyHint,
   suggestions,
-  placeholder = "输入你的问题，Enter 发送 · Shift+Enter 换行",
+  placeholder,
   active = true,
   showPromptPreview = true,
   beforeMessages,
@@ -187,6 +179,9 @@ export function ConversationPanel({
   onCitationClick,
   onToolMatchClick,
 }: ConversationPanelProps) {
+  const t = useTranslations("Conversation");
+  const locale = useLocale();
+  const resolvedPlaceholder = placeholder ?? t("defaultPlaceholder");
   const { capabilities } = useApp();
   const runtime = useConversationRuntime();
   const session = useConversationSession(sessionId);
@@ -220,7 +215,7 @@ export function ConversationPanel({
   const sendRef = React.useRef<(text: string) => void>(() => {});
   const lastDraftPromptRef = React.useRef<number | null>(null);
 
-  if (!session) throw new Error(`conversation session 不存在: ${sessionId}`);
+  if (!session) throw new Error(t("sessionMissing", { id: sessionId }));
   const messages = session.messages;
   const streaming = session.run !== null;
   const stopping = session.run?.lifecycle === "stopping";
@@ -382,10 +377,10 @@ export function ConversationPanel({
       try {
         await runtime.deleteMessage(sessionId, messageId);
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "删除失败");
+        toast.error(error instanceof Error ? error.message : t("deleteFailed"));
       }
     },
-    [runtime, sessionId],
+    [runtime, sessionId, t],
   );
 
   const renderTranscriptFooter = React.useCallback(
@@ -469,16 +464,20 @@ export function ConversationPanel({
     const f = files?.[0];
     if (!f) return;
     try {
-      let src = sources.find((s) => s.name === "对话上传");
+      const knownNames = new Set(["对话上传", "Chat uploads", t("chatUploads")]);
+      let src = sources.find((source) => knownNames.has(source.name));
       if (!src) {
-        src = await api.createSource({ name: "对话上传", description: "对话输入框上传的文档" });
+        src = await api.createSource({
+          name: t("chatUploads"),
+          description: t("chatUploadsDescription"),
+        });
         setSources((p) => [...p, src!]);
       }
       await api.uploadDocument(src.id, f);
       setScoped((p) => (p.some((x) => x.id === src!.id) ? p : [...p, { id: src!.id, name: src!.name }]));
-      toast.success(`已入知识库「对话上传」，处理完成后可针对提问`);
+      toast.success(t("documentAdded"));
     } catch {
-      toast.error("文档上传失败");
+      toast.error(t("documentUploadFailed"));
     }
   }
 
@@ -490,9 +489,9 @@ export function ConversationPanel({
     setImages((prev) => {
       const room = MAX_IMAGES - prev.length;
       const accepted = incoming.slice(0, Math.max(0, room));
-      if (incoming.length > room) toast.error(`最多 ${MAX_IMAGES} 张图片`);
+      if (incoming.length > room) toast.error(t("maxImages", { count: MAX_IMAGES }));
       const oversize = accepted.filter((f) => f.size > 10 * 1024 * 1024);
-      if (oversize.length) toast.error("图片过大（上限 10MB）");
+      if (oversize.length) toast.error(t("imageTooLarge"));
       return [
         ...prev,
         ...accepted
@@ -513,11 +512,11 @@ export function ConversationPanel({
     const pendingImages = images;
     if ((!query && pendingImages.length === 0) || uploadingRef.current) return;
     if (!capabilities?.llm_configured) {
-      toast.error("尚未配置模型，无法问答。请前往设置。");
+      toast.error(t("modelNotConfigured"));
       return;
     }
     if (runtime.getIndexSnapshot().activeRunSessionId) {
-      toast.error("已有回答正在生成，请等待完成或先停止");
+      toast.error(t("alreadyGenerating"));
       return;
     }
 
@@ -549,10 +548,10 @@ export function ConversationPanel({
       followOutputRef.current = true;
 
       void request.catch((error) => {
-        toast.error(error instanceof Error ? error.message : "连接中断，回答未完成");
+        toast.error(error instanceof Error ? error.message : t("connectionInterrupted"));
       });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "图片上传失败，请重试");
+      toast.error(error instanceof Error ? error.message : t("imageUploadFailed"));
     } finally {
       uploadingRef.current = false;
       setUploading(false);
@@ -564,7 +563,7 @@ export function ConversationPanel({
     try {
       await runtime.stop(sessionId);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "停止回答失败");
+      toast.error(error instanceof Error ? error.message : t("stopFailed"));
     }
   }
 
@@ -572,9 +571,9 @@ export function ConversationPanel({
     if (!pendingApproval || approvalBusy) return;
     try {
       if (approved) await runtime.approve(sessionId, pendingApproval.toolCallId);
-      else await runtime.reject(sessionId, pendingApproval.toolCallId, "用户拒绝执行");
+      else await runtime.reject(sessionId, pendingApproval.toolCallId, t("userRejected"));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "处理工具审批失败");
+      toast.error(error instanceof Error ? error.message : t("approvalFailed"));
     }
   }
   function onKeyDown(e: React.KeyboardEvent) {
@@ -610,7 +609,7 @@ export function ConversationPanel({
                 className="h-7 text-xs text-muted-foreground"
               >
                 {session.history.status === "loading" && <Spinner className="mr-1 size-3" />}
-                加载更早消息
+                {t("loadEarlier")}
               </Button>
             </div>
           )}
@@ -664,7 +663,7 @@ export function ConversationPanel({
                   <button
                     type="button"
                     onClick={() => removeImage(img.url)}
-                    aria-label="移除图片"
+                    aria-label={t("removeImage")}
                     className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full border bg-background text-muted-foreground opacity-0 shadow-soft transition-opacity hover:text-destructive group-hover/thumb:opacity-100"
                   >
                     <X className="size-3" />
@@ -679,10 +678,12 @@ export function ConversationPanel({
               className="absolute bottom-full left-3 z-20 mb-2 max-h-56 w-72 overflow-y-auto rounded-lg border bg-card p-1 shadow-lift"
             >
               <p className="px-2 py-1 text-[11px] text-muted-foreground">
-                @ 知识库范围{mentionQuery ? `：${mentionQuery}` : ""}（↑↓ 选择 · Enter 确认）
+                {t("knowledgeScope", {
+                  query: mentionQuery ? t("querySuffix", { query: mentionQuery }) : "",
+                })}
               </p>
               {mentionMatches.length === 0 && (
-                <p className="px-2 py-1.5 text-xs text-muted-foreground">没有匹配的信源</p>
+                <p className="px-2 py-1.5 text-xs text-muted-foreground">{t("noMatchingSources")}</p>
               )}
               {mentionMatches.map((src, i) => {
                 const on = scoped.some((x) => x.id === src.id);
@@ -736,7 +737,7 @@ export function ConversationPanel({
                 <span className="truncate">{sc.name}</span>
                 <button
                   type="button"
-                  aria-label={`移除 ${sc.name}`}
+                  aria-label={t("removeSource", { name: sc.name })}
                   onClick={() => setScoped((p) => p.filter((x) => x.id !== sc.id))}
                   className="rounded-sm text-primary/70 hover:bg-primary/15 hover:text-primary"
                 >
@@ -791,7 +792,7 @@ export function ConversationPanel({
               }}
               rows={1}
               maxLength={4000}
-              placeholder={scoped.length ? "继续输入…" : placeholder}
+              placeholder={scoped.length ? t("continueTyping") : resolvedPlaceholder}
               className="max-h-28 min-h-6 min-w-[12ch] flex-1 resize-none overflow-y-auto bg-transparent py-0 text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground"
             />
           </div>
@@ -804,8 +805,8 @@ export function ConversationPanel({
                     variant="ghost"
                     size="icon"
                     disabled={streaming || submitting}
-                    aria-label="添加"
-                    title="添加"
+                    aria-label={t("add")}
+                    title={t("add")}
                     className="size-8 rounded-full text-muted-foreground hover:text-foreground"
                   >
                     <Plus className="size-4" />
@@ -817,11 +818,11 @@ export function ConversationPanel({
                     onClick={() => fileRef.current?.click()}
                   >
                     <ImagePlus className="size-4" />
-                    图片（可直接粘贴）
+                    {t("imagesPaste")}
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => docRef.current?.click()}>
                     <FileUp className="size-4" />
-                    文档 → 入知识库
+                    {t("documentToKnowledge")}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -830,7 +831,9 @@ export function ConversationPanel({
                   <span className="inline-flex">
                     <button
                       type="button"
-                      aria-label={`联网搜索：${webEnabled ? "已开启" : "已关闭"}`}
+                      aria-label={t("webSearchAria", {
+                        state: webEnabled ? t("enabled") : t("disabled"),
+                      })}
                       aria-pressed={webEnabled}
                       disabled={streaming || submitting}
                       onClick={() => setWebEnabled((enabled) => !enabled)}
@@ -842,31 +845,33 @@ export function ConversationPanel({
                       )}
                     >
                       <Globe2 className="size-3.5" aria-hidden />
-                      <span>联网</span>
+                      <span>{t("web")}</span>
                     </button>
                   </span>
                 </TooltipTrigger>
                 <TooltipContent side="top" className="max-w-64">
                   {webEnabled
-                    ? "已开启：可使用已配置的联网搜索工具"
-                    : "已关闭：仅使用知识库内容"}
+                    ? t("webEnabledDescription")
+                    : t("webDisabledDescription")}
                 </TooltipContent>
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="min-w-0 max-w-[42vw] truncate px-1 text-xs text-muted-foreground sm:max-w-56">
-                    {capabilities?.llm_model ?? "未配置模型"}
+                    {capabilities?.llm_model ?? t("unconfiguredModel")}
                   </span>
                 </TooltipTrigger>
                 <TooltipContent side="top" className="max-w-72">
-                  当前模型：{capabilities?.llm_model ?? "未配置模型"}
+                  {t("currentModel", {
+                    model: capabilities?.llm_model ?? t("unconfiguredModel"),
+                  })}
                 </TooltipContent>
               </Tooltip>
 
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span
-                    aria-label="上下文占用"
+                    aria-label={t("contextUsage")}
                     className="size-4 shrink-0 cursor-default rounded-full"
                     style={{
                       background: `conic-gradient(hsl(var(--primary)) ${ctxPctRaw * 3.6}deg, hsl(var(--muted)) 0deg)`,
@@ -881,15 +886,15 @@ export function ConversationPanel({
                 >
                   <div className="space-y-2">
                     <div>
-                      <p className="text-sm font-medium">窗口使用情况</p>
+                      <p className="text-sm font-medium">{t("windowUsage")}</p>
                       <p className="mt-0.5 text-xs text-muted-foreground">
-                        当前对话占模型上下文窗口的比例
+                        {t("windowUsageDescription")}
                       </p>
                     </div>
                     <div className="flex items-center justify-between text-xs tabular-nums">
                       <span>{ctxPctLabel}</span>
                       <span className="text-muted-foreground">
-                        {formatTokenCount(ctxTokens)} / {formatTokenCount(ctxWindow)}
+                        {formatTokenCount(ctxTokens, locale)} / {formatTokenCount(ctxWindow, locale)}
                       </span>
                     </div>
                     <div className="h-2 overflow-hidden rounded-full bg-muted">
@@ -909,7 +914,7 @@ export function ConversationPanel({
                 size="icon"
                 onClick={stop}
                 disabled={stopping}
-                title="停止"
+                title={t("stop")}
                 className="size-8 rounded-full"
               >
                 {stopping ? <Spinner className="size-4" /> : <Square className="size-4" />}
@@ -919,7 +924,7 @@ export function ConversationPanel({
                 size="icon"
                 onClick={() => send()}
                 disabled={submitting || (!input.trim() && images.length === 0)}
-                title="发送"
+                title={t("send")}
                 className="size-8 rounded-full shadow-none disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100"
               >
                 {submitting ? <Spinner className="size-4" /> : <ArrowUp className="size-4" />}
@@ -932,24 +937,24 @@ export function ConversationPanel({
       <AlertDialog open={active && pendingApproval !== null}>
         <AlertDialogContent className="max-w-sm">
           <AlertDialogHeader>
-            <AlertDialogTitle>允许执行工具？</AlertDialogTitle>
+            <AlertDialogTitle>{t("allowToolTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {pendingApproval?.label ?? "工具"} 请求执行
+              {t("toolRequestsExecution", { tool: pendingApproval?.label ?? t("tool") })}
               {pendingApproval?.risk === "destructive"
-                ? "，此操作可能删除数据"
+                ? t("destructiveRisk")
                 : pendingApproval?.risk === "write"
-                  ? "，此操作会修改数据"
+                  ? t("writeRisk")
                   : ""}
-              。{pendingApproval ? toolArgumentsPreview(pendingApproval.arguments, 120) : ""}
+              {t("sentenceEnd")}{pendingApproval ? toolArgumentsPreview(pendingApproval.arguments, 120) : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <Button variant="outline" disabled={approvalBusy} onClick={() => resolveApproval(false)}>
-              拒绝
+              {t("reject")}
             </Button>
             <Button disabled={approvalBusy} onClick={() => resolveApproval(true)}>
               {approvalBusy && <Spinner />}
-              允许一次
+              {t("allowOnce")}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

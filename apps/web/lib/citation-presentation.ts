@@ -1,4 +1,5 @@
 import type { Citation } from "./types";
+import { clientErrorMessage } from "../i18n/client-errors";
 
 // Tool content may contain OpenAI's private-use citation delimiters
 // (`\uE200cite\uE202turn…\uE201`) or lossy square/replacement variants.
@@ -43,7 +44,9 @@ function internalMeta(citation: Citation): string {
   const heading = cleanCitationText(citation.heading);
   const parts: string[] = [];
   if (source) parts.push(source);
-  if (heading && (!source || !sameText(source, heading))) parts.push(`章节：${heading}`);
+  if (heading && (!source || !sameText(source, heading))) {
+    parts.push(clientErrorMessage("citationSection", { heading }));
+  }
   return parts.join(" · ");
 }
 
@@ -84,7 +87,10 @@ export function citationCopy(citation: Citation, fallbackIndex: number): Citatio
   if (citation.kind === "external") {
     const source = cleanCitationText(citation.source);
     const domain = externalHostname(citation.url);
-    const title = cleanCitationText(citation.title) || source || domain || `外部来源 ${fallbackIndex}`;
+    const title = cleanCitationText(citation.title)
+      || source
+      || domain
+      || clientErrorMessage("externalSource", { index: fallbackIndex });
     return {
       mode: "external",
       title,
@@ -109,7 +115,7 @@ export function citationCopy(citation: Citation, fallbackIndex: number): Citatio
   const number = Number.isInteger(citation.n) && citation.n > 0 ? citation.n : fallbackIndex;
   return {
     mode: "source_only",
-    title: `知识库来源 ${number}`,
+    title: clientErrorMessage("knowledgeSource", { index: number }),
     summary: "",
     meta: internalMeta(citation),
     excerpt,

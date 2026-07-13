@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Pencil } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
@@ -33,6 +34,7 @@ export function EditSourceDialog({
   buttonClassName?: string;
   tooltipSide?: React.ComponentProps<typeof TooltipContent>["side"];
 }) {
+  const t = useTranslations("SourceForm");
   const [open, setOpen] = React.useState(false);
   const [name, setName] = React.useState(source.name);
   const [description, setDescription] = React.useState(source.description ?? "");
@@ -54,11 +56,11 @@ export function EditSourceDialog({
         name: cleanName,
         description: description.trim(),
       });
-      toast.success("信源已更新");
+      toast.success(t("updated"));
       onUpdated?.(updated);
       setOpen(false);
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "更新失败");
+      toast.error(err instanceof ApiError ? err.message : t("updateFailed"));
     } finally {
       setLoading(false);
     }
@@ -73,49 +75,49 @@ export function EditSourceDialog({
               type="button"
               variant="ghost"
               size="icon"
-              aria-label="修改信源"
-              title="修改信源"
+              aria-label={t("edit")}
+              title={t("edit")}
               className={cn("text-muted-foreground hover:text-foreground", buttonClassName)}
             >
               <Pencil className="size-4" />
             </Button>
           </DialogTrigger>
         </TooltipTrigger>
-        <TooltipContent side={tooltipSide}>修改信源</TooltipContent>
+        <TooltipContent side={tooltipSide}>{t("edit")}</TooltipContent>
       </Tooltip>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>修改信源</DialogTitle>
-          <DialogDescription>调整这个信息源的名称和描述。</DialogDescription>
+          <DialogTitle>{t("edit")}</DialogTitle>
+          <DialogDescription>{t("editDescription")}</DialogDescription>
         </DialogHeader>
 
         <form onSubmit={submit} className="flex flex-col gap-4">
           <Field>
-            <FieldLabel htmlFor={`source-name-${source.id}`}>名称</FieldLabel>
+            <FieldLabel htmlFor={`source-name-${source.id}`}>{t("name")}</FieldLabel>
             <Input
               id={`source-name-${source.id}`}
               required
               autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="如：产品手册"
+              placeholder={t("namePlaceholder")}
               maxLength={200}
             />
           </Field>
           <Field>
-            <FieldLabel htmlFor={`source-desc-${source.id}`}>描述（可选）</FieldLabel>
+            <FieldLabel htmlFor={`source-desc-${source.id}`}>{t("description")}</FieldLabel>
             <Textarea
               id={`source-desc-${source.id}`}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="这个信源包含什么内容？"
+              placeholder={t("descriptionPlaceholder")}
               rows={2}
             />
           </Field>
 
           <DialogFooter>
             <Button type="submit" disabled={loading || !name.trim()}>
-              {loading ? "保存中…" : "保存修改"}
+              {loading ? t("saving") : t("saveChanges")}
             </Button>
           </DialogFooter>
         </form>

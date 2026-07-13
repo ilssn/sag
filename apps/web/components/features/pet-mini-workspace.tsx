@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { usePathname, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -98,6 +99,11 @@ interface MiniDocumentTarget {
 
 type MiniDetailTarget = UniverseDetailTarget | MiniCitationTarget | MiniDocumentTarget;
 
+interface MiniDetailLabels {
+  localKnowledge: string;
+  knowledgeNode: string;
+}
+
 const DEFAULT_MINI_PANEL_SIZE: MiniPanelSize = { width: 360, height: 470 };
 const MINI_PANEL_MIN_SIZE: MiniPanelSize = { width: 300, height: 300 };
 const MINI_PANEL_MAX_SIZE: MiniPanelSize = { width: 720, height: 760 };
@@ -146,6 +152,7 @@ function searchResultNode(
 function detailFromSearchResult(
   result: SearchResponse | null,
   target: UniverseDetailTarget,
+  labels: MiniDetailLabels,
 ): WorkspaceUniverseDetail | null {
   if (!result) return null;
   const event = target.kind === "event"
@@ -194,15 +201,15 @@ function detailFromSearchResult(
     id: target.id,
     kind: target.kind,
     source_id: supportingEvent?.source_id ?? sourceId,
-    source_name: supportingEvent?.source_name ?? "本地知识库",
-    label: event?.title ?? entity?.name ?? "知识星点",
+    source_name: supportingEvent?.source_name ?? labels.localKnowledge,
+    label: event?.title ?? entity?.name ?? labels.knowledgeNode,
     description: event?.summary ?? entity?.description ?? "",
     category: event?.category ?? entity?.type ?? "",
     start_time: event?.start_time ?? null,
     evidence: section
       ? {
           source_id: section.source_id ?? supportingEvent?.source_id ?? "",
-          source_name: section.source_name ?? supportingEvent?.source_name ?? "本地知识库",
+          source_name: section.source_name ?? supportingEvent?.source_name ?? labels.localKnowledge,
           document_id: supportingEvent?.document_id ?? null,
           document_name: null,
           chunk_id: section.chunk_id,
@@ -218,6 +225,7 @@ function detailFromSearchResult(
 function detailFromGraphPatch(
   patch: UniverseGraphPatch | null,
   target: UniverseDetailTarget,
+  labels: MiniDetailLabels,
 ): WorkspaceUniverseDetail | null {
   if (
     !patch
@@ -229,8 +237,8 @@ function detailFromGraphPatch(
     id: patch.anchor.id,
     kind: patch.anchor.kind,
     source_id: patch.anchor.source_id,
-    source_name: "本地知识库",
-    label: patch.anchor.label || "知识星点",
+    source_name: labels.localKnowledge,
+    label: patch.anchor.label || labels.knowledgeNode,
     description: patch.anchor.description || "",
     category: patch.anchor.category || "",
     start_time: patch.anchor.start_time ?? null,
@@ -263,6 +271,13 @@ export function PetMiniWorkspace({
   alignRight?: boolean;
   panelAbove?: boolean;
 }) {
+  const locale = useLocale();
+  const t = useTranslations("PetMini");
+  const nav = useTranslations("Navigation");
+  const detailLabels = React.useMemo<MiniDetailLabels>(() => ({
+    localKnowledge: t("detail.localKnowledge"),
+    knowledgeNode: t("detail.knowledgeNode"),
+  }), [t]);
   const router = useRouter();
   const pathname = usePathname();
   const conversationRuntime = useConversationRuntime();
@@ -408,19 +423,19 @@ export function PetMiniWorkspace({
   );
 
   const onSearchStart = React.useCallback(
-    (query: string) => character.search(`正在搜索：${query}`, { duration: null }),
-    [character],
+    (query: string) => character.search(t("search.searching", { query }), { duration: null }),
+    [character, t],
   );
 
   const onSearchComplete = React.useCallback(
     (result: SearchResponse) => {
       character.complete(
         result.sections.length
-          ? `找到 ${result.sections.length} 条相关证据`
-          : "没有找到足够相关的证据",
+          ? t("search.found", { count: result.sections.length })
+          : t("search.noEvidence"),
       );
     },
-    [character],
+    [character, t],
   );
 
   const onSearchError = React.useCallback(
@@ -502,7 +517,7 @@ export function PetMiniWorkspace({
       }
       const target = detailTargetRef.current;
       if (!target || target.kind === "citation" || target.kind === "document") return;
-      const patchDetail = detailFromGraphPatch(patch, target);
+      const patchDetail = detailFromGraphPatch(patch, target, detailLabels);
       if (!patchDetail) return;
       setDetail((current) => current
         ? {
@@ -518,7 +533,7 @@ export function PetMiniWorkspace({
       window.removeEventListener(UNIVERSE_DETAIL_EVENT, onDetail);
       window.removeEventListener(UNIVERSE_PATCH_EVENT, onPatch);
     };
-  }, [openDetail]);
+  }, [detailLabels, openDetail]);
 
   React.useEffect(() => {
     const openAsk = (target: UniverseAskTarget) => {
@@ -551,7 +566,7 @@ export function PetMiniWorkspace({
       return;
     }
     let alive = true;
-    const fallback = detailFromSearchResult(searchWorkspace.result, detailTarget);
+    const fallback = detailFromSearchResult(searchWorkspace.result, detailTarget, detailLabels);
     setDetail(null);
     setDetailError("");
     setDetailLoading(true);
@@ -564,6 +579,7 @@ export function PetMiniWorkspace({
               universeDetailKey(detailTarget.kind, detailTarget.id, detailTarget.source_id),
             ) ?? null,
             detailTarget,
+            detailLabels,
           );
           setDetail({
             ...value,
@@ -579,12 +595,13 @@ export function PetMiniWorkspace({
             universeDetailKey(detailTarget.kind, detailTarget.id, detailTarget.source_id),
           ) ?? null,
           detailTarget,
+          detailLabels,
         );
         if (patchFallback || fallback) {
           setDetail(patchFallback ?? fallback);
           return;
         }
-        setDetailError(reason instanceof ApiError ? reason.message : "星点详情加载失败");
+        setDetailError(reason instanceof ApiError ? reason.message : t("detail.loadFailed"));
       })
       .finally(() => {
         if (alive) setDetailLoading(false);
@@ -592,7 +609,7 @@ export function PetMiniWorkspace({
     return () => {
       alive = false;
     };
-  }, [detailTarget, searchWorkspace.result]);
+  }, [detailLabels, detailTarget, searchWorkspace.result, t]);
 
   const startResize = React.useCallback(
     (event: React.PointerEvent<HTMLButtonElement>) => {
@@ -701,14 +718,14 @@ export function PetMiniWorkspace({
     [threads],
   );
   const answerTitle = React.useMemo(() => {
-    if (!answerSnapshot?.threadId) return "新对话";
+    if (!answerSnapshot?.threadId) return t("answer.newConversation");
     return (
       threads.find((thread) => thread.id === answerSnapshot.threadId)?.title ||
-      "当前对话"
+      t("answer.currentConversation")
     );
-  }, [answerSnapshot?.threadId, threads]);
+  }, [answerSnapshot?.threadId, t, threads]);
   const searchTitle =
-    searchWorkspace.lastQuery || searchWorkspace.query.trim() || "搜索知识库";
+    searchWorkspace.lastQuery || searchWorkspace.query.trim() || t("search.title");
 
   const activateAnswerThread = React.useCallback(
     (threadId: string) => {
@@ -786,13 +803,13 @@ export function PetMiniWorkspace({
                 )}
               >
                 <span className="min-w-0 flex-1 truncate">
-                  {thread.title || "未命名对话"}
+                  {thread.title || t("answer.untitled")}
                 </span>
               </button>
             ))
           ) : (
             <p className="px-2 py-4 text-center text-xs text-muted-foreground">
-              还没有历史对话
+              {t("answer.noHistory")}
             </p>
           )}
         </motion.div>
@@ -835,8 +852,8 @@ export function PetMiniWorkspace({
                   current.length > 1 ? current.slice(0, -1) : [],
                 )
               }
-              aria-label="返回"
-              title="返回"
+              aria-label={t("controls.back")}
+              title={t("controls.back")}
             >
               <ArrowLeft className="size-3.5" />
             </Button>
@@ -852,8 +869,8 @@ export function PetMiniWorkspace({
                 (detailTarget.kind === "document"
                   ? detailTarget.title
                   : detailTarget.kind === "citation"
-                    ? detailTarget.citation.heading || detailTarget.citation.source_name || "引用详情"
-                    : "星点详情")}
+                    ? detailTarget.citation.heading || detailTarget.citation.source_name || t("detail.citationTitle")
+                    : t("detail.nodeTitle"))}
             </span>
             <Button
               type="button"
@@ -861,8 +878,8 @@ export function PetMiniWorkspace({
               size="icon"
               className="size-7"
               onClick={returnToSearchHome}
-              aria-label="返回搜索首页"
-              title="返回搜索首页"
+              aria-label={t("controls.searchHome")}
+              title={t("controls.searchHome")}
             >
               <Search className="size-3.5" />
             </Button>
@@ -893,7 +910,7 @@ export function PetMiniWorkspace({
                       section={item.id}
                       className="relative size-3.5 shrink-0"
                     />
-                    <span className="relative truncate">{item.label}</span>
+                    <span className="relative truncate">{nav(item.id)}</span>
                   </button>
                 );
               })}
@@ -906,8 +923,8 @@ export function PetMiniWorkspace({
           size="icon"
           className="size-7"
           onClick={() => openSettings()}
-          aria-label="打开设置"
-          title="打开设置"
+          aria-label={t("controls.settings")}
+          title={t("controls.settings")}
         >
           <Settings className="size-3.5" />
         </Button>
@@ -918,8 +935,8 @@ export function PetMiniWorkspace({
             size="icon"
             className="size-7"
             onClick={expand}
-            aria-label="放大工作台"
-            title="放大工作台"
+            aria-label={t("controls.expand")}
+            title={t("controls.expand")}
           >
             <Maximize2 className="size-3.5" />
           </Button>
@@ -930,8 +947,8 @@ export function PetMiniWorkspace({
           size="icon"
           className="size-7"
           onClick={hideWorkspace}
-          aria-label="关闭"
-          title="关闭"
+          aria-label={t("controls.close")}
+          title={t("controls.close")}
         >
           <X className="size-3.5" />
         </Button>
@@ -948,7 +965,7 @@ export function PetMiniWorkspace({
           <div className="flex h-11 shrink-0 items-center gap-1.5 border-b px-3">
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs font-medium">{searchTitle}</p>
-              <p className="text-[10px] text-muted-foreground">搜索</p>
+              <p className="text-[10px] text-muted-foreground">{nav("search")}</p>
             </div>
             <Button
               type="button"
@@ -960,8 +977,8 @@ export function PetMiniWorkspace({
               )}
               onClick={() => searchWorkspace.setContentView("history")}
               disabled={searchWorkspace.busy}
-              aria-label="查询历史"
-              title="查询历史"
+              aria-label={t("search.history")}
+              title={t("search.history")}
               aria-pressed={searchWorkspace.contentView === "history"}
             >
               <History className="size-3.5" />
@@ -976,8 +993,8 @@ export function PetMiniWorkspace({
               )}
               onClick={() => searchWorkspace.setContentView("activity")}
               disabled={searchWorkspace.busy}
-              aria-label="最近动态"
-              title="最近动态"
+              aria-label={t("search.recentActivity")}
+              title={t("search.recentActivity")}
               aria-pressed={searchWorkspace.contentView === "activity"}
             >
               <List className="size-3.5" />
@@ -1012,7 +1029,7 @@ export function PetMiniWorkspace({
           <div className="flex h-11 shrink-0 items-center gap-1.5 border-b px-3">
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs font-medium">{answerTitle}</p>
-              <p className="text-[10px] text-muted-foreground">问答</p>
+              <p className="text-[10px] text-muted-foreground">{nav("answer")}</p>
             </div>
             <Button
               type="button"
@@ -1020,8 +1037,8 @@ export function PetMiniWorkspace({
               size="icon"
               className="size-7"
               onClick={() => setAnswerHistoryOpen((current) => !current)}
-              aria-label="历史对话"
-              title="历史对话"
+              aria-label={t("answer.history")}
+              title={t("answer.history")}
               aria-pressed={answerHistoryOpen}
             >
               <History className="size-3.5" />
@@ -1033,8 +1050,8 @@ export function PetMiniWorkspace({
               className="size-7"
               onClick={newAnswer}
               disabled={answerBusy}
-              aria-label="新对话"
-              title="新对话"
+              aria-label={t("answer.newConversation")}
+              title={t("answer.newConversation")}
             >
               <MessageSquarePlus className="size-3.5" />
             </Button>
@@ -1056,21 +1073,21 @@ export function PetMiniWorkspace({
                 )}
                 heroNode={<PetHeadAvatar face={answerIdentity.avatar} size="lg" />}
                 emptyTitle={answerIdentity.name}
-                emptyHint={agent?.persona?.greeting || "有什么想法，直接问我。"}
+                emptyHint={agent?.persona?.greeting || t("answer.emptyHint")}
                 suggestions={[
-                  "总结一下知识库里最重要的内容",
-                  "这份资料的关键结论是什么？",
-                  "帮我梳理其中的时间线",
+                  t("answer.suggestions.summary"),
+                  t("answer.suggestions.conclusions"),
+                  t("answer.suggestions.timeline"),
                 ]}
                 draftPrompt={answerDraft}
-                placeholder={`向 ${answerIdentity.name} 发送消息，输入 @ 指定知识库`}
+                placeholder={t("answer.placeholder", { name: answerIdentity.name })}
                 onCitationClick={openAnswerCitation}
                 onToolMatchClick={openAnswerToolMatch}
               />
             ) : (
               <div className="flex h-full items-center justify-center gap-2 text-xs text-muted-foreground">
                 <Loader2 className="size-3.5 animate-spin" />
-                正在载入对话
+                {t("answer.loading")}
               </div>
             )}
           </div>
@@ -1127,7 +1144,7 @@ export function PetMiniWorkspace({
                       <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                         <FileText className="size-3.5" />
                         <span className="min-w-0 flex-1 truncate">
-                          {detailTarget.citation.source_name || "本地知识库"}
+                          {detailTarget.citation.source_name || t("detail.localKnowledge")}
                         </span>
                       </div>
                       {detailTarget.citation.heading && (
@@ -1137,22 +1154,22 @@ export function PetMiniWorkspace({
                       )}
                       <p className="whitespace-pre-wrap text-xs leading-5 text-foreground/75">
                         {stripCitationTransportTokens(detailTarget.citation.snippet)
-                          || "这条引用暂时没有可展示的原文。"}
+                          || t("detail.noCitationSource")}
                       </p>
                     </div>
                   ) : detailLoading && !detail ? (
                     <div className="flex h-52 items-center justify-center gap-2 text-xs text-muted-foreground">
                       <Loader2 className="size-4 animate-spin" />
-                      正在读取星点
+                      {t("detail.loading")}
                     </div>
                   ) : detail ? (
                     <div className="space-y-5">
                       <section>
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-                          <span>{detail.source_name || "本地知识库"}</span>
+                          <span>{detail.source_name || t("detail.localKnowledge")}</span>
                           {detail.category && <span>· {detail.category}</span>}
                           {detail.start_time && (
-                            <span>· {formatDate(detail.start_time, timezone)}</span>
+                            <span>· {formatDate(detail.start_time, timezone, { dateStyle: "medium" }, locale)}</span>
                           )}
                         </div>
                         <h2 className="mt-2 text-sm font-medium leading-5">{detail.label}</h2>
@@ -1166,7 +1183,7 @@ export function PetMiniWorkspace({
                       {detail.related_nodes.length > 0 && (
                         <section className="border-t pt-4">
                           <h3 className="text-[11px] font-medium text-muted-foreground">
-                            关联星点
+                            {t("detail.relatedNodes")}
                           </h3>
                           <div className="mt-2 space-y-1">
                             {detail.related_nodes.slice(0, 12).map((node) => (
@@ -1198,7 +1215,7 @@ export function PetMiniWorkspace({
                         <section className="border-t pt-4">
                           <div className="flex items-center justify-between gap-3">
                             <h3 className="text-[11px] font-medium text-muted-foreground">
-                              原文证据
+                              {t("detail.sourceEvidence")}
                             </h3>
                             <span className="max-w-44 truncate text-[10px] text-muted-foreground/70">
                               {detail.evidence.document_name || detail.evidence.source_name}
@@ -1215,7 +1232,7 @@ export function PetMiniWorkspace({
                     </div>
                   ) : (
                     <div className="flex h-52 items-center justify-center text-xs text-destructive">
-                      {detailError || "星点详情暂时不可用"}
+                      {detailError || t("detail.unavailable")}
                     </div>
                   )}
                 </motion.div>
@@ -1229,8 +1246,8 @@ export function PetMiniWorkspace({
         type="button"
         onPointerDown={startResize}
         onKeyDown={resizeWithKeyboard}
-        aria-label="调整迷你面板大小"
-        title="调整迷你面板大小"
+        aria-label={t("controls.resize")}
+        title={t("controls.resize")}
         className={cn(
           "absolute z-30 flex size-6 touch-none items-center justify-center text-muted-foreground/45 transition-colors hover:text-foreground",
           panelAbove ? "top-0" : "bottom-0",

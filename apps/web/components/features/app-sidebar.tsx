@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useLocale, useTranslations } from "next-intl";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Archive,
@@ -48,6 +49,7 @@ import {
 } from "@/components/ui/sidebar";
 
 function Brand() {
+  const t = useTranslations("AppSidebar");
   return (
     <SidebarMenu>
       <SidebarMenuItem>
@@ -58,7 +60,7 @@ function Brand() {
             </div>
             <div className="grid flex-1 text-left leading-tight">
               <span className="truncate text-base font-semibold">{PRODUCT_NAME}</span>
-              <span className="truncate text-xs text-muted-foreground">知识库 Agent</span>
+              <span className="truncate text-xs text-muted-foreground">{t("brandTagline")}</span>
             </div>
           </Link>
         </SidebarMenuButton>
@@ -68,6 +70,7 @@ function Brand() {
 }
 
 function NavUser() {
+  const t = useTranslations("AppSidebar");
   const { user, logout } = useApp();
   const initial = (user?.name || user?.email || "?").slice(0, 1).toUpperCase();
   return (
@@ -85,7 +88,7 @@ function NavUser() {
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-medium">{user?.name}</span>
                 <span className="truncate text-xs text-muted-foreground">
-                  {user?.email || "本地身份"}
+                  {user?.email || t("localIdentity")}
                 </span>
               </div>
               <ChevronsUpDown className="ml-auto size-4 text-muted-foreground" />
@@ -101,7 +104,7 @@ function NavUser() {
               <div className="flex flex-col">
                 <span className="truncate text-sm font-medium">{user?.name}</span>
                 <span className="truncate text-xs text-muted-foreground">
-                  {user?.email || "本地身份"}
+                  {user?.email || t("localIdentity")}
                 </span>
               </div>
             </DropdownMenuLabel>
@@ -109,12 +112,12 @@ function NavUser() {
             <DropdownMenuItem asChild>
               <Link href="/settings">
                 <Settings className="size-4" />
-                本地身份设置
+                {t("identitySettings")}
               </Link>
             </DropdownMenuItem>
             <DropdownMenuItem onClick={logout} className="text-destructive focus:text-destructive">
               <LogOut className="size-4" />
-              退出到启动页
+              {t("signOut")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -124,6 +127,9 @@ function NavUser() {
 }
 
 export function AppSidebar({ contained = false }: { contained?: boolean }) {
+  const t = useTranslations("AppSidebar");
+  const nav = useTranslations("Navigation");
+  const locale = useLocale();
   const routePath = usePathname();
   const router = useRouter();
   const {
@@ -169,9 +175,9 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
       await api.updateThread(agent.id, tid, { archived: true });
       await refreshThreads();
       if (activeThreadId === tid) router.push("/chat");
-      toast.success("已归档");
+      toast.success(t("archived"));
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "归档失败");
+      toast.error(e instanceof ApiError ? e.message : t("archiveFailed"));
     }
   }
 
@@ -179,7 +185,7 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
     try {
       await loadMoreThreads();
     } catch (error) {
-      toast.error(error instanceof ApiError ? error.message : "加载更多会话失败");
+      toast.error(error instanceof ApiError ? error.message : t("loadMoreFailed"));
     }
   }
 
@@ -199,11 +205,11 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
                   <SidebarMenuButton
                     asChild
                     isActive={activeSection === item.id}
-                    tooltip={item.label}
+                    tooltip={nav(item.id)}
                   >
                     <Link href={item.href}>
                       <WorkspaceSectionIcon section={item.id} />
-                      <span>{item.label}</span>
+                      <span>{nav(item.id)}</span>
                       {item.shortcut && (
                         <kbd className="ml-auto hidden rounded border border-sidebar-border px-1 py-0.5 text-[10px] font-medium leading-none text-muted-foreground opacity-0 transition-opacity group-hover/menu-item:opacity-100 group-data-[collapsible=icon]:hidden sm:inline-flex">
                           {item.shortcut}
@@ -219,7 +225,7 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
 
         <SidebarGroup className="min-h-0 flex-1 overflow-hidden group-data-[collapsible=icon]:hidden">
           <SidebarGroupLabel className="flex items-center pr-1">
-            <span className="flex-1">会话</span>
+            <span className="flex-1">{t("conversations")}</span>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -228,33 +234,36 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
                     window.dispatchEvent(new Event("sag:new-chat"));
                     router.push("/chat");
                   }}
-                  aria-label="新对话"
+                  aria-label={t("newChat")}
                   className="grid size-6 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
                 >
                   <MessageSquarePlus className="size-3.5" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="right">新对话</TooltipContent>
+              <TooltipContent side="right">{t("newChat")}</TooltipContent>
             </Tooltip>
           </SidebarGroupLabel>
           <SidebarMenu className="min-h-0 flex-1 overflow-y-auto pr-1">
             {threads.length === 0 && (
               <p className="px-2 py-1.5 text-xs text-muted-foreground">
-                还没有会话，从「新对话」开始。
+                {t("emptyThreads")}
               </p>
             )}
-            {threads.map((t) => {
-              const isLive = runningThreads.has(t.id);
+            {threads.map((thread) => {
+              const isLive = runningThreads.has(thread.id);
               return (
-                <SidebarMenuItem key={t.id}>
-                  <SidebarMenuButton asChild isActive={t.id === activeThreadId}>
-                    <Link href={`/chat/${t.id}`} aria-label={t.title}>
-                      <span className="min-w-0 flex-1 truncate">{t.title}</span>
+                <SidebarMenuItem key={thread.id}>
+                  <SidebarMenuButton asChild isActive={thread.id === activeThreadId}>
+                    <Link href={`/chat/${thread.id}`} aria-label={thread.title}>
+                      <span className="min-w-0 flex-1 truncate">{thread.title}</span>
                       {isLive ? (
-                        <Spinner className="size-3 shrink-0 text-muted-foreground" aria-label="生成中" />
+                        <Spinner
+                          className="size-3 shrink-0 text-muted-foreground"
+                          aria-label={t("generating")}
+                        />
                       ) : (
                         <span className="ml-2 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground transition-opacity group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0">
-                          {relativeTime(t.updated_at, timezone)}
+                          {relativeTime(thread.updated_at, timezone, locale)}
                         </span>
                       )}
                     </Link>
@@ -267,15 +276,15 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
                           onClick={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
-                            archiveThread(t.id);
+                            archiveThread(thread.id);
                           }}
-                          aria-label="归档会话"
+                          aria-label={t("archiveThread")}
                           className="absolute right-2 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded-md text-muted-foreground opacity-0 outline-none transition-[opacity,color,background-color] hover:bg-sidebar-accent hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-sidebar-ring group-hover/menu-item:opacity-100"
                         >
                           <Archive className="size-3.5" />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent side="right">归档</TooltipContent>
+                      <TooltipContent side="right">{t("archive")}</TooltipContent>
                     </Tooltip>
                   )}
                 </SidebarMenuItem>
@@ -288,12 +297,12 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
                     type="button"
                     size="sm"
                     disabled={loadingMoreThreads}
-                    aria-label="展开更多会话"
+                    aria-label={t("expandMore")}
                     onClick={() => void revealMoreThreads()}
                     className="text-muted-foreground hover:text-foreground"
                   >
                     <span className="min-w-0 flex-1 truncate">
-                      {loadingMoreThreads ? "加载中…" : "更多"}
+                      {loadingMoreThreads ? t("loading") : t("more")}
                     </span>
                     {loadingMoreThreads ? <Spinner className="size-3.5" /> : <ChevronDown />}
                   </SidebarMenuButton>
@@ -302,14 +311,14 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
                       <TooltipTrigger asChild>
                         <button
                           type="button"
-                          aria-label="收起"
+                          aria-label={t("collapse")}
                           onClick={collapseThreads}
                           className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
                         >
                           <ChevronUp className="size-3.5" />
                         </button>
                       </TooltipTrigger>
-                      <TooltipContent side="right">收起</TooltipContent>
+                      <TooltipContent side="right">{t("collapse")}</TooltipContent>
                     </Tooltip>
                   )}
                 </div>
@@ -322,7 +331,7 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
                   onClick={collapseThreads}
                   className="text-muted-foreground hover:text-foreground"
                 >
-                  <span className="min-w-0 flex-1 truncate">收起</span>
+                  <span className="min-w-0 flex-1 truncate">{t("collapse")}</span>
                   <ChevronUp />
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -333,10 +342,14 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton asChild isActive={pathname.startsWith("/settings")} tooltip="设置">
+            <SidebarMenuButton
+              asChild
+              isActive={pathname.startsWith("/settings")}
+              tooltip={nav("settings")}
+            >
               <Link href="/settings">
                 <Settings />
-                <span>设置</span>
+                <span>{nav("settings")}</span>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>

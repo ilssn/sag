@@ -11,10 +11,35 @@ export interface ParsedMcpConfig {
   skipped: string[];
 }
 
+export type McpConfigErrorCode =
+  | "fieldObject"
+  | "fieldScalar"
+  | "argsType"
+  | "argsScalar"
+  | "entryObject"
+  | "rootObject"
+  | "serversObject"
+  | "serverObject"
+  | "noServerShape"
+  | "nameRequired"
+  | "urlRequired"
+  | "invalidUrl"
+  | "httpOnly"
+  | "commandRequired"
+  | "invalidJson"
+  | "duplicateName"
+  | "allDisabled"
+  | "noMountableServer";
+
 export class McpConfigError extends Error {
-  constructor(message: string) {
-    super(message);
+  readonly code: McpConfigErrorCode;
+  readonly values: Record<string, string | number>;
+
+  constructor(code: McpConfigErrorCode, values: Record<string, string | number> = {}) {
+    super(code);
     this.name = "McpConfigError";
+    this.code = code;
+    this.values = values;
   }
 }
 
@@ -37,11 +62,11 @@ function looksLikeServer(value: unknown): value is JsonRecord {
 function stringMap(value: unknown, field: string, name: string): Record<string, string> | undefined {
   if (value == null) return undefined;
   if (!isRecord(value)) {
-    throw new McpConfigError(`服务「${name}」的 ${field} 必须是 JSON 对象`);
+    throw new McpConfigError("fieldObject", { name, field });
   }
   const entries = Object.entries(value).map(([key, item]) => {
     if (!["string", "number", "boolean"].includes(typeof item)) {
-      throw new McpConfigError(`服务「${name}」的 ${field}.${key} 必须是字符串或数字`);
+      throw new McpConfigError("fieldScalar", { name, field, key });
     }
     return [key, String(item)] as const;
   });
@@ -66,11 +91,11 @@ function argsList(value: unknown, name: string): string[] | undefined {
     return parsed.length ? parsed : undefined;
   }
   if (!Array.isArray(value)) {
-    throw new McpConfigError(`服务「${name}」的 args 必须是数组或字符串`);
+    throw new McpConfigError("argsType", { name });
   }
   const parsed = value.map((item) => {
     if (!["string", "number", "boolean"].includes(typeof item)) {
-      throw new McpConfigError(`服务「${name}」的 args 只能包含字符串或数字`);
+      throw new McpConfigError("argsScalar", { name });
     }
     return String(item);
   });
@@ -81,25 +106,25 @@ function serverEntries(root: unknown): Array<[string, JsonRecord]> {
   if (Array.isArray(root)) {
     return root.map((item, index) => {
       if (!isRecord(item)) {
-        throw new McpConfigError(`第 ${index + 1} 个服务配置不是 JSON 对象`);
+        throw new McpConfigError("entryObject", { index: index + 1 });
       }
       const name = typeof item.name === "string" ? item.name.trim() : "";
-      return [name || `MCP 服务 ${index + 1}`, item];
+      return [name || `MCP ${index + 1}`, item];
     });
   }
   if (!isRecord(root)) {
-    throw new McpConfigError("MCP 配置必须是 JSON 对象");
+    throw new McpConfigError("rootObject");
   }
 
   const container = root.mcpServers ?? root.servers;
   if (container !== undefined) {
     if (Array.isArray(container)) return serverEntries(container);
     if (!isRecord(container)) {
-      throw new McpConfigError("mcpServers（或 servers）必须是 JSON 对象");
+      throw new McpConfigError("serversObject");
     }
     return Object.entries(container).map(([name, config]) => {
       if (!isRecord(config)) {
-        throw new McpConfigError(`服务「${name}」的配置必须是 JSON 对象`);
+        throw new McpConfigError("serverObject", { name });
       }
       return [name, config];
     });
@@ -107,19 +132,19 @@ function serverEntries(root: unknown): Array<[string, JsonRecord]> {
 
   if (looksLikeServer(root)) {
     const name = typeof root.name === "string" ? root.name.trim() : "";
-    return [[name || "MCP 服务", root]];
+    return [[name || "MCP", root]];
   }
 
   const entries = Object.entries(root);
   if (entries.length && entries.every(([, value]) => isRecord(value))) {
     return entries.map(([name, value]) => [name, value as JsonRecord]);
   }
-  throw new McpConfigError("没有识别到 MCP 服务，请检查是否包含 url 或 command");
+  throw new McpConfigError("noServerShape");
 }
 
 function normalizeServer(rawName: string, raw: JsonRecord): ParsedMcpServer | null {
   const name = rawName.trim() || (typeof raw.name === "string" ? raw.name.trim() : "");
-  if (!name) throw new McpConfigError("每个 MCP 服务都需要名称");
+  if (!name) throw new McpConfigError("nameRequired");
   if (raw.disabled === true || raw.enabled === false) return null;
 
   const transport = String(raw.type ?? raw.transport ?? "").toLowerCase();
@@ -130,15 +155,15 @@ function normalizeServer(rawName: string, raw: JsonRecord): ParsedMcpServer | nu
   const mode: McpConnectionMode = prefersStdio ? "stdio" : prefersHttp || url ? "http" : "stdio";
 
   if (mode === "http") {
-    if (!url) throw new McpConfigError(`服务「${name}」缺少 url`);
+    if (!url) throw new McpConfigError("urlRequired", { name });
     let parsed: URL;
     try {
       parsed = new URL(url);
     } catch {
-      throw new McpConfigError(`服务「${name}」的 url 不是有效地址`);
+      throw new McpConfigError("invalidUrl", { name });
     }
     if (!["http:", "https:"].includes(parsed.protocol)) {
-      throw new McpConfigError(`服务「${name}」仅支持 HTTP 或 HTTPS 地址`);
+      throw new McpConfigError("httpOnly", { name });
     }
     const headers = stringMap(raw.headers, "headers", name);
     return {
@@ -148,7 +173,7 @@ function normalizeServer(rawName: string, raw: JsonRecord): ParsedMcpServer | nu
     };
   }
 
-  if (!command) throw new McpConfigError(`服务「${name}」缺少 command`);
+  if (!command) throw new McpConfigError("commandRequired", { name });
   const args = argsList(raw.args, name);
   const env = stringMap(raw.env, "env", name);
   return {
@@ -167,7 +192,7 @@ export function parseMcpConfig(value: string): ParsedMcpConfig {
   try {
     root = JSON.parse(source);
   } catch {
-    throw new McpConfigError("JSON 格式不完整，请检查括号、引号和逗号");
+    throw new McpConfigError("invalidJson");
   }
 
   const skipped: string[] = [];
@@ -182,10 +207,10 @@ export function parseMcpConfig(value: string): ParsedMcpConfig {
       servers.findIndex((candidate) => candidate.name.toLowerCase() === server.name.toLowerCase()) !==
       index,
   );
-  if (duplicate) throw new McpConfigError(`服务名称「${duplicate.name}」重复`);
+  if (duplicate) throw new McpConfigError("duplicateName", { name: duplicate.name });
   if (!servers.length && skipped.length) {
-    throw new McpConfigError("配置中的 MCP 服务均处于停用状态");
+    throw new McpConfigError("allDisabled");
   }
-  if (!servers.length) throw new McpConfigError("没有识别到可挂载的 MCP 服务");
+  if (!servers.length) throw new McpConfigError("noMountableServer");
   return { servers, skipped };
 }
