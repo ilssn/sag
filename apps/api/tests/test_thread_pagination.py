@@ -38,11 +38,13 @@ async def test_archived_threads_support_stable_offset_pagination():
                 assert archived.status_code == 200, archived.text
 
             base_url = f"/api/v1/agents/{agent['id']}/threads?archived=true"
-            all_rows = (await client.get(base_url, headers=headers)).json()
+            default_rows = (await client.get(base_url, headers=headers)).json()
+            all_rows = (await client.get(f"{base_url}&limit=100", headers=headers)).json()
             first = (await client.get(f"{base_url}&limit=3", headers=headers)).json()
             second = (await client.get(f"{base_url}&limit=3&offset=3", headers=headers)).json()
 
             assert len(all_rows) >= 7
+            assert default_rows == all_rows[:6]
             assert first == all_rows[:3]
             assert second == all_rows[3:6]
             assert {row["id"] for row in first}.isdisjoint(row["id"] for row in second)

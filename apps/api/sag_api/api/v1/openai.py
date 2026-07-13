@@ -101,7 +101,10 @@ async def chat_completions(
         )
 
     if body.stream:
+
         async def gen():
+            streamed_parts: list[str] = []
+
             def chunk(delta: dict, finish: str | None = None) -> str:
                 payload = {
                     "id": cid,
@@ -116,18 +119,33 @@ async def chat_completions(
             async for event in _events():
                 payload = event.data["payload"]
                 if event.type == EventType.MESSAGE_DELTA.value:
-                    yield chunk({"content": payload["delta"]})
+                    delta = str(payload["delta"])
+                    streamed_parts.append(delta)
+                    yield chunk({"content": delta})
+                elif event.type == EventType.RUN_COMPLETED.value:
+                    canonical = str(payload.get("output") or "")
+                    streamed = "".join(streamed_parts)
+                    # Canonicalization can append traceable-source fallbacks.
+                    # Stream the suffix when it preserves the content already
+                    # delivered; destructive rewrites remain a non-stream-only
+                    # guarantee because SSE cannot retract prior chunks.
+                    if canonical.startswith(streamed):
+                        suffix = canonical[len(streamed) :]
+                        if suffix:
+                            yield chunk({"content": suffix})
                 elif event.type in (EventType.RUN_FAILED.value, EventType.RUN_CANCELLED.value):
                     error = payload.get("error") or {}
                     yield chunk({"content": f"\n[错误] {error.get('message', '生成失败')}"})
             yield chunk({}, finish="stop")
             yield "data: [DONE]\n\n"
 
-        return StreamingResponse(gen(), media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+        return StreamingResponse(
+            gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+        )
 
     # 非流式：消费同一事件流，聚合为最终答案
     parts: list[str] = []
+    final_output = ""
     citations = plan.citations
     usage: dict = {}
     async for event in _events():
@@ -135,6 +153,7 @@ async def chat_completions(
         if event.type == EventType.MESSAGE_DELTA.value:
             parts.append(payload["delta"])
         elif event.type == EventType.RUN_COMPLETED.value:
+            final_output = str(payload.get("output") or "")
             citations = payload.get("citations") or citations
             usage = payload.get("usage") or {}
         elif event.type in (EventType.RUN_FAILED.value, EventType.RUN_CANCELLED.value):
@@ -148,7 +167,7 @@ async def chat_completions(
         "choices": [
             {
                 "index": 0,
-                "message": {"role": "assistant", "content": "".join(parts)},
+                "message": {"role": "assistant", "content": final_output or "".join(parts)},
                 "finish_reason": "stop",
             }
         ],

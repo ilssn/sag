@@ -10,6 +10,7 @@ import { DEFAULT_AGENT_AVATAR, DEFAULT_AGENT_NAME } from "@/lib/branding";
 import { usePetEnabled } from "@/lib/pet-preferences";
 import { useApp } from "@/components/features/app-shell";
 import { PetHeadAvatar } from "@/components/features/pet-head-avatar";
+import { PetAppearanceSettings } from "@/components/features/pet-appearance-settings";
 import { SettingsRow, SettingsSection } from "@/components/features/settings-section";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
@@ -58,19 +59,20 @@ export function AgentSettingsCard() {
   }
 
   return (
-    <form onSubmit={save}>
-      <SettingsSection
-        title="默认助手"
-        description="设置它在新对话中的身份、开场白和回答边界。"
-        footer={
-          <div className="flex justify-end">
-            <Button type="submit" disabled={saving}>
-              {saving ? <Spinner /> : <Save />}
-              {saving ? "保存中…" : "保存更改"}
-            </Button>
-          </div>
-        }
-      >
+    <div className="flex flex-col gap-6">
+      <form onSubmit={save}>
+        <SettingsSection
+          title="默认助手"
+          description="设置它在新对话中的身份、开场白和回答边界。"
+          footer={
+            <div className="flex justify-end">
+              <Button type="submit" disabled={saving}>
+                {saving ? <Spinner /> : <Save />}
+                {saving ? "保存中…" : "保存更改"}
+              </Button>
+            </div>
+          }
+        >
         <SettingsRow
           title="基本信息"
           description={`头像最多 ${MAX_AVATAR_CHARS} 个字符；名称会显示在对话和侧栏中。`}
@@ -136,7 +138,9 @@ export function AgentSettingsCard() {
             <FieldDescription>影响每次回答的行为边界；留空即默认「有据作答」。</FieldDescription>
           </Field>
         </SettingsRow>
-      </SettingsSection>
-    </form>
+        </SettingsSection>
+      </form>
+      <PetAppearanceSettings agentFace={avatar || DEFAULT_AGENT_AVATAR} />
+    </div>
   );
 }

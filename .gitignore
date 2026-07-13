@@ -20,6 +20,7 @@ uploads/
 # Node / Next
 node_modules/
 .next/
+.next-dev/
 out/
 .turbo/
 npm-debug.log*

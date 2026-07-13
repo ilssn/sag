@@ -1,88 +1,67 @@
 "use client";
 
 import * as React from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
 
-import { api } from "@/lib/api";
 import { DEFAULT_AGENT_AVATAR } from "@/lib/branding";
-import { streamAgentAsk } from "@/lib/sse";
 import { useApp } from "@/components/features/app-shell";
 import {
-  ConversationView,
-  type ConvMessage,
-} from "@/components/features/chat/conversation-view";
+  useConversationRuntime,
+  useConversationSession,
+} from "@/components/features/chat/conversation-provider";
+import { ConversationPanel } from "@/components/features/chat/conversation-panel";
 import { PetHeadAvatar } from "@/components/features/pet-head-avatar";
 
-/** 对话 —— 产品主入口：默认 agent + 会话（/chat 新会话，/chat/[id] 续聊）。 */
+/** 对话主入口；会话数据与迷你问答共享，仅保留完整工作台外壳。 */
 export default function ChatPage() {
-  const { id } = useParams<{ id?: string[] }>();
+  const { id } = useParams<{ id?: string | string[] }>();
+  const pathname = usePathname();
   const router = useRouter();
-  const { agent, refreshThreads } = useApp();
-  const routeThreadId = id?.[0] ?? null;
-  const [draftThreadId, setDraftThreadId] = React.useState<string | null>(null);
-  const [draftNonce, setDraftNonce] = React.useState(0);
-  const threadId = routeThreadId ?? draftThreadId;
-  // 本页新建的线程接管 URL 时保持组件实例；真正切换到其他线程才重新挂载。
-  const conversationViewKey =
-    routeThreadId && routeThreadId !== draftThreadId
-      ? routeThreadId
-      : `new-${draftNonce}`;
+  const { agent, panelMode } = useApp();
+  const runtime = useConversationRuntime();
+  const routeThreadId =
+    (Array.isArray(id) ? id[0] : id) ?? pathname.match(/^\/chat\/([^/]+)/)?.[1] ?? null;
+  const [sessionId, setSessionId] = React.useState<string | null>(null);
+  const preferredDraftRef = React.useRef<string | null>(null);
+  const session = useConversationSession(sessionId);
+
+  React.useEffect(() => {
+    if (routeThreadId) {
+      preferredDraftRef.current = null;
+      setSessionId(runtime.forThread(routeThreadId, { activate: true }));
+      return;
+    }
+    const index = runtime.getIndexSnapshot();
+    const next =
+      preferredDraftRef.current ??
+      index.activeRunSessionId ??
+      index.activeSessionId ??
+      runtime.createDraft({ activate: true });
+    preferredDraftRef.current = null;
+    runtime.activate(next);
+    setSessionId(next);
+  }, [routeThreadId, runtime]);
 
   React.useEffect(() => {
     const onNewChat = () => {
-      setDraftThreadId(null);
-      setDraftNonce((n) => n + 1);
+      const next = runtime.createDraft({ activate: true });
+      preferredDraftRef.current = next;
+      setSessionId(next);
       if (window.location.pathname !== "/chat") router.push("/chat");
     };
     window.addEventListener("sag:new-chat", onNewChat);
     return () => window.removeEventListener("sag:new-chat", onNewChat);
-  }, [router]);
+  }, [router, runtime]);
 
   React.useEffect(() => {
-    // 兼容任何直接导航到 /chat 的入口，不让刚创建过的线程泄漏到新草稿页。
-    if (!routeThreadId && window.location.pathname === "/chat") {
-      setDraftThreadId(null);
-    }
-  }, [routeThreadId]);
-
-  const listMessages = React.useCallback(
-    (tid: string): Promise<ConvMessage[]> =>
-      agent ? api.listMessages(agent.id, tid) : Promise.resolve([]),
-    [agent],
-  );
-
-  const stream = React.useCallback(
-    (
-      tid: string,
-      query: string,
-      onEvent: Parameters<typeof streamAgentAsk>[3],
-      signal: AbortSignal,
-      attachments?: string[],
-      sourceIds?: string[],
-    ) => {
-      if (!agent) return Promise.reject(new Error("agent 未就绪"));
-      return streamAgentAsk(
-        agent.id,
-        tid,
-        { query, attachments, source_ids: sourceIds },
-        onEvent,
-        signal,
-      );
-    },
-    [agent],
-  );
-
-  const ensureThread = React.useCallback(async () => {
-    if (!agent) throw new Error("agent 未就绪");
-    if (threadId) return threadId;
-    const t = await api.createThread(agent.id);
-    setDraftThreadId(t.id);
-    // 原生 history 避免中断刚启动的流；本地 thread 状态负责后续连续对话。
-    window.history.replaceState(window.history.state, "", `/chat/${t.id}`);
+    const threadId = session?.threadId;
+    if (!threadId || routeThreadId) return;
+    const nextPath = `/chat/${threadId}`;
+    if (window.location.pathname === nextPath) return;
+    // 不触发路由卸载，确保创建线程后的流式回答持续由同一 runtime 托管。
+    window.history.replaceState(window.history.state, "", nextPath);
     window.dispatchEvent(new Event("sag:pathchange"));
-    refreshThreads();
-    return t.id;
-  }, [agent, threadId, refreshThreads]);
+  }, [routeThreadId, session?.threadId]);
 
   const glyph = agent?.avatar || DEFAULT_AGENT_AVATAR;
   const avatarNode = React.useMemo(
@@ -94,26 +73,14 @@ export default function ChatPage() {
     [glyph],
   );
 
-  if (!agent) return null;
+  if (!agent || !sessionId || !session) return null;
 
   return (
     <div className="h-full min-h-0">
-      <ConversationView
-        key={conversationViewKey}
-        conversationKey={agent.id}
-        threadId={threadId}
-        listMessages={listMessages}
-        deleteMessage={(tid, mid) => (agent ? api.deleteMessage(agent.id, tid, mid) : Promise.resolve())}
-        stream={stream}
-        cancelRun={(tid, runId) => api.cancelAgentRun(agent.id, tid, runId)}
-        approveTool={(tid, runId, toolCallId) =>
-          api.approveAgentTool(agent.id, tid, runId, toolCallId)
-        }
-        rejectTool={(tid, runId, toolCallId, reason) =>
-          api.rejectAgentTool(agent.id, tid, runId, toolCallId, reason)
-        }
-        ensureThread={ensureThread}
-        onActivity={refreshThreads}
+      <ConversationPanel
+        key={sessionId}
+        sessionId={sessionId}
+        active={panelMode === "normal"}
         avatarNode={avatarNode}
         heroNode={heroNode}
         emptyTitle={agent.name}

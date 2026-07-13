@@ -13,7 +13,11 @@ from sag_api.core.logging import get_logger
 from sag_api.db.models import Source, User
 from sag_api.generation import LLMClient
 from sag_api.mcp.server import MCP_TOOL_DETAILS, MCP_TOOL_NAMES
-from sag_api.schemas.system import ModelConfigUpdate, QuickModelSetupRequest
+from sag_api.schemas.system import (
+    ModelConfigUpdate,
+    QuickModelSetupRequest,
+    SystemPreferencesUpdate,
+)
 from sag_api.services import settings_service
 
 router = APIRouter(prefix="/system", tags=["system"])
@@ -32,6 +36,7 @@ def _capabilities() -> dict:
         "vector_provider": settings.sag_vector_provider,
         "language": settings.sag_language,
         "search_strategy": settings.search_strategy,
+        "timezone": settings.timezone,
         "max_upload_mb": settings.max_upload_mb,
         "allowed_upload_exts": sorted(settings.allowed_upload_exts),
     }
@@ -67,6 +72,26 @@ async def get_model_config(
 ) -> dict:
     """当前生效的模型与检索配置（密钥脱敏为 *_set 布尔）。"""
     return settings_service.effective_model_config()
+
+
+@router.get("/preferences")
+async def get_system_preferences(
+    _user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    """Presentation preferences shared by this local-first installation."""
+    return settings_service.effective_system_preferences()
+
+
+@router.put("/preferences")
+async def update_system_preferences(
+    body: SystemPreferencesUpdate,
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, str]:
+    return await settings_service.save_system_preferences(
+        session,
+        body.model_dump(exclude_unset=True),
+    )
 
 
 @router.get("/model-setup")

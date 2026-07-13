@@ -58,7 +58,7 @@ export function ModelConfigForm() {
   const [mineruVersion, setMineruVersion] =
     React.useState<ModelConfig["mineru_version"]>("2.5");
   const [mineruKey, setMineruKey] = React.useState("");
-  const [strategy, setStrategy] = React.useState<ModelConfig["search_strategy"]>("multi");
+  const [strategy, setStrategy] = React.useState<ModelConfig["search_strategy"]>("vector");
   const [topK, setTopK] = React.useState(8);
   const [language, setLanguage] = React.useState<ModelConfig["sag_language"]>("zh");
 
@@ -426,10 +426,13 @@ export function ModelConfigForm() {
       </SettingsSection>
 
       <SettingsSection title="检索" description="控制知识召回方式和信息抽取语言。">
-        <SettingsRow title="检索规则" description="调整策略、召回条数和语言。">
+        <SettingsRow
+          title="检索规则"
+          description="快速模式使用向量召回；精确模式增加实体关系扩展与 LLM 精排。"
+        >
           <div className="grid gap-4 sm:grid-cols-2">
             <Field>
-              <FieldLabel htmlFor="strategy">检索策略</FieldLabel>
+              <FieldLabel htmlFor="strategy">默认检索模式</FieldLabel>
               <Select value={strategy} onValueChange={(value) => setStrategy(value as typeof strategy)}>
                 <SelectTrigger id="strategy">
                   <SelectValue />

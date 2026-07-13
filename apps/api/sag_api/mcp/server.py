@@ -18,6 +18,8 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
+from sag_api.services.retrieval_service import retrieve_relevant_sections
+
 if TYPE_CHECKING:
     from sag_api.db.models import Document, Source
     from sag_api.sag import EngineManager
@@ -216,8 +218,9 @@ def build_source_mcp(*, stateless_http: bool = False) -> FastMCP:
         normalized = (query or "").strip()
         if not normalized:
             return "（空查询）"
-        outcome = await scope.engine_manager.search_many(
-            [(source.sag_source_config_id, source) for source in selected],
+        outcome = await retrieve_relevant_sections(
+            scope.engine_manager,
+            selected,
             normalized,
             top_k=max(1, min(top_k, 50)),
         )

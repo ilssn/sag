@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sag_api.connectors import registry
+from sag_api.core.config import settings
 from sag_api.core.errors import ApiError, NotFoundError, ValidationError
 from sag_api.core.logging import get_logger
 from sag_api.db.base import new_id
@@ -23,6 +24,41 @@ log = get_logger("services.source")
 
 async def list_sources(session: AsyncSession) -> list[Source]:
     rows = await session.execute(select(Source).order_by(Source.created_at.desc()))
+    return list(rows.scalars().all())
+
+
+async def search_source_candidates(
+    session: AsyncSession,
+    source_ids: list[str] | None = None,
+) -> list[Source]:
+    """Select a bounded retrieval scope without materializing the source table.
+
+    Explicit `source_ids` preserve the user's @ order. An implicit global search
+    uses data density and recency as the cheap partition router until a dedicated
+    source-level semantic index is available.
+    """
+    limit = settings.search_source_candidate_limit
+    if source_ids:
+        ordered_ids = list(dict.fromkeys(source_ids))
+        if len(ordered_ids) > limit:
+            raise ValidationError(
+                f"单次最多检索 {limit} 个信息源，请通过 @ 缩小范围",
+                code="too_many_search_sources",
+            )
+        rows = await session.execute(select(Source).where(Source.id.in_(ordered_ids)))
+        by_id = {source.id: source for source in rows.scalars().all()}
+        return [by_id[source_id] for source_id in ordered_ids if source_id in by_id]
+
+    rows = await session.execute(
+        select(Source)
+        .order_by(
+            Source.chunk_count.desc(),
+            Source.event_count.desc(),
+            Source.updated_at.desc(),
+            Source.id,
+        )
+        .limit(limit)
+    )
     return list(rows.scalars().all())
 
 
@@ -60,7 +96,13 @@ async def create_source(
     return source
 
 
-async def update_source(session: AsyncSession, source_id: str, data: SourceUpdate) -> Source:
+async def update_source(
+    session: AsyncSession,
+    source_id: str,
+    data: SourceUpdate,
+    *,
+    job_queue: JobQueue | None = None,
+) -> Source:
     source = await get_source(session, source_id)
     if data.name is not None:
         source.name = data.name
@@ -70,11 +112,24 @@ async def update_source(session: AsyncSession, source_id: str, data: SourceUpdat
         source.status = data.status
     await session.commit()
     await session.refresh(source)
+    from sag_api.services.universe_service import schedule_universe_refresh
+
+    await schedule_universe_refresh(
+        session,
+        job_queue,
+        source_id=source.id,
+        reason="source_updated",
+    )
     return source
 
 
 async def delete_source(
-    session: AsyncSession, source_id: str, *, engine_manager: EngineManager, upload_dir: str
+    session: AsyncSession,
+    source_id: str,
+    *,
+    engine_manager: EngineManager,
+    upload_dir: str,
+    job_queue: JobQueue | None = None,
 ) -> None:
     """删除信源并收尾：移除悬挂绑定、关闭引擎槽、清理上传文件。"""
     source = await get_source(session, source_id)
@@ -93,6 +148,14 @@ async def delete_source(
     # 引擎槽关闭 + 上传目录清理（尽力而为，不阻断删除）
     await engine_manager.release(sag_id)
     shutil.rmtree(os.path.join(upload_dir, source_id), ignore_errors=True)
+    from sag_api.services.universe_service import schedule_universe_refresh
+
+    await schedule_universe_refresh(
+        session,
+        job_queue,
+        source_id=None,
+        reason="source_deleted",
+    )
 
 
 async def sync_source(session: AsyncSession, source_id: str, *, job_queue: JobQueue) -> Job:

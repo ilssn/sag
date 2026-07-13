@@ -1,0 +1,32 @@
+export type WorkspaceSection = "search" | "answer" | "knowledge";
+
+export interface WorkspaceSectionDefinition {
+  id: WorkspaceSection;
+  label: string;
+  href: string;
+  shortcut?: string;
+}
+
+/**
+ * 工作台能力的单一入口配置。normal 与 mini 只改变呈现方式，不再各自维护菜单。
+ */
+export const WORKSPACE_SECTIONS: readonly WorkspaceSectionDefinition[] = [
+  { id: "search", label: "搜索", href: "/search", shortcut: "⌘K" },
+  { id: "answer", label: "问答", href: "/chat", shortcut: "⌘J" },
+  { id: "knowledge", label: "知识库", href: "/knowledge" },
+];
+
+export function isWorkspaceSection(value: unknown): value is WorkspaceSection {
+  return value === "search" || value === "answer" || value === "knowledge";
+}
+
+export function workspaceSectionFromPathname(pathname: string): WorkspaceSection | null {
+  if (pathname === "/search" || pathname.startsWith("/search/")) return "search";
+  if (pathname === "/chat" || pathname.startsWith("/chat/")) return "answer";
+  if (pathname === "/knowledge" || pathname.startsWith("/knowledge/")) return "knowledge";
+  return null;
+}
+
+export function workspaceSectionDefinition(section: WorkspaceSection) {
+  return WORKSPACE_SECTIONS.find((item) => item.id === section)!;
+}

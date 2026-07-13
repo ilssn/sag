@@ -70,6 +70,7 @@ class LLMClient:
                 temperature=self._settings.llm_temperature,
                 max_tokens=self._settings.llm_max_tokens,
                 tools=list(request.tools) or None,  # type: ignore[arg-type]
+                tool_choice=request.tool_choice if request.tools else None,
                 stream=True,
                 extra_body=self._extra_body(),
             )
@@ -152,3 +153,36 @@ class LLMClient:
             return resp.choices[0].message.content or ""
         except Exception as e:  # noqa: BLE001
             raise UpstreamError(f"生成失败：{e}") from e
+
+    async def stream_complete(self, messages: list[Message]) -> AsyncIterator[str]:
+        """Stream plain text completion deltas without the Agent/tool protocol."""
+
+        self._ensure_configured()
+        stream = None
+        try:
+            stream = await self._client.chat.completions.create(
+                model=self._settings.llm_model,
+                messages=messages,  # type: ignore[arg-type]
+                temperature=self._settings.llm_temperature,
+                max_tokens=self._settings.llm_max_tokens,
+                stream=True,
+                extra_body=self._extra_body(),
+            )
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                token = getattr(chunk.choices[0].delta, "content", None)
+                if token:
+                    yield token
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise UpstreamError(f"生成失败：{e}") from e
+        finally:
+            # Closing explicitly makes browser aborts release the upstream HTTP
+            # connection immediately, even when the stream is only partly read.
+            if stream is not None:
+                try:
+                    await stream.close()
+                except Exception as e:  # noqa: BLE001
+                    log.debug("LLM 流关闭失败：%s", e)

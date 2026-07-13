@@ -106,9 +106,10 @@ export function QuickModelSetupDialog({
             <div className="mb-2 grid size-10 place-items-center rounded-lg border bg-muted/50 text-foreground">
               <KeyRound className="size-5" />
             </div>
-            <DialogTitle>快速配置 302.AI</DialogTitle>
+            <DialogTitle>用 302.AI 快速开始问答</DialogTitle>
             <DialogDescription className="max-w-[34rem] leading-6">
-              填写一个 API Key，即可完成生成模型、向量模型、MinerU 文档解析和检索配置。
+              推荐新用户使用：填写一个 API Key，即可完成生成模型、向量模型、
+              MinerU 文档解析和检索配置。也可以先跳过，稍后在设置中自行配置。
             </DialogDescription>
           </DialogHeader>
 
@@ -186,7 +187,7 @@ export function QuickModelSetupDialog({
               onClick={() => onOpenChange(false)}
               disabled={saving}
             >
-              稍后配置
+              跳过，稍后配置
             </Button>
             <Button type="submit" disabled={saving || !apiKey.trim()} className="min-w-28">
               {saving ? <Spinner aria-label="正在配置" /> : <Sparkles />}

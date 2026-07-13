@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -15,10 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sag_api.core.config import Settings
 from sag_api.core.config import settings as _settings
 from sag_api.core.errors import ConfigurationError
+from sag_api.core.logging import get_logger
 from sag_api.db.models import Setting
+from sag_api.enums import SEARCH_STRATEGIES, normalize_search_strategy
 
 _SCOPE = "global"
 _KEY = "model_config"
+_PREFERENCES_KEY = "system_preferences"
+log = get_logger("settings")
 
 # 允许运行期覆盖的字段（值已由请求 schema 校验/转型）
 _FIELDS = frozenset(
@@ -65,15 +70,29 @@ QUICK_SETUP_302 = {
 }
 
 
-async def _load_row(session: AsyncSession) -> Setting | None:
+async def _load_row(session: AsyncSession, key: str = _KEY) -> Setting | None:
     return await session.scalar(
-        select(Setting).where(Setting.scope == _SCOPE, Setting.key == _KEY)
+        select(Setting).where(Setting.scope == _SCOPE, Setting.key == key)
     )
+
+
+def _normalize_overrides(overrides: dict) -> dict:
+    """清理持久化配置，确保已下线或非法策略不会进入运行时。"""
+    normalized = dict(overrides)
+    strategy = normalized.get("search_strategy")
+    if strategy == "atomic":
+        normalized["search_strategy"] = normalize_search_strategy(strategy)
+        log.warning("旧检索策略 atomic 已迁移为精确模式 multi")
+    elif strategy is not None and strategy not in SEARCH_STRATEGIES:
+        normalized.pop("search_strategy", None)
+        log.warning("忽略非法的持久化检索策略：%s", strategy)
+    return normalized
 
 
 async def load_overrides(session: AsyncSession) -> dict:
     row = await _load_row(session)
-    return dict(row.value) if row and isinstance(row.value, dict) else {}
+    raw = dict(row.value) if row and isinstance(row.value, dict) else {}
+    return _normalize_overrides(raw)
 
 
 async def model_setup_status(session: AsyncSession) -> dict[str, bool]:
@@ -92,7 +111,7 @@ async def model_setup_status(session: AsyncSession) -> dict[str, bool]:
 
 def apply_overrides(settings: Settings, overrides: dict) -> None:
     """把存储的覆盖值就地写回 settings 单例（请求 schema 已保证类型合法）。"""
-    for key, value in overrides.items():
+    for key, value in _normalize_overrides(overrides).items():
         if key in _FIELDS:
             setattr(settings, key, value)
 
@@ -100,7 +119,30 @@ def apply_overrides(settings: Settings, overrides: dict) -> None:
 async def apply_startup_overrides(session_factory: async_sessionmaker) -> None:
     """启动时：把 DB 里的模型配置覆盖到 settings 单例（在构建 LLMClient 之前调用）。"""
     async with session_factory() as session:
-        apply_overrides(_settings, await load_overrides(session))
+        row = await _load_row(session)
+        raw = dict(row.value) if row and isinstance(row.value, dict) else {}
+        overrides = _normalize_overrides(raw)
+        if row is not None and overrides != raw:
+            # JSON 列未使用 MutableDict，必须整体重新赋值才能可靠持久化。
+            row.value = overrides
+            await session.commit()
+        apply_overrides(_settings, overrides)
+        preferences = await _load_row(session, _PREFERENCES_KEY)
+        preference_values = (
+            dict(preferences.value)
+            if preferences and isinstance(preferences.value, dict)
+            else {}
+        )
+        timezone = preference_values.get("timezone")
+        if isinstance(timezone, str):
+            # Stored values were validated on write. Settings assignment is kept
+            # explicit so model configuration and presentation preferences remain separate.
+            try:
+                ZoneInfo(timezone)
+            except (ZoneInfoNotFoundError, ValueError):
+                log.warning("忽略非法的持久化时区：%s", timezone)
+            else:
+                _settings.timezone = timezone
 
 
 def effective_model_config() -> dict:
@@ -127,6 +169,28 @@ def effective_model_config() -> dict:
     }
 
 
+def effective_system_preferences() -> dict[str, str]:
+    return {"timezone": _settings.timezone}
+
+
+async def save_system_preferences(session: AsyncSession, patch: dict) -> dict[str, str]:
+    row = await _load_row(session, _PREFERENCES_KEY)
+    stored = dict(row.value) if row and isinstance(row.value, dict) else {}
+    timezone = patch.get("timezone")
+    if isinstance(timezone, str):
+        stored["timezone"] = timezone
+
+    if row is None:
+        session.add(Setting(scope=_SCOPE, key=_PREFERENCES_KEY, value=stored))
+    else:
+        row.value = stored
+    await session.commit()
+
+    if isinstance(stored.get("timezone"), str):
+        _settings.timezone = stored["timezone"]
+    return effective_system_preferences()
+
+
 async def save_model_config(session: AsyncSession, patch: dict) -> dict:
     """合并保存模型配置：入库 + 覆盖 settings 单例；返回生效配置（脱敏）。
 
@@ -136,7 +200,8 @@ async def save_model_config(session: AsyncSession, patch: dict) -> dict:
     - 可空字段（base_url / dimensions）值为空 → 置 None（清除）。
     """
     row = await _load_row(session)
-    stored = dict(row.value) if row and isinstance(row.value, dict) else {}
+    raw = dict(row.value) if row and isinstance(row.value, dict) else {}
+    stored = _normalize_overrides(raw)
 
     for key, value in patch.items():
         if key not in _FIELDS:

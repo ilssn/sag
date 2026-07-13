@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from contextlib import AsyncExitStack, asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -88,6 +88,8 @@ async def lifespan(app: FastAPI):
             yield
     finally:
         warmup_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await warmup_task
         await app.state.agent_runtime.stop()
         await app.state.job_queue.stop()
         await app.state.engine_manager.aclose_all()

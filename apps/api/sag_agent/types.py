@@ -163,9 +163,7 @@ class AgentMessage:
 class ToolSpec:
     name: str
     description: str
-    parameters: Mapping[str, Any] = field(
-        default_factory=lambda: {"type": "object", "properties": {}}
-    )
+    parameters: Mapping[str, Any] = field(default_factory=lambda: {"type": "object", "properties": {}})
     label: str | None = None
     risk: ToolRisk = ToolRisk.READ_ONLY
     requires_approval: bool = False
@@ -187,6 +185,7 @@ class ToolSpec:
 class ModelRequest:
     messages: tuple[AgentMessage, ...]
     tools: tuple[Mapping[str, Any], ...] = ()
+    tool_choice: str | Mapping[str, Any] | None = None
     run_id: str = ""
     turn: int = 0
     metadata: Mapping[str, Any] = field(default_factory=dict)

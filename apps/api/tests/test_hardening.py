@@ -196,6 +196,36 @@ async def test_engine_close_all_waits_for_inflight_use():
 
 
 @pytest.mark.asyncio
+async def test_engine_lifecycle_reset_waits_for_inflight_operations():
+    """新引擎重置共享资源前，必须等待已有引擎操作退出。"""
+    from sag_api.sag.engine_manager import _EngineLifecycleGate
+
+    gate = _EngineLifecycleGate()
+    reader_entered = asyncio.Event()
+    release_reader = asyncio.Event()
+    writer_entered = asyncio.Event()
+
+    async def hold_operation():
+        async with gate.read():
+            reader_entered.set()
+            await release_reader.wait()
+
+    async def reset_runtime():
+        async with gate.write():
+            writer_entered.set()
+
+    reader = asyncio.create_task(hold_operation())
+    await reader_entered.wait()
+    writer = asyncio.create_task(reset_runtime())
+    await asyncio.sleep(0.02)
+    assert writer_entered.is_set() is False
+
+    release_reader.set()
+    await asyncio.gather(reader, writer)
+    assert writer_entered.is_set() is True
+
+
+@pytest.mark.asyncio
 async def test_search_falls_back_to_vector():
     """multi 失败或空结果时自动回退 vector；vector 自身失败不再回退。"""
     from sag_api.core.config import settings

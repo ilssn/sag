@@ -8,6 +8,7 @@ import { api, ApiError } from "@/lib/api";
 import type { Doc } from "@/lib/types";
 import { formatBytes, relativeTime } from "@/lib/format";
 import { useDetailPanel } from "@/components/features/detail-panel";
+import { useApp } from "@/components/features/app-shell";
 import { DocStatusBadge } from "@/components/features/status-badge";
 import { Button } from "@/components/ui/button";
 
@@ -15,13 +16,18 @@ export function DocumentList({
   sourceId,
   documents,
   onChange,
+  variant = "normal",
+  onOpenDocument,
 }: {
   sourceId: string;
   documents: Doc[];
   onChange: () => void;
+  variant?: "normal" | "compact";
+  onOpenDocument?: (document: Doc) => void;
 }) {
   const [pending, setPending] = React.useState<string | null>(null);
   const { open } = useDetailPanel();
+  const { timezone } = useApp();
 
   async function reprocess(d: Doc) {
     setPending(d.id);
@@ -49,6 +55,46 @@ export function DocumentList({
     }
   }
 
+  if (variant === "compact") {
+    return (
+      <div className="space-y-0.5">
+        {documents.map((document) => (
+          <button
+            key={document.id}
+            type="button"
+            onClick={() => {
+              if (onOpenDocument) onOpenDocument(document);
+              else open({ kind: "document", sourceId, documentId: document.id });
+            }}
+            className="group/document flex w-full items-center gap-3 rounded-lg px-2.5 py-2.5 text-left outline-none transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+            title="查看文档"
+          >
+            <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground transition-colors group-hover/document:text-foreground">
+              <FileText className="size-4" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-medium text-foreground">
+                {document.filename}
+              </div>
+              <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+                <span>{formatBytes(document.size_bytes)}</span>
+                <span>·</span>
+                <span>{relativeTime(document.created_at, timezone)}</span>
+                {document.status === "ready" && (
+                  <>
+                    <span>·</span>
+                    <span className="truncate">{document.event_count} 事件</span>
+                  </>
+                )}
+              </div>
+            </div>
+            <DocStatusBadge status={document.status} />
+          </button>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="overflow-hidden rounded-lg border bg-card">
       {documents.map((d, i) => (
@@ -73,7 +119,7 @@ export function DocumentList({
             <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
               <span>{formatBytes(d.size_bytes)}</span>
               <span>·</span>
-              <span>{relativeTime(d.created_at)}</span>
+              <span>{relativeTime(d.created_at, timezone)}</span>
               {d.status === "ready" && (
                 <>
                   <span>·</span>

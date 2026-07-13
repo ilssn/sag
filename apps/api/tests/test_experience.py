@@ -82,14 +82,18 @@ async def test_empty_response_injection_and_prompt_preview():
             completed = next(d["payload"] for e, d in events if e == "run.completed")
             assert completed["prompt_preview"]
             assert EMPTY in completed["prompt_preview"]
+            assert "公司的报销流程是怎样的？" in completed["prompt_preview"]
+            assert "你好！" not in completed["prompt_preview"]
             tokens = "".join(d["payload"]["delta"] for e, d in events if e == "message.delta")
             assert tokens == "你好！"
 
             # 该轮回答已落库
-            msgs = (
-                await c.get(f"/api/v1/agents/{agent['id']}/threads/{thread['id']}/messages", headers=A)
-            ).json()
-            assert any(m["content"] == "你好！" and m["role"] == "assistant" for m in msgs)
+            msgs = (await c.get(f"/api/v1/agents/{agent['id']}/threads/{thread['id']}/messages", headers=A)).json()[
+                "items"
+            ]
+            saved = next(m for m in msgs if m["content"] == "你好！" and m["role"] == "assistant")
+            assert saved["prompt_preview"] == completed["prompt_preview"]
+            assert saved["content"] not in saved["prompt_preview"]
 
 
 @pytest.mark.asyncio
@@ -127,12 +131,10 @@ async def test_openai_compatible_endpoint():
                 assert resp.status_code == 200
                 async for line in resp.aiter_lines():
                     if line.startswith("data:"):
-                        chunks.append(line[len("data:"):].strip())
+                        chunks.append(line[len("data:") :].strip())
             assert chunks[-1] == "[DONE]"
             content = "".join(
-                json.loads(ch)["choices"][0]["delta"].get("content", "")
-                for ch in chunks
-                if ch != "[DONE]"
+                json.loads(ch)["choices"][0]["delta"].get("content", "") for ch in chunks if ch != "[DONE]"
             )
             assert content == "你好！"
 

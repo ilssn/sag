@@ -15,8 +15,6 @@ import {
   TriangleAlert,
 } from "lucide-react";
 
-import { api, ApiError } from "@/lib/api";
-import type { Doc, Source } from "@/lib/types";
 import { useApp } from "@/components/features/app-shell";
 import { DocumentList } from "@/components/features/document-list";
 import { EmptyState } from "@/components/features/empty-state";
@@ -24,6 +22,7 @@ import { RetrievalTestDialog } from "@/components/features/retrieval-test-dialog
 import { SourceGraph } from "@/components/features/source-graph";
 import { SyncPanel } from "@/components/features/sync-panel";
 import { UploadZone } from "@/components/features/upload-zone";
+import { useSourceContent } from "@/components/features/use-source-content";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,14 +37,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 
-const ACTIVE = ["pending", "loading", "extracting"];
-
 export default function SourceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { capabilities } = useApp();
-  const [source, setSource] = React.useState<Source | null>(null);
-  const [documents, setDocuments] = React.useState<Doc[] | null>(null);
+  const { source, documents, refresh, notFound } = useSourceContent(id);
   const [contentView, setContentView] = React.useState<"list" | "graph">("list");
 
   React.useEffect(() => {
@@ -59,33 +55,9 @@ export default function SourceDetailPage() {
     window.localStorage.setItem("sag:source-content-view", view);
   };
 
-  const refresh = React.useCallback(async () => {
-    try {
-      const [s, d] = await Promise.all([api.getSource(id), api.listDocuments(id)]);
-      setSource(s);
-      setDocuments(d);
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 404) router.replace("/knowledge");
-    }
-  }, [id, router]);
-
   React.useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  const active = documents?.some((d) => ACTIVE.includes(d.status)) ?? false;
-  React.useEffect(() => {
-    if (!active) return;
-    let t: ReturnType<typeof setInterval> | null = null;
-    const tick = () => {
-      if (document.hidden) return;
-      refresh();
-    };
-    t = setInterval(tick, 4000);
-    return () => {
-      if (t) clearInterval(t);
-    };
-  }, [active, refresh]);
+    if (notFound) router.replace("/knowledge");
+  }, [notFound, router]);
 
   const [addOpen, setAddOpen] = React.useState(false);
   const [retrievalOpen, setRetrievalOpen] = React.useState(false);

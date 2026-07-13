@@ -24,9 +24,11 @@ import {
 } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
+import { formatDate } from "@/lib/format";
 import type { Entity, Source, SourceGraphEvent, SourceGraphResponse } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useDetailPanel } from "@/components/features/detail-panel";
+import { useApp } from "@/components/features/app-shell";
 import {
   GRAPH_EDGE_TYPE,
   GraphCanvas,
@@ -415,6 +417,7 @@ function SelectionCard({
   selection: Exclude<Selection, null>;
   onOpenEvent?: (event: SourceGraphEvent) => void;
 }) {
+  const { timezone } = useApp();
   if (selection.kind === "entity") {
     const entity = selection.value;
     return (
@@ -450,9 +453,7 @@ function SelectionCard({
         {event.start_time && (
           <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
             <CalendarClock className="size-3" />
-            {new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium" }).format(
-              new Date(event.start_time),
-            )}
+            {formatDate(event.start_time, timezone)}
           </span>
         )}
         {event.chunk_id && onOpenEvent && (

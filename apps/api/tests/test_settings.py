@@ -13,6 +13,7 @@ _RESTORE = (
     "llm_base_url",
     "llm_model",
     "llm_temperature",
+    "search_strategy",
     "search_top_k",
     "sag_language",
     "llm_api_key",
@@ -20,6 +21,7 @@ _RESTORE = (
     "mineru_base_url",
     "mineru_api_key",
     "mineru_version",
+    "timezone",
 )
 
 
@@ -39,9 +41,67 @@ def test_cors_origins_env_formats(monkeypatch, raw, expected):
     assert Settings(_env_file=None).cors_origins == expected
 
 
+def test_legacy_atomic_env_strategy_maps_to_precise(monkeypatch):
+    monkeypatch.setenv("SAG_SEARCH_STRATEGY", "atomic")
+    assert Settings(_env_file=None).search_strategy == "multi"
+
+
+def test_timezone_defaults_to_beijing_and_rejects_invalid(monkeypatch):
+    monkeypatch.delenv("SAG_TIMEZONE", raising=False)
+    assert Settings(_env_file=None).timezone == "Asia/Shanghai"
+    monkeypatch.setenv("SAG_TIMEZONE", "UTC")
+    assert Settings(_env_file=None).timezone == "UTC"
+    monkeypatch.setenv("SAG_TIMEZONE", "Mars/Olympus")
+    with pytest.raises(ValueError):
+        Settings(_env_file=None)
+
+
+@pytest.mark.asyncio
+async def test_legacy_atomic_db_strategy_is_migrated():
+    from sqlalchemy import delete, select
+
+    from sag_api.core.db import SessionLocal, init_db
+    from sag_api.db.models import Setting
+    from sag_api.services.settings_service import apply_startup_overrides
+
+    await init_db()
+    previous = settings.search_strategy
+    try:
+        async with SessionLocal() as session:
+            await session.execute(
+                delete(Setting).where(Setting.scope == "global", Setting.key == "model_config")
+            )
+            session.add(
+                Setting(
+                    scope="global",
+                    key="model_config",
+                    value={"search_strategy": "atomic"},
+                )
+            )
+            await session.commit()
+
+        await apply_startup_overrides(SessionLocal)
+        assert settings.search_strategy == "multi"
+
+        async with SessionLocal() as session:
+            row = await session.scalar(
+                select(Setting).where(Setting.scope == "global", Setting.key == "model_config")
+            )
+            assert row is not None
+            assert row.value["search_strategy"] == "multi"
+    finally:
+        async with SessionLocal() as session:
+            await session.execute(
+                delete(Setting).where(Setting.scope == "global", Setting.key == "model_config")
+            )
+            await session.commit()
+        settings.search_strategy = previous
+
+
 async def _register(c, email):
     r = await c.post("/api/v1/auth/register", json={"email": email, "password": "password123"})
     assert r.status_code == 201, r.text
+    assert r.json()["user"]["created_at"].endswith(("Z", "+00:00"))
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
 
@@ -59,6 +119,24 @@ async def test_model_config_crud_masking_and_test():
         async with app.router.lifespan_context(app):
             async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
                 A = await _register(c, "modelcfg@t.com")
+
+                preferences = (await c.get("/api/v1/system/preferences", headers=A)).json()
+                assert preferences["timezone"] == snapshot["timezone"]
+                changed = await c.put(
+                    "/api/v1/system/preferences",
+                    headers=A,
+                    json={"timezone": "UTC"},
+                )
+                assert changed.status_code == 200
+                assert changed.json()["timezone"] == "UTC"
+                assert settings.timezone == "UTC"
+                assert (await c.get("/api/v1/system/capabilities")).json()["timezone"] == "UTC"
+                invalid_timezone = await c.put(
+                    "/api/v1/system/preferences",
+                    headers=A,
+                    json={"timezone": "Mars/Olympus"},
+                )
+                assert invalid_timezone.status_code == 422
 
                 # GET：密钥脱敏为 *_set，离线下未配置
                 body = (await c.get("/api/v1/system/model-config", headers=A)).json()
@@ -136,6 +214,11 @@ async def test_model_config_crud_masking_and_test():
                 ).status_code == 422
                 assert (
                     await c.put(
+                        "/api/v1/system/model-config", headers=A, json={"search_strategy": "atomic"}
+                    )
+                ).status_code == 422
+                assert (
+                    await c.put(
                         "/api/v1/system/model-config", headers=A, json={"search_top_k": 999}
                     )
                 ).status_code == 422
@@ -147,7 +230,10 @@ async def test_model_config_crud_masking_and_test():
     finally:
         async with SessionLocal() as s:
             await s.execute(
-                delete(Setting).where(Setting.scope == "global", Setting.key == "model_config")
+                delete(Setting).where(
+                    Setting.scope == "global",
+                    Setting.key.in_(["model_config", "system_preferences"]),
+                )
             )
             await s.commit()
         for key, value in snapshot.items():

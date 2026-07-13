@@ -36,7 +36,7 @@ async def test_chunk_endpoint_and_citation_refs():
             from zleap.sag.db.models import SourceChunk, SourceConfig
 
             chunk_id = uuid.uuid4().hex
-            full_text = "导出支持 Markdown / PDF / JSON。" * 30  # 远超 240 字截断
+            full_text = "导出支持 Markdown / PDF / JSON。" * 30  # 远超引用预览上限
             sf = get_session_factory()
             async with sf() as s:
                 await s.merge(SourceConfig(id=scid, name="手册"))
@@ -61,9 +61,7 @@ async def test_chunk_endpoint_and_citation_refs():
             assert body["source_id"] == sid and body["source_name"] == "手册"
 
             # 不存在 / 跨源访问 → 404
-            assert (
-                await c.get(f"/api/v1/sources/{sid}/chunks/{uuid.uuid4().hex}", headers=H)
-            ).status_code == 404
+            assert (await c.get(f"/api/v1/sources/{sid}/chunks/{uuid.uuid4().hex}", headers=H)).status_code == 404
 
             # citations：source_id 应为 sag 信源 id（非引擎内部 id）
             section = RetrievedSection(
@@ -77,4 +75,5 @@ async def test_chunk_endpoint_and_citation_refs():
             cites = build_citations([section], {scid: {"id": sid, "name": "手册"}})
             assert cites[0]["source_id"] == sid
             assert cites[0]["source_name"] == "手册"
-            assert cites[0]["snippet"].endswith("…") and len(cites[0]["snippet"]) <= 242
+            assert cites[0]["snippet"].endswith("…") and len(cites[0]["snippet"]) <= 722
+            assert "summary" not in cites[0]

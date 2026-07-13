@@ -15,7 +15,8 @@ export type AgentEventType =
   | "tool.progress"
   | "tool.approval_required"
   | "tool.completed"
-  | "tool.failed";
+  | "tool.failed"
+  | "universe.activation";
 
 export interface AgentErrorPayload {
   code: string;
@@ -188,9 +189,20 @@ async function streamPost(
 export function streamAgentAsk(
   agentId: string,
   threadId: string,
-  body: { query: string; attachments?: string[]; source_ids?: string[] },
+  body: {
+    query: string;
+    attachments?: string[];
+    source_ids?: string[];
+    knowledge_only?: boolean;
+    web_enabled: boolean;
+  },
   onEvent: (event: AgentEvent) => void,
   signal?: AbortSignal,
 ): Promise<AgentRunOutcome> {
-  return streamPost(`/api/v1/agents/${agentId}/threads/${threadId}/ask`, body, onEvent, signal);
+  return streamPost(
+    `/api/v1/agents/${agentId}/threads/${threadId}/ask`,
+    body,
+    onEvent,
+    signal,
+  );
 }

@@ -143,7 +143,13 @@ async def reprocess_document(
     return job
 
 
-async def delete_document(session: AsyncSession, source: Source, document_id: str) -> None:
+async def delete_document(
+    session: AsyncSession,
+    source: Source,
+    document_id: str,
+    *,
+    job_queue: JobQueue | None = None,
+) -> None:
     document = await get_document(session, source, document_id)
     path = document.storage_path
     await session.delete(document)
@@ -166,3 +172,11 @@ async def delete_document(session: AsyncSession, source: Source, document_id: st
                     os.remove(candidate)
             except OSError:
                 pass
+    from sag_api.services.universe_service import schedule_universe_refresh
+
+    await schedule_universe_refresh(
+        session,
+        job_queue,
+        source_id=source.id,
+        reason="document_deleted",
+    )

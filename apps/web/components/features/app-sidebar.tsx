@@ -8,19 +8,22 @@ import {
   ChevronDown,
   ChevronUp,
   ChevronsUpDown,
-  Library,
   LogOut,
   MessageSquarePlus,
-  Search,
   Settings,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
 import { PRODUCT_NAME } from "@/lib/branding";
-import { useChatLive } from "@/lib/chat-live";
 import { relativeTime } from "@/lib/format";
+import {
+  WORKSPACE_SECTIONS,
+  workspaceSectionFromPathname,
+} from "@/lib/workspace";
 import { useApp } from "@/components/features/app-shell";
+import { useConversationIndex } from "@/components/features/chat/conversation-provider";
+import { WorkspaceSectionIcon } from "@/components/features/workspace-section-icon";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -132,8 +135,18 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
     refreshThreads,
     loadMoreThreads,
     collapseThreads,
+    timezone,
   } = useApp();
-  const live = useChatLive();
+  const conversationIndex = useConversationIndex();
+  const runningThreads = React.useMemo(
+    () =>
+      new Set(
+        conversationIndex.sessions.flatMap((session) =>
+          session.running && session.threadId ? [session.threadId] : [],
+        ),
+      ),
+    [conversationIndex.sessions],
+  );
 
   // replaceState（新会话接管 URL 不打断流式）不会触发 usePathname —— 监听自定义事件补齐
   const [pathname, setPathname] = React.useState(routePath);
@@ -170,8 +183,7 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
     }
   }
 
-  const searchActive = pathname === "/search" || pathname.startsWith("/search/");
-  const knowledgeActive = pathname === "/knowledge" || pathname.startsWith("/knowledge/");
+  const activeSection = workspaceSectionFromPathname(pathname);
 
   return (
     <Sidebar collapsible="icon" className={contained ? "absolute" : undefined}>
@@ -181,41 +193,50 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
       <SidebarContent className="overflow-hidden">
         <SidebarGroup className="shrink-0">
           <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild isActive={searchActive} tooltip="搜索">
-                <Link href="/search">
-                  <Search />
-                  <span>搜索</span>
-                  <kbd className="ml-auto hidden rounded border border-sidebar-border px-1 py-0.5 text-[10px] font-medium leading-none text-muted-foreground opacity-0 transition-opacity group-hover/menu-item:opacity-100 group-data-[collapsible=icon]:hidden sm:inline-flex">
-                    ⌘K
-                  </kbd>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild isActive={knowledgeActive} tooltip="知识库">
-                <Link href="/knowledge">
-                  <Library />
-                  <span>知识库</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild tooltip="新对话">
-                <Link
-                  href="/chat"
-                  onClick={() => window.dispatchEvent(new Event("sag:new-chat"))}
-                >
-                  <MessageSquarePlus />
-                  <span>新对话</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+            {WORKSPACE_SECTIONS.map((item) => {
+              return (
+                <SidebarMenuItem key={item.id}>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={activeSection === item.id}
+                    tooltip={item.label}
+                  >
+                    <Link href={item.href}>
+                      <WorkspaceSectionIcon section={item.id} />
+                      <span>{item.label}</span>
+                      {item.shortcut && (
+                        <kbd className="ml-auto hidden rounded border border-sidebar-border px-1 py-0.5 text-[10px] font-medium leading-none text-muted-foreground opacity-0 transition-opacity group-hover/menu-item:opacity-100 group-data-[collapsible=icon]:hidden sm:inline-flex">
+                          {item.shortcut}
+                        </kbd>
+                      )}
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              );
+            })}
           </SidebarMenu>
         </SidebarGroup>
 
         <SidebarGroup className="min-h-0 flex-1 overflow-hidden group-data-[collapsible=icon]:hidden">
-          <SidebarGroupLabel>会话</SidebarGroupLabel>
+          <SidebarGroupLabel className="flex items-center pr-1">
+            <span className="flex-1">会话</span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => {
+                    window.dispatchEvent(new Event("sag:new-chat"));
+                    router.push("/chat");
+                  }}
+                  aria-label="新对话"
+                  className="grid size-6 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+                >
+                  <MessageSquarePlus className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">新对话</TooltipContent>
+            </Tooltip>
+          </SidebarGroupLabel>
           <SidebarMenu className="min-h-0 flex-1 overflow-y-auto pr-1">
             {threads.length === 0 && (
               <p className="px-2 py-1.5 text-xs text-muted-foreground">
@@ -223,7 +244,7 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
               </p>
             )}
             {threads.map((t) => {
-              const isLive = live.streaming && live.threadId === t.id;
+              const isLive = runningThreads.has(t.id);
               return (
                 <SidebarMenuItem key={t.id}>
                   <SidebarMenuButton asChild isActive={t.id === activeThreadId}>
@@ -233,7 +254,7 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
                         <Spinner className="size-3 shrink-0 text-muted-foreground" aria-label="生成中" />
                       ) : (
                         <span className="ml-2 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground transition-opacity group-focus-within/menu-item:opacity-0 group-hover/menu-item:opacity-0">
-                          {relativeTime(t.updated_at)}
+                          {relativeTime(t.updated_at, timezone)}
                         </span>
                       )}
                     </Link>

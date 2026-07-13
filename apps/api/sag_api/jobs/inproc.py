@@ -10,12 +10,13 @@ import asyncio
 from datetime import UTC, datetime
 
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from sag_api.core.config import settings
 from sag_api.core.errors import ServiceUnavailableError, UpstreamError
 from sag_api.core.logging import get_logger
-from sag_api.enums import JobStatus
+from sag_api.enums import JobStatus, JobType
 from sag_api.jobs.queue import JobQueue
 from sag_api.jobs.tasks import TASK_HANDLERS
 from sag_api.sag import EngineManager
@@ -24,6 +25,7 @@ log = get_logger("jobs")
 
 # 退避基数（秒）：第 n 次重试等待 base**n。测试可 monkeypatch 缩短。
 _BACKOFF_BASE_SECONDS = 2.0
+_RECOVERY_LOCK_RETRIES = 4
 
 
 def _now() -> datetime:
@@ -49,6 +51,7 @@ class InProcessAsyncQueue(JobQueue):
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._workers: list[asyncio.Task] = []
         self._retry_tasks: set[asyncio.Task] = set()
+        self._universe_user_locks: dict[str, asyncio.Lock] = {}
         self._started = False
 
     async def enqueue(self, job_id: str) -> None:
@@ -72,14 +75,25 @@ class InProcessAsyncQueue(JobQueue):
         if self._started:
             return
         self._started = True
-        for i in range(self._concurrency):
-            self._workers.append(asyncio.create_task(self._worker_loop(i), name=f"sag-worker-{i}"))
-        await self._recover()
+        try:
+            # Recover before workers begin consuming so a failed startup cannot
+            # leave detached workers holding database sessions.
+            await self._recover()
+            for i in range(self._concurrency):
+                self._workers.append(
+                    asyncio.create_task(self._worker_loop(i), name=f"sag-worker-{i}")
+                )
+        except BaseException:
+            await self.stop()
+            raise
         log.info("任务队列已启动（并发=%d）", self._concurrency)
 
     async def stop(self) -> None:
-        for t in list(self._retry_tasks):
+        retry_tasks = list(self._retry_tasks)
+        for t in retry_tasks:
             t.cancel()
+        if retry_tasks:
+            await asyncio.gather(*retry_tasks, return_exceptions=True)
         self._retry_tasks.clear()
         for w in self._workers:
             w.cancel()
@@ -89,25 +103,37 @@ class InProcessAsyncQueue(JobQueue):
             except asyncio.CancelledError:
                 pass
         self._workers.clear()
+        self._universe_user_locks.clear()
         self._started = False
 
     async def _recover(self) -> None:
         from sag_api.db.models import Job
 
-        async with self._session_factory() as session:
-            rows = (
-                await session.execute(
-                    select(Job).where(Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]))
-                )
-            ).scalars().all()
-            for job in rows:
-                if job.status == JobStatus.RUNNING:
-                    job.status = JobStatus.QUEUED
-            await session.commit()
-            for job in rows:
-                await self._queue.put(job.id)
-            if rows:
-                log.info("恢复 %d 个未完成任务", len(rows))
+        rows = []
+        for attempt in range(_RECOVERY_LOCK_RETRIES):
+            try:
+                async with self._session_factory() as session:
+                    rows = (
+                        await session.execute(
+                            select(Job).where(
+                                Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING])
+                            )
+                        )
+                    ).scalars().all()
+                    for job in rows:
+                        if job.status == JobStatus.RUNNING:
+                            job.status = JobStatus.QUEUED
+                    await session.commit()
+                break
+            except OperationalError as error:
+                locked = "database is locked" in str(error).lower()
+                if not locked or attempt == _RECOVERY_LOCK_RETRIES - 1:
+                    raise
+                await asyncio.sleep(0.08 * (2**attempt))
+        for job in rows:
+            await self._queue.put(job.id)
+        if rows:
+            log.info("恢复 %d 个未完成任务", len(rows))
 
     async def _worker_loop(self, idx: int) -> None:
         while True:
@@ -127,6 +153,26 @@ class InProcessAsyncQueue(JobQueue):
         async with self._session_factory() as session:
             job = await session.get(Job, job_id)
             if job is None:
+                return
+            universe_user_id = (
+                str((job.payload or {}).get("user_id") or "")
+                if job.type == JobType.INDEX_UNIVERSE
+                else ""
+            )
+
+        if universe_user_id:
+            lock = self._universe_user_locks.setdefault(universe_user_id, asyncio.Lock())
+            async with lock:
+                await self._run_job(job_id)
+            return
+        await self._run_job(job_id)
+
+    async def _run_job(self, job_id: str) -> None:
+        from sag_api.db.models import Job
+
+        async with self._session_factory() as session:
+            job = await session.get(Job, job_id)
+            if job is None or job.status != JobStatus.QUEUED:
                 return
             job.status = JobStatus.RUNNING
             job.started_at = _now()

@@ -15,10 +15,12 @@ export default function SearchGraph({
   events,
   entities,
   relations,
+  onOpenEvent,
 }: {
   events: SearchEvent[];
   entities: Entity[];
   relations: SourceGraphRelation[];
+  onOpenEvent?: (event: SearchEvent) => void;
 }) {
   const { open } = useDetailPanel();
   const eventsById = React.useMemo(
@@ -53,7 +55,12 @@ export default function SearchGraph({
       emptyDescription="当前命中的事件尚未关联实体，可切回列表查看事件摘要。"
       onOpenEvent={(event) => {
         const result = eventsById.get(event.id);
-        if (!result?.chunk_id || !result.source_id) return;
+        if (!result) return;
+        if (onOpenEvent) {
+          onOpenEvent(result);
+          return;
+        }
+        if (!result.chunk_id || !result.source_id) return;
         open({
           kind: "chunk",
           sourceId: result.source_id,
