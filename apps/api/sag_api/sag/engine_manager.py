@@ -342,6 +342,53 @@ class EngineManager:
             overrides = source.config.get("engine")
         return build_engine_config(self._settings, overrides=overrides)
 
+    async def _ensure_source_config(
+        self,
+        source_config_id: str,
+        source: Source | None = None,
+    ) -> None:
+        """Ensure the zleap-sag parent row exists before derived data is written.
+
+        ``DataEngine.start()`` initializes storage schemas but does not create a
+        ``SourceConfig`` row. The upstream ``ingest()`` convenience method normally
+        creates it; our incremental processor uses the lower-level loader directly,
+        so the adapter must preserve that invariant itself.
+        """
+        from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+        from zleap.sag.db import SourceConfig, get_session_factory
+
+        name = str(getattr(source, "name", "") or f"sag-{source_config_id[-8:]}")[:100]
+        description = str(
+            getattr(source, "description", "") or "created by sag EngineManager"
+        )[:255]
+        try:
+            session_factory = get_session_factory()
+            async with session_factory() as session:
+                if await session.get(SourceConfig, source_config_id) is not None:
+                    return
+                session.add(
+                    SourceConfig(
+                        id=source_config_id,
+                        name=name,
+                        description=description,
+                        target_config={},
+                    )
+                )
+                try:
+                    await session.commit()
+                except IntegrityError:
+                    # Another process may have provisioned the same source between
+                    # our read and insert. Treat that race as success only when the
+                    # parent row is now present.
+                    await session.rollback()
+                    if await session.get(SourceConfig, source_config_id) is None:
+                        raise
+        except SQLAlchemyError as error:
+            from sag_api.core.errors import UpstreamError
+
+            log.exception("信源父记录初始化失败 source_config_id=%s", source_config_id)
+            raise UpstreamError("信源引擎初始化失败，请稍后重试") from error
+
     async def _slot(self, source_config_id: str, source: Source | None = None) -> _Slot:
         slot = self._slots.get(source_config_id)
         if slot is not None and not slot.closing:
@@ -360,7 +407,18 @@ class EngineManager:
                     )
                     with map_sag_errors():
                         await engine.start()
-                    await self._ensure_universe_query_indexes()
+                    try:
+                        await self._ensure_source_config(source_config_id, source)
+                        await self._ensure_universe_query_indexes()
+                    except Exception:
+                        try:
+                            await engine.aclose()
+                        except Exception:  # noqa: BLE001 - preserve provisioning error
+                            log.exception(
+                                "初始化失败后的引擎关闭异常 source_config_id=%s",
+                                source_config_id,
+                            )
+                        raise
                     slot = _Slot(engine=engine)
                     self._slots[source_config_id] = slot
                     await self._evict_lru(keep=source_config_id)
@@ -433,7 +491,7 @@ class EngineManager:
                 return
 
     async def provision(self, source_config_id: str, source: Source | None = None) -> None:
-        """确保该源的引擎 schema 就绪（幂等）。"""
+        """确保该源的引擎 schema 与父记录就绪（幂等）。"""
         await self._slot(source_config_id, source)
 
     async def delete_document_data(

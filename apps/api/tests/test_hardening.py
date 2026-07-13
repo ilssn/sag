@@ -29,6 +29,23 @@ async def test_health_ready_and_upload_whitelist():
             A = await _register(c)
             sid = (await c.post("/api/v1/sources", headers=A, json={"name": "白名单"})).json()["id"]
 
+            # 创建信源必须同步建立引擎父记录；增量加载器会直接写 article，
+            # 缺少该记录时将触发 FOREIGN KEY constraint failed。
+            from zleap.sag.db import SourceConfig, get_session_factory
+
+            from sag_api.core.db import SessionLocal
+            from sag_api.db.models import Source
+
+            async with SessionLocal() as session:
+                source = await session.get(Source, sid)
+                assert source is not None
+                source_config_id = source.sag_source_config_id
+            engine_session_factory = get_session_factory()
+            async with engine_session_factory() as engine_session:
+                parent = await engine_session.get(SourceConfig, source_config_id)
+                assert parent is not None
+                assert parent.name == "白名单"
+
             # 不支持的扩展名 → 422（校验失败），前端展示明确提示
             bad = await c.post(
                 f"/api/v1/sources/{sid}/documents",

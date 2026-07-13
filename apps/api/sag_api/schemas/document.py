@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from sag_api.enums import DocumentStatus
 
@@ -39,3 +39,23 @@ class DocumentOut(BaseModel):
     error: str | None
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("error", mode="before")
+    @classmethod
+    def redact_storage_error(cls, value: object) -> object:
+        """Keep SQL and local storage details in server logs, not in the UI."""
+        if not isinstance(value, str):
+            return value
+        normalized = value.lower()
+        sql_markers = (
+            "sqlite3.",
+            "sqlalchemy.exc",
+            "[sql:",
+            "[parameters:",
+            "sqlalche.me/e/",
+        )
+        if not any(marker in normalized for marker in sql_markers):
+            return value
+        if "foreign key constraint failed" in normalized:
+            return "信息源初始化未完成，文档尚未入库，请重试。"
+        return "文档入库失败，请重试；若仍失败，请查看服务日志。"

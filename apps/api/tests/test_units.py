@@ -29,6 +29,35 @@ def test_build_engine_config_zero_infra():
     assert cfg.data_dir == settings.data_dir
 
 
+def test_document_output_redacts_database_details():
+    from datetime import UTC, datetime
+
+    from sag_api.enums import DocumentStatus
+    from sag_api.schemas.document import DocumentOut
+
+    payload = {
+        "id": "doc-1",
+        "source_id": "source-1",
+        "filename": "note.md",
+        "content_type": "text/markdown",
+        "size_bytes": 12,
+        "status": DocumentStatus.FAILED,
+        "chunk_count": 0,
+        "event_count": 0,
+        "progress": 5,
+        "token_usage": 0,
+        "error": "(sqlite3.IntegrityError) FOREIGN KEY constraint failed [SQL: INSERT]",
+        "created_at": datetime.now(UTC),
+        "updated_at": datetime.now(UTC),
+    }
+    document = DocumentOut.model_validate(payload)
+    assert document.error == "信息源初始化未完成，文档尚未入库，请重试。"
+
+    payload["error"] = "解析服务暂时不可用"
+    document = DocumentOut.model_validate(payload)
+    assert document.error == "解析服务暂时不可用"
+
+
 def test_llm_timeout_and_retries_reach_both_clients(monkeypatch):
     from sag_api.generation import llm as generation_llm
 
