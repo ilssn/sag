@@ -1,102 +1,332 @@
-# sag
-
-<p>
-  <a href="https://github.com/ilssn/sag/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/ilssn/sag/actions/workflows/ci.yml/badge.svg?branch=main" /></a>
-  <img alt="version" src="https://img.shields.io/badge/version-v1.2.2-18181b" />
-  <img alt="python" src="https://img.shields.io/badge/python-3.11+-3776ab" />
-  <img alt="node" src="https://img.shields.io/badge/node-20+-339933" />
-  <img alt="shadcn/ui" src="https://img.shields.io/badge/ui-shadcn-000000" />
-  <img alt="MCP" src="https://img.shields.io/badge/protocol-MCP-6b7280" />
+<p align="center">
+  <img src="docs/assets/readme/zleap-readme-header.png" alt="Zleap and astronaut" width="294" />
 </p>
 
-> **一个干净、清晰、好用的 SAG 开源示范项目 —— 带知识库的 Agent 客户端。**
-> 对话是主入口（单 agent 开箱即用）；上传文档进知识库 → 搜索/溯源 → 带引用对话。信源即 MCP。
+<h1 align="center">SAG</h1>
 
-`sag` 以 [`zleap-sag`](https://pypi.org/project/zleap-sag/)（本地优先的知识引擎：解析 · 分块 · 向量 · 事件—实体图谱 · 检索）为数据基座，用最短的链路把 SAG 的能力示范清楚。**个人向、单用户、零基础设施**——没有多租户、没有团队权限、没有一堆待接线的组件，只留下一条主干：
+<p align="center">
+  <strong>English</strong> · <a href="README-CN.md">简体中文</a>
+</p>
 
-**信息进来（信源 + 文档）→ 检索得到有据的结果（搜索 + 原文溯源）→ Agent 依据信源带引用作答，并可经 MCP 扩展工具。**
+<p align="center">
+  <a href="https://arxiv.org/abs/2606.15971"><img alt="Paper" src="https://img.shields.io/badge/paper-arXiv%3A2606.15971-18181b" /></a>
+  <a href="https://pypi.org/project/zleap-sag/"><img alt="PyPI" src="https://img.shields.io/pypi/v/zleap-sag?label=zleap--sag&color=18181b" /></a>
+  <img alt="SAG version" src="https://img.shields.io/badge/SAG-v1.2.2-18181b" />
+  <img alt="Python" src="https://img.shields.io/badge/Python-3.11%2B-3776ab" />
+  <img alt="Node" src="https://img.shields.io/badge/Node-20%2B-339933" />
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-18181b" /></a>
+</p>
 
-- 🧩 **MCP 一等公民**：每个信源都是一个 MCP 端点，可挂进 Claude Desktop / Cursor；Agent 也作为 MCP 客户端，挂载自己的信源与更多外部 MCP 工具。
-- 🔎 **一步溯源**：回答里的引用 `[n]` 可点开看原文分块。
-- 🤖 **Agent 即模型**：任意 Agent 暴露一个 OpenAI 兼容端点，可当作「带检索与引用的模型」调用。
+<p align="center"><strong>From now on, this is the only knowledge base app you need.</strong></p>
 
-## 核心概念（三个）
+<p align="center">
+  Built on the state-of-the-art SAG architecture, it turns scattered documents and data into knowledge that is searchable, connected, and traceable.
+</p>
 
-- **信源（Source）** — 装内容的容器。上传文档，sag 自动解析、分块、向量化、抽取事件与实体。每个信源同时是一个可对外挂载的 **MCP 端点**。
-- **Agent** — 绑定若干信源、带设定（system prompt / 开场白），依据信源带引用作答；可挂载外部 MCP server 扩展工具。
-- **搜索（Search）** — ⌘K 全局唤出，可锁定信源范围，命中即可跳到原文。
+## Contents
 
-## 快速开始（Docker，推荐）
+<p align="center">
+  <a href="#project">Project</a> ·
+  <a href="#technology">Technology</a> ·
+  <a href="#user-guide">User Guide</a> ·
+  <a href="#developer-guide">Developer Guide</a>
+</p>
 
-准备 Docker Desktop，或 Docker Engine + Compose v2。下载代码后，在项目根目录运行：
+---
+
+<a id="project"></a>
+
+## Project
+
+### SAG in one minute
+
+SAG is not a fusion of traditional RAG and GraphRAG. It is an original retrieval architecture that replaces both.
+
+Through event-entity indexing and query-time dynamic hyperedges, SAG delivers semantic retrieval and relational reasoning in one system, without maintaining two RAG systems or merging two retrieval paths.
+
+SAG achieves the best result on 8 of the 9 Recall@1/2/5 metrics across HotpotQA, 2WikiMultiHopQA, and MuSiQue, establishing a new state of the art for RAG.
+
+This project is a complete knowledge base application for individuals and Agents built on SAG:
+
+**sources and documents → structured knowledge → search and source tracing → cited Agent answers → reuse through API or MCP**
+
+Upload a document once. SAG parses it, splits it into chunks, embeds it, extracts events and entities, and keeps every retrieval result connected to the original text. You can then search across sources, inspect the event-entity graph, ask questions with citations, or expose the same knowledge to another application.
+
+| Capability | What it gives you |
+| --- | --- |
+| Knowledge ingestion | File and web sources, document parsing, chunking, embedding, event/entity extraction, background processing |
+| Search | Global or source-scoped retrieval with `vector`, `atomic`, and `multi` strategies |
+| Source tracing | Open any result or citation back to the exact original chunk |
+| Knowledge graph | Inspect events, entities, and their queryable associations |
+| Agent chat | Multi-turn answers grounded in selected sources, with clickable citations |
+| Integration | Self-hosted REST/OpenAPI, OpenAI-compatible chat, MCP, and the `zleap-sag` Python package |
+
+The product is deliberately local-first and single-user. It starts with SQLite and LanceDB, requires no external database, and keeps a clear path to PostgreSQL/pgvector and other production backends.
+
+---
+
+<a id="technology"></a>
+
+## Technology
+
+### Paper
+
+**SAG: SQL-Retrieval Augmented Generation with Query-Time Dynamic Hyperedges**<br>
+Yuchao Wu, Junqin Li, XingCheng Liang, Yongjie Chen, Yinghao Liang, Linyuan Mo, and Guanxian Li
+
+[Read the paper](https://arxiv.org/abs/2606.15971) · [Reproduce the benchmark](https://github.com/Zleap-AI/SAG-Benchmark)
+
+<p align="center">
+  <a href="https://arxiv.org/abs/2606.15971">
+    <img src="docs/assets/readme/paper-first-page.png" alt="First page of the SAG paper" width="900" />
+  </a>
+</p>
+
+### An original third architecture
+
+Traditional dense RAG retrieves chunks mainly by semantic similarity. GraphRAG adds offline graph construction, but pays for triple extraction, entity merging, relation normalization, global maintenance, and difficult incremental updates.
+
+SAG does not wrap those two systems. It replaces that choice with its own data model and execution path:
+
+```text
+chunk → one semantically complete event
+chunk → multiple indexing entities
+event ↔ entities → one latent hyperedge
+```
+
+- **Event** carries the complete meaning of a chunk. It is not fragmented into independent triples.
+- **Entity** is a lightweight index and expansion point, not a replacement for the event's meaning.
+- **Query-time dynamic hyperedge** is created locally when SQL joins events that share entities around the current query. SAG does not pre-build or globally maintain those hyperedges.
+- **Original evidence** remains the output boundary. Selected events always map back to source chunks for generation and citation.
+
+The semantic and structural paths inside SAG are native parts of the SAG pipeline. They are not a traditional RAG service and a GraphRAG service running side by side.
+
+<p align="center">
+  <img src="docs/assets/readme/paper-architecture.jpeg" alt="Original SAG paper architecture" width="940" />
+</p>
+
+### How retrieval works
+
+**Offline indexing**
+
+1. Parse a document into semantically coherent chunks.
+2. Extract one event and multiple entities from each chunk in parallel.
+3. Persist chunks, events, entities, and event-entity associations to relational storage.
+4. Persist chunk, event, and entity representations to vector/full-text indexes.
+
+**Online retrieval**
+
+1. Find seed entities and events using semantic and lexical signals.
+2. Use SQL joins over shared entities to expand from seed events into a local candidate space.
+3. Instantiate only the hyperedges relevant to this query; no global graph traversal or rebuild is required.
+4. Select the strongest event and direct-chunk candidates, deduplicate them, and return the original evidence chunks.
+
+This makes incremental writes natural: a new chunk adds its own event, entities, and associations without recomputing a global graph.
+
+### A new SOTA for RAG
+
+Under the same `BGE-Large-EN-v1.5` embedding and `Qwen3.6-Flash` LLM configuration, SAG reports the best result on **8 of 9 Recall@1/2/5 metrics** across HotpotQA, 2WikiMultiHopQA, and MuSiQue. Its average Recall@2/Recall@5 is **79.30%/88.18%**, compared with HippoRAG 2 at **68.14%/83.28%**.
+
+Full results:
+
+| Dataset | Method | Recall@1 | Recall@2 | Recall@5 |
+| --- | --- | ---: | ---: | ---: |
+| HotpotQA | **SAG** | **47.80%** | **91.55%** | **96.50%** |
+| HotpotQA | HippoRAG 2 | 44.40% | 78.35% | 94.35% |
+| 2WikiMultiHopQA | **SAG** | **43.53%** | **82.30%** | 88.00% |
+| 2WikiMultiHopQA | HippoRAG 2 | 42.38% | 76.55% | **90.35%** |
+| MuSiQue | **SAG** | **36.17%** | **64.05%** | **80.04%** |
+| MuSiQue | HippoRAG 2 | 30.65% | 49.52% | 65.13% |
+| **Average** | **SAG** | **42.50%** | **79.30%** | **88.18%** |
+| **Average** | HippoRAG 2 | 39.14% | 68.14% | 83.28% |
+
+See the [paper](https://arxiv.org/abs/2606.15971) and [SAG-Benchmark](https://github.com/Zleap-AI/SAG-Benchmark) for the full method and reproduction scripts.
+
+---
+
+<a id="user-guide"></a>
+
+## User Guide
+
+### Quick start (Docker, recommended)
+
+Requirements: Docker Desktop, or Docker Engine with Compose v2.
 
 ```bash
-# 在下载或克隆后的仓库根目录
+git clone https://github.com/Zleap-AI/SAG.git
+cd SAG
 docker compose up -d --build
 ```
 
-不需要先安装 Python、Node 或数据库，也不需要先填写 API Key。首次构建完成后：
+No API key, Python runtime, Node runtime, or external database is required to boot the application. When both services are healthy, open:
 
-- 打开前端：[http://localhost:3000](http://localhost:3000)
-- API 文档：[http://localhost:8000/docs](http://localhost:8000/docs)
-- 查看状态：`docker compose ps`（`api`、`web` 应显示 `healthy`）
-- 查看日志：`docker compose logs -f api web`
+- Web application: [http://localhost:3000](http://localhost:3000)
+- API documentation: [http://localhost:8000/docs](http://localhost:8000/docs)
 
-首次打开时填写名字（邮箱可选），系统会创建并在此数据卷中自动恢复本地身份。随后可使用首次引导里的 302.AI 快速配置，或跳过引导，在 **设置 → 模型** 中填写任意 OpenAI 兼容的 LLM、Embedding 与文档解析配置；保存立即生效。302.AI 快速配置会用同一个 Key 启用 LLM、Embedding 和 MinerU 2.5；从旧版本升级且已配置 302 模型的用户，也可在文档解析区直接复用服务端保存的 Key。PDF 在 MinerU 配置完整时优先走 MinerU；未配置或 MinerU 解析失败时自动回退本地 MarkItDown，其他 Office/文本格式也默认由 MarkItDown 转为 Markdown。未配置模型时，服务和界面仍可启动、创建信源和保存上传文件；Embedding 用于文档向量化/向量检索，LLM 用于事件抽取、查询理解与问答。
+On first launch:
 
-### 默认数据库与数据持久化
+1. Enter your name to create or restore the local identity.
+2. Use the 302.AI quick setup, or open **Settings → Models** and configure any OpenAI-compatible LLM and embedding endpoint.
+3. Create a source, upload documents, and wait until their status is **Ready**.
+4. Search, open the original source, or start a cited conversation.
 
-默认数据库是 **SQLite**：应用元数据写入容器卷内的 `/data/sag.db`；知识引擎默认使用 **LanceDB + 内置 SQLite**，上传文件与引擎数据也在同一个 `sagdata` 卷中。因此 `docker compose down` 或重新构建镜像不会丢数据。
+The UI and services still start without model credentials. Embeddings are required for indexing/vector retrieval; the LLM is required for event extraction, query understanding, and generated answers.
 
-| 运行方式 | 应用元数据 | 知识引擎 | 持久化位置 |
-|---|---|---|---|
-| Docker 快速启动（默认） | SQLite | LanceDB + 内置 SQLite | Docker `sagdata` 卷 |
-| 本地开发（默认） | SQLite | LanceDB + 内置 SQLite | `apps/api/.data/` |
-| Postgres 覆盖 | PostgreSQL | pgvector + PostgreSQL | `pgdata` + `sagdata` 卷 |
+### Import knowledge
 
-> **注意：**`docker compose down -v` 会永久删除数据库、知识库和上传文件。只有确认要完全重置时才使用。
+Create a source and add Markdown, text, PDF, Office, or other supported documents. SAG normalizes documents to Markdown, then runs chunking, embedding, event extraction, and entity extraction in the background.
 
-### 常用 Docker 命令
+<p align="center">
+  <img src="docs/assets/readme/product-import.png" alt="Import a document into SAG" width="940" />
+</p>
+
+PDF files use MinerU when it is configured and fall back to local MarkItDown when it is unavailable or fails. Other Office and text formats use MarkItDown by default.
+
+### Search and verify the source
+
+Search globally or restrict the query to selected sources. Every result can open the original chunk beside the ranked result, so retrieval quality is inspectable before an Agent uses it.
+
+<p align="center">
+  <img src="docs/assets/readme/product-search.png" alt="Search results with original source tracing" width="940" />
+</p>
+
+### Ask with citations
+
+The default Agent searches the bound knowledge sources, streams the answer, and attaches clickable citations. The same conversation path is also available through an OpenAI-compatible endpoint.
+
+<p align="center">
+  <img src="docs/assets/readme/product-chat.png" alt="Agent answer with source citations" width="940" />
+</p>
+
+### Explore the event-entity graph
+
+Switch a source from list view to graph view to inspect the events, entities, and associations produced by the SAG index.
+
+<p align="center">
+  <img src="docs/assets/readme/product-graph.png" alt="SAG event-entity knowledge graph" width="940" />
+</p>
+
+<p align="center">
+  <img src="docs/assets/readme/product-graph-3d.png" alt="SAG event-entity 3D knowledge graph" width="940" />
+</p>
+
+### MCP guide
+
+#### Use as an Agent Skill (Claude Code, Codex, and others)
+
+SAG ships an official Skill in [`skills/sag/`](skills/sag/). It teaches an Agent to use eight read-only MCP tools: call `list_sources` to confirm the accessible scope, then follow the `list_documents → outline → search/grep → get_chunk/read` exploration funnel to locate and cite knowledge.
+
+Copy the directory into your Agent's skills directory:
 
 ```bash
-docker compose ps                  # 查看状态
-docker compose logs --tail=200     # 查看最近日志
-docker compose restart             # 重启
-docker compose down                # 停止并保留数据
+# Claude Code
+cp -R skills/sag ~/.claude/skills/sag-knowledge
 
-# 拉取代码更新后，重建并滚动替换容器（数据卷保留）
-docker compose up -d --build
+# Codex
+cp -R skills/sag ~/.codex/skills/sag-knowledge
 ```
 
-默认只监听本机 `127.0.0.1`。当前产品是自动恢复身份的本地单用户模式；不要把 3000/8000 端口直接暴露到公网。如需自定义端口、受信局域网地址或预置模型配置：
+#### Mount MCP directly in an Agent
+
+The Skill is optional. In SAG, open **Settings → Integrations → Knowledge MCP**, select HTTP or local command, and copy the complete configuration. The copied HTTP configuration includes the current JWT, exposes all sources by default, and can be scoped with `source_id`.
+
+<p align="center">
+  <img src="docs/assets/readme/product-mcp.png" alt="SAG Knowledge MCP integration settings" width="940" />
+</p>
+
+### Use SAG as a model (OpenAI-compatible)
+
+SAG exposes an OpenAI Chat Completions endpoint with the same retrieval and citation behavior as the built-in chat:
+
+```bash
+curl -s http://localhost:8000/api/v1/openai/<AGENT_ID>/chat/completions \
+  -H "Authorization: Bearer <SAG_JWT>" \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"What is this material about?"}]}'
+```
+
+The response is a standard `chat.completion` with an additional `sag.citations` field; standard clients ignore unknown fields. Set `"stream": true` to receive SSE chunks.
+
+### Operate and update
+
+```bash
+docker compose ps                  # api and web should be healthy
+docker compose logs -f api web     # follow logs
+docker compose restart             # restart services
+docker compose down                # stop and keep all data
+
+git pull --ff-only                 # update the source checkout
+docker compose up -d --build       # rebuild without deleting volumes
+```
+
+Default persistence:
+
+| Runtime | Application metadata | Knowledge engine | Location |
+| --- | --- | --- | --- |
+| Docker default | SQLite | SQLite + LanceDB | Docker volume `sagdata` |
+| Local development | SQLite | SQLite + LanceDB | `apps/api/.data/` |
+| PostgreSQL override | PostgreSQL | PostgreSQL + pgvector | `pgdata` and `sagdata` volumes |
+
+`docker compose down` preserves data. **`docker compose down -v` permanently deletes the database, knowledge index, and uploaded files.**
+
+### Network and production safety
+
+The default Compose configuration binds ports 3000 and 8000 to `127.0.0.1`. SAG is currently a local, single-user product; do not expose those ports directly to the public internet.
+
+For custom ports or a trusted LAN address:
 
 ```bash
 cp .env.example .env
-# 编辑 .env；局域网访问需设置 BIND_ADDRESS=0.0.0.0
+# Edit BIND_ADDRESS, WEB_PORT, API_PORT, SAG_CORS_ORIGINS, and NEXT_PUBLIC_API_BASE.
 docker compose up -d --build
 ```
 
-如果修改 `WEB_PORT`，请同步修改 `SAG_CORS_ORIGINS`；如果修改 `API_PORT` 或公网 API 地址，请同步修改 `NEXT_PUBLIC_API_BASE`。后者是前端构建期配置，必须带 `--build` 重建。
+`NEXT_PUBLIC_API_BASE` is compiled into the web image, so changing it requires `--build`. A server deployment should add HTTPS and an external access-control layer such as VPN, IP allowlisting, or reverse-proxy authentication.
 
-### Postgres / pgvector 部署（可选）
+---
 
-需要服务器部署或 Postgres 时，使用覆盖文件。先复制 `.env.example`，至少设置强随机的 `SAG_SECRET_KEY`、`POSTGRES_PASSWORD`、实际的 `SAG_CORS_ORIGINS` 与 `NEXT_PUBLIC_API_BASE`；服务器对外监听还需设置 `BIND_ADDRESS=0.0.0.0`。
+<a id="developer-guide"></a>
 
-```bash
-cp .env.example .env
-openssl rand -hex 32              # 将输出填入 .env 的 SAG_SECRET_KEY
-docker compose -f compose.yaml -f compose.postgres.yaml config
-docker compose -f compose.yaml -f compose.postgres.yaml up -d --build
+## Developer Guide
+
+### System boundaries
+
+SAG has a separated Next.js frontend and FastAPI backend. The backend is a reference application built on the public `zleap-sag` Python engine. You can reuse the complete backend from another frontend, or embed `zleap-sag` directly in a Python service of your own.
+
+<p align="center">
+  <img src="docs/assets/readme/repository-architecture.png" alt="SAG repository and API boundaries" width="960" />
+</p>
+
+### Repository map
+
+```text
+apps/
+├── web/                    Next.js 15 + React 19 product UI
+└── api/
+    ├── sag_api/
+    │   ├── api/v1/         FastAPI HTTP routes and serialization
+    │   ├── connectors/     File/web source connectors and registry
+    │   ├── parsing/        MarkItDown and MinerU normalization
+    │   ├── jobs/           Background ingest → extract state machine
+    │   ├── sag/            The only application adapter importing zleap-sag
+    │   ├── generation/     Retrieved evidence → streamed cited answer
+    │   ├── mcp/            Knowledge MCP server and HTTP mount
+    │   ├── services/       Application/domain orchestration
+    │   └── tools/          Built-in and remote MCP Agent tools
+    └── sag_agent/          Framework-independent Agent runtime core
+skills/sag/                 Agent Skill for exploring SAG through MCP
+deploy/                     Deployment initialization assets
+docs/                       Architecture and engineering standards
 ```
 
-公网部署必须在 Web/API 前配置 HTTPS 反向代理与额外访问控制（如 VPN、IP 白名单或反向代理认证），不能依赖本地自动身份作为公网认证。升级前请同时备份 `pgdata` 与 `sagdata`；已有 Postgres 卷创建后，仅修改 `.env` 中的数据库密码不会自动修改数据库内部密码。
+The central dependency rule is simple: application code reaches the engine through `apps/api/sag_api/sag/`; the engine does not know about FastAPI, the Web UI, users, conversations, or citations.
 
-### 本地开发
+### Local development
 
-本地开发仍默认使用 SQLite + LanceDB。分别打开两个终端，并都从仓库根目录执行：
+Start the backend and frontend in separate terminals from the repository root.
 
 ```bash
-# 终端 1：后端（http://localhost:8000）
+# Terminal 1: API at http://localhost:8000
 cd apps/api
 python -m venv .venv
 . .venv/bin/activate
@@ -106,109 +336,222 @@ uvicorn sag_api.main:app --reload
 ```
 
 ```bash
-# 终端 2：前端（http://localhost:3000）
+# Terminal 2: Web at http://localhost:3000
 cd apps/web
-npm ci
+npm install
 npm run dev
 ```
 
-前端依赖统一由 npm 和 `apps/web/package-lock.json` 管理；不要在 `apps/web` 中运行 pnpm 或 yarn。
-
-### 三步走完主干
-
-1. **知识库建信源、上传文档** —— 自动解析、分块、向量化、抽取事件与实体。
-2. **搜索看结果、点开右栏查原文** —— 验证召回，chunk 级可核查。
-3. **直接对话** —— 默认助手已就绪（无需创建），回答带引用，点引用开右栏溯源。
-
-## 信源即 MCP
-
-每个信源都暴露一个标准 MCP 端点，提供三个工具：`search`（检索证据）· `get_entity`（查实体上下文）· `get_chunk`（读原文分块）。
-
-**拿到某个信源的挂载信息：**
+Useful checks:
 
 ```bash
-curl -s http://localhost:8000/api/v1/sources/<SOURCE_ID>/mcp \
-  -H "Authorization: Bearer <SAG_JWT>"
+cd apps/api && pytest
+cd apps/api && ruff check .
+cd apps/web && npm run typecheck
+cd apps/web && npm run build
 ```
 
-返回 HTTP（Streamable-HTTP）URL 与 stdio 配置片段两种接法。前端「信源详情 → 作为 MCP 挂载」也能直接复制。
+### Use `zleap-sag` directly
 
-**挂进 Claude Desktop / Cursor（stdio）：**
+[`zleap-sag`](https://pypi.org/project/zleap-sag/) is the continuously maintained Python engine behind the SAG application. Distribution name: `zleap-sag`; import path: `zleap.sag`; Python: 3.11+; license: MIT. The application currently requires `zleap-sag>=0.7.1`.
 
-```jsonc
-{
-  "mcpServers": {
-    "sag-<信源名>": {
-      "command": "python",
-      "args": ["-m", "sag_api.mcp.server"],
-      "env": { "SAG_MCP_SOURCE_ID": "<SOURCE_ID>" }
-    }
-  }
-}
-```
-
-**HTTP 接法**：宿主填 `http://<host>/mcp/?source_id=<SOURCE_ID>`，并在 `Authorization` 头携带 `Bearer <token>`。
-
-### 作为 Agent Skill（Claude Code / Codex 等）
-
-sag 提供官方 Skill（[`skills/sag/`](skills/sag/)）：教 Agent 用 7 个 MCP 工具走
-「list_documents → outline → search/grep → get_chunk/read」的探索漏斗。
-复制该目录到你的 skills 目录（如 `~/.claude/skills/sag-knowledge/`）即可启用。
-
-> **双形态**：sag 既是**客户端**（自己聊，带引用问答），也是**上下文供给方**
-> （被任意 Agent 经 MCP/Skill/OpenAI 端点挂载）——同一知识库，两个出口。
-
-### Agent 挂载 MCP 扩展工具
-
-Agent 除了绑定信源作答，还能挂载**外部 MCP server**（本地 filesystem、检索、你自建的工具……）。在「Agent → 连接 → MCP server」里填 HTTP url 或本地命令（如 `npx -y @modelcontextprotocol/server-filesystem /data`）即可；对话中模型可直接调用这些工具，与内置检索一视同仁。
-
-> 设计取舍：Agent 自身对绑定信源的检索走**进程内暖引擎**（快、无多余往返）；同一套能力经 MCP server 对**外部宿主**开放。“信源即 MCP” 是对外契约，内部则直连引擎——同源同解。
-
-## Agent 作为模型被调用（OpenAI 兼容）
-
-任意 Agent 暴露一个 OpenAI Chat Completions 端点，检索与引用与站内一致：
+Install the zero-infrastructure local stack:
 
 ```bash
-curl -s http://localhost:8000/api/v1/openai/<AGENT_ID>/chat/completions \
-  -H "Authorization: Bearer <SAG_JWT>" \
-  -H "Content-Type: application/json" \
-  -d '{"messages":[{"role":"user","content":"这份资料讲了什么？"}]}'
+pip install zleap-sag
 ```
 
-返回标准 `chat.completion`，额外带 `sag.citations` 引用字段（标准客户端忽略未知字段）。`"stream": true` 时以 SSE 分块返回。
+Then run the complete ingest → extract → search lifecycle:
 
-## 架构一览
+```python
+import asyncio
 
+from zleap.sag import DataEngine, EngineConfig
+from zleap.sag.config import EmbeddingConfig, LLMConfig
+
+
+async def main() -> None:
+    config = EngineConfig(
+        llm=LLMConfig(
+            api_key="sk-...",
+            base_url="https://your-openai-compatible-host/v1",
+            model="qwen3.6-flash",
+        ),
+        # When api_key/base_url are omitted, embedding reuses the LLM endpoint.
+        embedding=EmbeddingConfig(model="bge-large-en-v1.5"),
+        language="en",
+    )
+
+    # One DataEngine instance represents one logical data source.
+    async with DataEngine(config) as engine:
+        ingest = await engine.ingest("knowledge.md")
+        extract = await engine.extract()
+        result = await engine.search(
+            "Why is SAG effective for multi-hop retrieval?",
+            strategy="multi",
+            top_k=5,
+        )
+
+        print(ingest.chunk_count, extract.event_count)
+        for section in result.sections:
+            print(section.get("content", "")[:200])
+
+
+asyncio.run(main())
 ```
-apps/web   Next.js 15 + shadcn/ui（中性主题，亮暗双色，⌘K 全局搜索）
-apps/api   FastAPI · services 纯领域 · parsing/ 文档转 Markdown · sag/ 唯一引擎适配层
-           · jobs 进程内队列（解析任务续跑 + 退避重试）
-           tools/ Agent 工具层（内置检索/实体 + MCP 适配）· mcp/ 信源 MCP server + HTTP 挂载
-           · 引擎槽 LRU · 就绪/存活探针 · OpenAI 兼容端点
-apps/api/sag_agent  独立 Agent Core · 生命周期 · 版本化事件 · 工具/审批/取消 · RunStore
-zleap-sag  Markdown 分块 · 向量 · 事件—实体图谱 · 检索（只做检索，不做生成）
+
+Local storage is created automatically under `./.zleap/`. Add that directory to `.gitignore`.
+
+#### Configuration
+
+Use one configuration style, not both:
+
+| Style | Construction | Best for |
+| --- | --- | --- |
+| Parameter injection | `EngineConfig(llm=..., embedding=...)` | Libraries, notebooks, explicit application wiring |
+| Environment | `EngineConfig.from_env()` or `from_env(env_file=".env")` | Containers and 12-factor services |
+
+Minimal environment configuration:
+
+```bash
+export OPENAI_API_KEY=sk-...
+export OPENAI_BASE_URL=https://your-openai-compatible-host/v1
+export LLM_MODEL=qwen3.6-flash
+export EMBEDDING_MODEL=bge-large-en-v1.5
 ```
 
-数据模型（单用户、极简）：
+```python
+from zleap.sag import EngineConfig
 
-```
-User    { email, password_hash, name, is_active }
-Source  { name, description, connector_kind, config, sag_source_config_id, 计数… }   # 同时是 MCP 端点
-Document{ … }
-Agent   { name, avatar, persona{ system_prompt, greeting, tools[] } }
-Binding { agent_id, target_type(source|mcp_server), target_id, config }             # 绑信源 / 挂 MCP
-Thread / Message { … 带 citations }
+config = EngineConfig.from_env()
 ```
 
-深入阅读 → [docs/architecture.md](docs/architecture.md) · [Agent Runtime](docs/architecture/agent-runtime.md) · [Agent · MCP · 图谱](docs/architecture/agent-mcp-graph.md)
+`EngineConfig(...)` does not read environment variables implicitly. Use explicit parameters or `from_env()`. A separate embedding endpoint can be set with `EmbeddingConfig(api_key=..., base_url=..., model=...)`.
 
-## 工程规范（本项目同时是一份最佳实践）
+#### Public `DataEngine` API
 
-sag 的每一层都以「可被引用的范本」为标准交付——分层架构与错误模型、测试纪律、
-shadcn/ui 落地与 token 纪律、知识库与 Agent 设计原则，全部成文并与代码互相校验：
+| API | Purpose |
+| --- | --- |
+| `await engine.start()` | Initialize connections; local SQLite/LanceDB schema is created automatically |
+| `await engine.aclose()` | Close engine resources; handled automatically by `async with` |
+| `await engine.chunk(source)` | Parse and chunk a path or raw string without persisting it |
+| `await engine.ingest(path, ...)` | Parse one document, chunk it, embed it, and persist chunks/vectors |
+| `await engine.extract(...)` | Extract and persist the event-entity index for the current source |
+| `await engine.search(query, strategy=..., top_k=...)` | Return a typed `SearchResult` with `sections` and timing/statistics |
+| `await engine.init_schema()` | Idempotently initialize production schemas; not needed for the default local stack |
 
-**[docs/standards/](docs/standards/README.md)** — 价值理念 · [架构](docs/standards/architecture.md) · [前端](docs/standards/frontend.md) · [产品](docs/standards/product.md) ｜ 参与贡献见 [CONTRIBUTING.md](CONTRIBUTING.md)
+Typed results are available from `zleap.sag.results`: `ChunkResult`, `IngestResult`, `ExtractResult`, and `SearchResult`. All engine exceptions derive from `SagError`, so application boundaries can catch one base type.
 
-## 许可
+#### Search strategies
 
-见 [LICENSE](LICENSE)。基于 [`zleap-sag`](https://pypi.org/project/zleap-sag/) 引擎构建。
+| UI label | Python strategy | Implementation |
+| --- | --- | --- |
+| Vector | `vector` | Direct vector retrieval over original chunks; skips entity expansion and is the fastest path |
+| Graph-enhanced | `multi` | SAG's native multi-entity event retrieval with shared-entity SQL expansion and final selection |
+
+The product label **Graph-enhanced** maps to SAG's `multi` strategy; it does not run a separate GraphRAG implementation. Advanced engine strategies include `multi1`, `hopllm`, and `multi_es`; use them only when their backend/candidate-flow trade-offs are needed.
+
+#### Storage backends
+
+| Deployment | Relational storage | Vector storage | Package extra |
+| --- | --- | --- | --- |
+| Local default | SQLite | LanceDB | none |
+| Single database | PostgreSQL | pgvector | `zleap-sag[postgres]` |
+| Production split | MySQL/PostgreSQL/OceanBase | Elasticsearch | `zleap-sag[mysql]`, `[postgres]`, `[es]` |
+| Single database | OceanBase 4.3.3+ | OceanBase vector | `zleap-sag[mysql]` |
+
+Changing `EngineConfig` changes the backend without changing ingest/extract/search calls. Current engine connections are process-global, so use one `EngineConfig` per process.
+
+For the full package configuration, extras, examples, and changelog, see the [`zleap-sag` package page](https://pypi.org/project/zleap-sag/).
+
+### Build your own frontend with the SAG backend
+
+A browser cannot import a Python package directly. A custom frontend should call a Python HTTP service that owns `DataEngine`. This repository's FastAPI backend is that reference service, and it is already separated from the Next.js UI.
+
+The self-hosted API is available after starting SAG:
+
+| Entry | Address |
+| --- | --- |
+| API base | `http://localhost:8000/api/v1` |
+| Interactive OpenAPI | [http://localhost:8000/docs](http://localhost:8000/docs) |
+| OpenAPI schema | [http://localhost:8000/openapi.json](http://localhost:8000/openapi.json) |
+| MCP Streamable HTTP | `http://localhost:8000/mcp/` |
+
+This is a **self-hosted API**, not a hosted public cloud API. Most routes require a SAG JWT:
+
+```bash
+curl -s http://localhost:8000/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Developer"}'
+```
+
+Copy `access_token` from the response and send it as:
+
+```http
+Authorization: Bearer <SAG_TOKEN>
+```
+
+#### API map
+
+| Area | Main routes | Purpose |
+| --- | --- | --- |
+| System | `GET /system/health`, `/system/ready`, `/system/capabilities` | Health and active engine capabilities |
+| Identity | `POST /auth/login`, `GET /auth/me` | Local identity and JWT |
+| Sources | `GET/POST /sources`, `GET/PATCH/DELETE /sources/{id}` | Source lifecycle |
+| Documents | `/sources/{id}/documents` and `/documents/ingest` | File upload, continuous text/message ingestion, reprocessing, deletion |
+| Search | `POST /search`, `POST /sources/{id}/search` | Global or source-scoped `vector`/`atomic`/`multi` retrieval |
+| Graph | `GET /sources/{id}/entities`, `/sources/{id}/graph` | Event-entity inspection |
+| Agents | `/agents`, `/threads`, `/ask` | Agent configuration, conversations, SSE runs, citations |
+| OpenAI-compatible | `POST /openai/{agent_id}/chat/completions` | Use any SAG Agent as a cited model, streamed or non-streamed |
+| MCP | `/mcp/` or `/mcp/?source_id={id}` | Expose the whole knowledge base or one source to an MCP host |
+
+Create a source, ingest text, and search it:
+
+```bash
+BASE=http://localhost:8000/api/v1
+TOKEN=<SAG_TOKEN>
+
+SOURCE_ID=$(curl -s -X POST "$BASE/sources" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Product docs"}' | jq -r .id)
+
+curl -s -X POST "$BASE/sources/$SOURCE_ID/documents/ingest" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"SAG","text":"SAG uses event-entity indexing and query-time dynamic hyperedges."}'
+
+curl -s -X POST "$BASE/sources/$SOURCE_ID/search" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"How does SAG retrieve knowledge?","strategy":"multi","top_k":5}'
+```
+
+Document ingestion is processed by the background job queue. Check the returned document status or its job before expecting search results.
+
+For a frontend served from another origin, add it to `SAG_CORS_ORIGINS`. If the API address changes, rebuild the Web image with the matching `NEXT_PUBLIC_API_BASE`.
+
+### PostgreSQL/pgvector deployment
+
+The optional production override moves application metadata and engine storage to PostgreSQL/pgvector:
+
+```bash
+cp .env.example .env
+openssl rand -hex 32   # set SAG_SECRET_KEY
+openssl rand -hex 24   # set POSTGRES_PASSWORD
+
+docker compose -f compose.yaml -f compose.postgres.yaml config
+docker compose -f compose.yaml -f compose.postgres.yaml up -d --build
+```
+
+Set real `SAG_CORS_ORIGINS` and `NEXT_PUBLIC_API_BASE` values before server deployment. Back up both `pgdata` and `sagdata` before upgrades.
+
+---
+
+## Contributing and License
+
+- Contribution workflow: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Python engine: [`zleap-sag` on PyPI](https://pypi.org/project/zleap-sag/)
+- Paper reproduction: [Zleap-AI/SAG-Benchmark](https://github.com/Zleap-AI/SAG-Benchmark)
+
+SAG is released under the [MIT License](LICENSE).

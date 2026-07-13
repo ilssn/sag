@@ -68,6 +68,22 @@ export function SpaceParticles({ reducedMotion = false }: { reducedMotion?: bool
     () => createParticleOptions(dark, reducedMotion),
     [dark, reducedMotion],
   );
+  const mountedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const handleParticlesLoaded = React.useCallback<
+    NonNullable<React.ComponentProps<typeof Particles>["particlesLoaded"]>
+  >((container) => {
+    // If initialization finishes after unmount, tsparticles otherwise appends
+    // its fallback canvas to document.body and keeps an orphan renderer alive.
+    if (!mountedRef.current) container?.destroy();
+  }, []);
 
   return (
     <ParticlesProvider init={loadSlim}>
@@ -76,6 +92,7 @@ export function SpaceParticles({ reducedMotion = false }: { reducedMotion?: bool
         id={`sag-space-${id}`}
         className="sag-space-particles"
         options={options}
+        particlesLoaded={handleParticlesLoaded}
       />
     </ParticlesProvider>
   );

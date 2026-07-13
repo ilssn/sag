@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     upload_dir: str = "./.data/uploads"   # 上传原始文件落盘
     max_upload_mb: int = 25               # 单文件上传上限
     job_concurrency: int = 2              # 后台处理并发
+    document_extract_concurrency: int = Field(default=5, ge=1, le=50)  # 单文档 chunk 抽取并发
+    document_chunk_max_tokens: int = Field(default=1_000, ge=100, le=100_000)
+    document_chunk_mode: Literal["standard", "heading_strict"] = "standard"
     job_max_attempts: int = 3             # 可重试失败的最大尝试次数（含首次）
     engine_cache_size: int = 16           # 引擎槽 LRU 上限（超限逐出最久未用）
     engine_warmup_count: int = 4          # 启动时预热最近使用的信源引擎数
@@ -84,7 +87,8 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.3
     llm_max_tokens: int = 2048
     llm_context_window: int = 128_000  # 模型上下文窗口（供用量圆环分母）
-    llm_request_timeout: float = 120.0  # 单次 LLM 请求超时（秒）；不设则 SDK 默认 600s×重试=假死
+    llm_timeout_ms: int = Field(default=60_000, ge=1_000, le=600_000)
+    llm_max_retries: int = Field(default=2, ge=0, le=10)
     # 透传给 chat/completions 的额外请求体（JSON），如 {"enable_thinking": false}；
     # 未配置时对 qwen 系模型自动关闭思考（思考模式会让决策/首 token 慢 10 倍以上）
     llm_extra_body: dict | None = None

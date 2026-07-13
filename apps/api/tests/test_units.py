@@ -1,7 +1,7 @@
 """快速单元测试：无需网络 / 引擎。"""
 
 from sag_api.connectors import registry
-from sag_api.core.config import settings
+from sag_api.core.config import Settings, settings
 from sag_api.core.security import hash_password, verify_password
 from sag_api.enums import ConnectorKind
 from sag_api.generation.prompt import build_agent_messages, build_citations, build_messages
@@ -27,6 +27,60 @@ def test_build_engine_config_zero_infra():
     assert cfg.vector_provider == "lancedb"  # 默认零依赖向量后端
     assert cfg.llm.model == settings.llm_model
     assert cfg.data_dir == settings.data_dir
+
+
+def test_document_output_redacts_database_details():
+    from datetime import UTC, datetime
+
+    from sag_api.enums import DocumentStatus
+    from sag_api.schemas.document import DocumentOut
+
+    payload = {
+        "id": "doc-1",
+        "source_id": "source-1",
+        "filename": "note.md",
+        "content_type": "text/markdown",
+        "size_bytes": 12,
+        "status": DocumentStatus.FAILED,
+        "chunk_count": 0,
+        "event_count": 0,
+        "progress": 5,
+        "token_usage": 0,
+        "error": "(sqlite3.IntegrityError) FOREIGN KEY constraint failed [SQL: INSERT]",
+        "created_at": datetime.now(UTC),
+        "updated_at": datetime.now(UTC),
+    }
+    document = DocumentOut.model_validate(payload)
+    assert document.error == "信息源初始化未完成，文档尚未入库，请重试。"
+
+    payload["error"] = "解析服务暂时不可用"
+    document = DocumentOut.model_validate(payload)
+    assert document.error == "解析服务暂时不可用"
+
+
+def test_llm_timeout_and_retries_reach_both_clients(monkeypatch):
+    from sag_api.generation import llm as generation_llm
+
+    seen: dict = {}
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+
+    monkeypatch.setattr(generation_llm, "AsyncOpenAI", FakeAsyncOpenAI)
+    configured = Settings(
+        _env_file=None,
+        llm_timeout_ms=45_000,
+        llm_max_retries=3,
+    )
+
+    generation_llm.LLMClient(configured)
+    assert seen["timeout"] == 45
+    assert seen["max_retries"] == 3
+
+    engine = build_engine_config(configured)
+    assert engine.llm.timeout == 45
+    assert engine.llm.max_retries == 3
 
 
 def test_retrieved_section_from_dict():

@@ -20,7 +20,9 @@ from sag_api.services.document_service import (
     get_document,
     ingest_content,
     list_documents,
+    pause_document,
     reprocess_document,
+    resume_document,
 )
 from sag_api.services.source_service import get_source
 
@@ -177,6 +179,31 @@ async def reprocess(
     return JobOut.model_validate(job)
 
 
+@router.post("/{document_id}/pause", response_model=JobOut)
+async def pause(
+    source_id: str,
+    document_id: str,
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> JobOut:
+    source = await get_source(session, source_id)
+    job = await pause_document(session, source, document_id)
+    return JobOut.model_validate(job)
+
+
+@router.post("/{document_id}/resume", response_model=JobOut)
+async def resume(
+    source_id: str,
+    document_id: str,
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+    job_queue: JobQueue = Depends(get_job_queue),
+) -> JobOut:
+    source = await get_source(session, source_id)
+    job = await resume_document(session, source, document_id, job_queue=job_queue)
+    return JobOut.model_validate(job)
+
+
 @router.delete("/{document_id}", response_model=Ok)
 async def delete_(
     source_id: str,
@@ -184,7 +211,14 @@ async def delete_(
     _user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     job_queue: JobQueue = Depends(get_job_queue),
+    engine_manager: EngineManager = Depends(get_engine_manager),
 ) -> Ok:
     source = await get_source(session, source_id)
-    await delete_document(session, source, document_id, job_queue=job_queue)
+    await delete_document(
+        session,
+        source,
+        document_id,
+        engine_manager=engine_manager,
+        job_queue=job_queue,
+    )
     return Ok(detail="文档已删除")

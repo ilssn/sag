@@ -29,6 +29,23 @@ async def test_health_ready_and_upload_whitelist():
             A = await _register(c)
             sid = (await c.post("/api/v1/sources", headers=A, json={"name": "白名单"})).json()["id"]
 
+            # 创建信源必须同步建立引擎父记录；增量加载器会直接写 article，
+            # 缺少该记录时将触发 FOREIGN KEY constraint failed。
+            from zleap.sag.db import SourceConfig, get_session_factory
+
+            from sag_api.core.db import SessionLocal
+            from sag_api.db.models import Source
+
+            async with SessionLocal() as session:
+                source = await session.get(Source, sid)
+                assert source is not None
+                source_config_id = source.sag_source_config_id
+            engine_session_factory = get_session_factory()
+            async with engine_session_factory() as engine_session:
+                parent = await engine_session.get(SourceConfig, source_config_id)
+                assert parent is not None
+                assert parent.name == "白名单"
+
             # 不支持的扩展名 → 422（校验失败），前端展示明确提示
             bad = await c.post(
                 f"/api/v1/sources/{sid}/documents",
@@ -223,6 +240,107 @@ async def test_engine_lifecycle_reset_waits_for_inflight_operations():
     release_reader.set()
     await asyncio.gather(reader, writer)
     assert writer_entered.is_set() is True
+
+
+@pytest.mark.asyncio
+async def test_engine_allows_same_source_document_concurrency():
+    """文档处理不再占用每源串行锁，同一信源可同时处理多篇文档。"""
+    from sag_api.core.config import settings
+    from sag_api.sag.engine_manager import EngineManager, _Slot
+
+    class FakeEngine:
+        async def aclose(self):
+            pass
+
+    manager = EngineManager(settings)
+    manager._slots["source"] = _Slot(engine=FakeEngine())
+    entered = 0
+    both_entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def in_flight():
+        nonlocal entered
+        async with manager.use_concurrently("source"):
+            entered += 1
+            if entered == 2:
+                both_entered.set()
+            await release.wait()
+
+    first = asyncio.create_task(in_flight())
+    second = asyncio.create_task(in_flight())
+    await asyncio.wait_for(both_entered.wait(), timeout=1)
+    assert manager._slots["source"].concurrent_users == 2
+    release.set()
+    await asyncio.gather(first, second)
+    assert manager._slots["source"].concurrent_users == 0
+
+
+@pytest.mark.asyncio
+async def test_document_cleanup_drains_and_blocks_same_source_processing(monkeypatch):
+    """清理派生数据期间不允许同一信源启动新的文档处理。"""
+    from sag_api.core.config import settings
+    from sag_api.sag import document_cleanup
+    from sag_api.sag.engine_manager import EngineManager, _Slot
+
+    class FakeEngine:
+        async def aclose(self):
+            pass
+
+    class Deleted:
+        chunk_ids = ()
+        event_ids = ()
+        relation_ids = ()
+        entity_ids = ()
+
+    cleanup_entered = asyncio.Event()
+    release_cleanup = asyncio.Event()
+
+    async def fake_delete_records(source_config_id, document_source_id):
+        assert (source_config_id, document_source_id) == ("source", "document")
+        cleanup_entered.set()
+        await release_cleanup.wait()
+        return Deleted()
+
+    monkeypatch.setattr(document_cleanup, "delete_document_records", fake_delete_records)
+    manager = EngineManager(settings)
+    slot = _Slot(engine=FakeEngine())
+    manager._slots["source"] = slot
+
+    first_entered = asyncio.Event()
+    release_first = asyncio.Event()
+    second_entered = asyncio.Event()
+    release_second = asyncio.Event()
+
+    async def first_processing():
+        async with manager.use_concurrently("source"):
+            first_entered.set()
+            await release_first.wait()
+
+    async def second_processing():
+        async with manager.use_concurrently("source"):
+            second_entered.set()
+            await release_second.wait()
+
+    first = asyncio.create_task(first_processing())
+    await first_entered.wait()
+    cleanup = asyncio.create_task(manager.delete_document_data("source", "document"))
+    for _ in range(20):
+        if not slot.concurrent_allowed.is_set():
+            break
+        await asyncio.sleep(0)
+    assert slot.concurrent_allowed.is_set() is False
+
+    second = asyncio.create_task(second_processing())
+    release_first.set()
+    await cleanup_entered.wait()
+    await asyncio.sleep(0)
+    assert second_entered.is_set() is False
+
+    release_cleanup.set()
+    await cleanup
+    await asyncio.wait_for(second_entered.wait(), timeout=1)
+    release_second.set()
+    await asyncio.gather(first, second)
 
 
 @pytest.mark.asyncio

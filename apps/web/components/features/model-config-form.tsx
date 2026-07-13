@@ -21,7 +21,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
 import { Spinner } from "@/components/ui/spinner";
 import { api, ApiError } from "@/lib/api";
-import { SEARCH_STRATEGIES } from "@/lib/retrieval-config";
 import type { ModelConfig, ModelConfigPatch } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -47,6 +46,8 @@ export function ModelConfigForm() {
   const [llmModel, setLlmModel] = React.useState("");
   const [temperature, setTemperature] = React.useState(0.3);
   const [maxTokens, setMaxTokens] = React.useState(2048);
+  const [timeoutMs, setTimeoutMs] = React.useState(60_000);
+  const [maxRetries, setMaxRetries] = React.useState(2);
   const [ctxWindow, setCtxWindow] = React.useState(128000);
   const [embModel, setEmbModel] = React.useState("");
   const [embBaseUrl, setEmbBaseUrl] = React.useState("");
@@ -58,9 +59,6 @@ export function ModelConfigForm() {
   const [mineruVersion, setMineruVersion] =
     React.useState<ModelConfig["mineru_version"]>("2.5");
   const [mineruKey, setMineruKey] = React.useState("");
-  const [strategy, setStrategy] = React.useState<ModelConfig["search_strategy"]>("vector");
-  const [topK, setTopK] = React.useState(8);
-  const [language, setLanguage] = React.useState<ModelConfig["sag_language"]>("zh");
 
   const hydrate = React.useCallback((config: ModelConfig) => {
     setCfg(config);
@@ -68,6 +66,8 @@ export function ModelConfigForm() {
     setLlmModel(config.llm_model);
     setTemperature(config.llm_temperature);
     setMaxTokens(config.llm_max_tokens);
+    setTimeoutMs(config.llm_timeout_ms ?? 60_000);
+    setMaxRetries(config.llm_max_retries ?? 2);
     setCtxWindow(config.llm_context_window ?? 128000);
     setEmbModel(config.embedding_model);
     setEmbBaseUrl(config.embedding_base_url ?? "");
@@ -75,9 +75,6 @@ export function ModelConfigForm() {
     setDocumentParser(config.document_parser);
     setMineruBaseUrl(config.mineru_base_url ?? "");
     setMineruVersion(config.mineru_version);
-    setStrategy(config.search_strategy);
-    setTopK(config.search_top_k);
-    setLanguage(config.sag_language);
     setLlmKey("");
     setEmbKey("");
     setMineruKey("");
@@ -105,6 +102,8 @@ export function ModelConfigForm() {
         llm_model: llmModel.trim(),
         llm_temperature: temperature,
         llm_max_tokens: maxTokens,
+        llm_timeout_ms: timeoutMs,
+        llm_max_retries: maxRetries,
         llm_context_window: ctxWindow,
         embedding_model: embModel.trim(),
         embedding_base_url: embBaseUrl.trim(),
@@ -112,9 +111,6 @@ export function ModelConfigForm() {
         document_parser: documentParser,
         mineru_base_url: mineruBaseUrl.trim() || null,
         mineru_version: mineruVersion,
-        search_strategy: strategy,
-        search_top_k: topK,
-        sag_language: language,
       };
       if (llmKey.trim()) patch.llm_api_key = llmKey.trim();
       if (embKey.trim()) patch.embedding_api_key = embKey.trim();
@@ -162,7 +158,7 @@ export function ModelConfigForm() {
 
   if (loadError) {
     return (
-      <SettingsSection title="模型配置" description="生成、向量和检索参数。">
+      <SettingsSection title="模型配置" description="生成、向量和解析模型参数。">
         <div className="p-4 sm:p-5">
           <Alert variant="destructive">
             <AlertTitle>加载失败</AlertTitle>
@@ -185,8 +181,7 @@ export function ModelConfigForm() {
         {[
           ["生成模型", "正在加载模型连接。"],
           ["向量模型", "正在加载向量化配置。"],
-          ["文档解析", "正在加载文件解析配置。"],
-          ["检索", "正在加载检索规则。"],
+          ["解析模型", "正在加载文件解析模型。"],
         ].map(([title, description]) => (
           <SettingsSection key={title} title={title} description={description}>
             <div className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5">
@@ -233,7 +228,7 @@ export function ModelConfigForm() {
           </div>
         </SettingsRow>
 
-        <SettingsRow title="生成参数" description="控制模型、上下文和输出随机性。">
+        <SettingsRow title="生成参数" description="控制模型、上下文与请求策略。">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field>
               <FieldLabel htmlFor="llm-model">模型</FieldLabel>
@@ -283,6 +278,38 @@ export function ModelConfigForm() {
                 />
               </div>
               <FieldDescription>越低越稳定，越高越发散。</FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="llm-timeout">请求超时（毫秒）</FieldLabel>
+              <Input
+                id="llm-timeout"
+                type="number"
+                min={1000}
+                max={600000}
+                step={1000}
+                value={timeoutMs}
+                onChange={(event) =>
+                  setTimeoutMs(
+                    Math.min(600000, Math.max(1000, Number(event.target.value) || 1000)),
+                  )
+                }
+              />
+              <FieldDescription>单次模型请求的等待上限。</FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="llm-retries">重试次数</FieldLabel>
+              <Input
+                id="llm-retries"
+                type="number"
+                min={0}
+                max={10}
+                step={1}
+                value={maxRetries}
+                onChange={(event) =>
+                  setMaxRetries(Math.min(10, Math.max(0, Number(event.target.value) || 0)))
+                }
+              />
+              <FieldDescription>请求失败后自动重试的次数。</FieldDescription>
             </Field>
           </div>
         </SettingsRow>
@@ -339,7 +366,7 @@ export function ModelConfigForm() {
       </SettingsSection>
 
       <SettingsSection
-        title="文档解析"
+        title="解析模型"
         description="配置 PDF 等文件的解析方式；MinerU 未配置或解析失败时自动回退 MarkItDown。"
       >
         <SettingsRow title="解析引擎" description="选择默认引擎，并配置可选的 MinerU 服务。">
@@ -420,55 +447,6 @@ export function ModelConfigForm() {
                 placeholder={keyPlaceholder(cfg.mineru_api_key_set)}
               />
               <FieldDescription>密钥不会回显，留空保持当前配置不变。</FieldDescription>
-            </Field>
-          </div>
-        </SettingsRow>
-      </SettingsSection>
-
-      <SettingsSection title="检索" description="控制知识召回方式和信息抽取语言。">
-        <SettingsRow
-          title="检索规则"
-          description="快速模式使用向量召回；精确模式增加实体关系扩展与 LLM 精排。"
-        >
-          <div className="grid gap-4 sm:grid-cols-2">
-            <Field>
-              <FieldLabel htmlFor="strategy">默认检索模式</FieldLabel>
-              <Select value={strategy} onValueChange={(value) => setStrategy(value as typeof strategy)}>
-                <SelectTrigger id="strategy">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {SEARCH_STRATEGIES.map(({ value, label }) => (
-                    <SelectItem key={value} value={value}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="language">抽取语言</FieldLabel>
-              <Select value={language} onValueChange={(value) => setLanguage(value as typeof language)}>
-                <SelectTrigger id="language">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="zh">中文</SelectItem>
-                  <SelectItem value="en">English</SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field className="sm:col-span-2">
-              <FieldLabel>{`召回条数 · ${topK}`}</FieldLabel>
-              <div className="flex h-9 items-center">
-                <Slider
-                  value={[topK]}
-                  min={1}
-                  max={50}
-                  step={1}
-                  onValueChange={([value]) => setTopK(value)}
-                />
-              </div>
             </Field>
           </div>
         </SettingsRow>

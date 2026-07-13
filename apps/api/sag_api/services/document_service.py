@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import os
 
-from sqlalchemy import case, select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sag_api.core.errors import NotFoundError
+from sag_api.core.errors import ConflictError, NotFoundError
 from sag_api.db.base import new_id
 from sag_api.db.models import Document, Job, Source
 from sag_api.enums import DocumentStatus, JobStatus, JobType
 from sag_api.jobs import JobQueue
+from sag_api.sag import EngineManager
 
 
 async def list_documents(session: AsyncSession, source_id: str) -> list[Document]:
@@ -124,19 +125,101 @@ async def reprocess_document(
     latest = await session.scalar(
         select(Job).where(Job.document_id == document.id).order_by(Job.created_at.desc())
     )
-    if latest is not None and latest.status in {JobStatus.QUEUED, JobStatus.RUNNING}:
+    if latest is not None and latest.status in {
+        JobStatus.QUEUED,
+        JobStatus.RUNNING,
+        JobStatus.PAUSED,
+    }:
         return latest
+    restart_from_scratch = document.status == DocumentStatus.READY
     document.status = DocumentStatus.PENDING
     document.error = None
+    if restart_from_scratch:
+        document.progress = 0
+        document.token_usage = 0
+    payload = dict(latest.payload or {}) if latest is not None and not restart_from_scratch else {}
+    payload.pop("pause_requested", None)
+    payload.pop("resume_requested", None)
     job = Job(
         type=JobType.PROCESS_DOCUMENT,
         source_id=source.id,
         document_id=document.id,
         status=JobStatus.QUEUED,
         # 上次失败若已创建 MinerU 任务，重新处理应继续轮询而不是再次计费。
-        payload=dict(latest.payload or {}) if latest is not None else {},
+        payload=payload,
     )
     session.add(job)
+    await session.commit()
+    await session.refresh(job)
+    await job_queue.enqueue(job.id)
+    return job
+
+
+async def pause_document(session: AsyncSession, source: Source, document_id: str) -> Job:
+    """协作式暂停：已开始的分块跑完并保存断点，不再领取新分块。"""
+    document = await get_document(session, source, document_id)
+    job = await session.scalar(
+        select(Job)
+        .where(
+            Job.document_id == document.id,
+            Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]),
+        )
+        .order_by(Job.created_at.desc())
+        .limit(1)
+    )
+    if job is None:
+        raise ConflictError("当前文档没有可停止的抽取任务")
+
+    if job.status == JobStatus.QUEUED:
+        paused = await session.execute(
+            update(Job)
+            .where(Job.id == job.id, Job.status == JobStatus.QUEUED)
+            .values(status=JobStatus.PAUSED)
+        )
+        if paused.rowcount == 1:
+            document.status = DocumentStatus.PAUSED
+            await session.commit()
+            await session.refresh(job)
+            return job
+        await session.refresh(job)
+
+    if job.status != JobStatus.RUNNING:
+        raise ConflictError("抽取任务已经结束，无法停止")
+    job.payload = {**(job.payload or {}), "pause_requested": True}
+    await session.commit()
+    await session.refresh(job)
+    return job
+
+
+async def resume_document(
+    session: AsyncSession,
+    source: Source,
+    document_id: str,
+    *,
+    job_queue: JobQueue,
+) -> Job:
+    """把暂停任务原样重新入队，处理器会跳过断点中已完成的分块。"""
+    document = await get_document(session, source, document_id)
+    job = await session.scalar(
+        select(Job)
+        .where(Job.document_id == document.id, Job.status == JobStatus.PAUSED)
+        .order_by(Job.created_at.desc())
+        .limit(1)
+    )
+    if job is None:
+        raise ConflictError("当前文档没有可继续的暂停任务")
+
+    payload = dict(job.payload or {})
+    payload.pop("pause_requested", None)
+    payload["resume_requested"] = True
+    job.payload = payload
+    job.status = JobStatus.QUEUED
+    job.finished_at = None
+    job.error = None
+    document.status = (
+        DocumentStatus.EXTRACTING if payload.get("process_checkpoint") else DocumentStatus.PENDING
+    )
+    document.error = None
     await session.commit()
     await session.refresh(job)
     await job_queue.enqueue(job.id)
@@ -148,20 +231,51 @@ async def delete_document(
     source: Source,
     document_id: str,
     *,
+    engine_manager: EngineManager,
     job_queue: JobQueue | None = None,
 ) -> None:
     document = await get_document(session, source, document_id)
     path = document.storage_path
-    await session.delete(document)
-    await session.execute(
-        update(Source)
-        .where(Source.id == source.id)
-        .values(
-            document_count=case(
-                (Source.document_count > 0, Source.document_count - 1), else_=0
+    sag_source_id = document.sag_source_id
+
+    active_jobs = list(
+        (
+            await session.scalars(
+                select(Job).where(
+                    Job.document_id == document.id,
+                    Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]),
+                )
             )
-        )
+        ).all()
     )
+    for job in active_jobs:
+        job.payload = {**(job.payload or {}), "pause_requested": True}
+        if job.status == JobStatus.QUEUED:
+            job.status = JobStatus.PAUSED
+    if active_jobs:
+        await session.commit()
+
+    if sag_source_id:
+        await engine_manager.delete_document_data(
+            source.sag_source_config_id,
+            sag_source_id,
+            source=source,
+        )
+
+    await session.delete(document)
+    await session.flush()
+    document_count, chunk_count, event_count = (
+        await session.execute(
+            select(
+                func.count(Document.id),
+                func.coalesce(func.sum(Document.chunk_count), 0),
+                func.coalesce(func.sum(Document.event_count), 0),
+            ).where(Document.source_id == source.id)
+        )
+    ).one()
+    source.document_count = int(document_count)
+    source.chunk_count = int(chunk_count)
+    source.event_count = int(event_count)
     await session.commit()
     if path:
         from sag_api.parsing.service import parsed_sidecar_paths

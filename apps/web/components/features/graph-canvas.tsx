@@ -103,7 +103,7 @@ export function GraphLegend({
   return (
     <div
       className={cn(
-        "pointer-events-none absolute left-3 top-3 z-10 max-w-[calc(100%-13rem)] rounded-lg border bg-card/95 px-2.5 py-2 shadow-soft backdrop-blur-sm",
+        "pointer-events-none absolute left-3 top-24 z-10 max-w-[calc(100%-1.5rem)] rounded-lg border bg-card/95 px-2.5 py-2 shadow-soft backdrop-blur-sm sm:top-14",
         className,
       )}
     >
@@ -333,7 +333,7 @@ export function GraphCanvas({
       )}
     >
       {legend}
-      <div className="absolute right-3 top-3 z-20 flex items-center gap-1.5">
+      <div className="absolute right-3 top-3 z-20 flex w-[calc(100%-1.5rem)] flex-wrap items-center justify-end gap-1.5 sm:w-auto sm:max-w-[calc(100%-1.5rem)]">
         <GraphLayoutToggle value={layout} onValueChange={onLayoutChange} />
         <button
           type="button"

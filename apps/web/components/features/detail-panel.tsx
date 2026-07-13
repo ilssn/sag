@@ -16,7 +16,7 @@ import {
 import { api, ApiError } from "@/lib/api";
 import { getToken } from "@/lib/auth";
 import type { Doc } from "@/lib/types";
-import { formatBytes, relativeTime } from "@/lib/format";
+import { formatBytes, formatTokenCount, relativeTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { MarkdownContent } from "@/components/features/markdown-content";
 import { useApp } from "@/components/features/app-shell";
@@ -520,6 +520,11 @@ export function DocumentDetailContent({
             )}
           >
             <DocStatusBadge status={doc.status} />
+            <span>
+              {Math.min(100, Math.max(0, Math.round(doc.progress)))}% ·{" "}
+              {formatTokenCount(doc.token_usage)} tokens
+            </span>
+            <span>·</span>
             <span>{formatBytes(doc.size_bytes)}</span>
             <span>·</span>
             <span>{doc.chunk_count} 分块</span>

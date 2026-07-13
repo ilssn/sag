@@ -13,7 +13,11 @@ _RESTORE = (
     "llm_base_url",
     "llm_model",
     "llm_temperature",
+    "llm_timeout_ms",
+    "llm_max_retries",
     "search_strategy",
+    "document_chunk_max_tokens",
+    "document_chunk_mode",
     "search_top_k",
     "sag_language",
     "llm_api_key",
@@ -22,6 +26,7 @@ _RESTORE = (
     "mineru_api_key",
     "mineru_version",
     "timezone",
+    "document_extract_concurrency",
 )
 
 
@@ -143,6 +148,11 @@ async def test_model_config_crud_masking_and_test():
                 assert "llm_api_key" not in body and body["llm_api_key_set"] is False
                 assert "mineru_api_key" not in body and body["mineru_api_key_set"] is False
                 assert body["effective_document_parser"] == "markitdown"
+                assert body["document_extract_concurrency"] == 5
+                assert body["document_chunk_max_tokens"] == 1_000
+                assert body["document_chunk_mode"] == "standard"
+                assert body["llm_timeout_ms"] == 60_000
+                assert body["llm_max_retries"] == 2
                 assert "search_top_k" in body and "sag_language" in body
 
                 # 连接测试（未配置）→ 立即 ok False，无网络
@@ -153,15 +163,30 @@ async def test_model_config_crud_masking_and_test():
                 r = await c.put(
                     "/api/v1/system/model-config",
                     headers=A,
-                    json={"llm_model": "test-model-x", "search_top_k": 5, "sag_language": "en"},
+                    json={
+                        "llm_model": "test-model-x",
+                        "llm_timeout_ms": 45_000,
+                        "llm_max_retries": 3,
+                        "document_chunk_max_tokens": 1_600,
+                        "document_chunk_mode": "heading_strict",
+                        "search_top_k": 5,
+                        "sag_language": "en",
+                    },
                 )
                 assert r.status_code == 200, r.text
                 assert r.json()["config"]["llm_model"] == "test-model-x"
                 assert r.json()["capabilities"]["llm_model"] == "test-model-x"
                 assert settings.llm_model == "test-model-x"  # 单例即时生效
+                assert settings.llm_timeout_ms == 45_000
+                assert settings.llm_max_retries == 3
+                assert settings.document_chunk_max_tokens == 1_600
+                assert settings.document_chunk_mode == "heading_strict"
                 g = (await c.get("/api/v1/system/model-config", headers=A)).json()
                 assert g["llm_model"] == "test-model-x" and g["search_top_k"] == 5
                 assert g["sag_language"] == "en"
+                assert g["llm_timeout_ms"] == 45_000 and g["llm_max_retries"] == 3
+                assert g["document_chunk_max_tokens"] == 1_600
+                assert g["document_chunk_mode"] == "heading_strict"
 
                 # 密钥：设假 key → set=True 且不回显明文
                 r = await c.put(
@@ -199,11 +224,13 @@ async def test_model_config_crud_masking_and_test():
                         "mineru_base_url": "https://mineru.example.test",
                         "mineru_api_key": "sk-mineru-fake",
                         "mineru_version": "2.5",
+                        "document_extract_concurrency": 7,
                     },
                 )
                 parser_config = r.json()["config"]
                 assert parser_config["mineru_api_key_set"] is True
                 assert parser_config["effective_document_parser"] == "mineru"
+                assert parser_config["document_extract_concurrency"] == 7
                 assert "sk-mineru-fake" not in r.text
 
                 # 非法值 → 422（Literal / 越界）
@@ -225,6 +252,33 @@ async def test_model_config_crud_masking_and_test():
                 assert (
                     await c.put(
                         "/api/v1/system/model-config", headers=A, json={"document_parser": None}
+                    )
+                ).status_code == 422
+                assert (
+                    await c.put(
+                        "/api/v1/system/model-config",
+                        headers=A,
+                        json={"document_extract_concurrency": 0},
+                    )
+                ).status_code == 422
+                for invalid in (
+                    {"llm_timeout_ms": 999},
+                    {"llm_timeout_ms": None},
+                    {"llm_max_retries": 11},
+                    {"llm_max_retries": None},
+                    {"document_chunk_max_tokens": 99},
+                    {"document_chunk_max_tokens": None},
+                    {"document_chunk_mode": "overlap"},
+                    {"document_chunk_mode": None},
+                ):
+                    assert (
+                        await c.put("/api/v1/system/model-config", headers=A, json=invalid)
+                    ).status_code == 422
+                assert (
+                    await c.put(
+                        "/api/v1/system/model-config",
+                        headers=A,
+                        json={"document_extract_concurrency": None},
                     )
                 ).status_code == 422
     finally:

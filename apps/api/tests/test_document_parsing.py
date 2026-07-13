@@ -21,7 +21,7 @@ from sag_api.core.errors import (
 from sag_api.parsing import service
 from sag_api.parsing.mineru import MinerUClient, _assert_public_host, _interpret_poll_payload
 from sag_api.parsing.service import PreparedDocument
-from sag_api.sag.dto import ProcessOutcome
+from sag_api.sag.dto import ProcessCheckpoint, ProcessOutcome
 
 
 def _settings(**overrides: Any) -> Settings:
@@ -374,6 +374,8 @@ async def test_document_job_sends_parsed_markdown_to_engine(monkeypatch):
         error=None,
         chunk_count=0,
         event_count=0,
+        progress=0,
+        token_usage=0,
         sag_source_id=None,
     )
     source = SimpleNamespace(
@@ -382,7 +384,7 @@ async def test_document_job_sends_parsed_markdown_to_engine(monkeypatch):
         chunk_count=0,
         event_count=0,
     )
-    job = SimpleNamespace(document_id="doc-1", progress=0.0, payload={})
+    job = SimpleNamespace(id="job-1", document_id="doc-1", progress=0.0, payload={})
 
     class FakeSession:
         async def get(self, model, _id):
@@ -394,6 +396,9 @@ async def test_document_job_sends_parsed_markdown_to_engine(monkeypatch):
         async def execute(self, _statement):
             pass
 
+        async def refresh(self, _instance, attribute_names=None):
+            pass
+
     prepared_calls: list[str] = []
 
     async def fake_prepare(path, settings, *, state=None, on_state=None):
@@ -403,11 +408,40 @@ async def test_document_job_sends_parsed_markdown_to_engine(monkeypatch):
     class FakeEngineManager:
         seen_path = ""
 
-        async def process_document(self, source_config_id, path, *, source, on_stage):
+        async def process_document(
+            self,
+            source_config_id,
+            path,
+            *,
+            source,
+            on_stage,
+            checkpoint,
+            on_checkpoint,
+            should_pause,
+            max_concurrency,
+        ):
             self.seen_path = path
+            assert max_concurrency == tasks.settings.document_extract_concurrency
             await on_stage("loading")
+            await on_checkpoint(
+                ProcessCheckpoint(
+                    source_id="engine-doc",
+                    chunk_ids=["chunk-1", "chunk-2"],
+                    processed_chunk_ids=["chunk-1"],
+                    event_count=1,
+                    event_ids=["event-1"],
+                    token_usage=1234,
+                )
+            )
             await on_stage("extracting")
-            return ProcessOutcome(source_id="engine-doc", chunk_count=2, event_count=1)
+            return ProcessOutcome(
+                source_id="engine-doc",
+                chunk_count=2,
+                event_count=1,
+                chunk_ids=["chunk-1", "chunk-2"],
+                processed_chunk_ids=["chunk-1", "chunk-2"],
+                token_usage=2468,
+            )
 
     monkeypatch.setattr(tasks, "prepare_document", fake_prepare)
     engine = FakeEngineManager()
@@ -417,6 +451,7 @@ async def test_document_job_sends_parsed_markdown_to_engine(monkeypatch):
     assert engine.seen_path.endswith(".md")
     assert document.status.value == "ready"
     assert document.chunk_count == 2 and document.event_count == 1
+    assert document.progress == 100 and document.token_usage == 2468
 
 
 class _FakeAsyncClient:
