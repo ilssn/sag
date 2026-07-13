@@ -136,9 +136,6 @@
   /* 中性星空：多尺度星点与角落轨道，前景闪光由 SpaceBackdrop 承担。 */
   .bg-space-field {
     --space-bg: hsl(210 20% 97%);
-    --space-star-strong: hsl(216 18% 32% / 0.38);
-    --space-star: hsl(212 14% 40% / 0.24);
-    --space-star-soft: hsl(208 12% 46% / 0.13);
     --space-line: hsl(214 16% 42% / 0.11);
     --space-sparkle: hsl(42 72% 42% / 0.84);
     --space-wash: hsl(44 88% 70% / 0.13);
@@ -166,28 +163,14 @@
     background-color: var(--space-bg);
     background-image:
       linear-gradient(118deg, var(--space-wash), transparent 42%),
-      linear-gradient(302deg, var(--space-wash-secondary), transparent 48%),
-      radial-gradient(circle at 17px 19px, var(--space-star-strong) 0 1px, transparent 1.35px),
-      radial-gradient(circle at 83px 61px, var(--space-star) 0 1px, transparent 1.35px),
-      radial-gradient(circle at 141px 103px, var(--space-star-soft) 0 1px, transparent 1.3px),
-      radial-gradient(circle at 207px 47px, var(--space-star-soft) 0 0.75px, transparent 1.1px);
-    background-position:
-      center,
-      center,
-      0 0,
-      31px 47px,
-      97px 23px,
-      53px 89px;
-    background-repeat: no-repeat, no-repeat, repeat, repeat, repeat, repeat;
-    background-size: auto, auto, 137px 113px, 223px 181px, 347px 277px, 503px 397px;
+      linear-gradient(302deg, var(--space-wash-secondary), transparent 48%);
+    background-position: center;
+    background-repeat: no-repeat;
   }
 
   .bg-space-field--deep,
   .dark .bg-space-field {
     --space-bg: hsl(240 8% 4%);
-    --space-star-strong: hsl(0 0% 100% / 0.48);
-    --space-star: hsl(0 0% 100% / 0.28);
-    --space-star-soft: hsl(0 0% 100% / 0.12);
     --space-line: hsl(0 0% 100% / 0.1);
     --space-sparkle: hsl(45 96% 68% / 0.96);
     --space-wash: hsl(194 18% 11% / 0.44);

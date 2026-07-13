@@ -143,7 +143,7 @@ export function SpaceBackdrop() {
       data-universe-view-progress={initialViewRef.current.progress.toFixed(2)}
       aria-hidden
     >
-      {!reducedMotion && <SpaceParticles />}
+      <SpaceParticles reducedMotion={Boolean(reducedMotion)} />
       {!reducedMotion && (
         <span ref={cursorMeteorRef} className="sag-space-cursor-meteor" data-active="false" />
       )}

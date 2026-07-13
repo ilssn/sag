@@ -6,13 +6,13 @@ import Particles, { ParticlesProvider } from "@tsparticles/react";
 import { loadSlim } from "@tsparticles/slim";
 import { useTheme } from "next-themes";
 
-const BASE_PARTICLE_COUNT = 96;
+const BASE_PARTICLE_COUNT = 104;
 
-function createParticleOptions(dark: boolean): ISourceOptions {
+function createParticleOptions(dark: boolean, reducedMotion: boolean): ISourceOptions {
   return {
     autoPlay: true,
     background: { color: { value: "transparent" } },
-    detectRetina: false,
+    detectRetina: true,
     fpsLimit: 24,
     fullScreen: { enable: false },
     pauseOnBlur: true,
@@ -25,7 +25,7 @@ function createParticleOptions(dark: boolean): ISourceOptions {
       },
       move: {
         direction: "none",
-        enable: true,
+        enable: !reducedMotion,
         outModes: { default: "out" },
         random: true,
         speed: { min: 0.012, max: 0.045 },
@@ -60,11 +60,14 @@ function createParticleOptions(dark: boolean): ISourceOptions {
   };
 }
 
-export function SpaceParticles() {
+export function SpaceParticles({ reducedMotion = false }: { reducedMotion?: boolean }) {
   const id = React.useId().replace(/:/g, "");
   const { resolvedTheme } = useTheme();
   const dark = resolvedTheme === "dark";
-  const options = React.useMemo(() => createParticleOptions(dark), [dark]);
+  const options = React.useMemo(
+    () => createParticleOptions(dark, reducedMotion),
+    [dark, reducedMotion],
+  );
 
   return (
     <ParticlesProvider init={loadSlim}>
