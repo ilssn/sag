@@ -38,6 +38,12 @@
 
 ## Project
 
+### Changelog
+
+**July 14, 2026**
+
+Released a completely new version built on the `zleap-sag` package, featuring an entirely redesigned UI. The previous version has been archived in the `v1` branch and is no longer maintained.
+
 ### SAG in one minute
 
 SAG is not a fusion of traditional RAG and GraphRAG. It is an original retrieval architecture that replaces both.
@@ -55,7 +61,7 @@ Upload a document once. SAG parses it, splits it into chunks, embeds it, extract
 | Capability | What it gives you |
 | --- | --- |
 | Knowledge ingestion | File and web sources, document parsing, chunking, embedding, event/entity extraction, background processing |
-| Search | Global or source-scoped retrieval with `vector`, `atomic`, and `multi` strategies |
+| Search | Global or source-scoped retrieval with Fast (`vector`) and Precise (`multi`) modes |
 | Source tracing | Open any result or citation back to the exact original chunk |
 | Knowledge graph | Inspect events, entities, and their queryable associations |
 | Agent chat | Multi-turn answers grounded in selected sources, with clickable citations |
@@ -442,14 +448,14 @@ config = EngineConfig.from_env()
 
 Typed results are available from `zleap.sag.results`: `ChunkResult`, `IngestResult`, `ExtractResult`, and `SearchResult`. All engine exceptions derive from `SagError`, so application boundaries can catch one base type.
 
-#### Search strategies
+#### Retrieval modes
 
 | UI label | Python strategy | Implementation |
 | --- | --- | --- |
-| Vector | `vector` | Direct vector retrieval over original chunks; skips entity expansion and is the fastest path |
-| Graph-enhanced | `multi` | SAG's native multi-entity event retrieval with shared-entity SQL expansion and final selection |
+| Fast (default) | `vector` | Direct retrieval by semantic similarity for a faster response |
+| Precise | `multi` | Combines entity relationships with LLM reranking for more complete results |
 
-The product label **Graph-enhanced** maps to SAG's `multi` strategy; it does not run a separate GraphRAG implementation. Advanced engine strategies include `multi1`, `hopllm`, and `multi_es`; use them only when their backend/candidate-flow trade-offs are needed.
+The UI exposes only **Fast** and **Precise** retrieval modes. Precise maps to SAG's `multi` strategy and does not run a separate GraphRAG implementation.
 
 #### Storage backends
 
@@ -499,7 +505,7 @@ Authorization: Bearer <SAG_TOKEN>
 | Identity | `POST /auth/login`, `GET /auth/me` | Local identity and JWT |
 | Sources | `GET/POST /sources`, `GET/PATCH/DELETE /sources/{id}` | Source lifecycle |
 | Documents | `/sources/{id}/documents` and `/documents/ingest` | File upload, continuous text/message ingestion, reprocessing, deletion |
-| Search | `POST /search`, `POST /sources/{id}/search` | Global or source-scoped `vector`/`atomic`/`multi` retrieval |
+| Search | `POST /search`, `POST /sources/{id}/search` | Global or source-scoped `vector`/`multi` retrieval |
 | Graph | `GET /sources/{id}/entities`, `/sources/{id}/graph` | Event-entity inspection |
 | Agents | `/agents`, `/threads`, `/ask` | Agent configuration, conversations, SSE runs, citations |
 | OpenAI-compatible | `POST /openai/{agent_id}/chat/completions` | Use any SAG Agent as a cited model, streamed or non-streamed |
