@@ -143,7 +143,8 @@ function buildOrbitalLayout(slice: EventEntityGraphSlice): OrbitalLayout {
   );
   const minimumDistance = Math.max(0.26, Math.min(0.42, 2.45 / Math.sqrt(Math.max(1, anchors.length))));
 
-  for (let iteration = 0; iteration < 90; iteration += 1) {
+  const relaxationIterations = anchors.length > 320 ? 0 : anchors.length > 180 ? 18 : 90;
+  for (let iteration = 0; iteration < relaxationIterations; iteration += 1) {
     entityDirections = entityDirections.map((direction, index, values) => {
       const force = new THREE.Vector3();
       values.forEach((other, otherIndex) => {
@@ -896,7 +897,7 @@ export function OrbitalEventEntityGraph({
       const end = layout.positions.get(entityId);
       if (!start || !end) return;
       const curve = edgeCurve(start, end, relation.id);
-      const points = curve.getPoints(26);
+      const points = curve.getPoints(slice.relations.length > 1_000 ? 10 : 26);
       const entity = slice.entities.find((value) => value.id === relation.entityId);
       const startColor = new THREE.Color(
         eventColors.get(relation.eventId) ?? nodeColor("event", relation.eventId),
@@ -1123,7 +1124,11 @@ export function OrbitalEventEntityGraph({
     resize();
 
     let frame = 0;
+    let inViewport = true;
+    let pageVisible = document.visibilityState !== "hidden";
     const render = (time: number) => {
+      frame = 0;
+      if (!inViewport || !pageVisible) return;
       if (cameraTween) {
         const progress = Math.min(1, (time - cameraTween.startedAt) / 720);
         const eased = 1 - Math.pow(1 - progress, 3);
@@ -1141,7 +1146,29 @@ export function OrbitalEventEntityGraph({
       labelRenderer.render(scene, camera);
       frame = window.requestAnimationFrame(render);
     };
-    frame = window.requestAnimationFrame(render);
+    const startRendering = () => {
+      if (!frame && inViewport && pageVisible) {
+        frame = window.requestAnimationFrame(render);
+      }
+    };
+    const stopRendering = () => {
+      if (!frame) return;
+      window.cancelAnimationFrame(frame);
+      frame = 0;
+    };
+    const onVisibilityChange = () => {
+      pageVisible = document.visibilityState !== "hidden";
+      if (pageVisible) startRendering();
+      else stopRendering();
+    };
+    const intersectionObserver = new IntersectionObserver(([entry]) => {
+      inViewport = entry?.isIntersecting ?? true;
+      if (inViewport) startRendering();
+      else stopRendering();
+    });
+    intersectionObserver.observe(mount);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    startRendering();
 
     sceneApiRef.current = {
       resetCamera: () => animateCamera(homePosition.clone(), new THREE.Vector3()),
@@ -1163,7 +1190,9 @@ export function OrbitalEventEntityGraph({
 
     return () => {
       sceneApiRef.current = null;
-      window.cancelAnimationFrame(frame);
+      stopRendering();
+      intersectionObserver.disconnect();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       resizeObserver.disconnect();
       renderer.domElement.removeEventListener("pointermove", onPointerMove);
       renderer.domElement.removeEventListener("pointerleave", onPointerLeave);
@@ -1233,7 +1262,7 @@ export function OrbitalEventEntityGraph({
 
       <div ref={mountRef} className="absolute inset-0" />
 
-      <div className="pointer-events-none absolute left-3 top-3 z-10 max-w-[calc(100%-12rem)] rounded-md border border-white/10 bg-[#0b1020]/85 px-2.5 py-2 text-white/70 shadow-lg backdrop-blur-md">
+      <div className="pointer-events-none absolute left-3 top-24 z-10 max-w-[calc(100%-1.5rem)] rounded-md border border-white/10 bg-[#0b1020]/85 px-2.5 py-2 text-white/70 shadow-lg backdrop-blur-md sm:top-3">
         <div className="flex flex-wrap gap-x-3 gap-y-1.5">
           <span className="inline-flex items-center gap-1.5 text-[10px]">
             <span
@@ -1243,10 +1272,12 @@ export function OrbitalEventEntityGraph({
               )}
             />
             {eventSurfaceMode === "plates" ? "大陆" : "内核"} · 事件 {slice.events.length}
+            {graph.truncated ? ` / ${graph.counts.events}` : ""}
           </span>
           <span className="inline-flex items-center gap-1.5 text-[10px]">
             <span className="size-2 rounded-full border border-white/60 bg-[#6383ff]" />
             外轨 · 实体 {slice.entities.length}
+            {graph.truncated ? ` / ${graph.counts.entities}` : ""}
           </span>
           <span className="text-[10px] tabular-nums text-white/45">
             {slice.relations.length} 关系
@@ -1254,7 +1285,7 @@ export function OrbitalEventEntityGraph({
         </div>
       </div>
 
-      <div className="absolute right-3 top-3 z-20 flex items-center gap-1.5">
+      <div className="absolute right-3 top-3 z-20 flex w-[calc(100%-1.5rem)] flex-wrap items-center justify-end gap-1.5 sm:w-auto sm:max-w-[calc(100%-1.5rem)]">
         <button
           type="button"
           onClick={() =>
@@ -1295,7 +1326,7 @@ export function OrbitalEventEntityGraph({
           <RotateCcw className="size-4" />
         </button>
         {toolbarActions && (
-          <div className="[&>button]:border-white/15 [&>button]:bg-[#0b1020]/90 [&>button]:text-white/65 [&>button:hover]:bg-white/10 [&>button:hover]:text-white">
+          <div className="flex items-center gap-1.5 [&>button]:border-white/15 [&>button]:bg-[#0b1020]/90 [&>button]:text-white/65 [&>button:hover]:bg-white/10 [&>button:hover]:text-white">
             {toolbarActions}
           </div>
         )}

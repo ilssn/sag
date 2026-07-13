@@ -341,6 +341,16 @@ function buildNetwork(
     source: edge.source,
     target: edge.target,
   }));
+  // Force simulation is quadratic and becomes the dominant UI cost on larger
+  // graphs. The deterministic radial layout remains readable and avoids a long
+  // main-thread stall once the working set crosses this threshold.
+  if (simNodes.length > 280) {
+    return {
+      nodes: radialNodes,
+      edges: makeEdges(slice, radialPositions, layout),
+    };
+  }
+
   const simulation = forceSimulation<SimNode>(simNodes)
     .force(
       "link",
@@ -462,7 +472,9 @@ export function EventEntityGraph({
           >
             {graph.truncated && <AlertTriangle className="size-3 shrink-0" />}
             <span>
-              {slice.events.length} 事件 · {slice.entities.length} 实体 · {slice.relations.length} 关系
+              {slice.events.length}
+              {graph.truncated ? ` / ${graph.counts.events}` : ""} 事件 · {slice.entities.length}
+              {graph.truncated ? ` / ${graph.counts.entities}` : ""} 实体 · {slice.relations.length} 关系
             </span>
           </div>
         </GraphLegend>
@@ -525,10 +537,11 @@ export function SourceGraph({
 
   React.useEffect(() => {
     let alive = true;
+    const controller = new AbortController();
     setError("");
     setRefreshing(Boolean(graph));
     api
-      .getSourceGraph(source.id)
+      .getSourceGraph(source.id, controller.signal)
       .then((response) => {
         if (!alive) return;
         setGraph(response);
@@ -542,6 +555,7 @@ export function SourceGraph({
       });
     return () => {
       alive = false;
+      controller.abort();
     };
     // graph 不能加入依赖；刷新时保留旧画面，避免闪烁。
     // eslint-disable-next-line react-hooks/exhaustive-deps

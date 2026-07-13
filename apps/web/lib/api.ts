@@ -584,8 +584,8 @@ export const api = {
 
   // 检索结果关联实体
   listEntities: (sid: string) => request<Entity[]>(`/api/v1/sources/${sid}/entities`),
-  getSourceGraph: (sid: string) =>
-    request<SourceGraphResponse>(`/api/v1/sources/${sid}/graph`),
+  getSourceGraph: (sid: string, signal?: AbortSignal) =>
+    request<SourceGraphResponse>(`/api/v1/sources/${sid}/graph`, { signal }),
 
   // 近期动态（搜索页时间线）
   getActivity: () => request<ActivityItem[]>("/api/v1/activity"),
