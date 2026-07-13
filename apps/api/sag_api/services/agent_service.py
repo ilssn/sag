@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -47,6 +48,207 @@ _TOOL_LABELS = {
     "get_time": "查询时间",
 }
 
+_DIRECT_INTENT = re.compile(
+    r"^(?:你好|您好|嗨|hi|hello|谢谢|感谢|再见|你是谁|你叫什么)[!！?？。,.，\s]*$"
+    r"|(?:翻译|改写|润色|续写|纠错|起名|写一首|写一段|生成文案|头脑风暴)"
+    r"|(?:总结|概括)(?:以下|这段|这篇|我提供的)",
+    re.IGNORECASE,
+)
+_CLARIFICATION_FIRST_INTENT = re.compile(
+    r"^(?:(?:请|帮我|麻烦你|能否|可以|please)\s*)?"
+    r"(?:分析|总结|介绍|推荐|比较|对比|规划|看看|说说|查一下|analyse|analyze|summarize|"
+    r"recommend|compare|plan)(?:一下)?[!！?？。,.，\s]*$"
+    r"|^(?:最近|现在|目前|这个|那个|昨天|上周|上个月|去年|过去(?:一段时间)?)?"
+    r"(?:怎么样|怎么办|如何)[!！?？。,.，\s]*$",
+    re.IGNORECASE,
+)
+_SIMPLE_ARITHMETIC = re.compile(r"^[\d\s+\-*/().=？?]+$")
+_TIME_INTENT = re.compile(
+    r"(?:现在|今天|当前).{0,6}(?:几点|时间|日期|星期)|(?:时区|timezone|what time|current time)",
+    re.IGNORECASE,
+)
+_RELATIVE_TIME_INTENT = re.compile(
+    r"(?:过去|近)\s*(?:[一二三四五六七八九十百两\d]+|几|数)\s*(?:天|日|周|星期|个?月|季度|年)"
+    r"|(?:昨天|前天|明天|后天|上周|本周|下周|上个?月|本月|下个?月|去年|今年|明年)"
+    r"|\b(?:yesterday|tomorrow)\b"
+    r"|\b(?:last|past|next)\s+(?:(?:\d+|one|two|three|several|few)\s+)?"
+    r"(?:days?|weeks?|months?|quarters?|years?)\b",
+    re.IGNORECASE,
+)
+_TIME_SENSITIVE_INTENT = re.compile(
+    r"(?:最近|最新|近期|当前|现行|实时|截至|今日|今天|本周|本月|今年|刚刚|"
+    r"latest|recent|current|today|this (?:week|month|year)|as of)"
+    r".{0,40}(?:新闻|更新|版本|发布|价格|行情|天气|趋势|发展|政策|法规|赛程|日程|状态|变化|"
+    r"news|updates?|versions?|releases?|price|weather|trends?|policy|schedule|status|changes?)",
+    re.IGNORECASE,
+)
+_EXPLICIT_RESEARCH_INTENT = re.compile(
+    r"(?:资料|知识库|文档|来源|引用|证据|数据|统计|研究|报告|调研|查找|搜索|检索|核实|"
+    r"sources?|citations?|evidence|data|statistics|research|report|find|search|look up|verify)",
+    re.IGNORECASE,
+)
+_RESEARCH_TOOL = re.compile(
+    r"(?:search|find|query|browse|web|news|weather|price|knowledge|document|lookup|read|"
+    r"检索|搜索|查询|新闻|天气|行情|知识|文档|网页)",
+    re.IGNORECASE,
+)
+_CITATION_REFERENCE = re.compile(r"\[(\d+)]")
+_HTTP_URL = re.compile(r"^https?://\S+$", re.IGNORECASE)
+
+
+def _tool_supports_research(tool: AgentTool) -> bool:
+    if tool.spec.name in {"search_context", "get_entity"}:
+        return True
+    return bool(_RESEARCH_TOOL.search(f"{tool.spec.name} {tool.spec.description}"))
+
+
+def _named_tool_choice(name: str) -> dict[str, Any]:
+    return {"type": "function", "function": {"name": name}}
+
+
+def _initial_tool_choice(
+    query: str,
+    tools: tuple[AgentTool, ...],
+    *,
+    knowledge_only: bool,
+    scoped: bool,
+) -> str | dict[str, Any]:
+    """Apply only high-confidence first-turn routing.
+
+    The model keeps ``auto`` for ambiguous requests so it can clarify. Explicit
+    temporal requests first establish a dynamic time anchor; explicit knowledge
+    scopes and research requests still receive deterministic grounding.
+    """
+
+    if not tools:
+        return "auto"
+    names = {tool.spec.name for tool in tools}
+    normalized = " ".join(query.strip().split())
+    if (
+        not normalized
+        or _DIRECT_INTENT.search(normalized)
+        or _CLARIFICATION_FIRST_INTENT.search(normalized)
+        or _SIMPLE_ARITHMETIC.fullmatch(normalized)
+    ):
+        return "auto"
+
+    temporal = bool(
+        _TIME_INTENT.search(normalized)
+        or _RELATIVE_TIME_INTENT.search(normalized)
+        or _TIME_SENSITIVE_INTENT.search(normalized)
+    )
+    if temporal and "get_time" in names:
+        return _named_tool_choice("get_time")
+    if (knowledge_only or scoped) and "search_context" in names:
+        return _named_tool_choice("search_context")
+    if _EXPLICIT_RESEARCH_INTENT.search(normalized) and any(_tool_supports_research(tool) for tool in tools):
+        return "required"
+    if temporal and any(_tool_supports_research(tool) for tool in tools):
+        return "required"
+    return "auto"
+
+
+def _append_current_scene(
+    messages: list[dict[str, Any]],
+    notes: list[str],
+) -> list[dict[str, Any]]:
+    """Keep dynamic run context inside the single system role."""
+
+    if not notes:
+        return list(messages)
+    result = [dict(message) for message in messages]
+    scene = "【当前场景】\n" + "\n".join(f"- {note}" for note in notes)
+    for index, message in enumerate(result):
+        if message.get("role") == "system":
+            result[index] = {**message, "content": f"{message.get('content', '')}\n\n{scene}"}
+            break
+    else:
+        result.insert(0, {"role": "system", "content": scene})
+    return result
+
+
+def _finalize_answer_citations(
+    answer: str,
+    citations: list[dict[str, Any]],
+) -> tuple[str, list[dict[str, Any]]]:
+    """Return one canonical answer whose numeric citations are all clickable.
+
+    Model-invented or non-traceable numbers are removed. When grounded search
+    evidence exists but the model forgot claim markers, an explicitly
+    non-claim-mapped source row is appended instead of fake precision.
+    """
+
+    traceable: dict[int, dict[str, Any]] = {}
+    for citation in citations:
+        number = citation.get("n")
+        if (
+            isinstance(number, int)
+            and not isinstance(number, bool)
+            and citation.get("chunk_id")
+            and citation.get("source_id")
+        ):
+            traceable[number] = citation
+
+    used: list[int] = []
+
+    def replace_reference(match: re.Match[str]) -> str:
+        number = int(match.group(1))
+        if number not in traceable:
+            return ""
+        if number not in used:
+            used.append(number)
+        return match.group(0)
+
+    canonical = _CITATION_REFERENCE.sub(replace_reference, answer).strip()
+    canonical = re.sub(r"[ \t]+([，。！？；：,.!?;:])", r"\1", canonical)
+    if canonical and traceable and not used:
+        used = list(traceable)[:3]
+        label = (
+            "本轮知识库资料（未逐条对应）："
+            if re.search(r"[\u4e00-\u9fff]", canonical)
+            else ("Retrieved knowledge sources (not mapped claim by claim): ")
+        )
+        canonical += "\n\n" + label + " ".join(f"[{number}]" for number in used)
+    return canonical, [traceable[number] for number in used]
+
+
+def _finalize_external_references(
+    answer: str,
+    references: list[dict[str, Any]],
+) -> str:
+    """Guarantee a visible, truthful fallback for URLs returned by tools.
+
+    The prompt asks the model to place links next to claims. If it forgets all
+    of them, append a compact run-level list and explicitly say it is not a
+    claim-by-claim mapping. Only URLs observed in tool output are eligible.
+    """
+
+    valid: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for reference in references:
+        raw_url = reference.get("url")
+        if not isinstance(raw_url, str):
+            continue
+        url = raw_url.strip()
+        if not _HTTP_URL.fullmatch(url) or url in seen:
+            continue
+        seen.add(url)
+        raw_title = reference.get("title")
+        title = " ".join(str(raw_title or "").split()).replace("[", "(").replace("]", ")")
+        if not title:
+            title = url.split("//", 1)[-1].split("/", 1)[0]
+        valid.append((title[:160], url))
+
+    if not valid or any(url in answer for _, url in valid):
+        return answer
+    links = " · ".join(f"[{title}](<{url}>)" for title, url in valid[:3])
+    label = (
+        "外部资料（本轮检索，未逐条对应）："
+        if re.search(r"[\u4e00-\u9fff]", answer)
+        else ("External sources from this run (not mapped claim by claim): ")
+    )
+    return f"{answer.rstrip()}\n\n{label}{links}".strip()
+
 
 @dataclass(frozen=True, slots=True)
 class AgentStreamEvent:
@@ -56,16 +258,12 @@ class AgentStreamEvent:
     data: dict[str, Any]
 
 
-def _enabled_tool_names(
-    agent, *, has_sources: bool = False, knowledge_only: bool = False
-) -> list[str]:
+def _enabled_tool_names(agent, *, has_sources: bool = False, knowledge_only: bool = False) -> list[str]:
     persona = agent.persona or {}
     names = persona.get("tools")
     configured = [name for name in names if isinstance(name, str)] if isinstance(names, list) else []
     # 检索是信源挂载带来的基础能力，不应依赖 persona 中是否碰巧保存了 tools 字段。
-    knowledge_tools = (
-        _KNOWLEDGE_TOOLS if has_sources or getattr(agent, "is_default", False) else []
-    )
+    knowledge_tools = _KNOWLEDGE_TOOLS if has_sources or getattr(agent, "is_default", False) else []
     if knowledge_only:
         # Keep local, read-only system utilities available while excluding
         # configured/MCP tools and model-knowledge fallbacks.
@@ -83,6 +281,12 @@ def _adapt_tool(host_tool, host_context: HostToolContext, citations: list[dict])
         result = await host_tool.invoke(dict(arguments), host_context)
         citations.extend(result.citations)
         count = int(result.data.get("section_count") or len(result.citations) or 0)
+        raw_external_references = result.data.get("external_references")
+        external_references = (
+            [dict(reference) for reference in raw_external_references if isinstance(reference, Mapping)]
+            if isinstance(raw_external_references, list)
+            else []
+        )
         matches = [
             {
                 key: citation.get(key)
@@ -107,11 +311,12 @@ def _adapt_tool(host_tool, host_context: HostToolContext, citations: list[dict])
         elif result.content:
             details["output_preview"] = result.content[:800]
         artifacts: dict[str, Any] = {"citations": result.citations}
+        if external_references:
+            details["external_references"] = external_references[:6]
+            artifacts["external_references"] = external_references
         sections = result.data.get("sections")
         if host_tool.meta.name == "search_context" and isinstance(sections, list) and sections:
-            sources_by_config = {
-                source.sag_source_config_id: source for source in host_context.sources
-            }
+            sources_by_config = {source.sag_source_config_id: source for source in host_context.sources}
             graph = await host_context.engine_manager.graph_for_sections(
                 sections,
                 sources_by_config,
@@ -138,9 +343,7 @@ def _adapt_tool(host_tool, host_context: HostToolContext, citations: list[dict])
                         ],
                     }
                 )
-            event_source_by_id = {
-                str(event["id"]): str(event["source_id"] or "") for event in event_nodes
-            }
+            event_source_by_id = {str(event["id"]): str(event["source_id"] or "") for event in event_nodes}
             artifacts["universe_activation"] = {
                 "query": str(arguments.get("query") or ""),
                 "nodes": [
@@ -154,8 +357,7 @@ def _adapt_tool(host_tool, host_context: HostToolContext, citations: list[dict])
                                     event["source_id"]
                                     for event in event_nodes
                                     if any(
-                                        association.event_id == event["id"]
-                                        and association.entity_id == item.id
+                                        association.event_id == event["id"] and association.entity_id == item.id
                                         for association in graph.associations
                                     )
                                 ),
@@ -202,10 +404,6 @@ def _adapt_tool(host_tool, host_context: HostToolContext, citations: list[dict])
     )
 
 
-def _prompt_preview(handle) -> str:
-    return build_prompt_preview([message.to_model_dict() for message in handle.context.messages])
-
-
 def _stream_event(event: RuntimeEvent, *, payload: Mapping[str, Any] | None = None) -> AgentStreamEvent:
     data = event.to_dict()
     if payload is not None:
@@ -235,6 +433,8 @@ async def generate_stream(
         await active_runtime.start()
 
     citations = list(plan.citations)
+    external_references: list[dict[str, Any]] = []
+    external_reference_urls: set[str] = set()
     trace: list[dict] = []
     tool_inputs: dict[str, dict[str, Any]] = {}
     handle = None
@@ -251,46 +451,67 @@ async def generate_stream(
     )
 
     try:
-        async with open_agent_mcp_tools(mcp_specs) as mcp_tools:
+        async with open_agent_mcp_tools(mcp_specs) as mcp_bundle:
             names = _enabled_tool_names(
                 agent,
                 has_sources=bool(sources),
                 knowledge_only=knowledge_only,
             )
             host_tools = [tool_registry.get(name) for name in names if tool_registry.has(name)]
-            host_tools.extend(mcp_tools)
+            host_tools.extend(mcp_bundle.tools)
             tools = tuple(_adapt_tool(tool, host_context, citations) for tool in host_tools)
-            run_messages = list(plan.messages)
-            if knowledge_only:
-                run_messages.insert(
-                    1 if run_messages and run_messages[0].get("role") == "system" else 0,
-                    {
-                        "role": "system",
-                        "content": (
-                            "本轮是本地知识库问答。知识性问题必须先调用 search_context，"
-                            "只根据工具返回的原文证据回答并保留引用；证据不足时明确说明"
-                            "知识库中没有足够依据，不得使用模型自身知识补充。"
-                        ),
-                    },
+            scene_notes: list[str] = []
+            if mcp_bundle.warnings:
+                unavailable = "、".join(warning.get("server", "MCP") for warning in mcp_bundle.warnings)
+                scene_notes.append(
+                    f"部分挂载工具本轮不可用：{unavailable}。若当前任务依赖这些能力，"
+                    "必须明确说明暂时无法核验，不得用模型记忆替代实时或外部事实。"
                 )
+            if knowledge_only:
+                offline_rule = (
+                    "本轮联网已关闭，只能使用已挂载的本地知识库和必要系统工具；"
+                    "不得调用或声称使用网页、MCP 或其他外部搜索。知识性问题必须先调用 "
+                    "search_context，只根据工具返回的原文证据回答并保留引用；"
+                    "证据不足时明确说明知识库中没有足够依据，不得使用模型自身知识补充。"
+                )
+                if "search_context" not in names:
+                    offline_rule = (
+                        "本轮联网已关闭，且当前 Agent 没有可检索的本地知识库；只允许使用必要系统工具。"
+                        "不得调用或声称使用网页、MCP、其他外部搜索或模型自身知识来补充知识性事实；"
+                        "问题依赖外部或知识库资料时，应明确说明当前没有可用依据。"
+                    )
+                scene_notes.append(offline_rule)
             if plan.source_ids and sources:
-                scope_note = {
-                    "role": "system",
-                    "content": (
-                        "用户已通过 @ 将本轮知识范围限定为："
-                        + "、".join(source.name for source in sources)
-                        + "。问题涉及资料时必须先调用 search_context，并只依据返回证据作答。"
-                    ),
-                }
-                run_messages.insert(1 if run_messages and run_messages[0].get("role") == "system" else 0, scope_note)
+                scene_notes.append(
+                    "用户已通过 @ 将本轮知识范围限定为："
+                    + "、".join(source.name for source in sources)
+                    + "。问题涉及资料时必须先调用 search_context，并只依据返回证据作答。"
+                )
+            run_messages = _append_current_scene(list(plan.messages), scene_notes)
+            # Freeze the actual initial input before the runtime appends model
+            # output and tool-result messages. This is the only content the UI
+            # may describe as the model's starting context.
+            frozen_prompt_preview = build_prompt_preview(run_messages)
+            initial_tool_choice = _initial_tool_choice(
+                plan.query,
+                tools,
+                knowledge_only=knowledge_only,
+                scoped=bool(plan.source_ids),
+            )
             max_turns = max(1, int(getattr(settings, "agent_max_steps", AGENT_MAX_STEPS)))
             definition = RuntimeAgent(
                 name=agent.name,
                 model=llm,
                 tools=tools,
+                initial_tool_choice=initial_tool_choice,
                 max_turns=max_turns,
                 finalize_on_max_turns=True,
-                metadata={"agent_id": agent.id},
+                metadata={
+                    "agent_id": agent.id,
+                    "initial_tool_choice": initial_tool_choice,
+                    "web_enabled": not knowledge_only,
+                    "knowledge_only": knowledge_only,
+                },
             )
             handle = active_runtime.run(
                 definition,
@@ -300,6 +521,8 @@ async def generate_stream(
                     "thread_id": thread_id,
                     "source_ids": [source.id for source in sources],
                     "source_names": [source.name for source in sources],
+                    "web_enabled": not knowledge_only,
+                    "knowledge_only": knowledge_only,
                 },
             )
 
@@ -314,6 +537,9 @@ async def generate_stream(
                         "citations": citations,
                         "sources": [{"id": source.id, "name": source.name} for source in sources],
                         "tools": [tool.spec.name for tool in tools],
+                        "tool_warnings": mcp_bundle.warnings,
+                        "web_enabled": not knowledge_only,
+                        "knowledge_only": knowledge_only,
                     }
                 elif event.type in (
                     EventType.TOOL_APPROVAL_REQUIRED,
@@ -326,6 +552,16 @@ async def generate_stream(
                 elif event.type == EventType.TOOL_COMPLETED:
                     details = payload.get("details") or {}
                     artifacts = payload.get("artifacts") or {}
+                    observed_references = artifacts.get("external_references")
+                    if isinstance(observed_references, list):
+                        for reference in observed_references:
+                            if not isinstance(reference, Mapping):
+                                continue
+                            url = reference.get("url")
+                            if not isinstance(url, str) or url in external_reference_urls:
+                                continue
+                            external_reference_urls.add(url)
+                            external_references.append(dict(reference))
                     activation = artifacts.get("universe_activation")
                     if isinstance(activation, Mapping):
                         activation_event = event.to_dict()
@@ -366,8 +602,7 @@ async def generate_stream(
                         }
                     )
                 elif (
-                    event.type == EventType.MESSAGE_COMPLETED
-                    and payload.get("message", {}).get("role") == "assistant"
+                    event.type == EventType.MESSAGE_COMPLETED and payload.get("message", {}).get("role") == "assistant"
                 ):
                     duration = int(payload.get("duration_ms") or 0)
                     if payload.get("has_tool_calls"):
@@ -375,20 +610,30 @@ async def generate_stream(
                     else:
                         trace.append({"kind": "answer", "step": event.turn, "ms": duration})
                 elif event.type == EventType.RUN_COMPLETED:
+                    canonical_answer, canonical_citations = _finalize_answer_citations(
+                        str(payload.get("output") or ""),
+                        citations,
+                    )
+                    canonical_answer = _finalize_external_references(
+                        canonical_answer,
+                        external_references,
+                    )
                     message_id = None
                     if thread_id is not None:
                         message_id = await persist_answer(
                             session_factory,
                             thread_id,
-                            str(payload.get("output") or ""),
-                            citations,
+                            canonical_answer,
+                            canonical_citations,
                             steps=trace,
+                            prompt_preview=frozen_prompt_preview,
                         )
                     output_payload = {
                         **payload,
+                        "output": canonical_answer,
                         "message_id": message_id,
-                        "citations": citations,
-                        "prompt_preview": _prompt_preview(handle),
+                        "citations": canonical_citations,
+                        "prompt_preview": frozen_prompt_preview,
                     }
                     terminal = True
                 elif event.type in (EventType.RUN_FAILED, EventType.RUN_CANCELLED):

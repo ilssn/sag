@@ -140,9 +140,7 @@ async def get_agent(session: AsyncSession, agent_id: str) -> Agent:
     return agent
 
 
-async def create_agent(
-    session: AsyncSession, *, name: str, avatar: str = "", persona: dict | None = None
-) -> Agent:
+async def create_agent(session: AsyncSession, *, name: str, avatar: str = "", persona: dict | None = None) -> Agent:
     name = name.strip()
     if not name:
         raise ValidationError("Agent 名称不能为空")
@@ -179,11 +177,7 @@ _DEFAULT_PERSONA = {"greeting": _DEFAULT_GREETING, "system_prompt": ""}
 
 def _is_legacy_default_agent(agent: Agent) -> bool:
     """仅识别旧版本完全未自定义的默认助手，避免覆盖用户修改。"""
-    return (
-        agent.name == "sag"
-        and agent.avatar in {"s", "S"}
-        and (agent.persona or {}) == _DEFAULT_PERSONA
-    )
+    return agent.name == "sag" and agent.avatar in {"s", "S"} and (agent.persona or {}) == _DEFAULT_PERSONA
 
 
 async def get_default_agent(session: AsyncSession) -> Agent:
@@ -245,9 +239,7 @@ async def add_binding(
     )
     if exists is not None:
         raise ConflictError("已绑定该目标")
-    binding = AgentBinding(
-        agent_id=agent.id, target_type=target_type, target_id=target_id, config=config
-    )
+    binding = AgentBinding(agent_id=agent.id, target_type=target_type, target_id=target_id, config=config)
     session.add(binding)
     await session.commit()
     await session.refresh(binding)
@@ -382,15 +374,11 @@ async def list_messages_page(
                 and_(Message.created_at == created_at, Message.id < message_id),
             )
         )
-    rows = await session.execute(
-        statement.order_by(Message.created_at.desc(), Message.id.desc()).limit(limit + 1)
-    )
+    rows = await session.execute(statement.order_by(Message.created_at.desc(), Message.id.desc()).limit(limit + 1))
     candidates = list(rows.scalars().all())
     has_more = len(candidates) > limit
     page_desc = candidates[:limit]
-    next_cursor = (
-        _encode_message_cursor(thread_id, page_desc[-1]) if has_more and page_desc else None
-    )
+    next_cursor = _encode_message_cursor(thread_id, page_desc[-1]) if has_more and page_desc else None
     return MessagePage(
         items=list(reversed(page_desc)),
         next_cursor=next_cursor,
@@ -410,19 +398,14 @@ async def _history(session: AsyncSession, thread_id: str, exclude_id: str) -> li
         .limit(settings.history_load_limit)
     )
     messages = list(reversed(rows.scalars().all()))
-    return [
-        {"role": m.role.value, "content": m.content}
-        for m in messages
-    ]
+    return [{"role": m.role.value, "content": m.content} for m in messages]
 
 
 def _history_tokens(history: list[dict[str, str]]) -> int:
     return sum(estimate_tokens(m["content"]) for m in history)
 
 
-async def compress_history(
-    history: list[dict[str, str]], *, llm=None, budget_tokens: int
-) -> list[dict[str, str]]:
+async def compress_history(history: list[dict[str, str]], *, llm=None, budget_tokens: int) -> list[dict[str, str]]:
     """上下文阈值压缩：超预算时把较早消息压成一段摘要，仅保留最近 N 条原文。
 
     有 LLM → 摘要旧段（保留事实/结论/称呼/待办）；无 LLM/失败 → 按预算从尾部裁剪。
@@ -437,17 +420,14 @@ async def compress_history(
         return recent
 
     if llm is not None and getattr(llm, "configured", False):
-        transcript = "\n".join(
-            f"{'用户' if m['role'] == 'user' else '助手'}：{m['content']}" for m in older
-        )[:12000]
+        transcript = "\n".join(f"{'用户' if m['role'] == 'user' else '助手'}：{m['content']}" for m in older)[:12000]
         try:
             summary = await llm.complete(
                 [
                     {
                         "role": "system",
                         "content": (
-                            "把以下对话压缩为要点摘要（≤400字）："
-                            "保留事实、结论、数字、人物称呼与未决事项；不要评论。"
+                            "把以下对话压缩为要点摘要（≤400字）：保留事实、结论、数字、人物称呼与未决事项；不要评论。"
                         ),
                     },
                     {"role": "user", "content": transcript},
@@ -477,6 +457,7 @@ async def compress_history(
 class AskPlan:
     """一次问答的提示词计划（agent-first：检索由循环内工具按需完成，不预置资料区）。"""
 
+    query: str = ""
     messages: list[dict[str, str]] = field(default_factory=list)
     citations: list[dict] = field(default_factory=list)
     prompt_preview: str = ""
@@ -503,6 +484,7 @@ def build_ask_context(
         attachments=attachments,
     )
     return AskPlan(
+        query=query,
         messages=messages,
         prompt_preview=build_prompt_preview(messages),
         source_ids=source_ids or None,
@@ -528,8 +510,13 @@ async def prepare_ask(
         if path is None:
             raise ValidationError(f"附件不存在或已过期：{aid}")
         ext = aid.rsplit(".", 1)[-1].lower()
-        media_type = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
-                      "webp": "image/webp", "gif": "image/gif"}.get(ext, "image/png")
+        media_type = {
+            "png": "image/png",
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "webp": "image/webp",
+            "gif": "image/gif",
+        }.get(ext, "image/png")
         resolved.append({"id": aid, "media_type": media_type, "path": path})
 
     user_msg = Message(
@@ -547,9 +534,7 @@ async def prepare_ask(
 
     history = await _history(session, thread.id, exclude_id=user_msg.id)
     # 历史预算 = 上下文窗口的 40%（其余留给工具轮/回答）
-    history = await compress_history(
-        history, llm=llm, budget_tokens=int(settings.llm_context_window * 0.4)
-    )
+    history = await compress_history(history, llm=llm, budget_tokens=int(settings.llm_context_window * 0.4))
     plan = build_ask_context(
         agent=agent,
         query=query,
@@ -576,6 +561,7 @@ async def persist_answer(
     answer: str,
     citations: list[dict],
     steps: list[dict] | None = None,
+    prompt_preview: str = "",
 ) -> str:
     async with session_factory() as session:
         message = Message(
@@ -584,6 +570,7 @@ async def persist_answer(
             content=answer,
             citations=citations,
             steps=steps or [],
+            prompt_preview=prompt_preview,
         )
         session.add(message)
         await session.commit()

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from sag_api.core.config import settings
 from sag_api.core.logging import get_logger
@@ -332,6 +333,49 @@ def _validated_answer(answer: str, section_count: int) -> str | None:
     return text
 
 
+@dataclass(frozen=True, slots=True)
+class SearchAnswerUpdate:
+    kind: Literal["delta", "completed"]
+    text: str
+
+
+def _search_answer_messages(
+    query: str,
+    sections: list[RetrievedSection],
+) -> tuple[list[dict[str, str]], int]:
+    evidence_blocks: list[str] = []
+    used = 0
+    for index, section in enumerate(sections, 1):
+        block = f"[{index}] {section.heading or '相关资料'}\n{section.content.strip()}"
+        remaining = 12000 - used
+        if remaining <= 0:
+            break
+        block = block[:remaining]
+        evidence_blocks.append(block)
+        used += len(block)
+    return (
+        [
+            {
+                "role": "system",
+                "content": (
+                    "你是检索结果回答器。只回答用户提出的具体问题，不要概括候选集合。"
+                    "只能使用给定证据；忽略与问题无关的内容。每个事实性结论必须标注"
+                    "对应的 [编号]，编号只能来自证据。证据不足时明确说明不足，不得补充"
+                    "常识或猜测。回答简洁、直接。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"问题：{query}\n\n已通过相关性重排的证据：\n"
+                    + "\n\n".join(evidence_blocks)
+                ),
+            },
+        ],
+        len(evidence_blocks),
+    )
+
+
 async def synthesize_search_answer(
     query: str,
     sections: list[RetrievedSection],
@@ -344,38 +388,42 @@ async def synthesize_search_answer(
     if not sections or llm is None or not getattr(llm, "configured", False):
         return fallback
 
-    evidence_blocks: list[str] = []
-    used = 0
-    for index, section in enumerate(sections, 1):
-        block = f"[{index}] {section.heading or '相关资料'}\n{section.content.strip()}"
-        remaining = 12000 - used
-        if remaining <= 0:
-            break
-        block = block[:remaining]
-        evidence_blocks.append(block)
-        used += len(block)
+    messages, evidence_count = _search_answer_messages(query, sections)
     try:
-        answer = await llm.complete(
-            [
-                {
-                    "role": "system",
-                    "content": (
-                        "你是检索结果回答器。只回答用户提出的具体问题，不要概括候选集合。"
-                        "只能使用给定证据；忽略与问题无关的内容。每个事实性结论必须标注"
-                        "对应的 [编号]，编号只能来自证据。证据不足时明确说明不足，不得补充"
-                        "常识或猜测。回答简洁、直接。"
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": (
-                        f"问题：{query}\n\n已通过相关性重排的证据：\n"
-                        + "\n\n".join(evidence_blocks)
-                    ),
-                },
-            ]
-        )
+        answer = await llm.complete(messages)
     except Exception as error:  # noqa: BLE001
         log.warning("搜索答案生成失败，回退证据摘要：%s", error)
         return fallback
-    return _validated_answer(answer, len(sections)) or fallback
+    return _validated_answer(answer, evidence_count) or fallback
+
+
+async def stream_synthesize_search_answer(
+    query: str,
+    sections: list[RetrievedSection],
+    *,
+    llm: Any | None,
+) -> AsyncIterator[SearchAnswerUpdate]:
+    """Yield true provider deltas followed by one citation-validated answer."""
+
+    fallback = fallback_search_answer(query, sections)
+    if not sections or llm is None or not getattr(llm, "configured", False):
+        yield SearchAnswerUpdate(kind="completed", text=fallback)
+        return
+
+    messages, evidence_count = _search_answer_messages(query, sections)
+    parts: list[str] = []
+    try:
+        async for delta in llm.stream_complete(messages):
+            if not delta:
+                continue
+            parts.append(delta)
+            yield SearchAnswerUpdate(kind="delta", text=delta)
+    except asyncio.CancelledError:
+        raise
+    except Exception as error:  # noqa: BLE001
+        log.warning("搜索答案流生成失败，回退证据摘要：%s", error)
+        yield SearchAnswerUpdate(kind="completed", text=fallback)
+        return
+
+    answer = _validated_answer("".join(parts), evidence_count) or fallback
+    yield SearchAnswerUpdate(kind="completed", text=answer)

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   ArrowLeft,
@@ -57,6 +57,7 @@ interface PetActivity {
   mode: Exclude<PetAgentActivity, "done">;
   label: string;
   threadId: string | null;
+  runKey: string | null;
   failed: boolean;
 }
 
@@ -121,6 +122,7 @@ function deriveActivity(state: ConversationSessionSnapshot | null): PetActivity 
       mode: failed ? "error" : "idle",
       label: "",
       threadId: state?.threadId ?? null,
+      runKey: null,
       failed,
     };
   }
@@ -130,6 +132,7 @@ function deriveActivity(state: ConversationSessionSnapshot | null): PetActivity 
       mode: "thinking",
       label: "正在思考下一步",
       threadId: state.threadId,
+      runKey: `${state.sessionId}:${state.run.requestId}`,
       failed,
     };
   }
@@ -139,6 +142,7 @@ function deriveActivity(state: ConversationSessionSnapshot | null): PetActivity 
       mode: "answering",
       label: "正在组织回答",
       threadId: state.threadId,
+      runKey: `${state.sessionId}:${state.run.requestId}`,
       failed,
     };
   }
@@ -147,6 +151,7 @@ function deriveActivity(state: ConversationSessionSnapshot | null): PetActivity 
     mode: "working",
     label: active.label || active.name || "正在使用工具处理",
     threadId: state.threadId,
+    runKey: `${state.sessionId}:${state.run.requestId}`,
     failed,
   };
 }
@@ -239,6 +244,7 @@ export function Pet({
     hideWorkspace,
   } = useApp();
   const router = useRouter();
+  const pathname = usePathname();
   const reduceMotion = useReducedMotion();
   const activity = usePetActivity();
   const ownedCharacter = React.useMemo(
@@ -283,6 +289,8 @@ export function Pet({
   const expandActionTimerRef = React.useRef<number | null>(null);
   const commandCloseTimerRef = React.useRef<number | null>(null);
   const wasStreamingRef = React.useRef(activity.streaming);
+  const activeRunKeyRef = React.useRef<string | null>(activity.runKey);
+  const notifiedRunKeysRef = React.useRef(new Set<string>());
   const pointerFrameRef = React.useRef<number | null>(null);
   const pointerRef = React.useRef({ x: 0, y: 0 });
   const elRef = React.useRef<HTMLDivElement>(null);
@@ -389,7 +397,21 @@ export function Pet({
 
   React.useEffect(() => {
     setOpen(panelMode === "mini");
-    if (panelMode === "mini") setPetOverlay("none");
+    if (panelMode === "mini") {
+      setPetOverlay("none");
+      return;
+    }
+    if (panelMode !== "normal") return;
+
+    // Expanding the mini workspace removes a hovered child without always
+    // producing pointerleave on the pet shell. Clear that latched state so
+    // commands return to their hover/focus-only presentation.
+    setCurious(false);
+    setPetOverlay("none");
+    if (commandCloseTimerRef.current !== null) {
+      window.clearTimeout(commandCloseTimerRef.current);
+      commandCloseTimerRef.current = null;
+    }
   }, [panelMode]);
 
   React.useEffect(() => {
@@ -425,6 +447,9 @@ export function Pet({
   const activeThread = activity.threadId
     ? threads.find((thread) => thread.id === activity.threadId) ?? null
     : null;
+  const answerVisible =
+    (panelMode === "normal" && (pathname === "/chat" || pathname.startsWith("/chat/")))
+    || (panelMode === "mini" && workspaceSection === "answer");
   const canAct = !motionReduced && !activity.streaming && characterState.motion === "idle";
 
   const triggerWave = React.useCallback(() => {
@@ -490,6 +515,7 @@ export function Pet({
 
   React.useEffect(() => {
     if (activity.streaming) {
+      activeRunKeyRef.current = activity.runKey;
       const options = {
         threadId: activity.threadId ?? undefined,
         detail: activeThread?.title,
@@ -500,22 +526,61 @@ export function Pet({
       else if (activity.mode === "answering") character.answer(activity.label, options);
       else character.work(activity.label, options);
     } else if (wasStreamingRef.current) {
+      const completedRunKey = activeRunKeyRef.current;
       const options = {
         threadId: activity.threadId ?? undefined,
         detail: activeThread?.title,
       };
-      if (activity.failed) character.fail("这次没有顺利完成", options);
-      else character.complete("回答完成，来看看吧", options);
+      if (answerVisible) {
+        // The answer is already in front of the user. Returning to idle is
+        // feedback enough; a foreground completion bubble is notification spam.
+        character.idle();
+      } else if (
+        !completedRunKey
+        || !notifiedRunKeysRef.current.has(completedRunKey)
+      ) {
+        if (completedRunKey) {
+          notifiedRunKeysRef.current.add(completedRunKey);
+          if (notifiedRunKeysRef.current.size > 64) {
+            const oldest = notifiedRunKeysRef.current.values().next().value;
+            if (typeof oldest === "string") notifiedRunKeysRef.current.delete(oldest);
+          }
+        }
+        if (activity.failed) character.fail("这次没有顺利完成", { ...options, duration: 3_600 });
+        else character.complete("回答已完成", { ...options, duration: 3_200 });
+      }
+      activeRunKeyRef.current = null;
     }
     wasStreamingRef.current = activity.streaming;
   }, [
     activeThread?.title,
+    answerVisible,
     activity.failed,
     activity.label,
     activity.mode,
+    activity.runKey,
     activity.streaming,
     activity.threadId,
     character,
+  ]);
+
+  React.useEffect(() => {
+    if (
+      answerVisible
+      && !activity.streaming
+      && (
+        characterState.activity === "done"
+        || characterState.speech?.tone === "active"
+      )
+    ) {
+      character.idle();
+    }
+  }, [
+    activity.streaming,
+    answerVisible,
+    character,
+    characterState.activity,
+    characterState.speech?.tone,
   ]);
 
   React.useEffect(() => {
@@ -888,6 +953,9 @@ export function Pet({
     : {};
   const panelSide = alignRight ? "right-0" : "left-0";
   const panelVertical = panelAbove ? "bottom-full mb-2" : "top-full mt-2";
+  const statusPanelVertical = panelAbove
+    ? "bottom-[calc(100%+3rem)]"
+    : "top-full mt-2";
   const scale = characterState.identity.size;
   const visualStyle = {
     width: (collapsed ? 82 : 94) * scale,
@@ -992,6 +1060,7 @@ export function Pet({
       )}
       data-facing={characterState.facing}
       data-collapsed={collapsed ? "true" : "false"}
+      data-pet-workspace={panelMode}
       style={style}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -1010,7 +1079,11 @@ export function Pet({
                 ? { opacity: 1, scale: 1 }
                 : { ...visualAnimate, opacity: 1, scale: 1 }
             }
-            exit={{ opacity: 0, scale: 0.97 }}
+            exit={{
+              opacity: 0,
+              scale: 0.97,
+              transition: { duration: 0.16, ease: "easeOut" },
+            }}
             transition={visualTransition}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={() =>
@@ -1019,9 +1092,10 @@ export function Pet({
             }
             className={cn(
               "absolute flex w-60 max-w-[calc(100vw-2rem)] items-center gap-2 rounded-lg border bg-popover px-3 py-2 text-left shadow-lift",
-              panelVertical,
+              statusPanelVertical,
               panelSide,
             )}
+            data-pet-status="true"
             aria-live="polite"
           >
             {isBusy ? (
@@ -1358,7 +1432,9 @@ export function Pet({
           <div
             className="sag-pet__actions sag-pet__actions--commands sag-pet__actions--collapsed"
             data-align={alignRight ? "right" : "left"}
-            data-visible={curious ? "true" : "false"}
+            data-visible={panelMode === "normal" ? "false" : curious ? "true" : "false"}
+            data-pet-toolbar="true"
+            data-visibility-policy={panelMode === "normal" ? "hover-focus" : "contextual"}
             role="toolbar"
             aria-label="宇航员快捷入口"
             onPointerEnter={showCommands}
@@ -1414,7 +1490,9 @@ export function Pet({
               !ambient && "sag-pet__actions--commands",
             )}
             data-align={alignRight ? "right" : "left"}
-            data-visible={curious ? "true" : "false"}
+            data-visible={panelMode === "normal" ? "false" : curious ? "true" : "false"}
+            data-pet-toolbar="true"
+            data-visibility-policy={panelMode === "normal" ? "hover-focus" : "contextual"}
             role="toolbar"
             aria-label="宇航员快捷入口"
             onPointerEnter={showCommands}

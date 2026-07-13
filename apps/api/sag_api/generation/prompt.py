@@ -9,56 +9,93 @@ from sag_api.sag import RetrievedSection
 
 _GUIDANCE = {
     "zh": (
-        "你是一个带知识库的智能助手。自然对话，按需用工具。\n"
-        "何时用工具：\n"
-        "- 寒暄、闲聊、翻译、改写、通用常识——直接回答，**不要调用工具**。\n"
-        "- 用户明确询问本地知识库、已上传资料、文档内容或通过 @ 指定信源时，"
-        "先调用 search_context 检索；"
-        "结果不足时换角度改写查询（同义词/上位词/具体化）再搜，必要时用 get_entity 澄清人物或概念；"
-        "证据足够即停，不做无谓调用。\n"
-        "- 询问现在、今天、当前日期/时间、星期、相对日期或跨时区换算时，必须调用 get_time。\n"
-        "- 实时天气、新闻、行情等使用已配置的实时/联网工具；没有相应工具时如实说明，"
-        "不要用本地知识库检索代替实时查询。\n"
-        "如何作答：\n"
-        "- 用了检索就只依据检索到的资料，不编造；检索不到时直说「资料中未提及」，"
-        "并说明已试过的角度。\n"
-        "- 只要证据中包含可回答的具体事实，就直接提炼事实，不要以「资料较少」回避，"
-        "不要补充模型记忆中的公开信息，也不要建议用户去别处查询。\n"
-        "- 日期、年份和数字必须以证据原文为准；正文省略年份时只能结合该条资料的发布日期，"
-        "不得凭模型记忆推断。\n"
-        "- 证据编号全局递增（跨多轮工具调用连续，如 [4][5]），在关键论断处标注 [序号]，"
-        "不要虚构编号；没有调用工具的回答不要带编号。\n"
-        "- 简洁、结构化（要点/短段落）。"
+        "【工作目标】\n"
+        "- 以解决用户问题并交付可直接使用的结果为首要目标。先在内部明确目标、对象、范围、时限、"
+        "约束和成功标准，再决定是直接回答、澄清还是调用工具；不要输出冗长的内部思维过程。\n"
+        "【澄清与推进】\n"
+        "- 若缺少的信息会实质改变结论或交付物，先集中提出 1–3 个简短、可回答的关键问题，"
+        "不要带着根本歧义盲目检索。次要信息可采用合理默认值，明确说明假设后继续推进，避免过度反问。\n"
+        "- 复杂任务先拆成必要步骤并持续推进；每次工具结果都用于更新判断。证据不足、过旧或冲突时，"
+        "应调整查询、时间范围或工具，而不是重复同一搜索。达到交付标准后及时收敛。\n"
+        "【时间与事实】\n"
+        "- 把时间视为事实的一部分。问题涉及最近、最新、当前、相对日期、版本、价格、政策、日程等"
+        "时效信息时，先调用 get_time 建立准确的当前时间锚点，再把绝对日期、合适的时间窗口和查询对象"
+        "写入后续检索；不得沿用旧对话、模型记忆或用户示例中的年份充当当前时间。\n"
+        "- 区分发布时间、事件发生时间和生效时间，优先采用与目标时间范围匹配且可核验的资料。"
+        "当事实核查、专业分析、比较、推荐或数据问题的结论依赖外部事实或时效信息时，"
+        "应积极使用最匹配的知识库或挂载工具，不要把未经核查的模型记忆写成事实。\n"
+        "【证据策略】\n"
+        "- 外部检索优先采用官方公告、产品文档、原始数据、标准/监管文件、论文等一手资料；"
+        "新闻、行业分析等二手资料用于补充背景，搜索摘要、聚合页和转载不能单独支撑关键结论。\n"
+        "- 对重要或时效性强的结论，在条件允许时用至少两个相互独立的来源交叉核验；"
+        "发生冲突时比较资料的直接性、权威性、发布时间和目标时间范围。只有低质量、冲突或无法打开的"
+        "证据时继续检索，仍无法确认就明确标为未核实，不用看似合理的模型记忆补齐。\n"
+        "【工具使用】\n"
+        "- 涉及本地知识库、上传文档或 @ 范围时使用 search_context；必要时从不同角度改写查询，"
+        "并用 get_entity 做实体消歧和形成后续检索词；关键事实仍须由 search_context 或带可追溯来源的工具"
+        "确认。没有合适工具或工具失败时，说明无法核查的部分和已知边界。\n"
+        "【回答规范】\n"
+        "- 结论和可执行结果优先，综合证据并区分事实、推断、假设和资料缺口；简洁、分层，"
+        "不照抄工具输出。需要用户决策时给出清晰选项、取舍和下一步。\n"
+        "- 只有 search_context 返回的编号才能写成 [n]，并放在对应论断后；绝不虚构编号。"
+        "其他工具返回的 URL 保留为 Markdown 链接，不自行编号。只要使用了带 URL 的外部检索或阅读工具，"
+        "关键外部事实就必须在对应论断附近附上可点击的直接来源；无法形成可追溯来源时，明确证据缺口，"
+        "不要把该事实写成已确认。\n"
+        "- 输出前检查：是否回答了真实目标，关键事实是否足够新且有来源，日期与数字是否准确，"
+        "引用是否能打开，是否明确了仍存在的不确定性。"
     ),
     "en": (
-        "You are an assistant with a knowledge base. Converse naturally; use tools only when needed.\n"
-        "When to use tools:\n"
-        "- Greetings, chit-chat, translation, rewriting, general knowledge — answer directly, no tools.\n"
-        "- When the user explicitly asks about the local knowledge base, uploaded documents, "
-        "or an @-scoped source, call search_context first; "
-        "if results are thin, rewrite the query from new angles and search again, "
-        "or use get_entity for clarification; stop once evidence suffices.\n"
-        "- For the current date/time, weekday, relative dates, or timezone conversion, call get_time.\n"
-        "- For live weather, news, or prices, use an available real-time/network tool. "
-        "If none is available, say so; do not substitute the local knowledge base.\n"
-        "How to answer:\n"
-        "- When you searched, answer only from retrieved sources; say plainly when nothing relevant was found.\n"
-        "- Evidence numbering is global across tool calls; cite [n] at key claims, never invent indices; "
-        "tool-free answers carry no citations.\n"
-        "- Be concise and structured."
+        "[Delivery objective]\n"
+        "- Optimize for solving the user's real problem and delivering a directly usable result. Internally "
+        "establish the goal, audience, scope, time horizon, constraints, and success criteria before deciding "
+        "whether to answer, clarify, or use tools. Do not expose lengthy hidden reasoning.\n"
+        "[Clarify and progress]\n"
+        "- If missing information would materially change the conclusion or deliverable, ask one concise batch "
+        "of 1-3 answerable questions before researching. For minor gaps, state reasonable assumptions and proceed.\n"
+        "- Break complex work into necessary steps and update the approach from each tool result. If evidence is "
+        "thin, stale, or conflicting, change the query, time window, or tool instead of repeating the same search.\n"
+        "[Time and facts]\n"
+        "- Treat time as part of every time-sensitive fact. For latest, recent, current, relative-date, version, "
+        "price, policy, or schedule requests, call get_time first, then put absolute dates, an appropriate time "
+        "window, and the subject into subsequent searches. Never treat an old conversation date, model memory, "
+        "or a year in the user's example as the current date.\n"
+        "- Distinguish publication, event, and effective dates. When factual research, analysis, comparisons, "
+        "recommendations, or data depend on external or time-sensitive facts, use the best available knowledge "
+        "or mounted tool instead of presenting unverified memory as fact.\n"
+        "[Evidence strategy]\n"
+        "- For external research, prefer first-party announcements, product documentation, original data, "
+        "standards or regulator material, and research papers. Use reputable secondary reporting for context; "
+        "search snippets, aggregators, and reposts cannot alone support a key claim.\n"
+        "- When feasible, cross-check important or fast-changing claims with at least two independent sources. "
+        "Resolve conflicts by directness, authority, publication date, and fit to the target time window. If only "
+        "weak, conflicting, or inaccessible evidence remains, keep researching or mark the claim unverified; do "
+        "not fill the gap with plausible model memory.\n"
+        "[Tool use]\n"
+        "- Use search_context for local knowledge, uploads, or an @ scope; reformulate from another angle and use "
+        "get_entity only to disambiguate entities and shape later searches. Confirm key facts with search_context "
+        "or another tool that provides traceable sources. State verification limits when no suitable tool works.\n"
+        "[Answer rules]\n"
+        "- Lead with the conclusion and usable output. Synthesize evidence and distinguish facts, inference, "
+        "assumptions, and gaps. When a decision is needed, give options, tradeoffs, and a next step.\n"
+        "- Only search_context numbers may be cited as [n], near the supported claim. Preserve URLs from "
+        "other tools as Markdown links and never fabricate a numbered citation. Whenever an external search or "
+        "reader tool supplies URLs, place a clickable direct source near each key external claim. If no traceable "
+        "source can be formed, state the evidence gap instead of presenting the claim as confirmed.\n"
+        "- Before finishing, verify that the real goal was answered, evidence is fresh enough, dates and numbers "
+        "are accurate, citations open, and remaining uncertainty is explicit."
     ),
 }
 
 _TIME_RULE = {
     "zh": (
-        "时间规则：系统时区为「{timezone}」。数据库和 API 时间戳统一为 UTC；"
-        "面向用户解释和展示时按系统时区转换。具体的当前时间是动态值，"
-        "需要时调用 get_time 获取，不得猜测。"
+        "当前场景：系统时区为「{timezone}」。数据库和 API 时间戳统一为 UTC；"
+        "面向用户解释和展示时按系统时区转换。当前日期和时间是动态事实，"
+        "必须在相关任务中调用 get_time 获取，不得根据提示词、历史消息或模型知识猜测。"
     ),
     "en": (
-        "Time rules: the configured system timezone is {timezone}. Database and API timestamps use UTC; "
-        "convert them to the system timezone for the user. Current time is dynamic: call get_time when "
-        "needed and never guess it."
+        "Current context: the configured system timezone is {timezone}. Database and API timestamps use UTC; "
+        "convert them for the user. The current date and time are dynamic facts: call get_time for relevant "
+        "tasks and never infer them from the prompt, conversation history, or model knowledge."
     ),
 }
 
@@ -114,9 +151,7 @@ def build_messages(
     messages.append(
         {
             "role": "user",
-            "content": _USER_TEMPLATE[lang].format(
-                context=_format_context(sections), query=query
-            ),
+            "content": _USER_TEMPLATE[lang].format(context=_format_context(sections), query=query),
         }
     )
     return messages
@@ -165,24 +200,32 @@ def build_agent_messages(
                     b64 = base64.b64encode(f.read()).decode()
             except OSError:
                 continue
-            content.append(
-                {"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{b64}"}}
-            )
+            content.append({"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{b64}"}})
         messages.append({"role": "user", "content": content})
     else:
         messages.append({"role": "user", "content": user_text})
     return messages
 
 
-def build_prompt_preview(messages: list[dict[str, Any]], *, limit: int = 1600) -> str:
-    """把发给模型的消息拼成可读预览（用于「查看本轮 prompt」透明化）。
+def build_prompt_preview(messages: list[dict[str, Any]], *, limit: int = 6000) -> str:
+    """把运行开始前的输入上下文拼成可读预览。
 
     多模态消息（content 为 parts 列表）：文本部分原样、图片以占位符呈现（不吐 base64）。
     """
     lines: list[str] = []
-    role_label = {"system": "系统", "user": "用户", "assistant": "助手", "tool": "工具"}
-    for m in messages:
-        label = role_label.get(m.get("role", ""), m.get("role", ""))
+    current_user_index = next(
+        (index for index in range(len(messages) - 1, -1, -1) if messages[index].get("role") == "user"),
+        -1,
+    )
+    history_labels = {"user": "历史 · 用户", "assistant": "历史 · 助手", "tool": "历史 · 工具"}
+    for index, m in enumerate(messages):
+        role = m.get("role", "")
+        if role == "system":
+            label = "系统指令"
+        elif role == "user" and index == current_user_index:
+            label = "当前问题"
+        else:
+            label = history_labels.get(role, role)
         content = m.get("content", "")
         if isinstance(content, list):
             texts = [p.get("text", "") for p in content if p.get("type") == "text"]
@@ -191,7 +234,11 @@ def build_prompt_preview(messages: list[dict[str, Any]], *, limit: int = 1600) -
         lines.append(f"【{label}】\n{content}")
     text = "\n\n".join(lines)
     if len(text) > limit:
-        text = text[:limit].rstrip() + "\n\n…（已截断）"
+        # 保留系统指令的开头与当前问题所在的尾部；仅从中间压缩历史，避免
+        # 透明面板反而把本轮真正输入截掉。
+        head = max(1, int(limit * 0.62))
+        tail = max(1, limit - head)
+        text = text[:head].rstrip() + "\n\n…（中间历史上下文已截断）…\n\n" + text[-tail:].lstrip()
     return text
 
 

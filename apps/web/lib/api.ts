@@ -63,6 +63,234 @@ export class ApiError extends Error {
   }
 }
 
+export interface GlobalSearchBody {
+  query: string;
+  source_ids?: string[];
+  top_k?: number;
+  strategy?: SearchStrategy;
+  save_exploration?: boolean;
+}
+
+export interface GlobalSearchStreamHandlers {
+  onResult: (result: SearchResponse) => void;
+  onSummaryDelta: (delta: string) => void;
+  onCompleted: (result: SearchResponse) => void;
+}
+
+interface SearchStreamFrame {
+  event: string;
+  data: unknown;
+}
+
+type SearchStreamTimeout = "first-result" | "idle";
+
+const SEARCH_FIRST_RESULT_TIMEOUT_MS = 30_000;
+const SEARCH_STREAM_IDLE_TIMEOUT_MS = 45_000;
+
+function isSearchResponse(value: unknown): value is SearchResponse {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<SearchResponse>;
+  return typeof candidate.query === "string"
+    && Array.isArray(candidate.sections)
+    && Array.isArray(candidate.events)
+    && Array.isArray(candidate.entities)
+    && Array.isArray(candidate.relations)
+    && Array.isArray(candidate.source_hits)
+    && typeof candidate.summary === "string"
+    && Boolean(candidate.stats)
+    && typeof candidate.stats === "object";
+}
+
+function parseSearchStreamFrame(frame: string): SearchStreamFrame | null {
+  let event = "";
+  const data: string[] = [];
+  for (const line of frame.split(/\r?\n/)) {
+    if (!line || line.startsWith(":")) continue;
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+  }
+  if (!data.length) return null;
+  try {
+    return { event, data: JSON.parse(data.join("\n")) };
+  } catch {
+    throw new ApiError(0, "invalid_search_stream", "搜索服务返回了无法解析的流式数据");
+  }
+}
+
+async function streamGlobalSearch(
+  body: GlobalSearchBody,
+  handlers: GlobalSearchStreamHandlers,
+  signal?: AbortSignal,
+): Promise<SearchResponse> {
+  const token = getToken();
+  const timeoutController = new AbortController();
+  const combinedSignal = signal
+    ? AbortSignal.any([signal, timeoutController.signal])
+    : timeoutController.signal;
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  let timeoutReason: SearchStreamTimeout | null = null;
+  const clearStreamTimeout = () => {
+    if (timeoutHandle !== null) clearTimeout(timeoutHandle);
+    timeoutHandle = null;
+  };
+  const armStreamTimeout = (reason: SearchStreamTimeout, delay: number) => {
+    clearStreamTimeout();
+    timeoutHandle = setTimeout(() => {
+      timeoutReason = reason;
+      timeoutController.abort();
+    }, delay);
+  };
+  const timeoutError = () => new ApiError(
+    0,
+    "timeout",
+    timeoutReason === "first-result"
+      ? "检索准备超时，请重试"
+      : "搜索流长时间无响应，请重试",
+  );
+
+  armStreamTimeout("first-result", SEARCH_FIRST_RESULT_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/api/v1/search/stream`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+      signal: combinedSignal,
+    });
+  } catch (error) {
+    clearStreamTimeout();
+    if (timeoutReason) throw timeoutError();
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new ApiError(0, "aborted", "请求已取消");
+    }
+    if (signal?.aborted) throw new ApiError(0, "aborted", "请求已取消");
+    throw new ApiError(0, "network", "网络异常，请稍后重试");
+  }
+
+  if (response.status === 401 && typeof window !== "undefined") {
+    clearToken();
+    window.location.href = "/login";
+  }
+  if (!response.ok || !response.body) {
+    clearStreamTimeout();
+    let code = "search_stream_error";
+    let message = response.statusText || "检索失败";
+    try {
+      const value = await response.json();
+      code = value?.error?.code ?? code;
+      const detail = value?.error?.message ?? value?.detail;
+      if (detail) message = typeof detail === "string" ? detail : JSON.stringify(detail);
+    } catch {
+      /* Keep the stable fallback when a proxy returns HTML or an empty body. */
+    }
+    throw new ApiError(response.status, code, message);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let completed: SearchResponse | null = null;
+  const protocolState: { stage: "awaiting-result" | "streaming" } = {
+    stage: "awaiting-result",
+  };
+
+  const dispatch = (rawFrame: string) => {
+    const frame = parseSearchStreamFrame(rawFrame);
+    if (!frame) return;
+    if (frame.event === "result") {
+      if (protocolState.stage !== "awaiting-result" || !isSearchResponse(frame.data)) {
+        throw new ApiError(0, "invalid_search_stream", "搜索结果事件顺序或格式无效");
+      }
+      protocolState.stage = "streaming";
+      armStreamTimeout("idle", SEARCH_STREAM_IDLE_TIMEOUT_MS);
+      handlers.onResult(frame.data);
+      return;
+    }
+    if (frame.event === "summary.delta") {
+      if (protocolState.stage !== "streaming") {
+        throw new ApiError(0, "invalid_search_stream", "搜索总结出现在检索结果之前");
+      }
+      const delta = (frame.data as { delta?: unknown })?.delta;
+      if (typeof delta !== "string") {
+        throw new ApiError(0, "invalid_search_stream", "搜索总结增量格式无效");
+      }
+      if (delta) handlers.onSummaryDelta(delta);
+      return;
+    }
+    if (frame.event === "completed") {
+      if (protocolState.stage !== "streaming" || !isSearchResponse(frame.data)) {
+        throw new ApiError(0, "invalid_search_stream", "搜索完成事件顺序或格式无效");
+      }
+      completed = frame.data;
+      clearStreamTimeout();
+      handlers.onCompleted(completed);
+      return;
+    }
+    if (frame.event === "error") {
+      const payload = frame.data as { code?: unknown; message?: unknown };
+      throw new ApiError(
+        0,
+        typeof payload?.code === "string" ? payload.code : "search_stream_error",
+        typeof payload?.message === "string" ? payload.message : "检索失败",
+      );
+    }
+    throw new ApiError(0, "invalid_search_stream", `未知的搜索流事件：${frame.event || "(empty)"}`);
+  };
+
+  const cancelReader = async () => {
+    try {
+      await reader.cancel();
+    } catch {
+      /* The original protocol/network error is more useful than cancel noise. */
+    }
+  };
+
+  try {
+    readLoop: while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (protocolState.stage === "streaming") {
+        // Includes EventSourceResponse ping comments, so a healthy long model
+        // generation is kept alive without weakening the first-result limit.
+        armStreamTimeout("idle", SEARCH_STREAM_IDLE_TIMEOUT_MS);
+      }
+      buffer += decoder.decode(value, { stream: true });
+      let separator = buffer.match(/\r?\n\r?\n/);
+      while (separator?.index !== undefined) {
+        const frame = buffer.slice(0, separator.index);
+        buffer = buffer.slice(separator.index + separator[0].length);
+        if (frame.trim()) dispatch(frame);
+        if (completed) break readLoop;
+        separator = buffer.match(/\r?\n\r?\n/);
+      }
+    }
+    if (!completed) {
+      buffer += decoder.decode();
+      if (buffer.trim()) dispatch(buffer);
+    }
+    if (completed) await cancelReader();
+  } catch (error) {
+    await cancelReader();
+    if (timeoutReason) throw timeoutError();
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new ApiError(0, "aborted", "请求已取消");
+    }
+    if (signal?.aborted) throw new ApiError(0, "aborted", "请求已取消");
+    throw error;
+  } finally {
+    clearStreamTimeout();
+    reader.releaseLock();
+  }
+
+  if (!completed) {
+    throw new ApiError(0, "search_stream_incomplete", "搜索连接提前结束，请重试");
+  }
+  return completed;
+}
+
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = { ...(opts.headers as Record<string, string>) };
@@ -280,18 +508,13 @@ export const api = {
     request(`/api/v1/agents/${id}/threads/${tid}`, { method: "DELETE" }),
 
   // 搜索
-  globalSearch: (b: {
-    query: string;
-    source_ids?: string[];
-    top_k?: number;
-    strategy?: SearchStrategy;
-    save_exploration?: boolean;
-  }, signal?: AbortSignal) =>
+  globalSearch: (b: GlobalSearchBody, signal?: AbortSignal) =>
     request<SearchResponse>("/api/v1/search", {
       method: "POST",
       body: JSON.stringify(b),
       signal,
     }),
+  streamGlobalSearch,
 
   // 知识宇宙：统计轮廓 + 有界激活
   universeManifest: () => request<UniverseManifest>("/api/v1/universe/manifest"),

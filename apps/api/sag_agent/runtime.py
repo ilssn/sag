@@ -59,8 +59,7 @@ class RunContext:
 
 TransformContext = Callable[
     [tuple[AgentMessage, ...], RunContext],
-    Sequence[AgentMessage | Mapping[str, Any]]
-    | Awaitable[Sequence[AgentMessage | Mapping[str, Any]]],
+    Sequence[AgentMessage | Mapping[str, Any]] | Awaitable[Sequence[AgentMessage | Mapping[str, Any]]],
 ]
 BeforeToolCall = Callable[
     [ToolCall, AgentTool, RunContext],
@@ -79,6 +78,9 @@ class Agent:
     model: ModelProvider
     instructions: str = ""
     tools: tuple[AgentTool, ...] = ()
+    # Hosts may use provider `auto`/`required` or force one named function on
+    # the first turn. Later turns return to `auto` so evidence can be used.
+    initial_tool_choice: str | Mapping[str, Any] | None = None
     max_turns: int | None = None
     transform_context: TransformContext | None = None
     finalize_on_max_turns: bool = False
@@ -313,6 +315,20 @@ class AgentRuntime:
             raise ValueError("agent name cannot be empty")
         if not isinstance(agent.model, ModelProvider):
             raise TypeError("agent.model must implement ModelProvider.stream_turn")
+        registry = ToolRegistry(agent.tools)
+        choice = agent.initial_tool_choice
+        if isinstance(choice, str):
+            if choice not in ("auto", "required", "none"):
+                raise ValueError("agent.initial_tool_choice must be auto, required, none, or None")
+        elif choice is not None:
+            if not isinstance(choice, Mapping):
+                raise ValueError("agent.initial_tool_choice must be a string, mapping, or None")
+            function = choice.get("function")
+            name = function.get("name") if isinstance(function, Mapping) else None
+            if choice.get("type") != "function" or not isinstance(name, str) or not name.strip():
+                raise ValueError("named initial_tool_choice must select a function name")
+            if registry.get(name) is None:
+                raise ValueError(f"initial_tool_choice references unknown tool: {name}")
 
         messages = normalize_messages(history)
         if agent.instructions:
@@ -327,7 +343,6 @@ class AgentRuntime:
         if not messages or messages[-1].role not in ("user", "tool"):
             raise ValueError("a run must end with a user or tool message")
 
-        ToolRegistry(agent.tools)  # validate names before any work starts
         rid = run_id or uuid.uuid4().hex
         if rid in self._active:
             raise ValueError(f"run already active: {rid}")
@@ -488,9 +503,7 @@ class AgentRuntime:
                 return str(assistant.content or "") or "\n".join(outcome.model_content for outcome in outcomes)
 
         if agent.finalize_on_max_turns:
-            handle.context.messages.append(
-                AgentMessage(role="system", content=agent.final_instructions)
-            )
+            handle.context.messages.append(AgentMessage(role="system", content=agent.final_instructions))
             assistant, duration_ms = await self._model_turn(
                 agent,
                 handle,
@@ -523,6 +536,7 @@ class AgentRuntime:
         request = ModelRequest(
             messages=prepared,
             tools=tools.schemas(),
+            tool_choice=(agent.initial_tool_choice if turn == 1 and tools.all() else None),
             run_id=ctx.run_id,
             turn=turn,
             metadata=dict(ctx.metadata),
@@ -854,9 +868,7 @@ class AgentRuntime:
             await self.store.append(event)
         except Exception as exc:  # noqa: BLE001
             store_error = exc
-            ctx.metadata.setdefault("store_errors", []).append(
-                f"failed to append {event.type.value}: {exc}"
-            )
+            ctx.metadata.setdefault("store_errors", []).append(f"failed to append {event.type.value}: {exc}")
         handle._push(event)
         for listener in tuple(self._listeners):
             try:

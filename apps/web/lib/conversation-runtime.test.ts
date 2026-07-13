@@ -24,7 +24,7 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-function message(id: string, content: string): Message {
+function message(id: string, content: string, promptPreview?: string): Message {
   return {
     id,
     thread_id: "thread-1",
@@ -33,6 +33,7 @@ function message(id: string, content: string): Message {
     citations: [],
     attachments: [],
     steps: [],
+    prompt_preview: promptPreview,
     created_at: "2026-07-12T00:00:00Z",
   };
 }
@@ -99,6 +100,7 @@ class FakeTransport implements ConversationTransport {
   readonly deleteCalls: string[] = [];
   readonly historyPages: MessagePage[] = [];
   readonly historyCursors: Array<string | null | undefined> = [];
+  readonly streamCalls: Array<{ webEnabled: boolean; knowledgeOnly?: boolean }> = [];
   approvalResult: Promise<void> | null = null;
   onEvent: ((event: AgentEvent) => void) | null = null;
   streamSignal: AbortSignal | null = null;
@@ -114,10 +116,11 @@ class FakeTransport implements ConversationTransport {
     return this.historyPages.shift() ?? page();
   }
 
-  stream(input: {
-    onEvent: (event: AgentEvent) => void;
-    signal: AbortSignal;
-  }): Promise<AgentRunOutcome> {
+  stream(input: Parameters<ConversationTransport["stream"]>[0]): Promise<AgentRunOutcome> {
+    this.streamCalls.push({
+      webEnabled: input.webEnabled,
+      knowledgeOnly: input.knowledgeOnly,
+    });
     this.onEvent = input.onEvent;
     this.streamSignal = input.signal;
     return this.streamResult.promise;
@@ -173,7 +176,9 @@ afterEach(() => {
 describe("conversation runtime", () => {
   it("keeps stable session/thread identity and loads MessagePage history", async () => {
     const transport = new FakeTransport();
-    transport.historyPages.push(page([message("message-1", "历史回答")]));
+    transport.historyPages.push(
+      page([message("message-1", "历史回答", "【系统指令】\n规则\n\n【当前问题】\n问题")]),
+    );
     const conversations = runtime(transport);
     const sessionId = conversations.forThread("thread-1", { activate: true });
 
@@ -184,7 +189,14 @@ describe("conversation runtime", () => {
     expect(conversations.getSessionSnapshot(sessionId)).toMatchObject({
       threadId: "thread-1",
       history: { status: "ready", hasMore: false, nextCursor: null },
-      messages: [{ id: "message-1", content: "历史回答", delivery: "persisted" }],
+      messages: [
+        {
+          id: "message-1",
+          content: "历史回答",
+          delivery: "persisted",
+          promptPreview: "【系统指令】\n规则\n\n【当前问题】\n问题",
+        },
+      ],
     });
   });
 
@@ -382,6 +394,67 @@ describe("conversation runtime", () => {
     });
     expect(conversations.getSessionSnapshot(first).messages).toHaveLength(2);
     expect(transport.streamSignal?.aborted).toBe(false);
+  });
+
+  it("captures web access per round and always sends an explicit boolean", async () => {
+    const transport = new FakeTransport();
+    const conversations = runtime(transport);
+    const sessionId = conversations.forThread("thread-1", { activate: true });
+
+    const first = conversations.send(sessionId, {
+      query: "查询最新动态",
+      webEnabled: true,
+    });
+    expect(transport.streamCalls).toEqual([{ webEnabled: true, knowledgeOnly: undefined }]);
+
+    transport.streamResult.resolve({ status: "completed", runId: "run-1" });
+    await first;
+
+    await conversations.send(sessionId, { query: "只根据知识库回答" });
+    expect(transport.streamCalls).toEqual([
+      { webEnabled: true, knowledgeOnly: undefined },
+      { webEnabled: false, knowledgeOnly: undefined },
+    ]);
+  });
+
+  it("replaces buffered stream text with the canonical terminal answer and citations", async () => {
+    vi.useFakeTimers();
+    const transport = new FakeTransport();
+    const conversations = runtime(transport);
+    const sessionId = conversations.forThread("thread-1", { activate: true });
+    const running = conversations.send(sessionId, { query: "核验资料" });
+
+    transport.emit(event("message.delta", 1, { delta: "未校验内容 [99]" }));
+    transport.emit(
+      event("run.completed", 2, {
+        output: "已核验结论 [1]",
+        citations: [
+          {
+            n: 1,
+            chunk_id: "chunk-1",
+            source_id: "source-1",
+            heading: "依据",
+            snippet: "原文",
+            score: 0.9,
+          },
+        ],
+        prompt_preview: "【系统指令】\n规则\n\n【当前问题】\n核验资料",
+      }),
+    );
+
+    const terminal = conversations.getSessionSnapshot(sessionId).messages.at(-1);
+    expect(terminal).toMatchObject({
+      content: "已核验结论 [1]",
+      citations: [{ n: 1, chunk_id: "chunk-1", source_id: "source-1" }],
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(conversations.getSessionSnapshot(sessionId).messages.at(-1)?.content).toBe(
+      "已核验结论 [1]",
+    );
+
+    transport.historyPages.push(page());
+    transport.streamResult.resolve({ status: "completed", runId: "run-1" });
+    await running;
   });
 
   it("unifies approval and stop while rejecting stale or duplicate events", async () => {

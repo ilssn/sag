@@ -425,6 +425,11 @@ export function PetMiniWorkspace({
     [character],
   );
 
+  const onSearchCancel = React.useCallback(
+    () => character.idle(),
+    [character],
+  );
+
   const openAnswerCitation = React.useCallback(
     (citation: Citation, message: ConversationMessage) => {
       const node = message.universeActivation?.nodes.find(
@@ -974,6 +979,7 @@ export function PetMiniWorkspace({
               onSearchStart={onSearchStart}
               onSearchComplete={onSearchComplete}
               onSearchError={onSearchError}
+              onSearchCancel={onSearchCancel}
               onEventClick={openSearchEvent}
               onCitationClick={openSearchCitation}
             />

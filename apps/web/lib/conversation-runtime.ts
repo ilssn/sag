@@ -38,6 +38,7 @@ export interface ConversationTransport {
     attachmentIds?: string[];
     sourceIds?: string[];
     knowledgeOnly?: boolean;
+    webEnabled: boolean;
     onEvent: (event: AgentEvent) => void;
     signal: AbortSignal;
   }): Promise<AgentRunOutcome>;
@@ -140,6 +141,7 @@ export interface ConversationSendInput {
   attachmentIds?: string[];
   sourceIds?: string[];
   knowledgeOnly?: boolean;
+  webEnabled?: boolean;
   title?: string;
 }
 
@@ -223,6 +225,10 @@ function normalizeMessage(message: Message): ConversationMessage {
     citations: Array.isArray(message.citations) ? message.citations : [],
     attachments: Array.isArray(message.attachments) ? message.attachments : [],
     steps: Array.isArray(message.steps) ? message.steps : [],
+    promptPreview:
+      typeof message.prompt_preview === "string" && message.prompt_preview
+        ? message.prompt_preview
+        : undefined,
     createdAt: message.created_at,
     delivery: "persisted",
   };
@@ -630,6 +636,7 @@ export class ConversationRuntime {
         attachmentIds: attachmentIds.length ? attachmentIds : undefined,
         sourceIds: input.sourceIds?.length ? [...input.sourceIds] : undefined,
         knowledgeOnly: input.knowledgeOnly,
+        webEnabled: input.webEnabled === true,
         onEvent: (event) => this.handleEvent(operation, event),
         signal: controller.signal,
       });
@@ -814,11 +821,29 @@ export class ConversationRuntime {
         }));
       }
     } else if (event.type === "run.completed") {
+      const canonicalOutput = typeof event.payload.output === "string"
+        ? event.payload.output
+        : null;
+      if (canonicalOutput !== null) {
+        if (operation.flushTimer) clearTimeout(operation.flushTimer);
+        operation.flushTimer = null;
+        operation.pendingTokens = "";
+      }
       const citations = citationsFromArtifacts({ citations: event.payload.citations });
-      if (citations.length) {
+      const hasCanonicalCitations = Array.isArray(event.payload.citations);
+      if (
+        canonicalOutput !== null
+        || hasCanonicalCitations
+        || typeof event.payload.prompt_preview === "string"
+      ) {
         messages = updateMessage(messages, operation.assistantMessageId, (message) => ({
           ...message,
-          citations: mergeCitations(message.citations, citations),
+          content: canonicalOutput ?? message.content,
+          citations: hasCanonicalCitations ? citations : message.citations,
+          promptPreview:
+            typeof event.payload.prompt_preview === "string"
+              ? event.payload.prompt_preview
+              : message.promptPreview,
         }));
       }
     } else if (event.type === "tool.completed") {
@@ -865,13 +890,6 @@ export class ConversationRuntime {
         event.type === "run.cancelled"
           ? "已停止"
           : String(failure.message ?? "生成失败");
-    }
-
-    if (event.type === "run.completed" && typeof event.payload.prompt_preview === "string") {
-      messages = updateMessage(messages, operation.assistantMessageId, (message) => ({
-        ...message,
-        promptPreview: event.payload.prompt_preview as string,
-      }));
     }
 
     const runId = operation.runId ?? snapshot.run.runId;

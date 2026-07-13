@@ -5,15 +5,24 @@
 3. 绑定与描述端点 —— agent 挂载外部 MCP 的校验、信源的 MCP 连接描述。
 """
 
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
+
 import httpx
 import pytest
 from mcp.server.fastmcp import FastMCP
 from mcp.shared.memory import create_connected_server_and_client_session as connect
 
 from sag_api.mcp.server import MCP_TOOL_DETAILS, MCP_TOOL_NAMES, build_source_mcp, use_scope
+from sag_api.tools import mcp as mcp_module
 from sag_api.tools import registry
 from sag_api.tools.base import Tool, ToolContext, ToolMeta, ToolResult
-from sag_api.tools.mcp import tools_from_session
+from sag_api.tools.mcp import (
+    MCPTool,
+    MCPToolExecutionError,
+    open_agent_mcp_tools,
+    tools_from_session,
+)
 
 
 async def _register(c, email):
@@ -36,9 +45,7 @@ async def test_source_mcp_lists_and_calls_tools_over_engine():
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
             A = await _register(c, "mcpsrv@t.com")
             src = (await c.post("/api/v1/sources", headers=A, json={"name": "MCP 源"})).json()
-            src2 = (
-                await c.post("/api/v1/sources", headers=A, json={"name": "第二个 MCP 源"})
-            ).json()
+            src2 = (await c.post("/api/v1/sources", headers=A, json={"name": "第二个 MCP 源"})).json()
             async with SessionLocal() as s:
                 sources = tuple(
                     (
@@ -98,9 +105,7 @@ async def test_source_mcp_lists_and_calls_tools_over_engine():
                     assert "hello mcp world" in r_read.content[0].text
                     r_out = await client.call_tool("outline", {"document_id": doc["id"]})
                     assert isinstance(r_out.content[0].text, str)  # 处理中→占位文案亦可
-                    r_grep = await client.call_tool(
-                        "grep", {"pattern": "不存在的串xyz", "source_id": src["id"]}
-                    )
+                    r_grep = await client.call_tool("grep", {"pattern": "不存在的串xyz", "source_id": src["id"]})
                     assert "未匹配" in r_grep.content[0].text or "chunk_id" in r_grep.content[0].text
 
                     r_chunk = await client.call_tool(
@@ -109,17 +114,13 @@ async def test_source_mcp_lists_and_calls_tools_over_engine():
                     assert not r_chunk.isError
                     assert "未找到" in r_chunk.content[0].text
 
-                    r_entity = await client.call_tool(
-                        "get_entity", {"name": "查无此实体", "source_id": src["id"]}
-                    )
+                    r_entity = await client.call_tool("get_entity", {"name": "查无此实体", "source_id": src["id"]})
                     assert not r_entity.isError
                     assert "未找到" in r_entity.content[0].text
 
                     # 检索走真实引擎（离线下 SAG 需 LLM 抽取实体 → 结构化报错）；
                     # 关键是工具正确派发并返回结构化 MCP 响应，不使 server 崩溃
-                    r_search = await client.call_tool(
-                        "search", {"query": "任意问题", "source_id": src["id"]}
-                    )
+                    r_search = await client.call_tool("search", {"query": "任意问题", "source_id": src["id"]})
                     assert r_search.content and isinstance(r_search.content[0].text, str)
 
 
@@ -141,6 +142,128 @@ async def test_remote_mcp_tool_adapted_as_sag_tool():
         assert tool.meta.parameters.get("type") == "object"
         result = await tool.invoke({"text": "hi"}, ToolContext(engine_manager=None))
         assert result.content == "echo:hi"
+        assert result.data == {"external_references": []}
+
+
+class _StubCallSession:
+    def __init__(self, result):
+        self.result = result
+
+    async def call_tool(self, name, args):
+        return self.result
+
+
+def _adapt_stub_result(result) -> MCPTool:
+    return MCPTool(
+        _StubCallSession(result),
+        remote_name="lookup",
+        local_name="mcp__stub__lookup",
+        description="stub",
+        parameters={"type": "object", "properties": {}},
+    )
+
+
+@pytest.mark.asyncio
+async def test_remote_mcp_error_result_raises_structured_exception():
+    """MCP isError 必须进入运行时失败分支，不能伪装成成功的文本结果。"""
+    tool = _adapt_stub_result(
+        SimpleNamespace(
+            isError=True,
+            content=[SimpleNamespace(text="upstream rejected the query")],
+        )
+    )
+
+    with pytest.raises(MCPToolExecutionError) as raised:
+        await tool.invoke({}, ToolContext(engine_manager=None))
+
+    assert raised.value.to_dict() == {
+        "code": "mcp_tool_error",
+        "tool_name": "lookup",
+        "message": "upstream rejected the query",
+    }
+    assert "lookup" in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_remote_mcp_extracts_and_deduplicates_external_references():
+    """structured content、文本 JSON 与普通 URL 都能形成可渲染外部来源。"""
+    tool = _adapt_stub_result(
+        SimpleNamespace(
+            isError=False,
+            structuredContent={
+                "results": [
+                    {
+                        "url": "https://news.example/a",
+                        "title": "Alpha report",
+                        "source": "Example News",
+                    }
+                ]
+            },
+            structured_content={
+                "items": [
+                    {
+                        "href": "https://docs.example/b",
+                        "name": "Beta docs",
+                        "publisher": "Example Docs",
+                    }
+                ]
+            },
+            content=[
+                SimpleNamespace(
+                    text=('{"results":[{"link":"https://third.example/c","title":"Gamma","site":"Third"}]}')
+                ),
+                SimpleNamespace(text="重复来源 https://news.example/a；忽略 ftp://files.example/x"),
+            ],
+        )
+    )
+
+    result = await tool.invoke({}, ToolContext(engine_manager=None))
+
+    assert result.data["external_references"] == [
+        {
+            "url": "https://news.example/a",
+            "title": "Alpha report",
+            "source": "Example News",
+        },
+        {
+            "url": "https://docs.example/b",
+            "title": "Beta docs",
+            "source": "Example Docs",
+        },
+        {
+            "url": "https://third.example/c",
+            "title": "Gamma",
+            "source": "Third",
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_open_agent_mcp_tools_returns_safe_connection_warning(monkeypatch):
+    """连接失败会反馈给调用方，但 warning 不泄露配置、凭据或完整异常。"""
+
+    @asynccontextmanager
+    async def broken_session(config):
+        del config
+        raise RuntimeError("Bearer top-secret at https://private.example/mcp")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(mcp_module, "_open_session", broken_session)
+
+    async with open_agent_mcp_tools(
+        [("private-search", {"url": "https://private.example/mcp", "token": "top-secret"})]
+    ) as bundle:
+        assert bundle.tools == []
+        assert bundle.warnings == [
+            {
+                "code": "mcp_connection_failed",
+                "server": "private_search",
+                "message": "MCP 服务连接失败，本轮已跳过该服务。",
+            }
+        ]
+        warning_text = str(bundle.warnings)
+        assert "top-secret" not in warning_text
+        assert "private.example" not in warning_text
 
 
 def test_registry_overlay_does_not_pollute_global():

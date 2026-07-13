@@ -16,9 +16,8 @@ type MdNode = {
   data?: Record<string, unknown>;
 };
 
-function remarkCitationLinks(enabled: boolean) {
+function remarkCitationLinks(validNumbers: ReadonlySet<string>) {
   return () => {
-    if (!enabled) return;
     const visit = (node: MdNode) => {
       if (node.type === "link" || node.type === "code" || node.type === "inlineCode") return;
       if (!node.children) return;
@@ -33,6 +32,10 @@ function remarkCitationLinks(enabled: boolean) {
         let last = 0;
         let match: RegExpExecArray | null;
         while ((match = re.exec(child.value))) {
+          // A bracketed number is only interactive when the backend supplied
+          // traceable metadata for that exact number. Never manufacture a
+          // disabled "citation" control for model-invented references.
+          if (!validNumbers.has(match[1])) continue;
           if (match.index > last) {
             parts.push({ type: "text", value: child.value.slice(last, match.index) });
           }
@@ -95,7 +98,7 @@ export const MarkdownContent = React.memo(function MarkdownContent({
     return new Map((citations ?? []).map((c) => [String(c.n), c]));
   }, [citations]);
   const citationPlugin = React.useMemo(
-    () => remarkCitationLinks(citationByNumber.size > 0),
+    () => remarkCitationLinks(new Set(citationByNumber.keys())),
     [citationByNumber],
   );
 

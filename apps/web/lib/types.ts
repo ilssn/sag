@@ -240,6 +240,7 @@ export interface Message {
   citations: Citation[];
   attachments?: MessageAttachment[];
   steps?: MessageStep[];
+  prompt_preview?: string;
   created_at: string;
 }
 
@@ -345,6 +346,7 @@ export interface SearchSourceHit {
 }
 
 export type UniverseNodeKind = "event" | "entity";
+export type UniverseActivationOrigin = "search" | "assistant" | "browse";
 
 export interface UniversePartition {
   id: string;
@@ -459,6 +461,7 @@ export interface UniverseActivationNode {
 
 export interface UniverseActivation {
   epoch?: number;
+  origin?: UniverseActivationOrigin;
   query: string;
   nodes: UniverseActivationNode[];
   relations: UniverseRelation[];

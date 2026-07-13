@@ -10,6 +10,21 @@ import {
   dispatchUniverseActivation,
   dispatchUniverseReset,
 } from "@/lib/universe-events";
+import {
+  appendSearchSummary,
+  beginSearchLifecycle,
+  canLoadMoreSearch,
+  completeSearchLifecycle,
+  createSearchKey,
+  DEFAULT_SEARCH_TOP_K,
+  failSearchLifecycle,
+  receiveSearchResult,
+  resolveSearchRun,
+  type SearchLifecycleState,
+  type SearchRunIntent,
+} from "@/components/features/search/search-state";
+
+export type { SearchPhase, SearchRunIntent } from "@/components/features/search/search-state";
 
 export interface SearchScope {
   id: string;
@@ -22,23 +37,17 @@ export interface SearchRunOptions {
   strategy?: SearchStrategy;
   sourceIds?: string[];
   saveExploration?: boolean;
+  intent?: SearchRunIntent;
 }
 
 export type SearchBrowseView = "activity" | "history";
 export type SearchContentView = "results" | SearchBrowseView;
 
-interface SearchWorkspaceState {
+interface SearchWorkspaceState extends SearchLifecycleState {
   query: string;
   scoped: SearchScope[];
   sources: Source[];
-  result: SearchResponse | null;
-  busy: boolean;
-  error: string;
-  lastQuery: string;
   strategy: SearchStrategy;
-  lastStrategy: SearchStrategy;
-  topK: number;
-  hasMore: boolean;
   activity: ActivityItem[] | null;
   history: string[];
   contentView: SearchContentView;
@@ -47,6 +56,7 @@ interface SearchWorkspaceState {
 
 interface SearchWorkspaceContextValue extends SearchWorkspaceState {
   defaultStrategy: SearchStrategy;
+  canLoadMore: boolean;
   setQuery: (query: string) => void;
   setStrategy: (strategy: SearchStrategy) => void;
   setScope: (scope: SearchScope[]) => void;
@@ -67,6 +77,26 @@ const SearchWorkspaceContext = React.createContext<SearchWorkspaceContextValue |
 const SEARCH_HISTORY_KEY = "sag:search-history";
 const SEARCH_HISTORY_LIMIT = 20;
 const SEARCH_CONTENT_PREFERENCE_KEY = "sag:search-content-preference";
+
+interface ActiveSearchRequest {
+  id: number;
+  rollback: SearchLifecycleState | null;
+}
+
+function captureSearchLifecycle(state: SearchLifecycleState): SearchLifecycleState {
+  return {
+    result: state.result,
+    busy: state.busy,
+    phase: state.phase,
+    summaryStreaming: state.summaryStreaming,
+    error: state.error,
+    committedSearchKey: state.committedSearchKey,
+    lastQuery: state.lastQuery,
+    lastStrategy: state.lastStrategy,
+    topK: state.topK,
+    hasMore: state.hasMore,
+  };
+}
 
 function readSearchContentPreference(): SearchBrowseView {
   if (typeof window === "undefined") return "activity";
@@ -139,11 +169,14 @@ export function SearchProvider({
     sources: [],
     result: null,
     busy: false,
+    phase: "idle",
+    summaryStreaming: false,
     error: "",
+    committedSearchKey: "",
     lastQuery: "",
     strategy: defaultStrategy,
     lastStrategy: defaultStrategy,
-    topK: 12,
+    topK: DEFAULT_SEARCH_TOP_K,
     hasMore: false,
     activity: null,
     history: [],
@@ -154,6 +187,7 @@ export function SearchProvider({
   stateRef.current = state;
   const requestIdRef = React.useRef(0);
   const abortRef = React.useRef<AbortController | null>(null);
+  const activeRequestRef = React.useRef<ActiveSearchRequest | null>(null);
   const sourcesLoadedRef = React.useRef(false);
   const sourcesPromiseRef = React.useRef<Promise<Source[]> | null>(null);
   const activityPromiseRef = React.useRef<Promise<ActivityItem[]> | null>(null);
@@ -188,10 +222,16 @@ export function SearchProvider({
   }, [defaultStrategy]);
 
   const cancel = React.useCallback(() => {
+    const activeRequest = activeRequestRef.current;
     requestIdRef.current += 1;
     abortRef.current?.abort();
     abortRef.current = null;
-    setState((current) => ({ ...current, busy: false }));
+    activeRequestRef.current = null;
+    if (!activeRequest) return;
+    setState((current) => ({
+      ...current,
+      ...failSearchLifecycle(current, "", activeRequest.rollback),
+    }));
   }, []);
 
   const clear = React.useCallback(() => {
@@ -201,9 +241,13 @@ export function SearchProvider({
       ...current,
       query: "",
       result: null,
+      busy: false,
+      phase: "idle",
+      summaryStreaming: false,
       error: "",
+      committedSearchKey: "",
       lastQuery: "",
-      topK: 12,
+      topK: DEFAULT_SEARCH_TOP_K,
       hasMore: false,
       contentView: current.contentPreference,
     }));
@@ -263,62 +307,150 @@ export function SearchProvider({
       return null;
     }
 
+    const strategy = options.strategy ?? snapshot.strategy;
+    const sourceIds = options.sourceIds
+      ?? (snapshot.scoped.length ? snapshot.scoped.map((source) => source.id) : undefined);
+    const requestedKey = createSearchKey({ query, strategy, sourceIds });
+    const resolvedRun = resolveSearchRun({
+      intent: options.intent,
+      requestedKey,
+      requestedTopK: options.topK,
+      committedKey: snapshot.committedSearchKey,
+      committedTopK: snapshot.topK,
+      hasResult: snapshot.result !== null,
+      idle: snapshot.phase === "idle",
+    });
+    const rollback = resolvedRun.intent === "load-more"
+      ? captureSearchLifecycle(snapshot)
+      : null;
+
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
     const requestId = ++requestIdRef.current;
-    const resetEpoch = dispatchUniverseReset("search-start");
-    const topK = Math.max(1, Math.min(options.topK ?? snapshot.topK, 50));
-    const strategy = options.strategy ?? snapshot.strategy;
-    const sourceIds = options.sourceIds
-      ?? (snapshot.scoped.length ? snapshot.scoped.map((source) => source.id) : undefined);
+    const resetEpoch = resolvedRun.intent === "replace"
+      ? dispatchUniverseReset("search-start")
+      : null;
+    activeRequestRef.current = {
+      id: requestId,
+      rollback,
+    };
 
     setState((current) => ({
       ...current,
+      ...beginSearchLifecycle(current, { ...resolvedRun, strategy }),
       query,
-      busy: true,
-      error: "",
-      topK,
       strategy,
       contentView: "results",
     }));
+    let completed = false;
+    const isCurrentRequest = () => (
+      requestId === requestIdRef.current
+      && activeRequestRef.current?.id === requestId
+    );
+    let pendingSummary = "";
+    let summaryFrame: number | null = null;
+    const discardPendingSummary = () => {
+      pendingSummary = "";
+      if (summaryFrame !== null) cancelAnimationFrame(summaryFrame);
+      summaryFrame = null;
+    };
+    const flushPendingSummary = () => {
+      summaryFrame = null;
+      const delta = pendingSummary;
+      pendingSummary = "";
+      if (!delta || completed || !isCurrentRequest()) return;
+      setState((current) => ({
+        ...current,
+        ...appendSearchSummary(current, delta),
+      }));
+    };
+    const enqueueSummary = (delta: string) => {
+      if (!delta) return;
+      pendingSummary += delta;
+      if (summaryFrame === null) {
+        // One markdown/layout update per paint keeps long answers smooth while
+        // preserving the provider's real token stream semantics.
+        summaryFrame = requestAnimationFrame(flushPendingSummary);
+      }
+    };
+    const commitResult = (result: SearchResponse) => {
+      if (completed || !isCurrentRequest()) return;
+      completed = true;
+      discardPendingSummary();
+      const activationEpoch = resolvedRun.intent === "load-more"
+        ? dispatchUniverseReset("search-load-more-complete")
+        : resetEpoch;
+      dispatchUniverseActivation(
+        activationFromSearch(result),
+        activationEpoch ?? undefined,
+      );
+      const committedQuery = result.query || query;
+      const history = rememberSearch(committedQuery, stateRef.current.history);
+      setState((current) => ({
+        ...current,
+        ...completeSearchLifecycle(current, result, {
+          key: requestedKey,
+          query: committedQuery,
+          strategy,
+          topK: resolvedRun.topK,
+          hasMore: Boolean(result.stats.has_more),
+        }),
+        history,
+      }));
+    };
+
     try {
       const saveExploration = options.saveExploration ?? false;
-      const result = await api.globalSearch(
+      const result = await api.streamGlobalSearch(
         {
           query,
           source_ids: sourceIds,
-          top_k: topK,
+          top_k: resolvedRun.topK,
           strategy,
           save_exploration: saveExploration,
+        },
+        {
+          onResult: (result) => {
+            if (completed || !isCurrentRequest()) return;
+            setState((current) => ({
+              ...current,
+              ...receiveSearchResult(current, result),
+            }));
+          },
+          onSummaryDelta: (delta) => {
+            if (completed || !isCurrentRequest()) return;
+            enqueueSummary(delta);
+          },
+          onCompleted: commitResult,
         },
         controller.signal,
       );
       if (requestId !== requestIdRef.current) return null;
-      dispatchUniverseActivation(activationFromSearch(result), resetEpoch);
-      const history = rememberSearch(result.query || query, stateRef.current.history);
-      setState((current) => {
-        return {
-          ...current,
-          result,
-          busy: false,
-          error: "",
-          lastQuery: result.query || query,
-          lastStrategy: strategy,
-          hasMore: Boolean(result.stats.has_more),
-          history,
-        };
-      });
+      commitResult(result);
       return result;
     } catch (error) {
       if (requestId !== requestIdRef.current) return null;
-      if (error instanceof ApiError && error.code === "aborted") return null;
+      if (error instanceof ApiError && error.code === "aborted") {
+        setState((current) => ({
+          ...current,
+          ...failSearchLifecycle(current, "", rollback),
+        }));
+        return null;
+      }
       const message = error instanceof ApiError ? error.message : "检索失败";
-      setState((current) => ({ ...current, busy: false, error: message }));
+      setState((current) => ({
+        ...current,
+        ...failSearchLifecycle(current, message, rollback),
+      }));
       throw error;
     } finally {
+      discardPendingSummary();
       if (requestId === requestIdRef.current && abortRef.current === controller) {
         abortRef.current = null;
+      }
+      if (activeRequestRef.current?.id === requestId) {
+        activeRequestRef.current = null;
       }
     }
   }, [clear]);
@@ -378,10 +510,25 @@ export function SearchProvider({
     }));
   }, []);
 
+  const draftSearchKey = createSearchKey({
+    query: state.query,
+    strategy: state.strategy,
+    sourceIds: state.scoped.map((source) => source.id),
+  });
+  const canLoadMore = canLoadMoreSearch({
+    phase: state.phase,
+    hasResult: state.result !== null,
+    hasMore: state.hasMore,
+    topK: state.topK,
+    committedKey: state.committedSearchKey,
+    draftKey: draftSearchKey,
+  });
+
   const value = React.useMemo<SearchWorkspaceContextValue>(
     () => ({
       ...state,
       defaultStrategy,
+      canLoadMore,
       setQuery,
       setStrategy,
       setScope,
@@ -399,6 +546,7 @@ export function SearchProvider({
     }),
     [
       cancel,
+      canLoadMore,
       clear,
       defaultStrategy,
       ensureActivity,

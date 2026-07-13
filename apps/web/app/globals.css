@@ -1464,7 +1464,7 @@
     height: 15px;
   }
 
-  .sag-pet-shell:hover .sag-pet__actions--commands .sag-pet__action,
+  .sag-pet-rig:hover .sag-pet__actions--commands .sag-pet__action,
   .sag-pet__actions--commands[data-visible="true"] .sag-pet__action,
   .sag-pet__actions--commands:hover .sag-pet__action,
   .sag-pet__actions--commands:focus-within .sag-pet__action,
@@ -1573,7 +1573,7 @@
     transform: translateY(-5px) scale(0.74);
   }
 
-  .sag-pet-shell:hover .sag-pet__action,
+  .sag-pet-rig:hover .sag-pet__action,
   .sag-pet__actions--commands[data-visible="true"] .sag-pet__action,
   .sag-pet__actions--collapsed[data-visible="true"] .sag-pet__action,
   .sag-pet__actions--commands:hover .sag-pet__action,
@@ -1584,15 +1584,15 @@
     transform: translate(0, 0) scale(1);
   }
 
-  .sag-pet-shell:hover .sag-pet__action[data-slot="dance"],
-  .sag-pet-shell:hover .sag-pet__action[data-slot="hide"],
+  .sag-pet-rig:hover .sag-pet__action[data-slot="dance"],
+  .sag-pet-rig:hover .sag-pet__action[data-slot="hide"],
   .sag-pet__actions:focus-within .sag-pet__action[data-slot="dance"],
   .sag-pet__actions:focus-within .sag-pet__action[data-slot="hide"] {
     transform: translateY(0) scale(1);
   }
 
-  .sag-pet-shell:hover .sag-pet__action[data-slot="collapse"],
-  .sag-pet-shell:hover .sag-pet__action[data-slot="expand"],
+  .sag-pet-rig:hover .sag-pet__action[data-slot="collapse"],
+  .sag-pet-rig:hover .sag-pet__action[data-slot="expand"],
   .sag-pet__actions--collapsed[data-visible="true"] .sag-pet__action[data-slot="expand"],
   .sag-pet__actions:focus-within .sag-pet__action[data-slot="collapse"],
   .sag-pet__actions:focus-within .sag-pet__action[data-slot="expand"] {
@@ -1614,7 +1614,7 @@
       0 8px 18px -10px hsl(var(--foreground) / 0.52);
   }
 
-  .sag-pet-shell:hover .sag-pet__action:disabled,
+  .sag-pet-rig:hover .sag-pet__action:disabled,
   .sag-pet__actions--commands[data-visible="true"] .sag-pet__action:disabled,
   .sag-pet__actions--collapsed[data-visible="true"] .sag-pet__action:disabled,
   .sag-pet__actions--commands:hover .sag-pet__action:disabled,

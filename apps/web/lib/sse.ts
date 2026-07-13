@@ -194,6 +194,7 @@ export function streamAgentAsk(
     attachments?: string[];
     source_ids?: string[];
     knowledge_only?: boolean;
+    web_enabled: boolean;
   },
   onEvent: (event: AgentEvent) => void,
   signal?: AbortSignal,

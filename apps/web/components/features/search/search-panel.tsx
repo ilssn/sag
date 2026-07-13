@@ -38,6 +38,7 @@ import { MarkdownContent } from "@/components/features/markdown-content";
 import {
   useSearchWorkspace,
   type SearchContentView,
+  type SearchRunIntent,
 } from "@/components/features/search/search-provider";
 import { SearchStrategyControl } from "@/components/features/search-strategy-control";
 import { DocStatusBadge } from "@/components/features/status-badge";
@@ -84,13 +85,21 @@ function SearchScanning() {
     return () => window.clearInterval(grow);
   }, []);
   return (
-    <div className="flex flex-col gap-1.5 overflow-hidden rounded-lg border p-3" aria-label="检索中">
-      {Array.from({ length: rows }).map((_, i) => (
+    <div
+      className="flex flex-col gap-1.5 overflow-hidden rounded-lg border p-3"
+      role="status"
+      aria-live="polite"
+      aria-label="检索中"
+    >
+      {Array.from({ length: 6 }).map((_, i) => (
         <div
           key={i}
+          aria-hidden="true"
           className={cn(
-            "h-8 animate-fade-in rounded-md transition-colors duration-300",
+            "h-8 rounded-md transition-[opacity,background-color,box-shadow] duration-300",
+            i < rows ? "opacity-100" : "opacity-25",
             lit.has(i) ? "bg-primary/15 ring-1 ring-primary/25" : "bg-muted",
+            "motion-reduce:bg-muted motion-reduce:opacity-100 motion-reduce:ring-0 motion-reduce:transition-none",
           )}
         />
       ))}
@@ -537,6 +546,225 @@ function ResultList({
   );
 }
 
+function SearchSummaryCard({
+  summary,
+  citations,
+  compact,
+  streaming,
+  onCitationClick,
+}: {
+  summary: string;
+  citations: Citation[];
+  compact: boolean;
+  streaming: boolean;
+  onCitationClick: (citation: Citation) => void;
+}) {
+  const [expanded, setExpanded] = React.useState(streaming);
+  const [canExpand, setCanExpand] = React.useState(false);
+  const [expandedScrollable, setExpandedScrollable] = React.useState(false);
+  const [following, setFollowing] = React.useState(true);
+  const [streamLayoutLocked, setStreamLayoutLocked] = React.useState(streaming);
+  const viewportRef = React.useRef<HTMLDivElement>(null);
+  const contentRef = React.useRef<HTMLDivElement>(null);
+  const followOutputRef = React.useRef(true);
+  const wasStreamingRef = React.useRef(streaming);
+  const contentId = React.useId();
+  const hintId = `${contentId}-hint`;
+  const accessiblePreview = summary
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/[`*_>#~|]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const accessiblePreviewExcerpt = accessiblePreview.length > 240
+    ? `${accessiblePreview.slice(0, 240).trimEnd()}…`
+    : accessiblePreview;
+
+  const updateFollowing = React.useCallback((next: boolean) => {
+    followOutputRef.current = next;
+    setFollowing((current) => (current === next ? current : next));
+  }, []);
+
+  const scrollToLatest = React.useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    updateFollowing(true);
+    viewport.scrollTop = viewport.scrollHeight;
+  }, [updateFollowing]);
+
+  React.useLayoutEffect(() => {
+    let finalScrollFrame: number | null = null;
+    if (streaming && !wasStreamingRef.current) {
+      setExpanded(true);
+      setStreamLayoutLocked(true);
+      updateFollowing(true);
+    } else if (
+      !streaming
+      && wasStreamingRef.current
+      && expanded
+      && followOutputRef.current
+    ) {
+      // The terminal event can replace the last buffered tokens (or a failed
+      // model answer with the grounded fallback). Follow that final canonical
+      // content once, while still honoring a user who scrolled upward.
+      finalScrollFrame = requestAnimationFrame(() => {
+        if (followOutputRef.current) scrollToLatest();
+      });
+    }
+    wasStreamingRef.current = streaming;
+    return () => {
+      if (finalScrollFrame !== null) cancelAnimationFrame(finalScrollFrame);
+    };
+  }, [expanded, scrollToLatest, streaming, updateFollowing]);
+
+  React.useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    const content = contentRef.current;
+    if (!viewport || !content) return;
+
+    const update = () => {
+      const collapsedLimit = Math.min(160, Math.max(96, window.innerHeight * 0.24));
+      const expandedLimit = Math.min(224, Math.max(160, window.innerHeight * 0.24));
+      const contentHeight = content.scrollHeight;
+      const nextCanExpand = contentHeight > collapsedLimit + 1;
+      const nextScrollable = expanded && contentHeight > expandedLimit + 1;
+      setCanExpand((current) => (current === nextCanExpand ? current : nextCanExpand));
+      setExpandedScrollable((current) => (current === nextScrollable ? current : nextScrollable));
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(viewport);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [compact, expanded]);
+
+  React.useLayoutEffect(() => {
+    if (!streaming || !expanded || !followOutputRef.current) return;
+    const frame = requestAnimationFrame(() => {
+      // The user may scroll up after this frame was queued. Re-check here so
+      // programmatic following never wins that race and pulls them back down.
+      if (followOutputRef.current) scrollToLatest();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [expanded, scrollToLatest, streaming, summary]);
+
+  const collapsed = canExpand && !expanded;
+  const expandedScrollRegion = expanded && expandedScrollable;
+  const maxHeight = !expanded
+    ? "clamp(6rem, 24dvh, 10rem)"
+    : "clamp(10rem, 24dvh, 14rem)";
+
+  return (
+    <div
+      className={cn(
+        "shrink-0 rounded-lg border border-amber-500/15 bg-amber-500/[0.04]",
+        compact ? "px-3 py-2.5" : "px-4 py-3",
+      )}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+          <Sparkles className="size-3.5 shrink-0" />
+          <span className="truncate">基于相关证据的回答</span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {streaming && (
+            <span
+              className="inline-flex h-7 items-center gap-1.5 px-1.5 text-xs text-muted-foreground"
+              role="status"
+            >
+              <Spinner className="size-3" />
+              生成中
+            </span>
+          )}
+          {streaming && expanded && !following && (
+            <button
+              type="button"
+              onClick={scrollToLatest}
+              className="inline-flex h-7 items-center rounded-md px-2 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              跟随输出
+            </button>
+          )}
+          {(canExpand || streaming || (streamLayoutLocked && expanded)) && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = !expanded;
+                setExpanded(next);
+                if (!next) setStreamLayoutLocked(false);
+                else if (streaming) setStreamLayoutLocked(true);
+                if (streaming) updateFollowing(next);
+              }}
+              aria-expanded={expanded}
+              aria-controls={contentId}
+              aria-describedby={collapsed ? hintId : undefined}
+              className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {expanded ? "收起" : "展开回答"}
+              {expanded ? (
+                <ChevronUp className="size-3.5" />
+              ) : (
+                <ChevronDown className="size-3.5" />
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+      <div
+        ref={viewportRef}
+        id={contentId}
+        inert={collapsed || undefined}
+        aria-hidden={collapsed || undefined}
+        aria-label={expandedScrollRegion ? "完整回答，可滚动" : undefined}
+        role={expandedScrollRegion ? "region" : undefined}
+        tabIndex={expandedScrollRegion ? 0 : undefined}
+        onScroll={(event) => {
+          if (!streaming || !expanded) return;
+          const viewport = event.currentTarget;
+          const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+          updateFollowing(distance <= 32);
+        }}
+        className={cn(
+          "mt-1.5 text-sm leading-6 text-foreground/80",
+          !expanded && "overflow-hidden",
+          expanded && "overflow-y-auto overscroll-contain pr-1 outline-none [scrollbar-gutter:stable] focus-visible:ring-2 focus-visible:ring-ring",
+        )}
+        style={{
+          maxHeight,
+          height: streamLayoutLocked && expanded ? maxHeight : undefined,
+          WebkitMaskImage: collapsed
+            ? "linear-gradient(to bottom, black 0, black calc(100% - 2rem), transparent 100%)"
+            : undefined,
+          maskImage: collapsed
+            ? "linear-gradient(to bottom, black 0, black calc(100% - 2rem), transparent 100%)"
+            : undefined,
+        }}
+      >
+        <div ref={contentRef}>
+          {summary ? (
+            <MarkdownContent
+              content={summary}
+              citations={citations}
+              onCitationClick={onCitationClick}
+              streaming={streaming}
+            />
+          ) : streaming ? (
+            <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+              <Spinner className="size-3.5" />
+              正在根据入选证据组织回答…
+            </div>
+          ) : null}
+        </div>
+      </div>
+      {collapsed && (
+        <span id={hintId} className="sr-only">
+          {accessiblePreviewExcerpt} 回答当前为折叠预览，展开后可访问完整内容和引用。
+        </span>
+      )}
+    </div>
+  );
+}
+
 export interface SearchPanelProps {
   active?: boolean;
   initialQuery?: string;
@@ -551,6 +779,7 @@ export interface SearchPanelProps {
   onSearchStart?: (query: string) => void;
   onSearchComplete?: (result: SearchResponse) => void;
   onSearchError?: (message: string) => void;
+  onSearchCancel?: () => void;
   onActivityClick?: (item: ActivityItem) => void;
   onEventClick?: (event: SearchEvent, result: SearchResponse) => void;
   onCitationClick?: (citation: Citation, result: SearchResponse) => void;
@@ -572,6 +801,7 @@ export function SearchPanel({
   onSearchStart,
   onSearchComplete,
   onSearchError,
+  onSearchCancel,
   onActivityClick,
   onEventClick,
   onCitationClick,
@@ -597,6 +827,7 @@ export function SearchPanel({
       strategy?: SearchStrategy;
       sourceIds?: string[];
       saveExploration?: boolean;
+      intent?: SearchRunIntent;
     } = {}) => {
       const query = (options.query ?? search.query).trim();
       if (!query) {
@@ -613,7 +844,7 @@ export function SearchPanel({
       } catch (error) {
         const message = error instanceof Error ? error.message : "检索失败";
         if (onSearchError) onSearchError(message);
-        else toast.error(message);
+        else if (options.intent === "load-more") toast.error(message);
         return null;
       }
     },
@@ -628,17 +859,17 @@ export function SearchPanel({
       if (active) inputRef.current?.focus();
       return;
     }
-    hydrationKeyRef.current = hydrationKey;
     let cancelled = false;
     void ensureSources().then((sources) => {
       if (cancelled) return;
+      if (hydrationKeyRef.current === hydrationKey) return;
+      hydrationKeyRef.current = hydrationKey;
       const source = initialSourceId
         ? sources.find((item) => item.id === initialSourceId)
         : undefined;
       const sourceIds = source ? [source.id] : undefined;
       if (source) search.setScope([{ id: source.id, name: source.name }]);
       search.setQuery(seedQuery);
-      if (search.result && search.lastQuery === seedQuery) return;
       void executeSearch({
         query: seedQuery,
         sourceIds,
@@ -660,12 +891,15 @@ export function SearchPanel({
   React.useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root) return;
-    const update = (width: number) => setCompact(width < 520);
-    update(root.getBoundingClientRect().width);
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (entry) update(entry.contentRect.width);
-    });
+    const update = () => {
+      const next = root.getBoundingClientRect().width < 520;
+      setCompact((current) => (current === next ? current : next));
+    };
+    update();
+    // Use the border box: compact mode changes this same node's padding, so
+    // observing contentRect would make the 520px breakpoint feed back into
+    // itself and oscillate forever when a list scrollbar appears.
+    const observer = new ResizeObserver(update);
     observer.observe(root);
     return () => observer.disconnect();
   }, []);
@@ -702,17 +936,24 @@ export function SearchPanel({
     if ((search.result !== null || search.busy) && activeQuery) {
       void executeSearch({
         query: activeQuery,
-        topK: search.topK,
         strategy: value,
         saveExploration: false,
       });
     }
   }
 
-  async function run(e?: React.FormEvent, k?: number) {
+  async function run(e?: React.FormEvent) {
     e?.preventDefault();
     await executeSearch({
-      topK: k,
+      saveExploration: false,
+    });
+  }
+
+  async function loadMore() {
+    if (!search.canLoadMore) return;
+    await executeSearch({
+      intent: "load-more",
+      topK: search.topK + 12,
       saveExploration: false,
     });
   }
@@ -723,13 +964,22 @@ export function SearchPanel({
     () => search.result?.sections.map(sectionCitation) ?? [],
     [search.result],
   );
+  const resultStatus = search.phase === "loading-more"
+    ? "正在补充更多证据…"
+    : search.phase === "streaming"
+      ? "正在生成回答…"
+      : search.busy
+        ? "正在检索证据…"
+        : search.result
+          ? `入选 ${search.result.sections.length} 条相关证据`
+          : "";
 
   return (
     <div
       ref={rootRef}
       data-compact={compact || undefined}
       className={cn(
-        "flex h-full min-h-0 w-full flex-col overflow-y-auto",
+        "flex h-full min-h-0 w-full flex-col overflow-y-auto [scrollbar-gutter:stable]",
         compact ? "gap-3 p-3" : "gap-6 p-6",
         graphViewActive && "h-full min-h-0 overflow-hidden",
         className,
@@ -778,7 +1028,9 @@ export function SearchPanel({
                   onChange={(e) => {
                     const v = e.target.value;
                     const nextMentionOpen = mentionTerm(v) !== null;
+                    const cancelledSearch = search.busy && !v.trim();
                     search.setQuery(v);
+                    if (cancelledSearch) onSearchCancel?.();
                     setMentionOpen(nextMentionOpen);
                   }}
                   onKeyDown={(e) => {
@@ -819,7 +1071,9 @@ export function SearchPanel({
                 <button
                   type="button"
                   onClick={() => {
+                    const cancelledSearch = search.busy;
                     search.clear();
+                    if (cancelledSearch) onSearchCancel?.();
                     setMentionOpen(false);
                     inputRef.current?.focus();
                   }}
@@ -877,7 +1131,11 @@ export function SearchPanel({
           {showCancel && (
             <button
               type="button"
-              onClick={onCancel}
+              onClick={() => {
+                search.cancel();
+                onSearchCancel?.();
+                onCancel?.();
+              }}
               className="shrink-0 rounded-md px-2 py-1.5 text-sm text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
             >
               取消
@@ -944,11 +1202,7 @@ export function SearchPanel({
             </h2>
             <div className="flex items-center gap-3">
               {!compact && <span className="text-xs text-muted-foreground">
-                {search.busy ? (
-                  "正在更新结果…"
-                ) : (
-                  `入选 ${search.result.sections.length} 条相关证据`
-                )}
+                {resultStatus}
               </span>}
               {showGraphView && (
                 <ToggleGroup
@@ -969,50 +1223,58 @@ export function SearchPanel({
               )}
             </div>
           </div>
-          {search.result.summary && (
+          {(search.summaryStreaming || search.result.summary) && (
+            <SearchSummaryCard
+              summary={search.result.summary}
+              citations={citations}
+              compact={compact}
+              streaming={search.summaryStreaming}
+              onCitationClick={(citation) => {
+                if (onCitationClick) {
+                  onCitationClick(citation, search.result!);
+                  return;
+                }
+                if (!citation.chunk_id || !citation.source_id) return;
+                open({
+                  kind: "chunk",
+                  sourceId: citation.source_id,
+                  chunkId: citation.chunk_id,
+                  heading: citation.heading,
+                  sourceName: citation.source_name ?? undefined,
+                });
+              }}
+            />
+          )}
+          {search.error && (
             <div
-              className={cn(
-                "rounded-lg border border-amber-500/15 bg-amber-500/[0.04]",
-                compact ? "px-3 py-2.5" : "px-4 py-3",
-              )}
+              role="alert"
+              className="flex items-center justify-between gap-3 rounded-lg border border-destructive/25 bg-destructive/[0.04] px-3 py-2 text-xs text-destructive"
             >
-              <div className="flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-300">
-                <Sparkles className="size-3.5" />
-                基于相关证据的回答
-              </div>
-              <div className="mt-1.5 text-sm leading-6 text-foreground/80">
-                <MarkdownContent
-                  content={search.result.summary}
-                  citations={citations}
-                  onCitationClick={(citation) => {
-                    if (onCitationClick) {
-                      onCitationClick(citation, search.result!);
-                      return;
-                    }
-                    if (!citation.chunk_id || !citation.source_id) return;
-                    open({
-                      kind: "chunk",
-                      sourceId: citation.source_id,
-                      chunkId: citation.chunk_id,
-                      heading: citation.heading,
-                      sourceName: citation.source_name ?? undefined,
-                    });
-                  }}
-                />
-              </div>
+              <span className="min-w-0">补充结果失败：{search.error}</span>
+              {search.canLoadMore && (
+                <button
+                  type="button"
+                  onClick={() => void loadMore()}
+                  className="shrink-0 rounded-md border border-destructive/25 px-2 py-1 font-medium outline-none hover:bg-destructive/10 focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  重试
+                </button>
+              )}
             </div>
           )}
           {activeView === "graph" && search.result.events.length > 0 ? (
-            <SearchGraph
-              events={search.result.events}
-              entities={search.result.entities}
-              relations={search.result.relations}
-              onOpenEvent={
-                onEventClick
-                  ? (event) => onEventClick(event, search.result!)
-                  : undefined
-              }
-            />
+            <div className="min-h-0 flex-1">
+              <SearchGraph
+                events={search.result.events}
+                entities={search.result.entities}
+                relations={search.result.relations}
+                onOpenEvent={
+                  onEventClick
+                    ? (event) => onEventClick(event, search.result!)
+                    : undefined
+                }
+              />
+            </div>
           ) : (
             <>
               <ResultList
@@ -1021,11 +1283,12 @@ export function SearchPanel({
                 onCitationClick={onCitationClick}
                 compact={compact}
               />
-              {search.hasMore && search.topK < 48 && (
+              {((search.canLoadMore && !search.error) || (search.busy && search.hasMore)) && (
                 <div className="flex justify-center pt-1">
                   <button
-                    onClick={() => run(undefined, search.topK + 12)}
-                    disabled={search.busy}
+                    type="button"
+                    onClick={() => void loadMore()}
+                    disabled={!search.canLoadMore}
                     className="rounded-full border bg-card px-4 py-1.5 text-xs text-muted-foreground shadow-soft outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
                   >
                     {search.busy ? "加载中…" : "显示更多结果"}
@@ -1034,6 +1297,23 @@ export function SearchPanel({
               )}
             </>
           )}
+        </div>
+      ) : contentView === "results" && search.error ? (
+        <div className="mx-auto w-full max-w-3xl">
+          <EmptyState
+            icon={SearchIcon}
+            title="检索没有完成"
+            description={search.error}
+            action={(
+              <button
+                type="button"
+                onClick={() => void run()}
+                className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground outline-none hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                重新检索
+              </button>
+            )}
+          />
         </div>
       ) : contentView === "history" ? (
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">

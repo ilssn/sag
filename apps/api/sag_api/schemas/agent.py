@@ -77,6 +77,7 @@ class MessageOut(BaseModel):
     citations: list[dict[str, Any]]
     attachments: list[dict[str, Any]] = Field(default_factory=list)
     steps: list[dict[str, Any]] = Field(default_factory=list)
+    prompt_preview: str = ""
     created_at: datetime
 
 
@@ -92,14 +93,27 @@ class AskRequest(BaseModel):
     attachments: list[str] = Field(default_factory=list, max_length=4)
     # @知识库 范围限定：仅在这些信源内检索（空=默认全部）
     source_ids: list[str] = Field(default_factory=list, max_length=8)
-    # 可选的受限问答模式；默认保留 Agent 已绑定的完整工具能力。
-    knowledge_only: bool = False
+    # 联网能力由用户逐轮授权；默认关闭，开启后才暴露 Agent 配置的外部/MCP 工具。
+    web_enabled: bool = False
+    # 旧客户端兼容字段：knowledge_only=false 等价于 web_enabled=true。
+    # 新旧字段同时出现时，以语义更明确的 web_enabled 为准。
+    knowledge_only: bool | None = None
 
     @model_validator(mode="after")
     def require_text_or_attachment(self):
         if not self.query.strip() and not self.attachments:
             raise ValueError("问题或图片至少提供一项")
         return self
+
+    @property
+    def effective_web_enabled(self) -> bool:
+        """Resolve the new opt-in switch while preserving explicit legacy requests."""
+
+        if "web_enabled" in self.model_fields_set:
+            return self.web_enabled
+        if self.knowledge_only is not None:
+            return not self.knowledge_only
+        return False
 
 
 class ToolRejection(BaseModel):

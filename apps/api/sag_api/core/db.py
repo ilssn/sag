@@ -21,7 +21,7 @@ def _ensure_sqlite_dir(url: str) -> None:
     """SQLite 文件所在目录不存在时先创建。"""
     marker = "sqlite+aiosqlite:///"
     if url.startswith(marker):
-        path = url[len(marker):]
+        path = url[len(marker) :]
         if path and path not in (":memory:",):
             os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
 
@@ -60,7 +60,11 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 _COLUMN_UPGRADES: dict[str, dict[str, str]] = {
     "agents": {"is_default": "BOOLEAN NOT NULL DEFAULT 0"},
     "threads": {"archived": "BOOLEAN NOT NULL DEFAULT 0"},
-    "messages": {"attachments_json": "JSON", "steps_json": "JSON"},
+    "messages": {
+        "attachments_json": "JSON",
+        "steps_json": "JSON",
+        "prompt_preview": "TEXT NOT NULL DEFAULT ''",
+    },
     "universe_dirty_sources": {"revision": "INTEGER NOT NULL DEFAULT 1"},
 }
 
@@ -68,10 +72,8 @@ _COLUMN_UPGRADES: dict[str, dict[str, str]] = {
 # idempotent for local/embedded upgrades; production deployments can express
 # the same DDL in their migration runner.
 _INDEX_UPGRADES = (
-    "CREATE INDEX IF NOT EXISTS ix_messages_thread_created_id "
-    "ON messages (thread_id, created_at, id)",
-    "CREATE INDEX IF NOT EXISTS ix_documents_source_sag_source "
-    "ON documents (source_id, sag_source_id)",
+    "CREATE INDEX IF NOT EXISTS ix_messages_thread_created_id ON messages (thread_id, created_at, id)",
+    "CREATE INDEX IF NOT EXISTS ix_documents_source_sag_source ON documents (source_id, sag_source_id)",
 )
 
 

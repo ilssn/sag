@@ -32,12 +32,14 @@ export interface ConversationComposerSnapshot {
   input: string;
   scoped: ConversationComposerScope[];
   images: ConversationComposerImage[];
+  webEnabled: boolean;
 }
 
 const EMPTY_COMPOSER: ConversationComposerSnapshot = {
   input: "",
   scoped: [],
   images: [],
+  webEnabled: false,
 };
 
 class ConversationComposerStore {
@@ -269,6 +271,16 @@ export function useConversationComposer(sessionId: string) {
     },
     [sessionId, store],
   );
+  const setWebEnabled = React.useCallback<React.Dispatch<React.SetStateAction<boolean>>>(
+    (next) => {
+      store.update(sessionId, (current) => ({
+        ...current,
+        webEnabled:
+          typeof next === "function" ? next(current.webEnabled) : next,
+      }));
+    },
+    [sessionId, store],
+  );
 
-  return { ...draft, setInput, setScoped, setImages };
+  return { ...draft, setInput, setScoped, setImages, setWebEnabled };
 }

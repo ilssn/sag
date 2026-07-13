@@ -100,9 +100,7 @@ class GetEntityTool(Tool):
             if match is None:
                 match = next((e for e in entities if lowered in (e.name or "").lower()), None)
             if match is not None:
-                snippets = await ctx.engine_manager.entity_context(
-                    scid, match.id, source=source, limit=6
-                )
+                snippets = await ctx.engine_manager.entity_context(scid, match.id, source=source, limit=6)
                 body = "\n\n".join(snippets) if snippets else match.description or ""
                 return ToolResult(
                     content=f"实体「{match.name}」（{match.type}）：\n{body}".strip(),
@@ -116,7 +114,8 @@ class GetTimeTool(Tool):
         name="get_time",
         description=(
             "获取准确的当前日期、时间、星期与 UTC 偏移。"
-            "用户询问现在、今天、当前时间、相对日期或跨时区换算时使用；"
+            "时效查询应先用它建立时间锚点，再将绝对日期与时间范围写入后续检索；"
+            "用户询问最新、最近、现在、今天、相对日期或跨时区换算时使用；"
             "不传 timezone 时使用系统设定时区。"
         ),
         parameters={
@@ -140,8 +139,7 @@ class GetTimeTool(Tool):
         except (ZoneInfoNotFoundError, ValueError):
             return ToolResult(
                 content=(
-                    f"无法识别时区「{timezone_name}」。请使用 IANA 时区名称；"
-                    f"当前系统时区为 {settings.timezone}。"
+                    f"无法识别时区「{timezone_name}」。请使用 IANA 时区名称；当前系统时区为 {settings.timezone}。"
                 ),
                 data={"ok": False, "timezone": timezone_name},
             )

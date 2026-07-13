@@ -5,6 +5,7 @@
 避免触发后台记忆任务（引擎构建）带来的 DB 争用。向后兼容由 test_agents/test_experience 覆盖。
 """
 
+import json
 from types import SimpleNamespace
 
 import httpx
@@ -40,6 +41,32 @@ class EchoTool(Tool):
 
 
 registry.register(EchoTool())
+
+
+class ExternalEvidenceTool(Tool):
+    meta = ToolMeta(
+        name="external_evidence",
+        description="测试工具：搜索外部资料并返回可追溯网页来源。",
+        parameters={"type": "object", "properties": {}},
+    )
+
+    async def invoke(self, args, ctx):
+        del args, ctx
+        return ToolResult(
+            content="官方发布确认了更新。",
+            data={
+                "external_references": [
+                    {
+                        "title": "Official release",
+                        "url": "https://example.com/official-release",
+                        "source": "example.com",
+                    }
+                ]
+            },
+        )
+
+
+registry.register(ExternalEvidenceTool())
 
 
 @pytest.mark.asyncio
@@ -118,10 +145,7 @@ class FakeLLM:
 
     async def stream_turn(self, request, cancellation):
         self.calls += 1
-        has_echo = any(
-            tool.get("function", {}).get("name") == "echo"
-            for tool in request.tools
-        )
+        has_echo = any(tool.get("function", {}).get("name") == "echo" for tool in request.tools)
         if self.calls == 1 and has_echo:
             yield ModelChunk(
                 tool_calls=(ToolCall(id="call_1", name="echo", arguments={"q": "hi"}),),
@@ -132,6 +156,28 @@ class FakeLLM:
             cancellation.raise_if_cancelled()
             yield ModelChunk(text_delta=token)
         yield ModelChunk(finish_reason="stop")
+
+
+class ExternalEvidenceLLM:
+    """Calls an external tool, then intentionally forgets the returned URL."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    @property
+    def configured(self) -> bool:
+        return True
+
+    async def stream_turn(self, request, cancellation):
+        self.calls += 1
+        if self.calls == 1:
+            yield ModelChunk(
+                tool_calls=(ToolCall(id="external-1", name="external_evidence", arguments={}),),
+                finish_reason="tool_calls",
+            )
+            return
+        cancellation.raise_if_cancelled()
+        yield ModelChunk(text_delta="已核实更新。", finish_reason="stop")
 
 
 async def _register(c, email):
@@ -166,11 +212,60 @@ async def test_agent_tool_loop_dispatch_and_citations():
             assert r.status_code == 200, r.text
             body = r.json()
             # 工具循环跑完 → 最终答案
-            assert body["choices"][0]["message"]["content"] == "最终答案"
+            assert body["choices"][0]["message"]["content"] == ("最终答案\n\n本轮知识库资料（未逐条对应）：[1]")
             # 工具被派发（echo 执行）→ 其引用汇总进 sag.citations
             assert any(c.get("source_name") == "回声源" for c in body["sag"]["citations"])
             # 统一 provider 协议恰好两轮（工具决策 + 收尾）
             assert app.state.llm.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_agent_external_tool_adds_traceable_link_when_model_omits_it():
+    from sag_api.main import app
+
+    transport = httpx.ASGITransport(app=app)
+    async with app.router.lifespan_context(app):
+        app.state.llm = ExternalEvidenceLLM()
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            A = await _register(c, "externalrefs@t.com")
+            agent = (
+                await c.post(
+                    "/api/v1/agents",
+                    headers=A,
+                    json={"name": "外部资料助手", "persona": {"tools": ["external_evidence"]}},
+                )
+            ).json()
+
+            response = await c.post(
+                f"/api/v1/openai/{agent['id']}/chat/completions",
+                headers=A,
+                json={"messages": [{"role": "user", "content": "请搜索并核实更新"}]},
+            )
+
+            assert response.status_code == 200, response.text
+            content = response.json()["choices"][0]["message"]["content"]
+            assert "外部资料（本轮检索，未逐条对应）" in content
+            assert "[Official release](<https://example.com/official-release>)" in content
+
+            app.state.llm = ExternalEvidenceLLM()
+            chunks: list[str] = []
+            async with c.stream(
+                "POST",
+                f"/api/v1/openai/{agent['id']}/chat/completions",
+                headers=A,
+                json={
+                    "messages": [{"role": "user", "content": "请搜索并核实更新"}],
+                    "stream": True,
+                },
+            ) as streamed:
+                assert streamed.status_code == 200
+                async for line in streamed.aiter_lines():
+                    if line.startswith("data:"):
+                        chunks.append(line[len("data:") :].strip())
+            streamed_content = "".join(
+                json.loads(item)["choices"][0]["delta"].get("content", "") for item in chunks if item != "[DONE]"
+            )
+            assert "[Official release](<https://example.com/official-release>)" in streamed_content
 
 
 @pytest.mark.asyncio

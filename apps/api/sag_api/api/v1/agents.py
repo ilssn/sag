@@ -359,6 +359,7 @@ async def ask(
         source_ids=body.source_ids,
         llm=llm,
     )
+    web_enabled = body.effective_web_enabled
 
     async def event_gen():
         last = None
@@ -372,7 +373,7 @@ async def ask(
                 llm=llm,
                 tool_registry=tool_registry,
                 runtime=agent_runtime,
-                knowledge_only=body.knowledge_only,
+                knowledge_only=not web_enabled,
             ):
                 last = event
                 yield _sse(event.type, event.data)

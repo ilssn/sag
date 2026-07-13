@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ArrowUp, Check, Copy, FileUp, ImagePlus, Library, Plus, RotateCcw, Square, Trash2, X } from "lucide-react";
+import { ArrowUp, Check, Copy, FileUp, Globe2, ImagePlus, Library, Plus, RotateCcw, Square, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { toolArgumentsPreview } from "@/lib/agent-run-activity";
@@ -191,7 +191,16 @@ export function ConversationPanel({
   const runtime = useConversationRuntime();
   const session = useConversationSession(sessionId);
   const detailPanel = useDetailPanel();
-  const { input, setInput, images, setImages, scoped, setScoped } =
+  const {
+    input,
+    setInput,
+    images,
+    setImages,
+    scoped,
+    setScoped,
+    webEnabled,
+    setWebEnabled,
+  } =
     useConversationComposer(sessionId);
   const imagesRef = React.useRef(images);
   const [sources, setSources] = React.useState<Source[]>([]);
@@ -523,6 +532,7 @@ export function ConversationPanel({
         query,
         attachmentIds: uploaded.map((item) => item.id),
         sourceIds: scoped.map((source) => source.id),
+        webEnabled,
       });
 
       // send 在首次 await 前就登记 run；未登记表示被全局并发边界拒绝，保留草稿。
@@ -815,6 +825,42 @@ export function ConversationPanel({
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex">
+                    <button
+                      type="button"
+                      aria-label={`联网搜索：${webEnabled ? "已开启" : "已关闭"}`}
+                      aria-pressed={webEnabled}
+                      disabled={streaming || submitting}
+                      onClick={() => setWebEnabled((enabled) => !enabled)}
+                      className={cn(
+                        "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60",
+                        webEnabled
+                          ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/15"
+                          : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground",
+                      )}
+                    >
+                      <Globe2 className="size-3.5" aria-hidden />
+                      <span>联网</span>
+                      <span
+                        aria-hidden
+                        className={cn(
+                          "text-[10px] font-normal",
+                          webEnabled ? "text-primary/80" : "text-muted-foreground/70",
+                        )}
+                      >
+                        {webEnabled ? "开" : "关"}
+                      </span>
+                    </button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-64">
+                  {webEnabled
+                    ? "已开启：可使用已配置的联网搜索工具"
+                    : "已关闭：仅使用知识库内容"}
+                </TooltipContent>
+              </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="min-w-0 max-w-[42vw] truncate px-1 text-xs text-muted-foreground sm:max-w-56">

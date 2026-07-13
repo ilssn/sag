@@ -87,6 +87,7 @@ const CONVERSATION_TRANSPORT: ConversationTransport = {
     attachmentIds,
     sourceIds,
     knowledgeOnly,
+    webEnabled,
     onEvent,
     signal,
   }) =>
@@ -97,7 +98,8 @@ const CONVERSATION_TRANSPORT: ConversationTransport = {
         query,
         attachments: attachmentIds,
         source_ids: sourceIds,
-        knowledge_only: knowledgeOnly,
+        knowledge_only: knowledgeOnly === true || !webEnabled,
+        web_enabled: webEnabled,
       },
       onEvent,
       signal,
