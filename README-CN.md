@@ -316,7 +316,7 @@ apps/
     └── sag_agent/          与框架无关的 Agent Runtime Core
 skills/sag/                 通过 MCP 探索 SAG 的 Agent Skill
 deploy/                     部署初始化资源
-docs/                       架构与工程规范
+docs/assets/readme/         README 配图与示意图
 ```
 
 核心依赖规则很简单：应用只能通过 `apps/api/sag_api/sag/` 访问知识引擎；引擎不知道 FastAPI、Web UI、用户、对话和引用的存在。
