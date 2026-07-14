@@ -131,6 +131,7 @@ export interface Binding {
 }
 
 export interface ModelConfig {
+  llm_provider: "openai" | "anthropic" | "gemini";
   llm_base_url: string | null;
   llm_model: string;
   llm_context_window: number;
@@ -157,7 +158,8 @@ export interface ModelConfig {
 }
 
 export type ModelConfigPatch = Partial<{
-  llm_base_url: string;
+  llm_provider: ModelConfig["llm_provider"];
+  llm_base_url: string | null;
   llm_api_key: string;
   llm_model: string;
   llm_context_window: number;
@@ -431,11 +433,8 @@ export interface UniverseManifest {
 
 export interface UniversePolicy {
   source_limit: number;
-  entity_page_size: number;
-  entity_page_max: number;
   timeline_event_page_size: number;
   event_entity_limit: number;
-  auto_page_limit: number;
   lod_orbit_px: number;
   lod_near_px: number;
   lod_deep_px: number;
@@ -519,7 +518,14 @@ export interface UniversePatchNode {
 }
 
 export interface UniverseGraphPatch {
+  schema_version: 2;
   epoch: number;
+  source_id: string;
+  source_revision: string;
+  snapshot_id: string;
+  request_cursor: string | null;
+  page_id: string;
+  bundle_id: string;
   anchor: UniversePatchNode;
   nodes: UniversePatchNode[];
   relations: UniverseRelation[];
@@ -528,31 +534,46 @@ export interface UniverseGraphPatch {
     has_more: boolean;
     next_cursor: string | null;
   };
-  as_of: string | null;
-}
-
-export interface UniverseActivationSeed {
-  epoch: number;
-  source_id: string;
-  category: string | null;
-  seed_kind: "entity";
-  nodes: UniversePatchNode[];
-  has_more: boolean;
-  page: {
-    returned: number;
-    has_more: boolean;
-    next_cursor: string | null;
-  };
   as_of: string;
 }
 
+export interface UniverseTimelineEventNode extends UniversePatchNode {
+  kind: "event";
+}
+
+export interface UniverseTimelineEntityNode extends UniversePatchNode {
+  kind: "entity";
+}
+
+export interface UniverseTimelineRelation extends UniverseRelation {
+  kind: "mentions";
+}
+
 export interface UniverseTimelineSlice {
+  schema_version: 2;
   epoch: number;
   source_id: string;
-  nodes: UniversePatchNode[];
-  relations: UniverseRelation[];
+  source_revision: string;
+  snapshot_id: string;
+  request_cursor: string | null;
+  page_id: string;
+  bundles: Array<{
+    bundle_id: string;
+    event: UniverseTimelineEventNode;
+    nodes: UniverseTimelineEntityNode[];
+    relations: UniverseTimelineRelation[];
+    neighbor_page: {
+      total_unique: number;
+      returned_unique: number;
+      complete: boolean;
+      next_cursor: string | null;
+    };
+    cursor_after: string | null;
+  }>;
   page: {
-    returned: number;
+    returned_bundles: number;
+    returned_unique_nodes: number;
+    returned_relations: number;
     has_more: boolean;
     next_cursor: string | null;
   };
@@ -603,6 +624,7 @@ export interface ExplorationDetail {
 
 export interface Capabilities {
   llm_configured: boolean;
+  llm_provider: "openai" | "anthropic" | "gemini";
   llm_model: string;
   context_window?: number;
   embedding_model: string;

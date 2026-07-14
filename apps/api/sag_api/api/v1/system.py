@@ -27,6 +27,7 @@ log = get_logger("system")
 def _capabilities() -> dict:
     return {
         "llm_configured": settings.llm_configured,
+        "llm_provider": settings.llm_provider,
         "llm_model": settings.llm_model,
         "context_window": settings.llm_context_window,
         "embedding_model": settings.embedding_model,
@@ -165,6 +166,7 @@ async def update_model_config(
 
     # 解析器/检索参数保存无需打断暖引擎；只有引擎配置真的变化才安全重建。
     engine_fields = {
+        "llm_provider",
         "llm_base_url",
         "llm_model",
         "llm_timeout_ms",
@@ -180,7 +182,7 @@ async def update_model_config(
     )
     llm_client_changed = any(
         before.get(key) != config.get(key)
-        for key in {"llm_base_url", "llm_timeout_ms", "llm_max_retries"}
+        for key in {"llm_provider", "llm_base_url", "llm_timeout_ms", "llm_max_retries"}
     )
     if llm_client_changed or patch.get("llm_api_key"):
         request.app.state.llm = LLMClient(settings)
@@ -210,7 +212,10 @@ async def test_model_config(
         return {"ok": False, "message": "尚未配置 API Key"}
     try:
         await llm.complete([{"role": "user", "content": "ping"}])
-        return {"ok": True, "message": f"连接成功 · {settings.llm_model}"}
+        return {
+            "ok": True,
+            "message": f"连接成功 · {settings.llm_provider} / {settings.llm_model}",
+        }
     except ApiError as e:
         return {"ok": False, "message": e.message}
     except Exception as e:  # noqa: BLE001

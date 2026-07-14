@@ -15,8 +15,6 @@ from sag_api.schemas.universe import (
     ExplorationDetailOut,
     ExplorationSessionOut,
     ExplorationStepOut,
-    UniverseActivateIn,
-    UniverseActivationSeedOut,
     UniverseExpandIn,
     UniverseGraphPatchOut,
     UniverseManifestOut,
@@ -29,7 +27,6 @@ from sag_api.services.universe_service import (
     enqueue_universe_rebuild,
     get_exploration,
     list_explorations,
-    universe_activate_partition,
     universe_expand,
     universe_manifest,
     universe_node_detail,
@@ -87,57 +84,41 @@ async def manifest(
 @router.post("/expand", response_model=UniverseGraphPatchOut)
 async def expand(
     body: UniverseExpandIn,
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     engine_manager: EngineManager = Depends(get_engine_manager),
 ) -> UniverseGraphPatchOut:
     value = await universe_expand(
         session,
         engine_manager,
+        user_id=user.id,
         source_id=body.source_id,
         node_kind=body.node_kind,
         node_id=body.node_id,
         limit=body.limit,
         cursor=body.cursor,
+        snapshot_id=body.snapshot_id,
         after=body.after,
         before=body.before,
     )
     return UniverseGraphPatchOut(epoch=body.epoch, **value)
 
 
-@router.post("/activate", response_model=UniverseActivationSeedOut)
-async def activate(
-    body: UniverseActivateIn,
-    _user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_session),
-    engine_manager: EngineManager = Depends(get_engine_manager),
-) -> UniverseActivationSeedOut:
-    value = await universe_activate_partition(
-        session,
-        engine_manager,
-        source_id=body.source_id,
-        category=body.category,
-        limit=body.limit,
-        cursor=body.cursor,
-        after=body.after,
-        before=body.before,
-    )
-    return UniverseActivationSeedOut(epoch=body.epoch, **value)
-
-
 @router.post("/timeline", response_model=UniverseTimelineSliceOut)
 async def timeline(
     body: UniverseTimelineIn,
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
     engine_manager: EngineManager = Depends(get_engine_manager),
 ) -> UniverseTimelineSliceOut:
     value = await universe_timeline(
         session,
         engine_manager,
+        user_id=user.id,
         source_id=body.source_id,
         limit=body.limit,
         cursor=body.cursor,
+        snapshot_id=body.snapshot_id,
     )
     return UniverseTimelineSliceOut(epoch=body.epoch, **value)
 

@@ -23,6 +23,7 @@ services:
       SAG_SAG_VECTOR_PROVIDER: lancedb
       SAG_SAG_LANGUAGE: ${SAG_SAG_LANGUAGE:-zh}
       # LLM / Embedding / MinerU（留空也能启动，之后可在设置页配置）
+      SAG_LLM_PROVIDER: ${SAG_LLM_PROVIDER:-openai}
       SAG_LLM_BASE_URL: ${SAG_LLM_BASE_URL:-https://api.302ai.cn/v1}
       SAG_LLM_API_KEY: ${SAG_LLM_API_KEY:-}
       SAG_LLM_MODEL: ${SAG_LLM_MODEL:-qwen3.6-flash}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import math
 from datetime import UTC, datetime
 from typing import Any
@@ -12,7 +13,13 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sag_api.core.config import settings
-from sag_api.core.errors import NotFoundError, ServiceUnavailableError, ValidationError
+from sag_api.core.db import SessionLocal
+from sag_api.core.errors import (
+    ConflictError,
+    NotFoundError,
+    ServiceUnavailableError,
+    ValidationError,
+)
 from sag_api.core.logging import get_logger
 from sag_api.db.base import new_id
 from sag_api.db.models import (
@@ -38,11 +45,8 @@ log = get_logger("services.universe")
 def _universe_policy() -> dict[str, int]:
     return {
         "source_limit": settings.universe_manifest_source_limit,
-        "entity_page_size": settings.universe_entity_page_size,
-        "entity_page_max": settings.universe_entity_page_max,
         "timeline_event_page_size": settings.universe_timeline_event_page_size,
         "event_entity_limit": settings.universe_event_entity_limit,
-        "auto_page_limit": settings.universe_auto_page_limit,
         "lod_orbit_px": settings.universe_lod_orbit_px,
         "lod_near_px": settings.universe_lod_near_px,
         "lod_deep_px": settings.universe_lod_deep_px,
@@ -55,6 +59,51 @@ def _universe_policy() -> dict[str, int]:
         "edge_budget_desktop": settings.universe_edge_budget_desktop,
         "edge_budget_mobile": settings.universe_edge_budget_mobile,
     }
+
+
+async def _source_graph_revision(
+    *,
+    user_id: str,
+    source_id: str,
+) -> str:
+    """Read a graph fence in a fresh short transaction, bypassing ORM identity caches."""
+    async with SessionLocal() as revision_session:
+        source_state = (
+            await revision_session.execute(
+                select(
+                    Source.updated_at,
+                    Source.event_count,
+                    Source.chunk_count,
+                ).where(Source.id == source_id)
+            )
+        ).one_or_none()
+        if source_state is None:
+            raise NotFoundError("信息源不存在")
+        overview_id = await revision_session.scalar(
+            select(UniverseOverview.id)
+            .where(
+                UniverseOverview.user_id == user_id,
+                UniverseOverview.is_active.is_(True),
+                UniverseOverview.status == "ready",
+            )
+            .order_by(UniverseOverview.created_at.desc())
+        )
+        dirty_revision = await revision_session.scalar(
+            select(UniverseDirtySource.revision).where(
+                UniverseDirtySource.user_id == user_id,
+                UniverseDirtySource.source_id == source_id,
+            )
+        )
+    raw = "|".join(
+        [
+            str(overview_id or "none"),
+            str(int(dirty_revision or 0)),
+            source_state.updated_at.isoformat(),
+            str(int(source_state.event_count or 0)),
+            str(int(source_state.chunk_count or 0)),
+        ]
+    )
+    return hashlib.blake2b(raw.encode("utf-8"), digest_size=12).hexdigest()
 
 
 def _stable_unit(value: str) -> float:
@@ -578,11 +627,13 @@ async def universe_expand(
     session: AsyncSession,
     engine_manager: EngineManager,
     *,
+    user_id: str,
     source_id: str,
     node_kind: str,
     node_id: str,
     limit: int,
     cursor: str | None,
+    snapshot_id: str | None,
     after: datetime | None,
     before: datetime | None,
 ) -> dict[str, Any]:
@@ -590,6 +641,11 @@ async def universe_expand(
     source = await session.get(Source, source_id)
     if source is None:
         raise NotFoundError("信息源不存在")
+    source_revision = await _source_graph_revision(
+        user_id=user_id,
+        source_id=source.id,
+    )
+    hard_limit = 8 if node_kind == "event" else 4
     try:
         async with asyncio.timeout(8.0):
             expansion = await engine_manager.universe_expand(
@@ -597,17 +653,35 @@ async def universe_expand(
                 node_kind,
                 node_id,
                 source=source,
-                limit=max(1, min(int(limit), 128)),
+                limit=max(1, min(int(limit), hard_limit)),
                 cursor=cursor,
+                snapshot_id=snapshot_id,
+                source_revision=source_revision,
                 after=after,
                 before=before,
             )
     except TimeoutError as error:
         raise ServiceUnavailableError("知识邻域查询超时，请缩小时间范围后重试") from error
-    except (ValueError, TypeError) as error:
+    except ValueError as error:
+        if "revision" in str(error):
+            raise ConflictError(
+                "知识图谱数据已更新，请重新开始当前探索",
+                code="snapshot_changed",
+            ) from error
+        raise ValidationError("无效或不匹配的知识宇宙游标") from error
+    except TypeError as error:
         raise ValidationError("无效或不匹配的知识宇宙游标") from error
     if expansion is None:
         raise NotFoundError("知识星点已不存在")
+    committed_revision = await _source_graph_revision(
+        user_id=user_id,
+        source_id=source.id,
+    )
+    if committed_revision != source_revision:
+        raise ConflictError(
+            "知识图谱数据已更新，请重新开始当前探索",
+            code="snapshot_changed",
+        )
 
     anchor = {
         **expansion.anchor,
@@ -637,28 +711,46 @@ async def universe_expand(
         }
         for relation in expansion.relations
     ]
-    if not relations:
-        for neighbor in expansion.neighbors:
-            if node_kind == "event":
-                relation_source, relation_target = node_id, neighbor["id"]
-            else:
-                relation_source, relation_target = neighbor["id"], node_id
-            relations.append(
-                {
-                    "source_id": source.id,
-                    "from_id": relation_source,
-                    "to_id": relation_target,
-                    "kind": "mentions",
-                    "weight": float(neighbor.get("weight", 1.0)),
-                    "description": str(neighbor.get("relation_description", "")),
-                }
-            )
+    page_signature = json.dumps(
+        {
+            "source_id": source.id,
+            "source_revision": source_revision,
+            "as_of": expansion.as_of.isoformat(),
+            "node_kind": node_kind,
+            "node_id": node_id,
+            "request_cursor": cursor,
+            "limit": limit,
+            "anchor": anchor,
+            "nodes": nodes,
+            "relations": relations,
+            "page": {
+                "returned": expansion.returned,
+                "has_more": expansion.has_more,
+                "next_cursor": expansion.next_cursor,
+            },
+        },
+        ensure_ascii=True,
+        allow_nan=False,
+        default=str,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    page_id = hashlib.blake2b(
+        page_signature.encode("utf-8"),
+        digest_size=16,
+    ).hexdigest()
     return {
+        "source_id": source.id,
+        "source_revision": source_revision,
+        "snapshot_id": expansion.snapshot_id,
+        "request_cursor": cursor,
+        "page_id": page_id,
+        "bundle_id": f"{source.id}:{node_kind}:{node_id}:{page_id}",
         "anchor": anchor,
         "nodes": nodes,
         "relations": relations,
         "page": {
-            "returned": expansion.returned or len(nodes),
+            "returned": expansion.returned,
             "has_more": expansion.has_more,
             "next_cursor": expansion.next_cursor,
         },
@@ -670,85 +762,112 @@ async def universe_timeline(
     session: AsyncSession,
     engine_manager: EngineManager,
     *,
+    user_id: str,
     source_id: str,
     limit: int,
     cursor: str | None,
+    snapshot_id: str | None,
 ) -> dict[str, Any]:
     """Load one stable, recent-to-old source timeline page with bounded context."""
     source = await session.get(Source, source_id)
     if source is None:
         raise NotFoundError("信息源不存在")
+    source_revision = await _source_graph_revision(
+        user_id=user_id,
+        source_id=source.id,
+    )
     try:
         async with asyncio.timeout(8.0):
             page = await engine_manager.universe_timeline(
                 source.sag_source_config_id,
                 source=source,
-                limit=max(1, min(int(limit), 24)),
+                limit=max(1, min(int(limit), 6)),
                 entity_limit=settings.universe_event_entity_limit,
                 cursor=cursor,
+                snapshot_id=snapshot_id,
+                source_revision=source_revision,
             )
     except TimeoutError as error:
         raise ServiceUnavailableError("知识时间轴查询超时，请稍后重试") from error
-    except (ValueError, TypeError) as error:
+    except ValueError as error:
+        if "revision" in str(error):
+            raise ConflictError(
+                "知识图谱数据已更新，请刷新时间轴后继续",
+                code="snapshot_changed",
+            ) from error
         raise ValidationError("无效或不匹配的知识时间轴游标") from error
+    except TypeError as error:
+        raise ValidationError("无效或不匹配的知识时间轴游标") from error
+    committed_revision = await _source_graph_revision(
+        user_id=user_id,
+        source_id=source.id,
+    )
+    if committed_revision != source_revision:
+        raise ConflictError(
+            "知识图谱数据已更新，请刷新时间轴后继续",
+            code="snapshot_changed",
+        )
+    page_signature = "|".join(
+        [
+            source.id,
+            source_revision,
+            page.as_of.isoformat(),
+            cursor or "root",
+            str(limit),
+            *(bundle.bundle_id for bundle in page.bundles),
+        ]
+    )
+    page_id = hashlib.blake2b(
+        page_signature.encode("utf-8"),
+        digest_size=16,
+    ).hexdigest()
+    bundles = [
+        {
+            "bundle_id": f"{source.id}:{bundle.bundle_id}",
+            "event": {**bundle.event, "source_id": source.id},
+            "nodes": [
+                {**node, "source_id": source.id} for node in bundle.nodes
+            ],
+            "relations": [
+                {**relation, "source_id": source.id}
+                for relation in bundle.relations
+            ],
+            "neighbor_page": {
+                "total_unique": bundle.neighbor_total,
+                "returned_unique": bundle.neighbor_returned,
+                "complete": bundle.complete,
+                "next_cursor": bundle.neighbor_next_cursor,
+            },
+            "cursor_after": bundle.cursor_after,
+        }
+        for bundle in page.bundles
+    ]
+    returned_node_keys = {
+        (bundle["event"]["kind"], bundle["event"]["id"])
+        for bundle in bundles
+    }
+    returned_node_keys.update(
+        (node["kind"], node["id"])
+        for bundle in bundles
+        for node in bundle["nodes"]
+    )
     return {
         "source_id": source.id,
-        "nodes": [{**node, "source_id": source.id} for node in page.nodes],
-        "relations": [
-            {**relation, "source_id": source.id} for relation in page.relations
-        ],
+        "source_revision": source_revision,
+        "snapshot_id": page.snapshot_id,
+        "request_cursor": cursor,
+        "page_id": page_id,
+        "bundles": bundles,
         "page": {
-            "returned": sum(1 for node in page.nodes if node.get("kind") == "event"),
+            "returned_bundles": len(page.bundles),
+            "returned_unique_nodes": len(returned_node_keys),
+            "returned_relations": sum(
+                len(bundle["relations"]) for bundle in bundles
+            ),
             "has_more": page.has_more,
             "next_cursor": page.next_cursor,
         },
         "as_of": page.as_of,
-    }
-
-
-async def universe_activate_partition(
-    session: AsyncSession,
-    engine_manager: EngineManager,
-    *,
-    source_id: str,
-    category: str | None,
-    limit: int,
-    cursor: str | None,
-    after: datetime | None,
-    before: datetime | None,
-) -> dict[str, Any]:
-    """Enter one source through a bounded page of recently active entities."""
-    source = await session.get(Source, source_id)
-    if source is None:
-        raise NotFoundError("信息源不存在")
-    try:
-        async with asyncio.timeout(8.0):
-            seed = await engine_manager.universe_partition_seed(
-                source.sag_source_config_id,
-                source=source,
-                category=category,
-                limit=limit,
-                cursor=cursor,
-                after=after,
-                before=before,
-            )
-    except TimeoutError as error:
-        raise ServiceUnavailableError("分区激活超时，请缩小时间范围后重试") from error
-    except (ValueError, TypeError) as error:
-        raise ValidationError("无效或不匹配的知识宇宙游标") from error
-    page = {
-        "returned": len(seed.nodes),
-        "has_more": seed.has_more,
-        "next_cursor": seed.next_cursor,
-    }
-    return {
-        "source_id": source.id,
-        "category": category,
-        "seed_kind": "entity",
-        "nodes": [{**node, "source_id": source.id} for node in seed.nodes],
-        "has_more": seed.has_more,
-        "page": page,
-        "as_of": seed.as_of,
     }
 
 

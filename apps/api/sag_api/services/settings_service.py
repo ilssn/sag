@@ -28,6 +28,7 @@ log = get_logger("settings")
 # 允许运行期覆盖的字段（值已由请求 schema 校验/转型）
 _FIELDS = frozenset(
     {
+        "llm_provider",
         "llm_base_url",
         "llm_api_key",
         "llm_model",
@@ -58,6 +59,7 @@ _NULLABLE_FIELDS = frozenset(
 )
 
 QUICK_SETUP_302 = {
+    "llm_provider": "openai",
     "llm_base_url": "https://api.302ai.cn/v1",
     "llm_model": "qwen3.6-flash",
     "llm_temperature": 0.3,
@@ -167,6 +169,7 @@ async def apply_startup_overrides(session_factory: async_sessionmaker) -> None:
 def effective_model_config() -> dict:
     """当前生效的模型配置（读 settings 单例；密钥脱敏为 *_set 布尔）。"""
     return {
+        "llm_provider": _settings.llm_provider,
         "llm_base_url": _settings.llm_base_url,
         "llm_model": _settings.llm_model,
         "llm_temperature": _settings.llm_temperature,

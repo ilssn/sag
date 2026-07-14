@@ -14,6 +14,10 @@ const appShellSource = readFileSync(
   new URL("./app-shell.tsx", import.meta.url),
   "utf8",
 );
+const petSource = readFileSync(
+  new URL("./pet.tsx", import.meta.url),
+  "utf8",
+);
 const sheetSource = readFileSync(
   new URL("../ui/sheet.tsx", import.meta.url),
   "utf8",
@@ -36,8 +40,10 @@ describe("universe view settings drawer", () => {
 
     expect(appShellSource).toContain('import { Grip, Settings2 } from "lucide-react"');
     expect(appShellSource).toContain(
-      'className="fixed right-4 top-3 z-30 flex items-center gap-2"',
+      'className="fixed right-4 top-3 z-[45] flex items-center gap-2"',
     );
+    expect(petSource).toContain('sag-pet-shell group/pet fixed z-40');
+    expect(sheetSource).toContain("fixed inset-0 z-50");
     expect(controls).toContain("<Settings2");
     expect(controls.indexOf("<UniverseViewSettingsDrawer"))
       .toBeLessThan(controls.indexOf("onClick={exitExploreMode}"));
@@ -99,6 +105,12 @@ describe("universe view settings drawer", () => {
     );
     expect(panelSource).toContain(
       "visibleEventBundles: current.visibleEventBundles",
+    );
+    expect(panelSource).not.toContain(
+      "visibleEventBundles: effectiveWindow.visibleEventBundles,\n                  cachedEventBundles: value",
+    );
+    expect(panelSource).not.toContain(
+      "visibleEventBundles: value,\n                  cachedEventBundles:",
     );
   });
 

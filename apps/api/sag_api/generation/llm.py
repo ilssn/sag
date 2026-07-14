@@ -1,13 +1,17 @@
-"""OpenAI 兼容的 LLM 客户端 —— 用于答案合成（流式）。
+"""Provider-aware LLM client for generation and Agent tool calls.
 
-注意：检索由 zleap-sag 负责；本模块只做「拿着检索到的资料生成答案」这一步。
+OpenAI-compatible endpoints keep using the OpenAI SDK. Anthropic Messages and
+Gemini GenerateContent are routed through LiteLLM, which normalizes their native
+streaming/tool events into the same OpenAI-shaped chunks consumed by sag_agent.
 """
 
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from collections.abc import AsyncIterator
+from typing import Any
 
 from openai import AsyncOpenAI
 
@@ -22,14 +26,31 @@ log = get_logger("generation")
 Message = dict
 
 
+async def _litellm_completion(**kwargs: Any) -> Any:
+    """Import lazily so an unconfigured server can still start without provider work."""
+    from litellm import acompletion
+
+    return await acompletion(**kwargs)
+
+
+def _attr(value: Any, name: str, default: Any = None) -> Any:
+    if isinstance(value, dict):
+        return value.get(name, default)
+    return getattr(value, name, default)
+
+
 class LLMClient:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._client = AsyncOpenAI(
-            api_key=settings.llm_api_key or "not-configured",
-            base_url=settings.llm_base_url,
-            timeout=settings.llm_timeout_ms / 1000,
-            max_retries=settings.llm_max_retries,
+        self._client = (
+            AsyncOpenAI(
+                api_key=settings.llm_api_key or "not-configured",
+                base_url=settings.llm_base_url,
+                timeout=settings.llm_timeout_ms / 1000,
+                max_retries=settings.llm_max_retries,
+            )
+            if settings.llm_provider == "openai"
+            else None
         )
 
     @property
@@ -46,7 +67,59 @@ class LLMClient:
 
     def _ensure_configured(self) -> None:
         if not self.configured:
-            raise ConfigurationError("尚未配置 LLM（SAG_LLM_API_KEY / SAG_LLM_BASE_URL / SAG_LLM_MODEL）")
+            raise ConfigurationError(
+                "尚未配置 LLM（SAG_LLM_PROVIDER / SAG_LLM_API_KEY / SAG_LLM_MODEL）"
+            )
+
+    async def _create_completion(
+        self,
+        messages: list[Message],
+        *,
+        stream: bool = False,
+        tools: list[dict] | None = None,
+        tool_choice: str | dict | None = None,
+    ) -> Any:
+        common: dict[str, Any] = {
+            "messages": messages,
+            "temperature": self._settings.llm_temperature,
+            "max_tokens": self._settings.llm_max_tokens,
+            "stream": stream,
+        }
+        if tools:
+            common["tools"] = tools
+            if tool_choice is not None:
+                common["tool_choice"] = tool_choice
+
+        if self._settings.llm_provider == "openai":
+            if self._client is None:  # defensive invariant for future providers
+                raise ConfigurationError("OpenAI 客户端未初始化")
+            extra_body = self._extra_body()
+            if extra_body is not None:
+                common["extra_body"] = extra_body
+            return await self._client.chat.completions.create(
+                model=self._settings.llm_model,
+                **common,
+            )
+
+        native: dict[str, Any] = {
+            "model": self._settings.provider_llm_model,
+            "api_key": self._settings.llm_api_key,
+            "timeout": self._settings.llm_timeout_ms / 1000,
+            "num_retries": self._settings.llm_max_retries,
+            **common,
+        }
+        if self._settings.llm_base_url:
+            native["api_base"] = self._settings.llm_base_url
+        return await _litellm_completion(**native)
+
+    @staticmethod
+    async def _close_stream(stream: Any) -> None:
+        close = getattr(stream, "close", None) or getattr(stream, "aclose", None)
+        if close is None:
+            return
+        result = close()
+        if inspect.isawaitable(result):
+            await result
 
     async def stream_turn(
         self,
@@ -63,50 +136,50 @@ class LLMClient:
         tool_parts: dict[int, dict[str, str]] = {}
         finish_reason: str | None = None
         try:
-            stream = await self._client.chat.completions.create(
-                model=self._settings.llm_model,
-                messages=[message.to_model_dict() for message in request.messages],  # type: ignore[arg-type]
-                temperature=self._settings.llm_temperature,
-                max_tokens=self._settings.llm_max_tokens,
-                tools=list(request.tools) or None,  # type: ignore[arg-type]
+            stream = await self._create_completion(
+                [message.to_model_dict() for message in request.messages],
+                tools=list(request.tools) or None,
                 tool_choice=request.tool_choice if request.tools else None,
                 stream=True,
-                extra_body=self._extra_body(),
             )
             async for chunk in stream:
                 cancellation.raise_if_cancelled()
-                raw_usage = getattr(chunk, "usage", None)
+                raw_usage = _attr(chunk, "usage")
                 if raw_usage is not None:
-                    prompt_details = getattr(raw_usage, "prompt_tokens_details", None)
-                    completion_details = getattr(raw_usage, "completion_tokens_details", None)
+                    prompt_details = _attr(raw_usage, "prompt_tokens_details")
+                    completion_details = _attr(raw_usage, "completion_tokens_details")
                     yield ModelChunk(
                         usage=Usage(
-                            input_tokens=int(getattr(raw_usage, "prompt_tokens", 0) or 0),
-                            output_tokens=int(getattr(raw_usage, "completion_tokens", 0) or 0),
-                            cached_tokens=int(getattr(prompt_details, "cached_tokens", 0) or 0),
-                            reasoning_tokens=int(getattr(completion_details, "reasoning_tokens", 0) or 0),
+                            input_tokens=int(_attr(raw_usage, "prompt_tokens", 0) or 0),
+                            output_tokens=int(_attr(raw_usage, "completion_tokens", 0) or 0),
+                            cached_tokens=int(_attr(prompt_details, "cached_tokens", 0) or 0),
+                            reasoning_tokens=int(_attr(completion_details, "reasoning_tokens", 0) or 0),
                         )
                     )
-                if not chunk.choices:
+                choices = _attr(chunk, "choices", []) or []
+                if not choices:
                     continue
-                choice = chunk.choices[0]
-                finish_reason = choice.finish_reason or finish_reason
-                delta = choice.delta
-                token = getattr(delta, "content", None)
+                choice = choices[0]
+                finish_reason = _attr(choice, "finish_reason") or finish_reason
+                delta = _attr(choice, "delta", {})
+                token = _attr(delta, "content")
                 if token:
                     yield ModelChunk(text_delta=token)
-                for fallback_index, tool_delta in enumerate(getattr(delta, "tool_calls", None) or []):
-                    index = getattr(tool_delta, "index", None)
+                for fallback_index, tool_delta in enumerate(_attr(delta, "tool_calls") or []):
+                    index = _attr(tool_delta, "index")
                     index = fallback_index if index is None else int(index)
                     part = tool_parts.setdefault(index, {"id": "", "name": "", "arguments": ""})
-                    if getattr(tool_delta, "id", None):
-                        part["id"] += tool_delta.id
-                    function = getattr(tool_delta, "function", None)
+                    tool_id = _attr(tool_delta, "id")
+                    if tool_id:
+                        part["id"] += tool_id
+                    function = _attr(tool_delta, "function")
                     if function is not None:
-                        if getattr(function, "name", None):
-                            part["name"] += function.name
-                        if getattr(function, "arguments", None):
-                            part["arguments"] += function.arguments
+                        name = _attr(function, "name")
+                        arguments = _attr(function, "arguments")
+                        if name:
+                            part["name"] += name
+                        if arguments:
+                            part["arguments"] += arguments
 
             calls: list[RuntimeToolCall] = []
             for index in sorted(tool_parts):
@@ -142,14 +215,11 @@ class LLMClient:
     async def complete(self, messages: list[Message]) -> str:
         self._ensure_configured()
         try:
-            resp = await self._client.chat.completions.create(
-                model=self._settings.llm_model,
-                messages=messages,  # type: ignore[arg-type]
-                temperature=self._settings.llm_temperature,
-                max_tokens=self._settings.llm_max_tokens,
-                extra_body=self._extra_body(),
-            )
-            return resp.choices[0].message.content or ""
+            resp = await self._create_completion(messages)
+            choices = _attr(resp, "choices", []) or []
+            if not choices:
+                raise UpstreamError("模型未返回候选答案")
+            return _attr(_attr(choices[0], "message", {}), "content", "") or ""
         except Exception as e:  # noqa: BLE001
             raise UpstreamError(f"生成失败：{e}") from e
 
@@ -159,18 +229,12 @@ class LLMClient:
         self._ensure_configured()
         stream = None
         try:
-            stream = await self._client.chat.completions.create(
-                model=self._settings.llm_model,
-                messages=messages,  # type: ignore[arg-type]
-                temperature=self._settings.llm_temperature,
-                max_tokens=self._settings.llm_max_tokens,
-                stream=True,
-                extra_body=self._extra_body(),
-            )
+            stream = await self._create_completion(messages, stream=True)
             async for chunk in stream:
-                if not chunk.choices:
+                choices = _attr(chunk, "choices", []) or []
+                if not choices:
                     continue
-                token = getattr(chunk.choices[0].delta, "content", None)
+                token = _attr(_attr(choices[0], "delta", {}), "content")
                 if token:
                     yield token
         except asyncio.CancelledError:
@@ -182,6 +246,6 @@ class LLMClient:
             # connection immediately, even when the stream is only partly read.
             if stream is not None:
                 try:
-                    await stream.close()
+                    await self._close_stream(stream)
                 except Exception as e:  # noqa: BLE001
                     log.debug("LLM 流关闭失败：%s", e)

@@ -81,6 +81,9 @@ class Settings(BaseSettings):
     sag_pg_database: str = "sag"
 
     # ── LLM（答案生成 + 抽取），OpenAI 兼容 ────────────────────────────
+    # openai 表示 OpenAI-compatible Chat Completions；anthropic / gemini
+    # 使用各自原生协议，由 provider 适配层统一成 Agent 消息。
+    llm_provider: Literal["openai", "anthropic", "gemini"] = "openai"
     llm_base_url: str | None = "https://api.302ai.cn/v1"
     llm_api_key: str | None = None
     llm_model: str = "qwen3.6-flash"
@@ -122,25 +125,22 @@ class Settings(BaseSettings):
     search_fallback_vector: bool = True
 
     # ── 知识宇宙 ──────────────────────────────────────────────────────────
-    # 服务端统一下发 LOD 与场景预算，前端不再散落硬编码阈值。
+    # 服务端统一下发景深门与场景预算，前端不再散落硬编码阈值。
     universe_manifest_source_limit: int = Field(default=256, ge=16, le=2048)
-    universe_entity_page_size: int = Field(default=24, ge=4, le=48)
-    universe_entity_page_max: int = Field(default=48, ge=4, le=100)
-    universe_timeline_event_page_size: int = Field(default=8, ge=2, le=24)
-    # 事件包通常完整返回全部直接实体；该值只保护异常抽取造成的超大事件。
-    universe_event_entity_limit: int = Field(default=96, ge=8, le=128)
-    universe_auto_page_limit: int = Field(default=4, ge=1, le=12)
+    universe_timeline_event_page_size: int = Field(default=6, ge=2, le=6)
+    # 时间线只返回事件的一屏事实投影；完整邻域由显式探索分页加载。
+    universe_event_entity_limit: int = Field(default=8, ge=4, le=8)
     universe_lod_orbit_px: int = Field(default=72, ge=24, le=240)
     universe_lod_near_px: int = Field(default=180, ge=64, le=640)
     universe_lod_deep_px: int = Field(default=360, ge=120, le=1200)
     universe_lod_hysteresis_px: int = Field(default=24, ge=4, le=120)
     universe_lod_debounce_ms: int = Field(default=220, ge=50, le=2000)
-    universe_proxy_budget_desktop: int = Field(default=8000, ge=256, le=50000)
-    universe_proxy_budget_mobile: int = Field(default=2000, ge=128, le=12000)
-    universe_node_budget_desktop: int = Field(default=2000, ge=128, le=10000)
-    universe_node_budget_mobile: int = Field(default=800, ge=64, le=4000)
-    universe_edge_budget_desktop: int = Field(default=5000, ge=128, le=30000)
-    universe_edge_budget_mobile: int = Field(default=1500, ge=64, le=10000)
+    universe_proxy_budget_desktop: int = Field(default=3000, ge=256, le=3000)
+    universe_proxy_budget_mobile: int = Field(default=1200, ge=128, le=1200)
+    universe_node_budget_desktop: int = Field(default=240, ge=40, le=240)
+    universe_node_budget_mobile: int = Field(default=120, ge=40, le=120)
+    universe_edge_budget_desktop: int = Field(default=360, ge=64, le=360)
+    universe_edge_budget_mobile: int = Field(default=180, ge=64, le=180)
     universe_planet_radius_min: float = Field(default=42.0, ge=12.0, le=160.0)
     universe_planet_radius_max: float = Field(default=132.0, ge=48.0, le=360.0)
     universe_planet_radius_scale: float = Field(default=22.0, ge=2.0, le=80.0)
@@ -186,12 +186,24 @@ class Settings(BaseSettings):
         return bool(self.llm_api_key)
 
     @property
+    def provider_llm_model(self) -> str:
+        """LiteLLM 路由名；持久化配置仍保留用户填写的原始模型名。"""
+        if self.llm_provider == "openai" or self.llm_model.startswith(f"{self.llm_provider}/"):
+            return self.llm_model
+        return f"{self.llm_provider}/{self.llm_model}"
+
+    @property
     def effective_embedding_api_key(self) -> str | None:
-        return self.embedding_api_key or self.llm_api_key
+        # Anthropic / Gemini 的生成密钥不是 OpenAI-compatible Embedding 密钥。
+        return self.embedding_api_key or (
+            self.llm_api_key if self.llm_provider == "openai" else None
+        )
 
     @property
     def effective_embedding_base_url(self) -> str | None:
-        return self.embedding_base_url or self.llm_base_url
+        return self.embedding_base_url or (
+            self.llm_base_url if self.llm_provider == "openai" else None
+        )
 
     @property
     def mineru_configured(self) -> bool:

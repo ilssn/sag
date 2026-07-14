@@ -129,28 +129,34 @@ class UniverseExpansionInfo(BaseModel):
     anchor: dict[str, Any]
     neighbors: list[dict[str, Any]] = Field(default_factory=list)
     relations: list[dict[str, Any]] = Field(default_factory=list)
-    returned: int = 0
+    returned: int = Field(ge=0)
     has_more: bool = False
-    next_cursor: str | None = None
-    as_of: datetime | None = None
-
-
-class UniverseSeedInfo(BaseModel):
-    """A bounded set of recently active entities used to enter a source."""
-
-    nodes: list[dict[str, Any]] = Field(default_factory=list)
-    has_more: bool = False
-    next_cursor: str | None = None
+    next_cursor: str | None = Field(default=None, max_length=2048)
+    snapshot_id: str = Field(min_length=1, max_length=2048)
     as_of: datetime
+
+
+class UniverseTimelineBundleInfo(BaseModel):
+    """One event and its bounded first-screen factual neighborhood."""
+
+    bundle_id: str = Field(min_length=1)
+    event: dict[str, Any]
+    nodes: list[dict[str, Any]] = Field(default_factory=list)
+    relations: list[dict[str, Any]] = Field(default_factory=list)
+    neighbor_total: int = Field(default=0, ge=0)
+    neighbor_returned: int = Field(default=0, ge=0)
+    complete: bool = False
+    neighbor_next_cursor: str | None = Field(default=None, max_length=2048)
+    cursor_after: str | None = Field(default=None, max_length=2048)
 
 
 class UniverseTimelineInfo(BaseModel):
     """A bounded event-time page plus a small factual entity neighborhood."""
 
-    nodes: list[dict[str, Any]] = Field(default_factory=list)
-    relations: list[dict[str, Any]] = Field(default_factory=list)
+    bundles: list[UniverseTimelineBundleInfo] = Field(default_factory=list)
+    snapshot_id: str = Field(min_length=1, max_length=2048)
     has_more: bool = False
-    next_cursor: str | None = None
+    next_cursor: str | None = Field(default=None, max_length=2048)
     as_of: datetime
 
 

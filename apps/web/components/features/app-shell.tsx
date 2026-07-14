@@ -652,7 +652,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     initial={{ opacity: 0, scale: 0.92, y: -4 }}
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     transition={{ duration: 0.18 }}
-                    className="fixed right-4 top-3 z-30 flex items-center gap-2"
+                    className="fixed right-4 top-3 z-[45] flex items-center gap-2"
                     data-explore-controls="true"
                   >
                     <UniverseViewSettingsDrawer

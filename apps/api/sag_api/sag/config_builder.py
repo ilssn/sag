@@ -22,8 +22,11 @@ def build_engine_config(settings: Settings, *, overrides: dict[str, Any] | None 
 
     llm = LLMConfig(
         api_key=settings.llm_api_key or _PLACEHOLDER,
-        model=settings.llm_model,
+        model=settings.provider_llm_model,
+        provider="openai" if settings.llm_provider == "openai" else "litellm",
         base_url=settings.llm_base_url,
+        temperature=settings.llm_temperature,
+        max_tokens=settings.llm_max_tokens,
         timeout=max(1, (settings.llm_timeout_ms + 999) // 1000),
         max_retries=settings.llm_max_retries,
     )

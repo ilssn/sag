@@ -25,7 +25,6 @@ import type {
   TokenResponse,
   User,
   UniverseManifest,
-  UniverseActivationSeed,
   UniverseGraphPatch,
   UniverseTimelineSlice,
   UniverseNodeDetail,
@@ -539,7 +538,7 @@ export const api = {
     }),
   streamGlobalSearch,
 
-  // 知识宇宙：统计轮廓 + 有界激活
+  // 知识宇宙：统计轮廓 + 原子时间线与显式探索
   universeManifest: () => request<UniverseManifest>("/api/v1/universe/manifest"),
   universeNode: (kind: "event" | "entity", id: string, sourceId?: string | null) => {
     if (!sourceId) {
@@ -555,24 +554,11 @@ export const api = {
     node_id: string;
     limit?: number;
     cursor?: string | null;
+    snapshot_id?: string | null;
     after?: string | null;
     before?: string | null;
   }, signal?: AbortSignal) =>
     request<UniverseGraphPatch>("/api/v1/universe/expand", {
-      method: "POST",
-      body: JSON.stringify(body),
-      signal,
-    }),
-  universeActivate: (body: {
-    epoch: number;
-    source_id: string;
-    category?: string | null;
-    limit?: number;
-    cursor?: string | null;
-    after?: string | null;
-    before?: string | null;
-  }, signal?: AbortSignal) =>
-    request<UniverseActivationSeed>("/api/v1/universe/activate", {
       method: "POST",
       body: JSON.stringify(body),
       signal,
@@ -582,6 +568,7 @@ export const api = {
     source_id: string;
     limit?: number;
     cursor?: string | null;
+    snapshot_id?: string | null;
   }, signal?: AbortSignal) =>
     request<UniverseTimelineSlice>("/api/v1/universe/timeline", {
       method: "POST",
