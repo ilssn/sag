@@ -641,8 +641,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <DetailPanelProvider>
               <div
                 className={cn(
-                  "bg-space-field relative grid min-h-svh overflow-hidden",
-                  windowed && "place-items-center p-4 md:p-8",
+                  "bg-space-field relative grid h-svh min-h-0 overflow-hidden",
+                  windowed && "place-items-center p-4",
                 )}
               >
                 <SpaceBackdrop />

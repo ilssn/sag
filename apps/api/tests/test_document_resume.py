@@ -66,8 +66,8 @@ async def test_incremental_processor_pauses_after_inflight_chunks_and_resumes(mo
     assert len(paused.processed_chunk_ids) == 2
     assert paused.token_usage == 200
     assert normalized == []
-    assert len(restored) == 1
-    assert set(restored[0]) == {"event-c1", "event-c2"}
+    assert restored
+    assert set(restored[-1]) == {"event-c1", "event-c2"}
 
     pause_requested = False
     resumed = await processor.process(
@@ -82,14 +82,57 @@ async def test_incremental_processor_pauses_after_inflight_chunks_and_resumes(mo
     assert resumed.event_count == 5
     assert resumed.token_usage == 500
     assert normalized == [["c1", "c2", "c3", "c4", "c5"]]
-    assert len(restored) == 2
-    assert set(restored[1]) == {
+    assert set(restored[-1]) == {
         "event-c1",
         "event-c2",
         "event-c3",
         "event-c4",
         "event-c5",
     }
+
+
+@pytest.mark.asyncio
+async def test_incremental_processor_restores_events_before_publishing_checkpoint(monkeypatch):
+    """The graph must be able to read every event advertised by a live checkpoint."""
+    from sag_api.sag.dto import ProcessCheckpoint
+    from sag_api.sag.incremental_processor import IncrementalDocumentProcessor
+
+    processor = IncrementalDocumentProcessor(object(), "source-config", max_concurrency=1)
+    restored: set[str] = set()
+    snapshots: list[ProcessCheckpoint] = []
+
+    async def extract_chunk(chunk_id: str):
+        return {
+            "chunk-1": ["event-1", "event-2"],
+            "chunk-2": ["event-3"],
+        }[chunk_id], 10
+
+    async def restore(event_ids: list[str]):
+        restored.update(event_ids)
+
+    async def publish(value: ProcessCheckpoint):
+        # `on_checkpoint` persists document.event_count. Once it becomes visible to
+        # the detail page, those same event ids must already be visible to /graph.
+        assert set(value.event_ids) <= restored
+        snapshots.append(value)
+
+    async def no_op(_ids):
+        return None
+
+    monkeypatch.setattr(processor, "_extract_chunk", extract_chunk)
+    monkeypatch.setattr(processor, "_restore_checkpoint_events", restore)
+    monkeypatch.setattr(processor, "_normalize_event_ranks", no_op)
+
+    outcome = await processor.process(
+        None,
+        checkpoint=ProcessCheckpoint(chunk_ids=["chunk-1", "chunk-2"]),
+        on_checkpoint=publish,
+        should_pause=_return_false,
+    )
+
+    assert [snapshot.event_count for snapshot in snapshots] == [2, 3]
+    assert outcome.event_count == 3
+    assert restored == {"event-1", "event-2", "event-3"}
 
 
 @pytest.mark.asyncio
@@ -127,6 +170,37 @@ async def test_incremental_processor_passes_chunk_settings_to_zleap(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_incremental_processor_records_successful_eventless_chunks(monkeypatch):
+    from sag_api.sag.dto import ProcessCheckpoint
+    from sag_api.sag.incremental_processor import IncrementalDocumentProcessor
+
+    processor = IncrementalDocumentProcessor(object(), "source-config", max_concurrency=1)
+
+    async def extract_chunk(_chunk_id: str):
+        return [], 42
+
+    async def no_op(_ids):
+        return None
+
+    monkeypatch.setattr(processor, "_extract_chunk", extract_chunk)
+    monkeypatch.setattr(processor, "_restore_checkpoint_events", no_op)
+    monkeypatch.setattr(processor, "_normalize_event_ranks", no_op)
+    snapshots: list[ProcessCheckpoint] = []
+
+    outcome = await processor.process(
+        None,
+        checkpoint=ProcessCheckpoint(chunk_ids=["chunk-without-event"]),
+        on_checkpoint=lambda value: _append_checkpoint(snapshots, value),
+        should_pause=_return_false,
+    )
+
+    assert outcome.processed_chunk_ids == ["chunk-without-event"]
+    assert outcome.eventless_chunk_ids == ["chunk-without-event"]
+    assert outcome.event_count == 0
+    assert snapshots[-1].eventless_chunk_ids == ["chunk-without-event"]
+
+
+@pytest.mark.asyncio
 async def test_extract_chunk_tracks_tokens_from_wrapped_llm_client(monkeypatch):
     from sag_api.sag import incremental_processor as processor_module
     from sag_api.sag.incremental_processor import IncrementalDocumentProcessor
@@ -153,6 +227,7 @@ async def test_extract_chunk_tracks_tokens_from_wrapped_llm_client(monkeypatch):
             return self.client
 
         async def extract(self, config):
+            assert "观点、事实、定义" in config.custom_requirements
             # zleap-sag 的重试客户端会让结构化输出直接调用内层客户端。
             await self.client.client.chat([SimpleNamespace(content="西游记")])
             return [SimpleNamespace(id="event-1")]

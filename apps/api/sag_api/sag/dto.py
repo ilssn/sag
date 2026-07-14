@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -147,6 +147,7 @@ class UniverseTimelineBundleInfo(BaseModel):
     neighbor_returned: int = Field(default=0, ge=0)
     complete: bool = False
     neighbor_next_cursor: str | None = Field(default=None, max_length=2048)
+    cursor_before: str | None = Field(default=None, max_length=2048)
     cursor_after: str | None = Field(default=None, max_length=2048)
 
 
@@ -155,6 +156,11 @@ class UniverseTimelineInfo(BaseModel):
 
     bundles: list[UniverseTimelineBundleInfo] = Field(default_factory=list)
     snapshot_id: str = Field(min_length=1, max_length=2048)
+    direction: Literal["older", "newer"] = "older"
+    has_newer: bool = False
+    newer_cursor: str | None = Field(default=None, max_length=2048)
+    has_older: bool = False
+    older_cursor: str | None = Field(default=None, max_length=2048)
     has_more: bool = False
     next_cursor: str | None = Field(default=None, max_length=2048)
     as_of: datetime
@@ -169,6 +175,7 @@ class ProcessOutcome(BaseModel):
     chunk_ids: list[str] = []
     event_ids: list[str] = []
     processed_chunk_ids: list[str] = []
+    eventless_chunk_ids: list[str] = []
     token_usage: int = 0
     paused: bool = False
 
@@ -180,6 +187,9 @@ class ProcessOutcome(BaseModel):
             event_count=int(getattr(extract, "event_count", 0) or 0),
             chunk_ids=list(getattr(ingest, "chunk_ids", []) or []),
             event_ids=list(getattr(extract, "event_ids", []) or []),
+            eventless_chunk_ids=list(
+                getattr(extract, "eventless_chunk_ids", []) or []
+            ),
         )
 
 
@@ -191,6 +201,7 @@ class ProcessCheckpoint(BaseModel):
     processed_chunk_ids: list[str] = []
     event_count: int = 0
     event_ids: list[str] = []
+    eventless_chunk_ids: list[str] = []
     token_usage: int = 0
 
     @classmethod

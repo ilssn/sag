@@ -304,6 +304,41 @@ describe("universe working set", () => {
 });
 
 describe("transactional universe bundle admission", () => {
+  it("deduplicates an expanded network when a later timeline bundle owns it", () => {
+    const budget = { nodes: 8, edges: 8 };
+    const expanded = eventBundle("expansion:entity-1", "event-1", "entity-1");
+    const timeline = eventBundle("timeline:event-1", "event-1", "entity-1");
+    const first = admitUniverseBundle(
+      emptyUniverseWorkingSet(12),
+      expanded,
+      budget,
+      1,
+    );
+    const second = admitUniverseBundle(first.workingSet, timeline, budget, 2);
+
+    expect(second.accepted).toBe(true);
+    expect(second.workingSet.nodes.map((node) => node.id).sort()).toEqual([
+      "entity-1",
+      "event-1",
+    ]);
+    expect(second.workingSet.relations).toHaveLength(1);
+    expect(second.workingSet.node_owners["source-a:event:event-1"]).toEqual([
+      "expansion:entity-1",
+      "timeline:event-1",
+    ]);
+    expect(second.workingSet.node_owners["source-a:entity:entity-1"]).toEqual([
+      "expansion:entity-1",
+      "timeline:event-1",
+    ]);
+    expect(second.workingSet.relation_owners[
+      "source-a:mentions:event-1:entity-1"
+    ]).toEqual([
+      "expansion:entity-1",
+      "timeline:event-1",
+    ]);
+    expectBundleInvariants(second.workingSet, budget);
+  });
+
   it("keeps a shared entity resident when its oldest owner bundle is evicted", () => {
     const budget = { nodes: 4, edges: 4 };
     let current = admitUniverseBundle(
@@ -415,6 +450,122 @@ describe("transactional universe bundle admission", () => {
     expect(blocked.workingSet).toBe(current);
   });
 
+  it("protects complete cache bundles even when their nodes have other owners", () => {
+    const budget = { nodes: 2, edges: 0 };
+    let current = admitUniverseBundle(
+      emptyUniverseWorkingSet(12),
+      {
+        id: "cached-timeline",
+        origin: "timeline",
+        epoch: 12,
+        source_id: "source-a",
+        nodes: [{
+          id: "shared",
+          kind: "entity",
+          source_id: "source-a",
+          label: "shared",
+        }],
+        relations: [],
+      },
+      budget,
+      1,
+    ).workingSet;
+    current = admitUniverseBundle(
+      current,
+      {
+        id: "other-owner",
+        origin: "activation",
+        epoch: 12,
+        source_id: "source-a",
+        nodes: [
+          {
+            id: "shared",
+            kind: "entity",
+            source_id: "source-a",
+            label: "shared",
+          },
+          {
+            id: "old-event",
+            kind: "event",
+            source_id: "source-a",
+            label: "old-event",
+          },
+        ],
+        relations: [],
+      },
+      budget,
+      2,
+    ).workingSet;
+
+    const admitted = admitUniverseBundle(
+      current,
+      {
+        ...eventBundle("new-timeline", "new-event"),
+        origin: "timeline",
+      },
+      budget,
+      3,
+      { protectedBundleIds: ["cached-timeline"] },
+    );
+
+    expect(admitted.accepted).toBe(true);
+    expect(admitted.evictedBundleIds).toEqual(["other-owner"]);
+    expect(admitted.workingSet.bundle_order).toEqual([
+      "cached-timeline",
+      "new-timeline",
+    ]);
+    expect(admitted.workingSet.nodes.map((node) => node.id).sort()).toEqual([
+      "new-event",
+      "shared",
+    ]);
+    expectBundleInvariants(admitted.workingSet, budget);
+  });
+
+  it("releases expansion support before older timeline history", () => {
+    const budget = { nodes: 2, edges: 0 };
+    let current = admitUniverseBundle(
+      emptyUniverseWorkingSet(12),
+      {
+        ...eventBundle("timeline-old", "event-old"),
+        origin: "timeline",
+      },
+      budget,
+      1,
+    ).workingSet;
+    current = admitUniverseBundle(
+      current,
+      {
+        ...eventBundle("expansion-newer", "event-expanded"),
+        origin: "expansion",
+        anchor_key: "source-a:entity:anchor",
+        lineage_root_key: "source-a:event:timeline-root",
+        request_cursor: null,
+        next_cursor: null,
+      },
+      budget,
+      2,
+    ).workingSet;
+
+    const admitted = admitUniverseBundle(
+      current,
+      {
+        ...eventBundle("timeline-new", "event-new"),
+        origin: "timeline",
+      },
+      budget,
+      3,
+    );
+
+    expect(admitted.accepted).toBe(true);
+    expect(admitted.evictedBundleIds).toEqual(["expansion-newer"]);
+    expect(admitted.workingSet.bundle_order).toEqual([
+      "timeline-old",
+      "timeline-new",
+    ]);
+    expect(admitted.workingSet.bundles["timeline-old"].origin).toBe("timeline");
+    expectBundleInvariants(admitted.workingSet, budget);
+  });
+
   it("protects a locked factual edge until its one-hop network is unpinned", () => {
     const budget = { nodes: 4, edges: 1 };
     const lockedBundle = eventBundle(
@@ -480,6 +631,11 @@ describe("transactional universe bundle admission", () => {
     );
     expect(current.pinned_keys).toEqual([eventKey, entityKey]);
     expect(current.pinned_relation_keys).toEqual([lockedRelationKey]);
+    expect(setUniversePinnedNetwork(
+      current,
+      [eventKey, entityKey, eventKey],
+      [lockedRelationKey, lockedRelationKey],
+    )).toBe(current);
     current = setUniversePinnedKeys(current, [entityKey, entityKey]);
     expect(current.pinned_keys).toEqual([entityKey]);
     expect(current.pinned_relation_keys).toEqual([lockedRelationKey]);
@@ -505,6 +661,11 @@ describe("transactional universe bundle admission", () => {
     expect(admitted.workingSet.pinned_keys).toEqual([]);
     expect(admitted.workingSet.pinned_relation_keys).toEqual([]);
     expectBundleInvariants(admitted.workingSet, budget);
+  });
+
+  it("keeps an already-clear pin set referentially stable", () => {
+    const current = emptyUniverseWorkingSet(20);
+    expect(setUniversePinnedNetwork(current, [], [])).toBe(current);
   });
 
   it("acknowledges exact idempotent retries and rejects changed payloads for the same id", () => {

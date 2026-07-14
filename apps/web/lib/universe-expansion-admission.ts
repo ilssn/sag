@@ -7,6 +7,7 @@ import {
   type AdmitUniverseBundleOptions,
   type UniverseBundleAdmissionResult,
   type UniverseWorkingSet,
+  universeNodeKey,
 } from "./universe-working-set";
 
 export interface UniverseExpansionRequestAnchor {
@@ -14,6 +15,8 @@ export interface UniverseExpansionRequestAnchor {
   sourceId: string;
   nodeKind: UniverseNodeKind;
   nodeId: string;
+  /** Stable timeline node that owns the expansion branch. */
+  lineageRootKey: string;
   requestCursor: string | null;
   snapshotId: string | null;
   sourceRevision: string | null;
@@ -70,6 +73,7 @@ function validExpansionContract(
     || page.anchor.kind !== expected.nodeKind
     || page.anchor.id !== expected.nodeId
     || page.anchor.source_id !== expected.sourceId
+    || !validOpaqueValue(expected.lineageRootKey, 4096)
     || !Number.isInteger(page.page.returned)
     || page.page.returned < 0
     || page.page.has_more !== (page.page.next_cursor !== null)
@@ -162,6 +166,15 @@ export function admitUniverseExpansionPage(
     current,
     {
       id: page.bundle_id,
+      origin: "expansion",
+      anchor_key: universeNodeKey(
+        expected.nodeKind,
+        expected.nodeId,
+        expected.sourceId,
+      ),
+      lineage_root_key: expected.lineageRootKey,
+      request_cursor: page.request_cursor,
+      next_cursor: page.page.next_cursor,
       epoch: page.epoch,
       source_id: page.source_id,
       nodes: [page.anchor, ...page.nodes],

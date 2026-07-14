@@ -230,6 +230,7 @@ async def test_universe_real_store_statistics_and_keyset_cursor():
             async def timeline(
                 cursor: str | None = None,
                 snapshot_id: str | None = None,
+                direction: str = "older",
             ):
                 response = await client.post(
                     "/api/v1/universe/timeline",
@@ -238,6 +239,7 @@ async def test_universe_real_store_statistics_and_keyset_cursor():
                         "epoch": 10,
                         "source_id": source_id,
                         "limit": 6,
+                        "direction": direction,
                         "cursor": cursor,
                         "snapshot_id": snapshot_id,
                     },
@@ -272,6 +274,25 @@ async def test_universe_real_store_statistics_and_keyset_cursor():
             assert [
                 page["page"]["returned_bundles"] for page in timeline_pages
             ] == [6, 6, 6, 6]
+            assert timeline_pages[0]["page"]["has_newer"] is False
+            assert timeline_pages[0]["page"]["newer_cursor"] is None
+            assert timeline_pages[-1]["page"]["has_older"] is False
+            assert timeline_pages[-1]["page"]["older_cursor"] is None
+
+            recovered_newer_page = await timeline(
+                timeline_pages[1]["page"]["newer_cursor"],
+                timeline_pages[0]["snapshot_id"],
+                "newer",
+            )
+            assert recovered_newer_page["request_direction"] == "newer"
+            assert recovered_newer_page["page"]["direction"] == "newer"
+            assert recovered_newer_page["page"]["has_newer"] is False
+            assert recovered_newer_page["page"]["has_older"] is True
+            assert [
+                bundle["event"]["id"] for bundle in recovered_newer_page["bundles"]
+            ] == [
+                bundle["event"]["id"] for bundle in timeline_pages[0]["bundles"]
+            ]
             timeline_events = [
                 bundle["event"]["id"]
                 for page in timeline_pages
@@ -295,6 +316,9 @@ async def test_universe_real_store_statistics_and_keyset_cursor():
                 assert "nodes" not in page
                 assert "relations" not in page
                 assert len(page["bundles"]) == page["page"]["returned_bundles"]
+                assert page["bundles"][0]["cursor_before"] == page["page"][
+                    "newer_cursor"
+                ]
                 assert page["bundles"][-1]["cursor_after"] == page["page"]["next_cursor"]
                 event_ids_in_page = {
                     bundle["event"]["id"] for bundle in page["bundles"]

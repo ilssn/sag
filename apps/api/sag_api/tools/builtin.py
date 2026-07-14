@@ -20,7 +20,8 @@ from sag_api.connectors.web import extract_web_markdown, extract_web_title
 from sag_api.core.config import settings
 from sag_api.core.logging import get_logger
 from sag_api.generation import build_citations
-from sag_api.services.retrieval_service import retrieve_relevant_sections
+from sag_api.sag import RetrievedSection
+from sag_api.services.retrieval_service import recall_event_scores, retrieve_relevant_sections
 from sag_api.tools.base import Tool, ToolContext, ToolMeta, ToolResult
 
 log = get_logger("tools.web_search")
@@ -34,6 +35,7 @@ _WEB_PAGE_TEXT_LIMIT = 12_000
 _WEB_PAGE_MAX_REDIRECTS = 3
 _WEB_PAGE_CONTENT_TYPES = ("text/html", "text/plain", "application/xhtml+xml")
 _WEB_PAGE_PORTS = frozenset({80, 443, 8080, 8443})
+_DEFAULT_KNOWLEDGE_SEARCH_STRATEGY = "vector"
 _RECENT_QUERY_MARKERS = (
     "今天",
     "今日",
@@ -62,14 +64,135 @@ _RECENT_QUERY_MARKERS = (
 )
 
 
-def _format_sections(sections: list, offset: int = 0) -> str:
+def _events_by_section(events: list | None) -> dict[tuple[str, str], list]:
+    grouped: dict[tuple[str, str], list] = {}
+    for event in events or []:
+        source_config_id = str(getattr(event, "source_config_id", "") or "").strip()
+        chunk_id = str(getattr(event, "chunk_id", "") or "").strip()
+        if source_config_id and chunk_id:
+            grouped.setdefault((source_config_id, chunk_id), []).append(event)
+    return grouped
+
+
+def _format_sections(sections: list, offset: int = 0, events: list | None = None) -> str:
     if not sections:
         return "（无相关资料）"
+    event_refs = _events_by_section(events)
     blocks = []
     for i, s in enumerate(sections, start=1 + offset):
+        key = (
+            str(getattr(s, "source_config_id", "") or "").strip(),
+            str(getattr(s, "chunk_id", "") or "").strip(),
+        )
+        related_events = event_refs.get(key, [])
+        if related_events:
+            event = related_events[0]
+            title = " ".join(str(getattr(event, "title", "") or "").split())
+            summary = " ".join(str(getattr(event, "summary", "") or "").split())
+            lines = [f"[{i}] 事项：{title or '未命名事项'}"]
+            if summary:
+                lines.append(f"摘要：{summary}")
+            content = getattr(s, "content", "")
+            if content:
+                lines.append(f"原文证据：\n{content}")
+            blocks.append("\n".join(lines))
+            continue
         heading = getattr(s, "heading", None) or "片段"
         blocks.append(f"[{i}] {heading}\n{getattr(s, 'content', '')}")
     return "\n\n".join(blocks)
+
+
+async def _prioritize_event_evidence(
+    engine_manager: Any,
+    sections: list[RetrievedSection],
+    events: list,
+    sources_by_config: dict[str, Any],
+    *,
+    limit: int,
+) -> list[RetrievedSection]:
+    """Put event-backed evidence first, then retain chunk-only fallbacks."""
+
+    existing = {
+        ((section.source_config_id or "").strip(), (section.chunk_id or "").strip()): section
+        for section in sections
+        if section.source_config_id and section.chunk_id
+    }
+    event_scores: dict[tuple[str, str], float] = {}
+    ordered_keys: list[tuple[str, str]] = []
+    for event in events:
+        key = (
+            str(getattr(event, "source_config_id", "") or "").strip(),
+            str(getattr(event, "chunk_id", "") or "").strip(),
+        )
+        if not all(key):
+            continue
+        try:
+            score = float(getattr(event, "score", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            score = 0.0
+        event_scores[key] = max(event_scores.get(key, 0.0), score)
+        if key not in ordered_keys:
+            ordered_keys.append(key)
+        if len(ordered_keys) >= limit:
+            break
+
+    get_chunk = getattr(engine_manager, "get_chunk", None)
+    missing_keys = [key for key in ordered_keys if key not in existing]
+
+    async def load(key: tuple[str, str]) -> tuple[tuple[str, str], RetrievedSection | None]:
+        if not callable(get_chunk):
+            return key, None
+        source_config_id, chunk_id = key
+        try:
+            chunk = await get_chunk(
+                source_config_id,
+                chunk_id,
+                source=sources_by_config.get(source_config_id),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:  # noqa: BLE001
+            log.warning("读取事项原文块失败 %s/%s：%s", source_config_id, chunk_id, error)
+            return key, None
+        if chunk is None:
+            return key, None
+        return key, RetrievedSection(
+            chunk_id=chunk.chunk_id,
+            heading=chunk.heading,
+            content=chunk.content,
+            score=event_scores.get(key, 0.0),
+            rank=chunk.rank,
+            source_config_id=source_config_id,
+        )
+
+    if missing_keys:
+        for key, section in await asyncio.gather(*(load(key) for key in missing_keys)):
+            if section is not None:
+                existing[key] = section
+
+    selected: list[RetrievedSection] = []
+    selected_keys: set[tuple[str, str]] = set()
+    for key in ordered_keys:
+        section = existing.get(key)
+        if section is None:
+            continue
+        selected.append(section.model_copy(update={"score": max(section.score, event_scores.get(key, 0.0))}))
+        selected_keys.add(key)
+        if len(selected) >= limit:
+            return selected
+
+    for section in sections:
+        key = (
+            (section.source_config_id or "").strip(),
+            (section.chunk_id or "").strip(),
+        )
+        if key in selected_keys:
+            continue
+        selected.append(section)
+        selected_keys.add(key)
+        if len(selected) >= limit:
+            break
+    return selected
 
 
 class SearchContextTool(Tool):
@@ -99,17 +222,26 @@ class SearchContextTool(Tool):
         persona = ctx.persona or {}
         top_k = args.get("top_k") or persona.get("top_k")
         limit = max(1, min(int(top_k or 8), 50))
-        outcome = await retrieve_relevant_sections(
-            ctx.engine_manager,
-            ctx.sources,
-            query,
-            # 未在人格中指定时沿用全局快速/精确设置。
-            strategy=persona.get("search_strategy"),
-            top_k=limit,
-        )
-        sections = outcome.sections
         source_refs = {s.sag_source_config_id: {"id": s.id, "name": s.name} for s in ctx.sources}
         sources_by_config = {source.sag_source_config_id: source for source in ctx.sources}
+        outcome, event_scores = await asyncio.gather(
+            retrieve_relevant_sections(
+                ctx.engine_manager,
+                ctx.sources,
+                query,
+                # 问答工具有独立的 30 秒执行预算。默认采用与搜索页“快速”
+                # 一致的批量向量召回，并叠加并行词法与事项召回；人格可显式覆盖。
+                strategy=persona.get("search_strategy") or _DEFAULT_KNOWLEDGE_SEARCH_STRATEGY,
+                top_k=limit,
+            ),
+            recall_event_scores(
+                ctx.engine_manager,
+                query,
+                sources_by_config,
+                limit=limit,
+            ),
+        )
+        sections = outcome.sections
         graph_for_sections = getattr(ctx.engine_manager, "graph_for_sections", None)
         graph = (
             await graph_for_sections(
@@ -118,18 +250,31 @@ class SearchContextTool(Tool):
                 # graph_for_sections allocates the first event of each chunk
                 # before a second pass. Cover every returned section while
                 # retaining the existing minimum activation capacity.
-                event_limit=max(12, len(sections)),
+                event_limit=max(12, len(sections), len(event_scores)),
                 entity_limit=36,
+                event_scores=event_scores,
             )
-            if sections and callable(graph_for_sections)
+            if (sections or event_scores) and callable(graph_for_sections)
             else None
         )
+        if graph is not None and graph.events:
+            sections = await _prioritize_event_evidence(
+                ctx.engine_manager,
+                sections,
+                list(graph.events),
+                sources_by_config,
+                limit=limit,
+            )
         offset = max(0, ctx.citation_offset)
         citations = build_citations(sections, source_refs, list(graph.events) if graph is not None else None)
         for c in citations:
             c["n"] = c["n"] + offset
         return ToolResult(
-            content=_format_sections(sections, offset),
+            content=_format_sections(
+                sections,
+                offset,
+                list(graph.events) if graph is not None else None,
+            ),
             citations=citations,
             data={
                 "sections": sections,
@@ -137,6 +282,8 @@ class SearchContextTool(Tool):
                 "lexical_count": int(outcome.stats.get("lexical_candidates") or 0),
                 "filtered_count": int(outcome.stats.get("filtered_irrelevant") or 0),
                 "candidate_count": int(outcome.stats.get("candidates") or len(sections)),
+                "event_count": len(graph.events) if graph is not None else 0,
+                "event_candidates": len(event_scores),
                 "_graph": graph,
             },
         )
@@ -312,15 +459,11 @@ async def _download_public_web_page(url: str) -> tuple[str, str]:
                         location = response.headers.get("location")
                         if not location:
                             raise RuntimeError("网页跳转地址无效")
-                        current_url = await _validated_public_web_url(
-                            urljoin(current_url, location)
-                        )
+                        current_url = await _validated_public_web_url(urljoin(current_url, location))
                         continue
                     response.raise_for_status()
                     content_type = response.headers.get("content-type", "").lower()
-                    if content_type and not any(
-                        allowed in content_type for allowed in _WEB_PAGE_CONTENT_TYPES
-                    ):
+                    if content_type and not any(allowed in content_type for allowed in _WEB_PAGE_CONTENT_TYPES):
                         raise RuntimeError("该地址不是可读取的网页文本")
 
                     chunks: list[bytes] = []
@@ -359,10 +502,7 @@ def _web_results(payload: Any, *, limit: int) -> list[dict[str, str]]:
         host = urlsplit(url).hostname or url
         title = _clean_web_text(item.get("title"), limit=180) or host
         excerpt = _clean_web_text(
-            item.get("content")
-            or item.get("description")
-            or item.get("summary")
-            or item.get("snippet"),
+            item.get("content") or item.get("description") or item.get("summary") or item.get("snippet"),
             limit=_WEB_RESULT_CONTENT_LIMIT,
         )
         published_at = _clean_web_text(

@@ -10,7 +10,9 @@ const BASE_PARTICLE_COUNT = 104;
 
 function createParticleOptions(dark: boolean, reducedMotion: boolean): ISourceOptions {
   return {
-    autoPlay: true,
+    // In graph detail mode this layer is visual context only. A static first
+    // frame avoids running a second particle loop behind the WebGL scene.
+    autoPlay: !reducedMotion,
     background: { color: { value: "transparent" } },
     detectRetina: true,
     fpsLimit: 24,

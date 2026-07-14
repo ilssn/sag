@@ -20,7 +20,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from sag_api.core.model_providers import ModelProviderId, get_model_provider
 from sag_api.enums import SearchStrategy, normalize_search_strategy
+
+_DEFAULT_LLM_PROVIDER = get_model_provider("openai")
 
 
 class Settings(BaseSettings):
@@ -41,9 +44,7 @@ class Settings(BaseSettings):
     # 业务展示时区；数据库与 API 时间戳始终使用 UTC。
     timezone: str = "Asia/Shanghai"
     # NoDecode 让逗号分隔值先进入下方 validator，避免 settings 源强制按 JSON 解码。
-    cors_origins: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["http://localhost:3000"]
-    )
+    cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["http://localhost:3000"])
     # 关闭后仅允许首个用户注册（部署引导），其余返回 403
     allow_registration: bool = True
 
@@ -51,20 +52,33 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./.data/sag.db"
 
     # ── 存储 ────────────────────────────────────────────────────────────
-    data_dir: str = "./.data/engine"       # zleap-sag data_dir（LanceDB + SQLite）
-    upload_dir: str = "./.data/uploads"   # 上传原始文件落盘
-    max_upload_mb: int = 25               # 单文件上传上限
-    job_concurrency: int = 2              # 后台处理并发
+    data_dir: str = "./.data/engine"  # zleap-sag data_dir（LanceDB + SQLite）
+    upload_dir: str = "./.data/uploads"  # 上传原始文件落盘
+    max_upload_mb: int = 25  # 单文件上传上限
+    job_concurrency: int = 2  # 后台处理并发
     document_extract_concurrency: int = Field(default=5, ge=1, le=50)  # 单文档 chunk 抽取并发
     document_chunk_max_tokens: int = Field(default=1_000, ge=100, le=100_000)
     document_chunk_mode: Literal["standard", "heading_strict"] = "standard"
-    job_max_attempts: int = 3             # 可重试失败的最大尝试次数（含首次）
-    engine_cache_size: int = 16           # 引擎槽 LRU 上限（超限逐出最久未用）
-    engine_warmup_count: int = 4          # 启动时预热最近使用的信源引擎数
+    job_max_attempts: int = 3  # 可重试失败的最大尝试次数（含首次）
+    engine_cache_size: int = 16  # 引擎槽 LRU 上限（超限逐出最久未用）
+    engine_warmup_count: int = 4  # 启动时预热最近使用的信源引擎数
     # 允许上传的扩展名白名单（小写，含点）；空集合表示不限制
     allowed_upload_exts: set[str] = {
-        ".md", ".markdown", ".txt", ".text", ".pdf", ".docx", ".pptx",
-        ".xls", ".xlsx", ".csv", ".tsv", ".html", ".htm", ".json", ".epub",
+        ".md",
+        ".markdown",
+        ".txt",
+        ".text",
+        ".pdf",
+        ".docx",
+        ".pptx",
+        ".xls",
+        ".xlsx",
+        ".csv",
+        ".tsv",
+        ".html",
+        ".htm",
+        ".json",
+        ".epub",
     }
 
     # ── zleap-sag 后端选择 ─────────────────────────────────────────────
@@ -80,23 +94,22 @@ class Settings(BaseSettings):
     sag_pg_password: str = "sag"
     sag_pg_database: str = "sag"
 
-    # ── LLM（答案生成 + 抽取），OpenAI 兼容 ────────────────────────────
-    # openai 表示 OpenAI-compatible Chat Completions；anthropic / gemini
-    # 使用各自原生协议，由 provider 适配层统一成 Agent 消息。
-    llm_provider: Literal["openai", "anthropic", "gemini"] = "openai"
-    llm_base_url: str | None = "https://api.302ai.cn/v1"
+    # ── LLM（答案生成 + 抽取）─────────────────────────────────────────
+    # 协议、路由规则和技术默认值统一由 model_providers 注册表维护。
+    llm_provider: ModelProviderId = _DEFAULT_LLM_PROVIDER.id
+    llm_base_url: str | None = _DEFAULT_LLM_PROVIDER.default_base_url
     llm_api_key: str | None = None
-    llm_model: str = "qwen3.6-flash"
-    llm_temperature: float = 0.3
+    llm_model: str = _DEFAULT_LLM_PROVIDER.default_model
+    llm_temperature: float = _DEFAULT_LLM_PROVIDER.default_temperature
     llm_max_tokens: int = 2048
-    llm_context_window: int = 128_000  # 模型上下文窗口（供用量圆环分母）
+    llm_context_window: int = _DEFAULT_LLM_PROVIDER.default_context_window
     llm_timeout_ms: int = Field(default=60_000, ge=1_000, le=600_000)
     llm_max_retries: int = Field(default=2, ge=0, le=10)
     # 透传给 chat/completions 的额外请求体（JSON），如 {"enable_thinking": false}；
     # 未配置时对 qwen 系模型自动关闭思考（思考模式会让决策/首 token 慢 10 倍以上）
     llm_extra_body: dict | None = None
 
-    # ── Embedding（缺省复用 LLM 的 key / base_url）─────────────────────
+    # ── Embedding（OpenAI-compatible；仅 OpenAI provider 可复用生成配置）───────
     embedding_model: str = "bge-large-en-v1.5"
     embedding_base_url: str | None = "https://api.302ai.cn/v1"
     embedding_api_key: str | None = None
@@ -146,8 +159,8 @@ class Settings(BaseSettings):
     universe_planet_radius_scale: float = Field(default=22.0, ge=2.0, le=80.0)
 
     # ── Agent 循环 ──────────────────────────────────────────────────────
-    agent_max_steps: int = 6              # 工具调用最大轮数（多轮检索的上界）
-    history_keep_recent: int = 8          # 历史压缩时原文保留的最近消息数
+    agent_max_steps: int = 6  # 工具调用最大轮数（多轮检索的上界）
+    history_keep_recent: int = 8  # 历史压缩时原文保留的最近消息数
     # 只装载最近有界窗口；更旧对话应进入滚动摘要，不做全表回放。
     history_load_limit: int = Field(default=200, ge=1, le=1000)
 
@@ -186,24 +199,24 @@ class Settings(BaseSettings):
         return bool(self.llm_api_key)
 
     @property
-    def provider_llm_model(self) -> str:
-        """LiteLLM 路由名；持久化配置仍保留用户填写的原始模型名。"""
-        if self.llm_provider == "openai" or self.llm_model.startswith(f"{self.llm_provider}/"):
-            return self.llm_model
-        return f"{self.llm_provider}/{self.llm_model}"
+    def routed_llm_model(self) -> str:
+        """统一调用链使用的 LiteLLM 路由名。"""
+        return get_model_provider(self.llm_provider).route_model(self.llm_model)
+
+    @property
+    def effective_llm_temperature(self) -> float:
+        """应用当前 provider 的采样能力约束。"""
+        return get_model_provider(self.llm_provider).resolve_temperature(self.llm_temperature)
 
     @property
     def effective_embedding_api_key(self) -> str | None:
-        # Anthropic / Gemini 的生成密钥不是 OpenAI-compatible Embedding 密钥。
-        return self.embedding_api_key or (
-            self.llm_api_key if self.llm_provider == "openai" else None
-        )
+        provider = get_model_provider(self.llm_provider)
+        return self.embedding_api_key or (self.llm_api_key if provider.can_reuse_embedding_credentials else None)
 
     @property
     def effective_embedding_base_url(self) -> str | None:
-        return self.embedding_base_url or (
-            self.llm_base_url if self.llm_provider == "openai" else None
-        )
+        provider = get_model_provider(self.llm_provider)
+        return self.embedding_base_url or (self.llm_base_url if provider.can_reuse_embedding_credentials else None)
 
     @property
     def mineru_configured(self) -> bool:

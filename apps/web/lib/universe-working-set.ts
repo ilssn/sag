@@ -47,6 +47,16 @@ export interface UniverseWorkingSet {
 
 export interface UniverseWorkingBundle {
   id: string;
+  origin: "timeline" | "expansion" | "activation";
+  /** Canonical expansion anchor; absent for timeline/activation bundles. */
+  anchor_key?: string;
+  /**
+   * Stable timeline node that admitted this expansion branch. Unlike
+   * `anchor_key`, this survives FIFO removal of intermediate expansion pages.
+   */
+  lineage_root_key?: string;
+  request_cursor?: string | null;
+  next_cursor?: string | null;
   /** Includes explicit nodes and existing endpoints referenced by this bundle. */
   node_keys: string[];
   relation_keys: string[];
@@ -62,6 +72,11 @@ export interface UniverseWorkingBundle {
  */
 export interface UniverseAdmissionBundle {
   id: string;
+  origin?: UniverseWorkingBundle["origin"];
+  anchor_key?: string;
+  lineage_root_key?: string;
+  request_cursor?: string | null;
+  next_cursor?: string | null;
   epoch?: number;
   source_id?: string;
   nodes: UniverseActivationNode[];
@@ -76,6 +91,8 @@ export interface AdmitUniverseBundleOptions {
   pinnedKeys?: Iterable<string>;
   /** Relation keys protected only for this transaction. */
   protectedRelationKeys?: Iterable<string>;
+  /** Whole bundles protected only for this transaction. */
+  protectedBundleIds?: Iterable<string>;
   /** Relation keys added to the persistent pin set if the transaction commits. */
   pinnedRelationKeys?: Iterable<string>;
 }
@@ -304,6 +321,7 @@ function withDerivedBundleMetadata(
       position: nodeIndex.get(key) ?? Number.MAX_SAFE_INTEGER,
       bundle: {
         id: `__graph__:${value.epoch}:event:${key}`,
+        origin: "activation",
         node_keys: nodeKeys,
         relation_keys: relations.map(universeRelationKey),
         payload_fingerprint: bundlePayloadFingerprint(
@@ -322,6 +340,7 @@ function withDerivedBundleMetadata(
       position: nodeIndex.get(key) ?? Number.MAX_SAFE_INTEGER,
       bundle: {
         id: `__graph__:${value.epoch}:node:${key}`,
+        origin: "activation",
         node_keys: [key],
         relation_keys: [],
         payload_fingerprint: bundlePayloadFingerprint(
@@ -380,6 +399,15 @@ function planBundleEvictions(
   const relationOwnerCounts = new Map(
     [...initialOwners.relationOwners].map(([key, owners]) => [key, owners.length]),
   );
+  // Expansion support is opportunistic: release it before timeline history,
+  // while retaining FIFO order inside each origin class. This order is stable
+  // for the whole transaction, so consume it once instead of sorting the
+  // shrinking bundle list on every eviction.
+  const evictionOrder = [
+    ...state.order.filter((id) => state.bundles.get(id)?.origin === "expansion"),
+    ...state.order.filter((id) => state.bundles.get(id)?.origin !== "expansion"),
+  ];
+  let evictionIndex = 0;
 
   while (
     nodeOwnerCounts.size > nodeLimit(budget.nodes)
@@ -387,8 +415,13 @@ function planBundleEvictions(
   ) {
 
     let candidate: string | null = null;
-    for (const id of state.order) {
-      if (nonEvictableBundleIds.has(id)) continue;
+    while (evictionIndex < evictionOrder.length) {
+      const id = evictionOrder[evictionIndex];
+      evictionIndex += 1;
+      if (nonEvictableBundleIds.has(id)) {
+        blockedByProtection = true;
+        continue;
+      }
       const bundle = state.bundles.get(id);
       if (!bundle) continue;
       const removesProtectedNode = bundle.node_keys.some((key) =>
@@ -658,7 +691,12 @@ export function admitUniverseBundle(
   if (existingBundle) {
     const identical = sameStringSet(existingBundle.node_keys, bundleNodeKeys)
       && sameStringSet(existingBundle.relation_keys, bundleRelationKeys)
-      && existingBundle.payload_fingerprint === payloadFingerprint;
+      && existingBundle.payload_fingerprint === payloadFingerprint
+      && existingBundle.origin === (bundle.origin ?? "activation")
+      && existingBundle.anchor_key === bundle.anchor_key
+      && existingBundle.lineage_root_key === bundle.lineage_root_key
+      && existingBundle.request_cursor === bundle.request_cursor
+      && existingBundle.next_cursor === bundle.next_cursor;
     return identical
       ? {
           accepted: true,
@@ -692,6 +730,11 @@ export function admitUniverseBundle(
   candidate.order.push(bundle.id);
   candidate.bundles.set(bundle.id, {
     id: bundle.id,
+    origin: bundle.origin ?? "activation",
+    anchor_key: bundle.anchor_key,
+    lineage_root_key: bundle.lineage_root_key,
+    request_cursor: bundle.request_cursor,
+    next_cursor: bundle.next_cursor,
     node_keys: bundleNodeKeys,
     relation_keys: bundleRelationKeys,
     payload_fingerprint: payloadFingerprint,
@@ -718,7 +761,7 @@ export function admitUniverseBundle(
     budget,
     protectedSet,
     protectedRelationSet,
-    new Set([bundle.id]),
+    new Set([bundle.id, ...(options.protectedBundleIds ?? [])]),
   );
   if (!planned.state) {
     return {
@@ -802,11 +845,21 @@ export function setUniversePinnedNetwork(
   const residentRelations = new Set(current.relations
     .filter((relation) => relationNodeKeys(relation).every((key) => residentNodes.has(key)))
     .map(universeRelationKey));
+  const nextPinnedKeys = uniqueValues(nodeKeys).filter((key) => residentNodes.has(key));
+  const nextPinnedRelationKeys = uniqueValues(relationKeys).filter((key) =>
+    residentRelations.has(key));
+  const samePinnedKeys = nextPinnedKeys.length === current.pinned_keys.length
+    && nextPinnedKeys.every((key, index) => current.pinned_keys[index] === key);
+  const samePinnedRelations =
+    nextPinnedRelationKeys.length === current.pinned_relation_keys.length
+    && nextPinnedRelationKeys.every(
+      (key, index) => current.pinned_relation_keys[index] === key,
+    );
+  if (samePinnedKeys && samePinnedRelations) return current;
   return {
     ...current,
-    pinned_keys: uniqueValues(nodeKeys).filter((key) => residentNodes.has(key)),
-    pinned_relation_keys: uniqueValues(relationKeys).filter((key) =>
-      residentRelations.has(key)),
+    pinned_keys: nextPinnedKeys,
+    pinned_relation_keys: nextPinnedRelationKeys,
   };
 }
 

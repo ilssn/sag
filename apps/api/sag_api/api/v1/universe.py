@@ -117,6 +117,7 @@ async def timeline(
         user_id=user.id,
         source_id=body.source_id,
         limit=body.limit,
+        direction=body.direction,
         cursor=body.cursor,
         snapshot_id=body.snapshot_id,
     )

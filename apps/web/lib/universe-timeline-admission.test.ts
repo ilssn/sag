@@ -55,6 +55,7 @@ function timelinePage(secondEntityCount = 1): UniverseTimelineSlice {
         complete: true,
         next_cursor: null,
       },
+      cursor_before: null,
       cursor_after: "cursor-1",
     },
     {
@@ -75,6 +76,7 @@ function timelinePage(secondEntityCount = 1): UniverseTimelineSlice {
         complete: true,
         next_cursor: null,
       },
+      cursor_before: "cursor-2",
       cursor_after: "cursor-2",
     },
   ];
@@ -88,6 +90,7 @@ function timelinePage(secondEntityCount = 1): UniverseTimelineSlice {
     source_id: "source-a",
     source_revision: "revision-1",
     snapshot_id: "snapshot-1",
+    request_direction: "older",
     request_cursor: null,
     page_id: "page-1",
     bundles,
@@ -98,6 +101,11 @@ function timelinePage(secondEntityCount = 1): UniverseTimelineSlice {
         (total, bundle) => total + bundle.relations.length,
         0,
       ),
+      direction: "older",
+      has_newer: false,
+      newer_cursor: null,
+      has_older: true,
+      older_cursor: "cursor-2",
       has_more: true,
       next_cursor: "cursor-2",
     },
@@ -118,6 +126,14 @@ describe("timeline bundle admission", () => {
     expect(result.acknowledgedBundleIds).toEqual(["bundle-1", "bundle-2"]);
     expect(result.nextCursor).toBe("cursor-2");
     expect(result.done).toBe(false);
+    expect(result.workingSet.bundles["bundle-1"]).toMatchObject({
+      id: "bundle-1",
+      origin: "timeline",
+    });
+    expect(result.workingSet.bundles["bundle-2"]).toMatchObject({
+      id: "bundle-2",
+      origin: "timeline",
+    });
   });
 
   it("never advances past the first bundle that cannot fit atomically", () => {

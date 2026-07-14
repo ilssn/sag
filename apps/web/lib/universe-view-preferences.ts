@@ -7,6 +7,7 @@ import {
   universeNodeKey,
   type UniverseWorkingSet,
 } from "./universe-working-set";
+import { recommendedUniverseTimelineCacheLimit } from "./universe-timeline-prefetch";
 
 export const UNIVERSE_VIEW_PREFERENCES_VERSION = 5;
 export const UNIVERSE_VIEW_PREFERENCES_STORAGE_KEY =
@@ -100,7 +101,7 @@ function normalizeEntityCategories(value: unknown): string[] {
     .slice(0, MAX_REMEMBERED_ENTITY_CATEGORIES);
 }
 
-/** Smallest cache capacity that leaves one six-bundle runway past the window. */
+/** Visible time window + one history page + two prefetched forward pages. */
 export function minimumUniverseCacheBundles(visibleEventBundles: number) {
   const visible = clamp(
     finiteInteger(
@@ -112,7 +113,10 @@ export function minimumUniverseCacheBundles(visibleEventBundles: number) {
   );
   return clamp(
     roundUpToStep(
-      visible + UNIVERSE_VIEW_LIMITS.cachedEventBundles.step,
+      recommendedUniverseTimelineCacheLimit(
+        visible,
+        UNIVERSE_VIEW_LIMITS.cachedEventBundles.step,
+      ),
       UNIVERSE_VIEW_LIMITS.cachedEventBundles.step,
     ),
     UNIVERSE_VIEW_LIMITS.cachedEventBundles.min,

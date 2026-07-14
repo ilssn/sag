@@ -62,6 +62,7 @@ function expected(
     sourceId,
     nodeKind: "event",
     nodeId: "event-1",
+    lineageRootKey: "source-a:event:timeline-root",
     requestCursor: null,
     snapshotId: "snapshot-1",
     sourceRevision: "revision-1",
@@ -84,6 +85,13 @@ describe("expansion page admission", () => {
     expect(result.committed).toBe(true);
     expect(result.nextCursor).toBe("cursor-1");
     expect(result.workingSet.bundle_order).toEqual(["bundle-event-page-1"]);
+    expect(result.workingSet.bundles["bundle-event-page-1"]).toMatchObject({
+      origin: "expansion",
+      anchor_key: "source-a:event:event-1",
+      lineage_root_key: "source-a:event:timeline-root",
+      request_cursor: null,
+      next_cursor: "cursor-1",
+    });
   });
 
   it("counts only primary events for an entity expansion", () => {
@@ -136,6 +144,32 @@ describe("expansion page admission", () => {
     expect(result.accepted).toBe(true);
     expect(result.done).toBe(true);
     expect(result.workingSet.nodes).toHaveLength(4);
+    expect(result.workingSet.bundles["bundle-entity-page-1"]).toMatchObject({
+      origin: "expansion",
+      anchor_key: "source-a:entity:entity-anchor",
+      lineage_root_key: "source-a:event:timeline-root",
+      request_cursor: null,
+      next_cursor: null,
+    });
+  });
+
+  it("records continuation cursors as replay-safe bundle metadata", () => {
+    const page = eventExpansion("cursor-1");
+    const result = admitUniverseExpansionPage(
+      emptyUniverseWorkingSet(4),
+      page,
+      expected({ requestCursor: "cursor-1" }),
+      { nodes: 8, edges: 8 },
+      1,
+    );
+
+    expect(result.workingSet.bundles["bundle-event-page-2"]).toMatchObject({
+      origin: "expansion",
+      anchor_key: "source-a:event:event-1",
+      lineage_root_key: "source-a:event:timeline-root",
+      request_cursor: "cursor-1",
+      next_cursor: null,
+    });
   });
 
   it("rejects a response from another snapshot before admission", () => {

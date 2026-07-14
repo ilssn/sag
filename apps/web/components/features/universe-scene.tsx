@@ -16,6 +16,7 @@ import {
   orderUniverseKeyboardCandidates,
   type UniverseKeyboardDirection,
 } from "@/lib/universe-keyboard-navigation";
+import { planUniverseFocusCards } from "@/lib/universe-focus-cards";
 import {
   universeCardBudget,
   type UniverseViewPreferences,
@@ -26,6 +27,9 @@ import {
   universeDeepLoadMilestone,
   universeVisualDetailProgress,
 } from "@/lib/universe-presentation";
+import { planUniverseSceneDelta } from "@/lib/universe-scene-transition";
+import { UNIVERSE_SCENE_BUDGET } from "@/lib/universe-working-set";
+import { classifyUniverseWebGLContextFailure } from "@/lib/universe-webgl-capability";
 
 export type UniverseSceneNodeKind = "source" | "event" | "entity";
 
@@ -51,6 +55,10 @@ export interface UniverseSceneNode {
   x: number;
   y: number;
   z: number;
+  /** Data-driven presentation factors; omitted values preserve the stable view. */
+  presentationScale?: number;
+  presentationCardScale?: number;
+  presentationOpacity?: number;
 }
 
 export interface UniverseSceneLink {
@@ -59,6 +67,8 @@ export interface UniverseSceneLink {
   target: string;
   weight: number;
   virtual: boolean;
+  /** Multiplies the scene's normal/highlight link opacity. */
+  presentationOpacity?: number;
 }
 
 export interface UniverseSceneData {
@@ -69,6 +79,8 @@ export interface UniverseSceneData {
   windowRevision?: number;
   /** Identifies whether this window was committed by the active journey intent. */
   windowChangeCause?: "journey" | "synchronization";
+  /** Direction is explicit so forward and reverse transitions share one path. */
+  windowDirection?: UniverseTimelineDirection;
 }
 
 export interface UniverseSceneHover {
@@ -102,6 +114,8 @@ export type UniverseTimelineDirection = "next" | "previous";
 
 export type UniverseSceneUnavailableReason =
   | "dynamic-import"
+  | "context-disabled"
+  | "context-creation"
   | "initialization"
   | "context-lost";
 
@@ -113,6 +127,7 @@ export interface UniverseSceneHandle {
   focusNode: (nodeId: string) => void;
   lockNode: (nodeId: string) => void;
   unlockNode: () => void;
+  clearSelection: () => void;
   moveTimeline: (
     direction: UniverseTimelineDirection,
   ) => Promise<UniverseTimelineIntentResult> | void;
@@ -138,6 +153,8 @@ interface UniverseSceneProps {
   onTimelineIntent: (
     direction: UniverseTimelineDirection,
   ) => Promise<UniverseTimelineIntentResult> | UniverseTimelineIntentResult;
+  /** Direct camera input owns wheel/drag and restores the stable presentation. */
+  onCameraInteraction: () => void;
   onUnavailable?: (reason: UniverseSceneUnavailableReason) => void;
 }
 
@@ -181,10 +198,13 @@ interface ForceNode extends NodeObject {
   };
   entryOpacity?: number;
   renderedEntryOpacity?: number;
+  renderedPresentationScale?: number;
+  renderedPresentationOpacity?: number;
   timelineOpacity?: number;
   timelineScale?: number;
+  timelineRetiring?: boolean;
   timelineMotion?: {
-    kind: "enter" | "exit" | "restore";
+    kind: "enter" | "shift" | "exit";
     startedAt: number;
     duration: number;
     from: THREE.Vector3;
@@ -206,6 +226,7 @@ interface ForceLink extends LinkObject<ForceNode> {
   sceneLink: UniverseSceneLink;
   visible: boolean;
   highlighted: boolean;
+  timelineRetiring?: boolean;
   __lineObj?: THREE.Object3D;
   lineMaterial?: THREE.MeshBasicMaterial;
 }
@@ -233,6 +254,7 @@ interface SceneCallbacks {
   onTimelineIntent: (
     direction: UniverseTimelineDirection,
   ) => Promise<UniverseTimelineIntentResult> | UniverseTimelineIntentResult;
+  onCameraInteraction: () => void;
   onUnavailable: (reason: UniverseSceneUnavailableReason) => void;
 }
 
@@ -243,6 +265,7 @@ interface GraphControls {
   dampingFactor?: number;
   rotateSpeed?: number;
   zoomSpeed?: number;
+  zoomToCursor?: boolean;
   panSpeed?: number;
   minDistance?: number;
   maxDistance?: number;
@@ -267,15 +290,14 @@ const HOVER_LABEL_SETTLE_MS = 72;
 const HOVER_CLEAR_GRACE_MS = 84;
 const MAX_PLACEMENT_MEMORY = 512;
 const NEBULA_BURST_MS = 1_400;
-const TIMELINE_CAMERA_MIN_DISTANCE = 92;
-const TIMELINE_CAMERA_MAX_DISTANCE = 50_000;
-const TIMELINE_EVENT_GATE_PX = 28;
-const TIMELINE_WHEEL_THRESHOLD = 72;
-const TIMELINE_WHEEL_IDLE_MS = 180;
-const TIMELINE_WHEEL_COOLDOWN_MS = 460;
-const TIMELINE_EXIT_MIN_MS = 340;
-const TIMELINE_EXIT_VARIANCE_MS = 60;
-const TIMELINE_ENTRY_MS = 420;
+const HIGHLIGHT_FLOW_FRAME_MS = 1000 / 30;
+const MAX_RENDER_PIXELS_DESKTOP = 2_400_000;
+const MAX_RENDER_PIXELS_MOBILE = 1_100_000;
+const UNIVERSE_CAMERA_MIN_DISTANCE = 24;
+const UNIVERSE_CAMERA_MAX_DISTANCE = 50_000;
+const TIMELINE_EXIT_MIN_MS = 460;
+const TIMELINE_EXIT_VARIANCE_MS = 90;
+const TIMELINE_ENTRY_MS = 560;
 const SOURCE_PALETTE = [
   "#6fc0d0",
   "#9d8bd0",
@@ -363,6 +385,18 @@ function easeTimelineMotion(value: number) {
   return value < 0.5
     ? 4 * value * value * value
     : 1 - Math.pow(-2 * value + 2, 3) / 2;
+}
+
+function presentationScale(value: number | undefined) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, value)
+    : 1;
+}
+
+function presentationOpacity(value: number | undefined) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? THREE.MathUtils.clamp(value, 0, 1)
+    : 1;
 }
 
 function sourceColor(sourceId: string) {
@@ -635,6 +669,7 @@ class UniverseForceSceneEngine {
     onSourceLod: () => undefined,
     onSelectionClear: () => undefined,
     onTimelineIntent: () => "blocked",
+    onCameraInteraction: () => undefined,
     onUnavailable: () => undefined,
   };
   private unavailableNotified = false;
@@ -662,12 +697,19 @@ class UniverseForceSceneEngine {
   private pointerX = 0;
   private pointerY = 0;
   private pointerActive = false;
+  private cameraGestureActive = false;
+  private cameraGestureChanged = false;
+  private cameraGesturePosition = new THREE.Vector3();
+  private cameraGestureTarget = new THREE.Vector3();
   private eventTexture = makeSpriteTexture("event");
   private eventCoreTexture = makeEventCoreTexture();
   private entityTexture = makeSpriteTexture("entity");
   private entityCoreTexture = makeEntityCoreTexture();
   private sourceTexture = makeSpriteTexture("source");
   private sourceHitGeometry = new THREE.SphereGeometry(1, 10, 8);
+  private highlightFlowMaterial: THREE.SpriteMaterial;
+  private highlightFlowSprites = new Map<string, THREE.Sprite>();
+  private lastHighlightFlowAt = 0;
   private nebulaPoints: THREE.Points | null = null;
   private nebulaParticles: NebulaParticle[] = [];
   private nebulaAlphaKey = "";
@@ -715,21 +757,14 @@ class UniverseForceSceneEngine {
   private dataWindowRevision: number | null = null;
   private timelineIntentPending = false;
   private timelineIntentToken = 0;
+  private timelineIntentDirection: UniverseTimelineDirection | null = null;
   private timelineMotionPhase:
     | "idle"
-    | "exiting"
     | "awaiting-result"
     | "awaiting-data"
-    | "entering"
-    | "restoring" = "idle";
-  private timelineMotionResolve: (() => void) | null = null;
-  private timelineExitSnapshots = new Map<string, THREE.Vector3>();
-  private timelineWheelAccumulator = 0;
-  private timelineWheelDirection: UniverseTimelineDirection | null = null;
-  private timelineWheelConsumed = false;
-  private timelineWheelIdleTimer: number | null = null;
+    | "entering" = "idle";
   private timelineRevisionWatchTimer: number | null = null;
-  private lastTimelineIntentAt = 0;
+  private currentPixelRatio: number | null = null;
   private clusterNodes: ForceNode[] = [];
   private dataReady = false;
   private initialFocusTimer: number | null = null;
@@ -757,13 +792,26 @@ class UniverseForceSceneEngine {
     this.host.replaceChildren();
     this.host.style.position = "absolute";
     this.host.style.inset = "0";
+    this.highlightFlowMaterial = new THREE.SpriteMaterial({
+      map: this.entityCoreTexture,
+      color: "#b5f2fb",
+      transparent: true,
+      opacity: 0.92,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+      blending: THREE.AdditiveBlending,
+    });
 
     this.graph = new ForceGraph3D(this.host, {
       controlType: "orbit",
       rendererConfig: {
         alpha: true,
         antialias: true,
-        powerPreference: "high-performance",
+        // This is only a browser hint. Forcing the discrete/high-performance
+        // adapter can reject otherwise valid WebGL2 contexts on remote,
+        // battery-saving, and virtualized Chrome sessions.
+        powerPreference: "default",
       },
     });
     this.graph
@@ -811,10 +859,12 @@ class UniverseForceSceneEngine {
         this.callbacks.onNodeClick(node.sceneNode);
       })
       .onBackgroundClick(() => {
+        if (this.lockedId || this.selectedId || this.keyboardFocusedId) {
+          this.callbacks.onSelectionClear();
+          return;
+        }
         if (this.timelineIsBusy()) return;
-        this.clearKeyboardFocus(true);
-        this.handleNodeHover(null, false, true);
-        this.callbacks.onSelectionClear();
+        if (this.hoveredId) this.handleNodeHover(null, false, true);
       })
       .onEngineTick(() => {
         this.syncFrozenNodeCoordinates();
@@ -844,11 +894,14 @@ class UniverseForceSceneEngine {
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.085;
     this.controls.rotateSpeed = 0.42;
-    this.controls.zoomSpeed = 0.76;
+    this.controls.zoomSpeed = 0.72;
+    this.controls.zoomToCursor = true;
     this.controls.panSpeed = 0.52;
-    this.controls.minDistance = TIMELINE_CAMERA_MIN_DISTANCE;
-    this.controls.maxDistance = TIMELINE_CAMERA_MAX_DISTANCE;
+    this.controls.minDistance = UNIVERSE_CAMERA_MIN_DISTANCE;
+    this.controls.maxDistance = UNIVERSE_CAMERA_MAX_DISTANCE;
+    this.controls.addEventListener("start", this.handleControlsStart);
     this.controls.addEventListener("change", this.handleControlsChange);
+    this.controls.addEventListener("end", this.handleControlsEnd);
 
     const charge = this.graph.d3Force("charge") as {
       strength?: (value: number | ((node: ForceNode) => number)) => unknown;
@@ -889,10 +942,6 @@ class UniverseForceSceneEngine {
     this.host.addEventListener("pointermove", this.handlePointerMove, { passive: true });
     this.host.addEventListener("pointerenter", this.handlePointerEnter, { passive: true });
     this.host.addEventListener("pointerleave", this.handlePointerLeave, { passive: true });
-    this.host.addEventListener("wheel", this.handleWheel, {
-      capture: true,
-      passive: false,
-    });
     this.host.addEventListener("focus", this.handleCanvasFocus);
     this.host.addEventListener("blur", this.handleCanvasBlur);
     this.host.addEventListener("keydown", this.handleKeyDown);
@@ -921,6 +970,7 @@ class UniverseForceSceneEngine {
     text: UniverseSceneText;
   }) {
     const themeChanged = this.darkTheme !== options.darkTheme;
+    const motionChanged = this.reducedMotion !== options.reducedMotion;
     const timelineDisabled = this.timelineJourney.enabled && !options.timelineJourney.enabled;
     const cardPreferencesChanged =
       this.viewPreferences.showEventCards !== options.viewPreferences.showEventCards
@@ -938,7 +988,7 @@ class UniverseForceSceneEngine {
     this.host.dataset.universeEntityCards = String(options.viewPreferences.showEntityCards);
     this.syncTimelineDiagnostics();
     this.controls.enabled = options.interactive;
-    this.controls.enableZoom = options.interactive && !this.timelineIsBusy();
+    this.controls.enableZoom = options.interactive;
     this.controls.enableDamping = !options.reducedMotion;
     this.graph
       .enablePointerInteraction(options.interactive)
@@ -955,6 +1005,7 @@ class UniverseForceSceneEngine {
       this.updateObjectOpacities();
       this.updateLinkVisuals();
     }
+    if (motionChanged) this.syncHighlightFlowSprites();
     if (this.dataReady && (cardPreferencesChanged || localeChanged)) this.rebuildLabels();
     const keyboardCandidates = this.keyboardCandidates();
     if (
@@ -988,9 +1039,19 @@ class UniverseForceSceneEngine {
       && this.dataWindowRevision !== null
       && nextWindowRevision !== this.dataWindowRevision;
     const windowChangeCause = data.windowChangeCause ?? "synchronization";
+    const windowDirection = data.windowDirection
+      ?? this.timelineIntentDirection
+      ?? "next";
     if (
-      windowChanged
-      && this.shouldCancelTimelineIntentForWindowChange(windowChangeCause)
+      (
+        !epochChanged
+        && windowChangeCause === "synchronization"
+        && this.timelineMotionPhase === "entering"
+      )
+      || (
+        windowChanged
+        && this.shouldCancelTimelineIntentForWindowChange(windowChangeCause)
+      )
     ) {
       // A configuration/device reflow can change the projected window while the
       // old gesture is still leaving or waiting for data. Invalidate that intent
@@ -1030,6 +1091,10 @@ class UniverseForceSceneEngine {
     const persistentAnchor = oldNodes.get(this.lockedId ?? this.selectedId ?? "");
     const nextNodes = new Map<string, ForceNode>();
     const sceneNodesById = new Map(data.nodes.map((node) => [node.id, node]));
+    const nodeDelta = planUniverseSceneDelta(oldNodes.keys(), sceneNodesById.keys());
+    this.host.dataset.universeRetainedNodeCount = String(nodeDelta.retainedIds.length);
+    this.host.dataset.universeEnteringNodeDelta = String(nodeDelta.enteringIds.length);
+    this.host.dataset.universeExitingNodeDelta = String(nodeDelta.exitingIds.length);
     const expansionAnchors = new Map<string, string>();
     const relationNeighbors = new Map<string, Set<string>>();
     const anchorPriority = (id: string) => {
@@ -1080,9 +1145,9 @@ class UniverseForceSceneEngine {
       }
       this.timelineIntentPending = true;
       this.timelineMotionPhase = "entering";
-      this.controls.enableZoom = false;
-      this.host.dataset.universeTimelineDirection =
-        this.host.dataset.universeTimelineDirection || "next";
+      this.controls.enableZoom = this.interactive;
+      this.timelineIntentDirection = windowDirection;
+      this.host.dataset.universeTimelineDirection = windowDirection;
     }
     const entryOrderById = new Map<string, number>();
     const entrantCountBySource = new Map<string, number>();
@@ -1146,20 +1211,41 @@ class UniverseForceSceneEngine {
       const currentSource = currentSources.get(node.sourceId) ?? sourceBase;
       return position.add(currentSource).sub(sourceBase);
     };
-    const timelineEntryFor = (
+    const timelineMotionFor = (
       node: UniverseSceneNode,
       destination: THREE.Vector3,
       sourcePosition: THREE.Vector3,
       existingPosition?: THREE.Vector3,
+      previousVisual?: { opacity: number; scale: number },
     ): ForceNode["timelineMotion"] => {
       if (!animateTimelineWindow || this.reducedMotion || node.kind === "source") {
         return undefined;
       }
-      const from = existingPosition?.clone() ?? sourcePosition.clone().add(
-          stableDirection(`${node.id}:timeline-entry-origin`).multiplyScalar(
-            1.8 + stableUnit(`${node.id}:timeline-entry-jitter`) * 3.2,
-          ),
+      if (
+        existingPosition
+        && previousVisual
+        && existingPosition.distanceToSquared(destination) < 0.0001
+        && Math.abs(previousVisual.opacity - 1) < 0.001
+        && Math.abs(previousVisual.scale - 1) < 0.001
+      ) return undefined;
+      const previousEntryDirection = destination.clone().sub(sourcePosition);
+      if (previousEntryDirection.lengthSq() < 0.0001) {
+        previousEntryDirection.copy(
+          stableDirection(`${node.id}:timeline-previous-entry-side`),
         );
+      }
+      const from = existingPosition?.clone()
+        ?? (windowDirection === "previous"
+          ? destination.clone().add(
+              previousEntryDirection.normalize().multiplyScalar(
+                Math.max(26, destination.distanceTo(sourcePosition) * 0.72),
+              ),
+            )
+          : sourcePosition.clone().add(
+              stableDirection(`${node.id}:timeline-entry-origin`).multiplyScalar(
+                1.8 + stableUnit(`${node.id}:timeline-entry-jitter`) * 3.2,
+              ),
+            ));
       const travel = destination.clone().sub(from);
       const travelDirection = travel.lengthSq() > 0.0001
         ? travel.clone().normalize()
@@ -1169,15 +1255,17 @@ class UniverseForceSceneEngine {
       if (arc.lengthSq() < 0.0001) arc.set(-travelDirection.y, travelDirection.x, 0.18);
       arc.normalize().multiplyScalar(Math.min(12, 3 + travel.length() * 0.055));
       return {
-        kind: "enter",
-        startedAt: entryNow + stableUnit(`${node.id}:timeline-entry-delay`) * 54,
+        kind: existingPosition ? "shift" : "enter",
+        // A timeline window is one visual batch. Temporal depth and scale carry
+        // chronology; per-node start delays would read as incremental popping.
+        startedAt: entryNow,
         duration: TIMELINE_ENTRY_MS,
         from,
         to: destination.clone(),
         arc,
-        opacityFrom: 0,
+        opacityFrom: previousVisual?.opacity ?? 0,
         opacityTo: 1,
-        scaleFrom: 0.54,
+        scaleFrom: previousVisual?.scale ?? 0.12,
         scaleTo: 1,
       };
     };
@@ -1208,25 +1296,33 @@ class UniverseForceSceneEngine {
       const currentSource = currentSources.get(sceneNode.sourceId)
         ?? (sourceScene ? scenePosition(sourceScene) : scenePosition(sceneNode));
       if (existing) {
+        const previousVisual = {
+          opacity: existing.timelineOpacity ?? 1,
+          scale: existing.timelineScale ?? 1,
+        };
         existing.kind = sceneNode.kind;
         existing.sourceId = sceneNode.sourceId;
         existing.sceneNode = sceneNode;
+        existing.timelineRetiring = false;
         existing.visualOpacity = undefined;
         existing.visuallyEmphasized = undefined;
         existing.renderedEntryOpacity = undefined;
+        existing.renderedPresentationScale = undefined;
+        existing.renderedPresentationOpacity = undefined;
         if (animateTimelineWindow && sceneNode.kind !== "source") {
           const desired = timelineTarget(sceneNode);
-          const timelineMotion = timelineEntryFor(
+          const timelineMotion = timelineMotionFor(
             sceneNode,
             desired,
             currentSource,
             new THREE.Vector3(existing.x, existing.y, existing.z),
+            previousVisual,
           );
           existing.entry = undefined;
           existing.entryOpacity = undefined;
           existing.timelineMotion = timelineMotion;
-          existing.timelineOpacity = timelineMotion ? 0 : undefined;
-          existing.timelineScale = timelineMotion ? timelineMotion.scaleFrom : undefined;
+          existing.timelineOpacity = timelineMotion?.opacityFrom ?? 1;
+          existing.timelineScale = timelineMotion?.scaleFrom ?? 1;
           this.rememberPlacement(sceneNode.id, desired);
           this.freezeNode(existing, timelineMotion?.from ?? desired);
           nextNodes.set(sceneNode.id, existing);
@@ -1240,6 +1336,9 @@ class UniverseForceSceneEngine {
             existing.entry?.to ?? new THREE.Vector3(existing.x, existing.y, existing.z),
           );
         }
+        existing.timelineMotion = undefined;
+        existing.timelineOpacity = 1;
+        existing.timelineScale = 1;
         this.freezeNode(existing);
         nextNodes.set(sceneNode.id, existing);
         return;
@@ -1272,7 +1371,7 @@ class UniverseForceSceneEngine {
       arc.addScaledVector(travelDirection, -arc.dot(travelDirection));
       if (arc.lengthSq() < 0.0001) arc.set(-travelDirection.y, travelDirection.x, 0.24);
       arc.normalize().multiplyScalar(Math.min(16, 4 + travel.length() * 0.075));
-      const timelineMotion = timelineEntryFor(sceneNode, desired, currentSource);
+      const timelineMotion = timelineMotionFor(sceneNode, desired, currentSource);
       const entry = animateTimelineWindow || sceneNode.kind === "source" || this.reducedMotion
         ? undefined
         : {
@@ -1299,13 +1398,123 @@ class UniverseForceSceneEngine {
         entry,
         entryOpacity: entry ? 0 : undefined,
         timelineMotion,
-        timelineOpacity: timelineMotion ? 0 : undefined,
-        timelineScale: timelineMotion?.scaleFrom,
+        timelineOpacity: timelineMotion?.opacityFrom ?? 1,
+        timelineScale: timelineMotion?.scaleFrom ?? 1,
+        timelineRetiring: false,
       });
     });
+    const retiringNodeIds = new Set<string>();
+    const exitCamera = this.graph.camera() as THREE.PerspectiveCamera;
+    exitCamera.updateMatrixWorld();
+    const exitCameraRight = new THREE.Vector3()
+      .setFromMatrixColumn(exitCamera.matrixWorld, 0)
+      .normalize();
+    const exitCameraUp = new THREE.Vector3()
+      .setFromMatrixColumn(exitCamera.matrixWorld, 1)
+      .normalize();
+    const exitAspect = Math.max(
+      0.4,
+      this.host.clientWidth / Math.max(1, this.host.clientHeight),
+    );
+    const currentSourceNodes = new Map(
+      [...oldNodes.values()]
+        .filter((node) => node.kind === "source")
+        .map((node) => [node.sourceId, node]),
+    );
+    const mobileScene = this.host.clientWidth < 768;
+    const hardSceneBudget = mobileScene
+      ? UNIVERSE_SCENE_BUDGET.mobile
+      : UNIVERSE_SCENE_BUDGET.desktop;
+    const configuredNodeBudget = mobileScene
+      ? this.policy.node_budget_mobile
+      : this.policy.node_budget_desktop;
+    const configuredEdgeBudget = mobileScene
+      ? this.policy.edge_budget_mobile
+      : this.policy.edge_budget_desktop;
+    const transitionNodeBudget = Math.min(
+      hardSceneBudget.nodes,
+      Math.max(
+        0,
+        Number.isFinite(configuredNodeBudget) ? Math.floor(configuredNodeBudget) : 0,
+      ),
+    );
+    const transitionEdgeBudget = Math.min(
+      hardSceneBudget.edges,
+      Math.max(
+        0,
+        Number.isFinite(configuredEdgeBudget) ? Math.floor(configuredEdgeBudget) : 0,
+      ),
+    );
+    let remainingGhostNodeCapacity = Math.max(
+      0,
+      transitionNodeBudget
+        - [...nextNodes.values()].filter((node) => node.kind !== "source").length,
+    );
+    let droppedGhostNodeCount = 0;
     oldNodes.forEach((node, id) => {
-      if (!nextNodes.has(id)) this.detachSharedNodeResources(node);
+      if (nextNodes.has(id)) return;
+      if (!animateTimelineWindow || this.reducedMotion || node.kind === "source") {
+        this.detachSharedNodeResources(node);
+        return;
+      }
+      if (remainingGhostNodeCapacity <= 0) {
+        droppedGhostNodeCount += 1;
+        this.detachSharedNodeResources(node);
+        return;
+      }
+      remainingGhostNodeCapacity -= 1;
+      const from = new THREE.Vector3(node.x, node.y, node.z);
+      const source = currentSourceNodes.get(node.sourceId);
+      const depthPoint = source ?? node;
+      const distance = exitCamera.position.distanceTo(
+        new THREE.Vector3(depthPoint.x, depthPoint.y, depthPoint.z),
+      );
+      const worldHeight = 2 * distance
+        * Math.tan(THREE.MathUtils.degToRad(exitCamera.fov) / 2);
+      const side = this.timelineExitSide(node, source);
+      const currentOpacity = node.timelineOpacity ?? 1;
+      const currentScale = node.timelineScale ?? 1;
+      node.entry = undefined;
+      node.entryOpacity = undefined;
+      node.timelineRetiring = true;
+      node.timelineOpacity = currentOpacity;
+      node.timelineScale = currentScale;
+      const collapseTarget = source
+        ? new THREE.Vector3(source.x, source.y, source.z).add(
+            stableDirection(`${node.id}:timeline-collapse`).multiplyScalar(2.4),
+          )
+        : from.clone();
+      node.timelineMotion = {
+        kind: "exit",
+        startedAt: entryNow,
+        duration: TIMELINE_EXIT_MIN_MS
+          + stableUnit(`${node.id}:timeline-exit-duration`) * TIMELINE_EXIT_VARIANCE_MS,
+        from,
+        to: windowDirection === "previous"
+          ? collapseTarget
+          : from.clone()
+              .addScaledVector(exitCameraRight, side * worldHeight * exitAspect * 0.58)
+              .addScaledVector(
+                exitCameraUp,
+                (stableUnit(`${node.id}:timeline-exit-rise`) - 0.5) * worldHeight * 0.1,
+              ),
+        arc: exitCameraUp.clone().multiplyScalar(
+          (stableUnit(`${node.id}:timeline-exit-arc`) - 0.5) * worldHeight * 0.07,
+        ),
+        opacityFrom: currentOpacity,
+        opacityTo: 0,
+        scaleFrom: currentScale,
+        scaleTo: windowDirection === "previous"
+          ? 0.12
+          : Math.max(0.08, currentScale * 0.42),
+      };
+      retiringNodeIds.add(id);
+      nextNodes.set(id, node);
     });
+    this.host.dataset.universeTransitionNodeBudget = String(transitionNodeBudget);
+    this.host.dataset.universeTransitionEdgeBudget = String(transitionEdgeBudget);
+    this.host.dataset.universeRetainedGhostNodeCount = String(retiringNodeIds.size);
+    this.host.dataset.universeDroppedGhostNodeCount = String(droppedGhostNodeCount);
 
     this.nodes = nextNodes;
     this.sourceHits = sourceHits;
@@ -1326,20 +1535,20 @@ class UniverseForceSceneEngine {
     this.host.dataset.universeSelectedId = this.selectedId ?? "";
     this.clusterNodes = [...nextNodes.values()];
 
-    const oldLinks = new Map(this.links.map((link) => [link.id, link]));
-    this.links = data.links
+    const previousLinks = this.links;
+    const oldLinks = new Map(previousLinks.map((link) => [link.id, link]));
+    const nextLinks = data.links
       .filter((link) => nextNodes.has(link.source) && nextNodes.has(link.target) && !link.virtual)
       .map((sceneLink) => {
         const existing = oldLinks.get(sceneLink.id);
         if (existing) {
           oldLinks.delete(sceneLink.id);
-          existing.source = sceneLink.source;
-          existing.target = sceneLink.target;
           existing.sourceId = sceneLink.source;
           existing.targetId = sceneLink.target;
           existing.sceneLink = sceneLink;
           existing.visible = true;
           existing.highlighted = false;
+          existing.timelineRetiring = false;
           return existing;
         }
         return {
@@ -1351,20 +1560,64 @@ class UniverseForceSceneEngine {
           sceneLink,
           visible: true,
           highlighted: false,
+          timelineRetiring: false,
         };
       });
+    let remainingGhostLinkCapacity = Math.max(
+      0,
+      transitionEdgeBudget - nextLinks.length,
+    );
+    let retainedGhostLinkCount = 0;
+    let droppedGhostLinkCount = 0;
+    if (animateTimelineWindow) {
+      oldLinks.forEach((link, id) => {
+        const sourceId = link.sourceId || endpointId(link.source);
+        const targetId = link.targetId || endpointId(link.target);
+        if (
+          !nextNodes.has(sourceId)
+          || !nextNodes.has(targetId)
+          || (!retiringNodeIds.has(sourceId) && !retiringNodeIds.has(targetId))
+        ) return;
+        if (remainingGhostLinkCapacity <= 0) {
+          droppedGhostLinkCount += 1;
+          return;
+        }
+        remainingGhostLinkCapacity -= 1;
+        retainedGhostLinkCount += 1;
+        link.sourceId = sourceId;
+        link.targetId = targetId;
+        link.visible = true;
+        link.highlighted = false;
+        link.timelineRetiring = true;
+        nextLinks.push(link);
+        oldLinks.delete(id);
+      });
+    }
+    this.host.dataset.universeRetainedGhostLinkCount = String(retainedGhostLinkCount);
+    this.host.dataset.universeDroppedGhostLinkCount = String(droppedGhostLinkCount);
+    this.links = nextLinks;
     this.rebuildAdjacency();
     this.visibleEdgeIds = new Set(this.links.map((link) => link.id));
     this.links.forEach((link) => {
       link.visible = true;
     });
 
-    this.graph.graphData({ nodes: [...nextNodes.values()], links: this.links });
-    oldLinks.forEach((link) => {
-      // three-forcegraph synchronously disposes removed line objects. Drop our
-      // data-side reference without disposing the same material a second time.
-      link.lineMaterial = undefined;
-    });
+    const topologyChanged = planUniverseSceneDelta(
+      oldNodes.keys(),
+      nextNodes.keys(),
+    ).topologyChanged || planUniverseSceneDelta(
+      previousLinks.map((link) => link.id),
+      this.links.map((link) => link.id),
+    ).topologyChanged;
+    this.host.dataset.universeTopologyChanged = String(topologyChanged);
+    if (topologyChanged) {
+      this.graph.graphData({ nodes: [...nextNodes.values()], links: this.links });
+      oldLinks.forEach((link) => {
+        // three-forcegraph synchronously disposes removed line objects. Drop our
+        // data-side reference without disposing the same material a second time.
+        link.lineMaterial = undefined;
+      });
+    }
     this.syncFrozenNodeCoordinates();
     const enteringCount = [...nextNodes.values()].filter((node) => node.entry).length;
     const timelineMovingCount = [...nextNodes.values()].filter(
@@ -1372,7 +1625,7 @@ class UniverseForceSceneEngine {
     ).length;
     this.host.dataset.universeEnteringCount = String(enteringCount);
     this.host.dataset.universeTimelineMovingCount = String(timelineMovingCount);
-    if (animateTimelineWindow) this.timelineExitSnapshots.clear();
+    this.host.dataset.universeRetiringNodeCount = String(retiringNodeIds.size);
     this.updatePixelRatio();
     this.dataReady = true;
     if (this.initialFocusTimer !== null) window.clearTimeout(this.initialFocusTimer);
@@ -1403,8 +1656,8 @@ class UniverseForceSceneEngine {
     this.rebuildNebula();
     this.rebuildLabels();
     this.applyHighlight();
-    if (animateTimelineWindow && timelineMovingCount === 0) {
-      this.finishTimelineMotionPhase("entering");
+    if (this.timelineMotionPhase === "entering" && timelineMovingCount === 0) {
+      this.finishTimelineMotionPhase();
     }
     if (!this.paused && searchFocusSourceId) this.focusSource(searchFocusSourceId);
     if (!this.paused) {
@@ -1637,6 +1890,39 @@ class UniverseForceSceneEngine {
     this.releaseLockedNode();
   }
 
+  /**
+   * Clears every interaction focus in one scene transaction. This deliberately
+   * leaves graph data, deterministic positions and the camera untouched so a
+   * blank-canvas click feels like dismissing a popover, not reloading a graph.
+   */
+  clearSelection() {
+    const changed = Boolean(
+      this.lockedId
+      || this.selectedId
+      || this.hoveredId
+      || this.keyboardFocusedId,
+    );
+    if (!changed) return;
+    const lockedNode = this.lockedId ? this.nodes.get(this.lockedId) : undefined;
+    if (lockedNode) this.freezeNode(lockedNode);
+    this.cancelHoverClear();
+    this.cancelHoverLabelRebuild();
+    this.lockedId = null;
+    this.selectedId = null;
+    this.hoveredId = null;
+    this.hoveredFromLabel = false;
+    this.keyboardFocusedId = null;
+    this.host.dataset.universeLockedId = "";
+    this.host.dataset.universeSelectedId = "";
+    this.host.dataset.universeKeyboardNodeId = "";
+    this.updateKeyboardStatus([]);
+    this.callbacks.onHover(null);
+    if (!this.dataReady) return;
+    this.rebuildLabels();
+    this.applyHighlight();
+    this.wakeRendering(480);
+  }
+
   pause() {
     this.paused = true;
     this.keyboardActive = false;
@@ -1660,6 +1946,7 @@ class UniverseForceSceneEngine {
     this.pointerActive = false;
     this.hoveredId = null;
     this.hoveredFromLabel = false;
+    this.clearHighlightFlowSprites();
     this.renderingAwake = false;
     this.host.dataset.universeRenderer = "sleeping";
     this.graph.pauseAnimation();
@@ -1686,12 +1973,13 @@ class UniverseForceSceneEngine {
     if (this.lodTimer !== null) window.clearTimeout(this.lodTimer);
     if (this.initialFocusTimer !== null) window.clearTimeout(this.initialFocusTimer);
     if (this.sleepTimer !== null) window.clearTimeout(this.sleepTimer);
+    this.controls.removeEventListener("start", this.handleControlsStart);
     this.controls.removeEventListener("change", this.handleControlsChange);
+    this.controls.removeEventListener("end", this.handleControlsEnd);
     this.resizeObserver.disconnect();
     this.host.removeEventListener("pointermove", this.handlePointerMove);
     this.host.removeEventListener("pointerenter", this.handlePointerEnter);
     this.host.removeEventListener("pointerleave", this.handlePointerLeave);
-    this.host.removeEventListener("wheel", this.handleWheel, true);
     this.host.removeEventListener("focus", this.handleCanvasFocus);
     this.host.removeEventListener("blur", this.handleCanvasBlur);
     this.host.removeEventListener("keydown", this.handleKeyDown);
@@ -1699,6 +1987,8 @@ class UniverseForceSceneEngine {
     document.removeEventListener("visibilitychange", this.handleVisibilityChange);
     this.rendererCanvas.removeEventListener("webglcontextlost", this.handleWebglContextLost);
     this.clearNebula();
+    this.clearHighlightFlowSprites();
+    this.highlightFlowMaterial.dispose();
     this.nodes.forEach((node) => this.detachSharedNodeResources(node));
     this.graph._destructor();
     this.links.forEach((link) => {
@@ -1879,7 +2169,10 @@ class UniverseForceSceneEngine {
         node.visuallyEmphasized ?? false,
       );
     });
-    if (hadEntry) this.syncGraphObjectPositions();
+    if (hadEntry) {
+      this.syncGraphObjectPositions();
+      this.updateLinkVisuals();
+    }
     this.host.dataset.universeEnteringCount = String(entering);
     return entering > 0;
   }
@@ -1914,16 +2207,13 @@ class UniverseForceSceneEngine {
   private shouldCancelTimelineIntentForWindowChange(
     cause: NonNullable<UniverseSceneData["windowChangeCause"]>,
   ) {
-    // Journey data is only authoritative after the exit has completed. A
-    // journey-marked change during `exiting` is stale/misattributed and must not
-    // be allowed to release the old promise into another callback.
-    if (this.timelineMotionPhase === "exiting") return true;
     if (cause === "journey") return false;
     return this.timelineMotionPhase === "awaiting-result"
       || this.timelineMotionPhase === "awaiting-data";
   }
 
   private syncTimelineDiagnostics() {
+    const busy = this.timelineIsBusy();
     this.host.dataset.universeTimelineEnabled = String(this.timelineJourney.enabled);
     this.host.dataset.universeTimelinePhase = this.timelineJourney.phase;
     this.host.dataset.universeTimelineInternalPhase = this.timelineMotionPhase;
@@ -1935,48 +2225,63 @@ class UniverseForceSceneEngine {
       this.timelineJourney.networkExhausted,
     );
     this.host.dataset.universeTimelineRevision = String(this.timelineJourney.revision);
-    this.host.dataset.universeTimelineBusy = String(this.timelineIsBusy());
+    this.host.dataset.universeTimelineBusy = String(busy);
+    this.labels.forEach((label) => {
+      label.element.disabled = busy;
+    });
   }
 
-  private finishTimelineMotionPhase(
-    completed: "exiting" | "entering" | "restoring",
-  ) {
-    if (this.timelineMotionPhase !== completed) return;
-    if (completed === "exiting") {
-      this.timelineMotionPhase = "awaiting-result";
-    } else {
-      this.timelineMotionPhase = "idle";
-      this.timelineIntentPending = false;
-      this.timelineExitSnapshots.clear();
-      this.controls.enableZoom = this.interactive && !this.timelineIsBusy();
-    }
+  private pruneRetiringTimelineElements() {
+    const retiringIds = new Set(
+      [...this.nodes.values()]
+        .filter((node) => node.timelineRetiring)
+        .map((node) => node.id),
+    );
+    if (retiringIds.size === 0) return;
+    const previousLinks = this.links;
+    const nextNodes = new Map<string, ForceNode>();
+    this.nodes.forEach((node, id) => {
+      if (retiringIds.has(id)) {
+        this.detachSharedNodeResources(node);
+        return;
+      }
+      nextNodes.set(id, node);
+    });
+    const nextLinks = previousLinks.filter((link) =>
+      nextNodes.has(link.sourceId) && nextNodes.has(link.targetId));
+    this.nodes = nextNodes;
+    this.links = nextLinks;
+    this.clusterNodes = [...nextNodes.values()];
+    this.rebuildAdjacency();
+    this.visibleEdgeIds = new Set(nextLinks.map((link) => link.id));
+    this.graph.graphData({ nodes: [...nextNodes.values()], links: nextLinks });
+    previousLinks.forEach((link) => {
+      if (!nextLinks.includes(link)) link.lineMaterial = undefined;
+    });
+    this.syncFrozenNodeCoordinates();
+    this.host.dataset.universeRenderedRelations = String(this.visibleEdgeIds.size);
+    this.host.dataset.universeEventStarCount = String(
+      [...nextNodes.values()].filter((node) => node.kind === "event").length,
+    );
+    this.host.dataset.universeEntityGlyphCount = String(
+      [...nextNodes.values()].filter((node) => node.kind === "entity").length,
+    );
+    this.host.dataset.universeRetiringNodeCount = "0";
+    this.host.dataset.universeRetainedGhostNodeCount = "0";
+    this.host.dataset.universeRetainedGhostLinkCount = "0";
+    this.rebuildLabels();
+    this.applyHighlight();
+  }
+
+  private finishTimelineMotionPhase() {
+    if (this.timelineMotionPhase !== "entering") return;
+    this.pruneRetiringTimelineElements();
+    this.timelineMotionPhase = "idle";
+    this.timelineIntentPending = false;
+    this.timelineIntentDirection = null;
+    this.controls.enableZoom = this.interactive;
     this.host.dataset.universeTimelineMovingCount = "0";
     this.syncTimelineDiagnostics();
-    const resolve = this.timelineMotionResolve;
-    this.timelineMotionResolve = null;
-    resolve?.();
-  }
-
-  private waitForTimelineMotions(
-    phase: "exiting" | "entering" | "restoring",
-  ) {
-    const moving = [...this.nodes.values()].filter((node) => node.timelineMotion).length;
-    this.host.dataset.universeTimelineMovingCount = String(moving);
-    if (moving === 0) {
-      this.finishTimelineMotionPhase(phase);
-      return Promise.resolve();
-    }
-    const duration = [...this.nodes.values()].reduce((latest, node) => {
-      const motion = node.timelineMotion;
-      return motion
-        ? Math.max(latest, motion.startedAt + motion.duration - performance.now())
-        : latest;
-    }, 0);
-    this.wakeRendering(duration + 240);
-    this.startLoop(duration + 160);
-    return new Promise<void>((resolve) => {
-      this.timelineMotionResolve = resolve;
-    });
   }
 
   private updateTimelineMotions(now: number) {
@@ -2032,10 +2337,7 @@ class UniverseForceSceneEngine {
     }
     this.host.dataset.universeTimelineMovingCount = String(moving);
     if (touched && moving === 0) {
-      const phase = this.timelineMotionPhase;
-      if (phase === "exiting" || phase === "entering" || phase === "restoring") {
-        this.finishTimelineMotionPhase(phase);
-      }
+      if (this.timelineMotionPhase === "entering") this.finishTimelineMotionPhase();
     }
     return moving > 0;
   }
@@ -2050,133 +2352,21 @@ class UniverseForceSceneEngine {
     return stableUnit(`${node.id}:timeline-exit-side`) < 0.5 ? -1 : 1;
   }
 
-  private animateTimelineExit(direction: UniverseTimelineDirection) {
-    this.timelineMotionPhase = "exiting";
-    this.host.dataset.universeTimelineDirection = direction;
-    this.timelineExitSnapshots.clear();
-    this.clearKeyboardFocus(true, false);
-    if (this.hoveredId) this.handleNodeHover(null, false, true);
-    if (this.reducedMotion) return this.waitForTimelineMotions("exiting");
-
-    const camera = this.graph.camera() as THREE.PerspectiveCamera;
-    camera.updateMatrixWorld();
-    const cameraRight = new THREE.Vector3()
-      .setFromMatrixColumn(camera.matrixWorld, 0)
-      .normalize();
-    const cameraUp = new THREE.Vector3()
-      .setFromMatrixColumn(camera.matrixWorld, 1)
-      .normalize();
-    const aspect = Math.max(0.4, this.host.clientWidth / Math.max(1, this.host.clientHeight));
-    const sourceById = new Map(
-      [...this.nodes.values()]
-        .filter((node) => node.kind === "source")
-        .map((node) => [node.sourceId, node]),
-    );
-    const now = performance.now();
-    this.nodes.forEach((node) => {
-      if (node.kind === "source") return;
-      const from = new THREE.Vector3(node.x, node.y, node.z);
-      this.timelineExitSnapshots.set(node.id, from.clone());
-      node.entry = undefined;
-      node.entryOpacity = undefined;
-      const source = sourceById.get(node.sourceId);
-      const depthPoint = source ?? node;
-      const distance = camera.position.distanceTo(
-        new THREE.Vector3(depthPoint.x, depthPoint.y, depthPoint.z),
-      );
-      const worldHeight = 2 * distance
-        * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
-      const side = this.timelineExitSide(node, source);
-      const to = from.clone()
-        .addScaledVector(cameraRight, side * worldHeight * aspect * 0.72)
-        .addScaledVector(
-          cameraUp,
-          (stableUnit(`${node.id}:timeline-exit-rise`) - 0.5) * worldHeight * 0.12,
-        );
-      node.timelineOpacity = 1;
-      node.timelineScale = 1;
-      node.timelineMotion = {
-        kind: "exit",
-        startedAt: now,
-        duration: TIMELINE_EXIT_MIN_MS
-          + stableUnit(`${node.id}:timeline-exit-duration`) * TIMELINE_EXIT_VARIANCE_MS,
-        from,
-        to,
-        arc: cameraUp.clone().multiplyScalar(
-          (stableUnit(`${node.id}:timeline-exit-arc`) - 0.5) * worldHeight * 0.08,
-        ),
-        opacityFrom: 1,
-        opacityTo: 0,
-        scaleFrom: 1,
-        scaleTo: 0.72,
-      };
-      node.renderedEntryOpacity = undefined;
-      this.setObjectOpacity(
-        node,
-        node.visualOpacity ?? 1,
-        node.visuallyEmphasized ?? false,
-      );
-    });
-    this.syncTimelineDiagnostics();
-    return this.waitForTimelineMotions("exiting");
-  }
-
-  private restoreTimelineExit() {
-    this.timelineMotionPhase = "restoring";
-    const now = performance.now();
-    this.timelineExitSnapshots.forEach((target, nodeId) => {
-      const node = this.nodes.get(nodeId);
-      if (!node) return;
-      const from = new THREE.Vector3(node.x, node.y, node.z);
-      if (this.reducedMotion) {
-        this.freezeNode(node, target);
-        node.timelineMotion = undefined;
-        node.timelineOpacity = undefined;
-        node.timelineScale = undefined;
-        this.setObjectOpacity(
-          node,
-          node.visualOpacity ?? 1,
-          node.visuallyEmphasized ?? false,
-        );
-        return;
-      }
-      node.timelineMotion = {
-        kind: "restore",
-        startedAt: now,
-        duration: 320,
-        from,
-        to: target.clone(),
-        arc: new THREE.Vector3(),
-        opacityFrom: node.timelineOpacity ?? 0,
-        opacityTo: 1,
-        scaleFrom: node.timelineScale ?? 0.72,
-        scaleTo: 1,
-      };
-    });
-    this.syncTimelineDiagnostics();
-    return this.waitForTimelineMotions("restoring");
-  }
-
   private cancelTimelineTransition(snapToStable: boolean) {
     this.timelineIntentToken += 1;
-    if (this.timelineWheelIdleTimer !== null) {
-      window.clearTimeout(this.timelineWheelIdleTimer);
-      this.timelineWheelIdleTimer = null;
-    }
     if (this.timelineRevisionWatchTimer !== null) {
       window.clearTimeout(this.timelineRevisionWatchTimer);
       this.timelineRevisionWatchTimer = null;
     }
-    const resolve = this.timelineMotionResolve;
-    this.timelineMotionResolve = null;
     if (snapToStable) {
       this.nodes.forEach((node) => {
-        const stable = this.timelineExitSnapshots.get(node.id)
-          ?? (node.timelineMotion?.kind === "enter" ? node.timelineMotion.to : null);
-        if (stable) this.freezeNode(node, stable);
+        const motion = node.timelineMotion;
+        if (motion && !node.timelineRetiring) {
+          this.freezeNode(node, motion.to);
+          node.timelineOpacity = motion.opacityTo;
+          node.timelineScale = motion.scaleTo;
+        }
         node.timelineMotion = undefined;
-        node.timelineOpacity = undefined;
-        node.timelineScale = undefined;
         node.renderedEntryOpacity = undefined;
         this.setObjectOpacity(
           node,
@@ -2184,18 +2374,15 @@ class UniverseForceSceneEngine {
           node.visuallyEmphasized ?? false,
         );
       });
+      this.pruneRetiringTimelineElements();
       this.syncGraphObjectPositions();
       this.updateLinkVisuals();
     }
-    this.timelineExitSnapshots.clear();
     this.timelineIntentPending = false;
+    this.timelineIntentDirection = null;
     this.timelineMotionPhase = "idle";
-    this.timelineWheelAccumulator = 0;
-    this.timelineWheelDirection = null;
-    this.timelineWheelConsumed = false;
-    this.controls.enableZoom = this.interactive && !this.timelineIsBusy();
+    this.controls.enableZoom = this.interactive;
     this.syncTimelineDiagnostics();
-    resolve?.();
   }
 
   async moveTimeline(
@@ -2222,14 +2409,15 @@ class UniverseForceSceneEngine {
     const token = ++this.timelineIntentToken;
     const startWindowRevision = this.dataWindowRevision;
     this.timelineIntentPending = true;
-    this.controls.enableZoom = false;
+    this.timelineIntentDirection = direction;
+    this.timelineMotionPhase = "awaiting-result";
+    this.controls.enableZoom = this.interactive;
+    this.host.dataset.universeTimelineDirection = direction;
     this.host.dataset.universeTimelineResult = "";
+    this.clearKeyboardFocus(true, false);
+    if (this.hoveredId) this.handleNodeHover(null, false, true);
     this.syncTimelineDiagnostics();
     try {
-      await this.animateTimelineExit(direction);
-      if (token !== this.timelineIntentToken) return "blocked";
-      this.timelineMotionPhase = "awaiting-result";
-      this.syncTimelineDiagnostics();
       const result = await this.callbacks.onTimelineIntent(direction);
       if (token !== this.timelineIntentToken) return "blocked";
       const normalized: UniverseTimelineIntentResult = result === "advanced"
@@ -2249,17 +2437,17 @@ class UniverseForceSceneEngine {
               token !== this.timelineIntentToken
               || this.dataWindowRevision !== startWindowRevision
             ) return;
-            void this.restoreTimelineExit();
+            this.cancelTimelineTransition(false);
           }, 1_600);
         }
         return normalized;
       }
-      await this.restoreTimelineExit();
+      this.cancelTimelineTransition(false);
       return normalized;
     } catch {
       if (token === this.timelineIntentToken) {
         this.host.dataset.universeTimelineResult = "error";
-        await this.restoreTimelineExit();
+        this.cancelTimelineTransition(false);
       }
       return "error";
     }
@@ -2410,6 +2598,15 @@ class UniverseForceSceneEngine {
       group.add(hit);
     }
     node.object = group;
+    // three-force-graph creates custom objects after graphData() returns. Apply
+    // the already-computed transition state immediately so a new star cannot
+    // render for one frame at its material's full opacity and scale.
+    node.renderedEntryOpacity = undefined;
+    this.setObjectOpacity(
+      node,
+      node.visualOpacity ?? 1,
+      node.visuallyEmphasized ?? false,
+    );
     return group;
   }
 
@@ -2448,6 +2645,17 @@ class UniverseForceSceneEngine {
       ?? this.keyboardFocusedId
       ?? (this.visualDetailMix >= 0.5 ? this.hoveredId : null);
     return focusId && this.nodes.get(focusId)?.kind !== "source" ? focusId : null;
+  }
+
+  private transientHoverFocusId() {
+    if (
+      this.lockedId
+      || this.selectedId
+      || this.keyboardFocusedId
+      || this.visualDetailMix < 0.5
+    ) return null;
+    const node = this.hoveredId ? this.nodes.get(this.hoveredId) : undefined;
+    return node && node.kind !== "source" ? node.id : null;
   }
 
   private cancelHoverLabelRebuild() {
@@ -2527,6 +2735,8 @@ class UniverseForceSceneEngine {
     const anchorId = this.labelFocusId();
     const anchor = anchorId ? this.nodes.get(anchorId) : undefined;
     const neighbors = anchorId ? this.adjacency.get(anchorId) ?? new Set<string>() : null;
+    const transientHoverId = this.transientHoverFocusId();
+    const transientHover = anchorId !== null && anchorId === transientHoverId;
     const hitRank = new Map(this.sourceHits.map((hit, index) => [hit.source_id, index]));
     let relationCount = 0;
     this.links.forEach((link) => {
@@ -2539,19 +2749,23 @@ class UniverseForceSceneEngine {
     });
     this.nodes.forEach((node) => {
       let opacity = 1;
-      if (anchorId) {
-        if (node.id === anchorId) opacity = 1;
-        else if (neighbors?.has(node.id)) opacity = 0.92;
-        else if (node.kind === "source" && anchor?.sourceId === node.sourceId) {
-          opacity = 0.38;
-        } else opacity = 0.18;
-      } else if (hitRank.size) {
+      if (hitRank.size) {
         const rank = hitRank.get(node.sourceId);
         opacity = rank === 0 ? 1 : rank !== undefined ? 0.58 : 0.16;
       } else if (node.kind !== "source" && node.sceneNode.state !== "active") {
         // Dormant nodes recede without becoming undiscoverable. Every entity
         // keeps a visible glyph even when it does not receive a compact label.
         opacity = node.kind === "event" ? 0.52 : 0.48;
+      }
+      // Hover is a transient relationship preview: preserve the spatial and
+      // brightness structure. Persistent selection may still mute unrelated
+      // context to support deliberate inspection.
+      if (anchorId && !transientHover) {
+        if (node.id === anchorId) opacity = 1;
+        else if (neighbors?.has(node.id)) opacity = 0.92;
+        else if (node.kind === "source" && anchor?.sourceId === node.sourceId) {
+          opacity = 0.38;
+        } else opacity = 0.18;
       }
       const overviewSourceHovered = node.kind === "source"
         && this.visualDetailMix < 0.5
@@ -2564,7 +2778,9 @@ class UniverseForceSceneEngine {
       if (label.kind !== "node") return;
       const labelNode = this.nodes.get(label.nodeId);
       label.element.dataset.expanded = String(
-        labelNode?.kind === "event" && label.nodeId === anchorId,
+        labelNode?.kind === "event"
+          && label.nodeId === anchorId
+          && !transientHover,
       );
     });
     this.host.dataset.universeRenderedRelations = String(this.visibleEdgeIds.size);
@@ -2572,6 +2788,7 @@ class UniverseForceSceneEngine {
     this.host.dataset.universeRelationAnchor = anchorId ?? "";
     this.updateNebulaAlphas();
     this.updateLinkVisuals();
+    this.syncHighlightFlowSprites();
     this.sortLabelsForLayout();
     this.updateLabels(performance.now(), true);
     this.renderOnce();
@@ -2583,26 +2800,38 @@ class UniverseForceSceneEngine {
 
   private setObjectOpacity(node: ForceNode, opacity: number, emphasized: boolean) {
     const entryOpacity = (node.entryOpacity ?? 1) * (node.timelineOpacity ?? 1);
+    const dataScale = presentationScale(node.sceneNode.presentationScale);
+    const dataOpacity = presentationOpacity(node.sceneNode.presentationOpacity);
     if (
       node.visualOpacity === opacity
       && node.visuallyEmphasized === emphasized
       && node.renderedEntryOpacity === entryOpacity
+      && node.renderedPresentationScale === dataScale
+      && node.renderedPresentationOpacity === dataOpacity
     ) return;
     node.visualOpacity = opacity;
     node.visuallyEmphasized = emphasized;
     node.renderedEntryOpacity = entryOpacity;
+    node.renderedPresentationScale = dataScale;
+    node.renderedPresentationOpacity = dataOpacity;
     const object = node.object;
     if (!object) return;
     const entryScale = 0.28 + easeOutCubic(entryOpacity) * 0.72;
+    const emphasisScale = emphasized
+      ? node.id === this.transientHoverFocusId() ? 1.06 : 1.18
+      : 1;
     object.scale.setScalar(
-      (emphasized ? 1.18 : 1)
+      emphasisScale
         * entryScale
         * (node.timelineScale ?? 1)
-        * this.nodeMorphScale(node),
+        * this.nodeMorphScale(node)
+        * dataScale,
     );
     object.traverse((child) => {
       if (child.userData.hitArea) {
-        if (node.kind !== "source") child.visible = entryOpacity > 0.16;
+        if (node.kind !== "source") {
+          child.visible = entryOpacity * dataOpacity > 0.16;
+        }
         return;
       }
       const candidate = child as THREE.Object3D & {
@@ -2625,8 +2854,8 @@ class UniverseForceSceneEngine {
         material.opacity = entryOpacity <= 0.001
           ? 0
           : Math.max(
-              child.userData.sourceAura ? 0 : 0.035 * entryOpacity,
-              base * opacity * entryOpacity * detailFactor,
+              child.userData.sourceAura ? 0 : 0.035 * entryOpacity * dataOpacity,
+              base * opacity * entryOpacity * detailFactor * dataOpacity,
             );
       });
     });
@@ -2686,15 +2915,21 @@ class UniverseForceSceneEngine {
 
   private updateNodeMorphScales() {
     this.nodes.forEach((node) => {
-      if (!node.object || node.kind === "source") return;
+      if (!node.object) return;
       const entryOpacity = (node.entryOpacity ?? 1) * (node.timelineOpacity ?? 1);
       const entryScale = 0.28 + easeOutCubic(entryOpacity) * 0.72;
+      const dataScale = presentationScale(node.sceneNode.presentationScale);
+      const emphasisScale = node.visuallyEmphasized
+        ? node.id === this.transientHoverFocusId() ? 1.06 : 1.18
+        : 1;
       node.object.scale.setScalar(
-        (node.visuallyEmphasized ? 1.18 : 1)
+        emphasisScale
           * entryScale
           * (node.timelineScale ?? 1)
-          * this.nodeMorphScale(node),
+          * this.nodeMorphScale(node)
+          * dataScale,
       );
+      node.renderedPresentationScale = dataScale;
     });
   }
 
@@ -2710,8 +2945,9 @@ class UniverseForceSceneEngine {
             ? this.darkTheme ? 0.24 : 0.18
             : 0.96;
         const opacity = node.visualOpacity ?? 1;
+        const dataOpacity = presentationOpacity(node.sceneNode.presentationOpacity);
         const detailFactor = this.sourceMarkerDetailFactor(node, child);
-        material.opacity = base * opacity * detailFactor;
+        material.opacity = base * opacity * detailFactor * dataOpacity;
         child.visible = material.opacity > 0.008;
       });
     });
@@ -2891,13 +3127,13 @@ class UniverseForceSceneEngine {
 
   private updateNebulaAlphas(force = false) {
     if (!this.nebulaPoints) return;
-    const anchor = this.nodes.get(
-      this.lockedId
-      ?? this.selectedId
-      ?? this.keyboardFocusedId
-      ?? this.hoveredId
-      ?? "",
+    const persistentAnchor = this.nodes.get(
+      this.lockedId ?? this.selectedId ?? this.keyboardFocusedId ?? "",
     );
+    const hovered = this.hoveredId ? this.nodes.get(this.hoveredId) : undefined;
+    // Hovering a concrete node must not make unrelated stars/nebulae vanish.
+    // Source hover remains an overview affordance; selection remains deliberate.
+    const anchor = persistentAnchor ?? (hovered?.kind === "source" ? hovered : undefined);
     const contextKey = anchor
       ? `anchor:${anchor.kind}:${anchor.sourceId}`
       : this.sourceHits.length
@@ -3014,8 +3250,8 @@ class UniverseForceSceneEngine {
   private restingLinkOpacity() {
     const load = THREE.MathUtils.clamp((this.visibleEdgeIds.size - 24) / 336, 0, 1);
     return this.darkTheme
-      ? THREE.MathUtils.lerp(0.28, 0.09, load)
-      : THREE.MathUtils.lerp(0.24, 0.075, load);
+      ? THREE.MathUtils.lerp(0.18, 0.055, load)
+      : THREE.MathUtils.lerp(0.16, 0.045, load);
   }
 
   private linkWorldWidth() {
@@ -3027,17 +3263,24 @@ class UniverseForceSceneEngine {
   private linkVisualStyle(link: ForceLink) {
     const source = this.nodes.get(link.sourceId);
     const target = this.nodes.get(link.targetId);
+    const dataOpacity = presentationOpacity(link.sceneLink.presentationOpacity);
     const timelineOpacity = Math.min(
-      source?.timelineOpacity ?? 1,
-      target?.timelineOpacity ?? 1,
-    );
+      (source?.entryOpacity ?? 1) * (source?.timelineOpacity ?? 1),
+      (target?.entryOpacity ?? 1) * (target?.timelineOpacity ?? 1),
+    ) * dataOpacity;
     if (!link.visible) {
       return { color: this.darkTheme ? "#5b747a" : "#70898e", opacity: 0 };
     }
     if (link.highlighted) {
       return {
         color: this.darkTheme ? "#b5f2fb" : "#0b6677",
-        opacity: (this.darkTheme ? 0.9 : 0.84) * timelineOpacity,
+        opacity: (this.darkTheme ? 0.96 : 0.9) * timelineOpacity,
+      };
+    }
+    if (this.transientHoverFocusId()) {
+      return {
+        color: this.darkTheme ? "#527d85" : "#526f75",
+        opacity: this.restingLinkOpacity() * 0.68 * timelineOpacity,
       };
     }
     if (this.labelFocusId()) {
@@ -3082,6 +3325,74 @@ class UniverseForceSceneEngine {
     });
   }
 
+  private clearHighlightFlowSprites() {
+    this.highlightFlowSprites.forEach((sprite) => sprite.removeFromParent());
+    this.highlightFlowSprites.clear();
+    this.lastHighlightFlowAt = 0;
+    this.host.dataset.universeHighlightFlowCount = "0";
+  }
+
+  private syncHighlightFlowSprites() {
+    const highlighted = this.reducedMotion
+      ? []
+      : this.links.filter((link) => link.visible && link.highlighted);
+    const highlightedIds = new Set(highlighted.map((link) => link.id));
+    this.highlightFlowSprites.forEach((sprite, id) => {
+      if (highlightedIds.has(id)) return;
+      sprite.removeFromParent();
+      this.highlightFlowSprites.delete(id);
+    });
+    this.highlightFlowMaterial.color.set(this.darkTheme ? "#d7fbff" : "#0b6677");
+    highlighted.forEach((link) => {
+      const existing = this.highlightFlowSprites.get(link.id);
+      if (existing) {
+        existing.userData.link = link;
+        return;
+      }
+      const sprite = new THREE.Sprite(this.highlightFlowMaterial);
+      sprite.name = `sag-highlight-flow:${link.id}`;
+      sprite.frustumCulled = false;
+      sprite.renderOrder = 4;
+      sprite.scale.set(2.6, 2.6, 1);
+      sprite.userData.link = link;
+      sprite.userData.flowPhase = stableUnit(`${link.id}:flow-phase`);
+      this.highlightFlowSprites.set(link.id, sprite);
+      this.graph.scene().add(sprite);
+    });
+    this.host.dataset.universeHighlightFlowCount = String(
+      this.highlightFlowSprites.size,
+    );
+    if (this.highlightFlowSprites.size > 0) this.startLoop();
+  }
+
+  private updateHighlightFlowSprites(now: number) {
+    if (this.highlightFlowSprites.size === 0 || this.reducedMotion) return false;
+    if (now - this.lastHighlightFlowAt < HIGHLIGHT_FLOW_FRAME_MS) return true;
+    this.lastHighlightFlowAt = now;
+    this.highlightFlowSprites.forEach((sprite) => {
+      const link = sprite.userData.link as ForceLink | undefined;
+      const source = link ? this.nodes.get(link.sourceId) : undefined;
+      const target = link ? this.nodes.get(link.targetId) : undefined;
+      if (!link?.highlighted || !source || !target) {
+        sprite.visible = false;
+        return;
+      }
+      const progress = (
+        now * 0.00042 + (sprite.userData.flowPhase as number)
+      ) % 1;
+      sprite.visible = true;
+      sprite.position.set(
+        THREE.MathUtils.lerp(source.x, target.x, progress),
+        THREE.MathUtils.lerp(source.y, target.y, progress),
+        THREE.MathUtils.lerp(source.z, target.z, progress),
+      );
+      const pulse = 0.88 + Math.sin(progress * Math.PI) * 0.34;
+      sprite.scale.set(2.6 * pulse, 2.6 * pulse, 1);
+    });
+    if (!this.renderingAwake) this.renderOnce();
+    return true;
+  }
+
   private renderOnce() {
     if (this.paused || document.visibilityState !== "visible") return;
     this.graph.renderer().render(this.graph.scene(), this.graph.camera());
@@ -3089,6 +3400,7 @@ class UniverseForceSceneEngine {
 
   private rebuildLabels() {
     const focusId = this.labelFocusId();
+    const transientHover = focusId !== null && focusId === this.transientHoverFocusId();
     this.cancelHoverLabelRebuild();
     const retainedLabelRank = new Map(
       this.labels
@@ -3096,8 +3408,11 @@ class UniverseForceSceneEngine {
         .map((label, index) => [label.nodeId, index]),
     );
     this.rebuildingLabels = true;
-    this.labelLayer.replaceChildren();
-    this.labels = [];
+    const existingLabels = new Map(
+      this.labels.map((label) => [`${label.kind}:${label.nodeId}`, label]),
+    );
+    const nextLabels: SceneLabel[] = [];
+    let reusedLabelCount = 0;
     const mobile = this.host.clientWidth < 768;
     const sourceRank = new Map(this.sourceHits.map((hit, index) => [hit.source_id, index]));
     const focusNeighbors = focusId ? this.adjacency.get(focusId) ?? new Set<string>() : null;
@@ -3118,11 +3433,23 @@ class UniverseForceSceneEngine {
         return right.sceneNode.importance - left.sceneNode.importance;
       })
       .slice(0, mobile ? 8 : 18);
-    const focusNode = focusId ? this.nodes.get(focusId) : undefined;
-    const showEventCards = this.viewPreferences.showEventCards
-      || focusNode?.kind === "event";
-    const showEntityCards = this.viewPreferences.showEntityCards
-      || focusNode?.kind === "entity";
+    const focusCardPlan = planUniverseFocusCards(
+      [...this.nodes.values()]
+        .filter((node): node is ForceNode & { kind: "event" | "entity" } =>
+          node.kind === "event" || node.kind === "entity"),
+      focusId,
+      focusNeighbors ?? [],
+      labelSourceId,
+    );
+    const focusCardIds = new Set(focusCardPlan.ids);
+    const hasConcreteFocus = focusCardIds.size > 0;
+    this.host.dataset.universeFocusCardCount = String(focusCardPlan.ids.length);
+    this.host.dataset.universeFocusEventCardCount = String(focusCardPlan.eventCount);
+    this.host.dataset.universeFocusEntityCardCount = String(focusCardPlan.entityCount);
+    // Card preferences control the resting scene. Hover, keyboard focus and
+    // click lock all reveal the complete factual one-hop group.
+    const showEventCards = this.viewPreferences.showEventCards || hasConcreteFocus;
+    const showEntityCards = this.viewPreferences.showEntityCards || hasConcreteFocus;
     const cardBudget = universeCardBudget(
       Math.max(1, this.host.clientWidth),
       Math.max(1, this.host.clientHeight),
@@ -3155,29 +3482,33 @@ class UniverseForceSceneEngine {
     const candidates = [...this.nodes.values()].filter((node) =>
       node.kind !== "source"
       && (node.kind === "event" ? showEventCards : showEntityCards)
-      && (node.sceneNode.state === "active" || node.id === focusId)
+      && (node.sceneNode.state === "active" || focusCardIds.has(node.id))
       && node.sourceId === labelSourceId
-      && (!focusId || node.id === focusId || focusNeighbors?.has(node.id))
+      && (!focusId || focusCardIds.has(node.id))
     );
     const eventLimit = showEventCards
-      ? Math.max(cardBudget.events, focusNode?.kind === "event" ? 1 : 0)
+      ? Math.max(cardBudget.events, focusCardPlan.eventCount)
       : 0;
     const entityLimit = showEntityCards
-      ? Math.max(cardBudget.entities, focusNode?.kind === "entity" ? 1 : 0)
+      ? Math.max(cardBudget.entities, focusCardPlan.entityCount)
       : 0;
-    const totalLimit = focusId
-      && focusNode
-      && focusNode.kind !== "source"
-      ? Math.max(cardBudget.total, 1)
+    const totalLimit = hasConcreteFocus
+      ? Math.max(cardBudget.total, focusCardPlan.ids.length)
       : cardBudget.total;
     this.labelPlacementBudget = {
       events: Math.min(eventLimit, totalLimit),
       entities: Math.min(entityLimit, totalLimit),
       total: totalLimit,
     };
-    const eventCandidateLimit = Math.min(60, eventLimit * 3);
-    const entityCandidateLimit = Math.min(60, entityLimit * 3);
-    const totalCandidateLimit = Math.min(60, totalLimit * 3);
+    const eventCandidateLimit = hasConcreteFocus
+      ? focusCardPlan.eventCount
+      : Math.min(60, eventLimit * 3);
+    const entityCandidateLimit = hasConcreteFocus
+      ? focusCardPlan.entityCount
+      : Math.min(60, entityLimit * 3);
+    const totalCandidateLimit = hasConcreteFocus
+      ? focusCardPlan.ids.length
+      : Math.min(60, totalLimit * 3);
     const activeNodes = [
       ...candidates
         .filter((node) => node.kind === "event")
@@ -3192,10 +3523,25 @@ class UniverseForceSceneEngine {
       .slice(0, totalCandidateLimit);
 
     sources.forEach((node) => {
-      const element = document.createElement("button");
-      element.type = "button";
-      element.className = "sag-nebula-label";
+      const labelKey = `source:${node.id}`;
+      const retained = existingLabels.get(labelKey);
+      const element = retained?.element ?? document.createElement("button");
+      if (retained) {
+        reusedLabelCount += 1;
+        existingLabels.delete(labelKey);
+      } else {
+        element.type = "button";
+        element.className = "sag-nebula-label";
+        const marker = document.createElement("span");
+        marker.className = "sag-nebula-label__marker";
+        const copy = document.createElement("span");
+        copy.append(document.createElement("strong"), document.createElement("small"));
+        element.append(marker, copy);
+        this.bindLabelInteraction(element, node);
+        this.labelLayer.appendChild(element);
+      }
       element.dataset.universeNodeId = node.id;
+      element.disabled = this.timelineIsBusy();
       element.setAttribute("aria-label", this.text.exploreSource(node.sceneNode.label));
       element.style.setProperty(
         "--nebula-color",
@@ -3205,59 +3551,63 @@ class UniverseForceSceneEngine {
         "--nebula-phase",
         `${(-1.2 - stableUnit(`${node.id}:beacon-phase`) * 4.8).toFixed(2)}s`,
       );
-      this.bindLabelInteraction(element, node);
-      const marker = document.createElement("span");
-      marker.className = "sag-nebula-label__marker";
-      const copy = document.createElement("span");
-      const title = document.createElement("strong");
+      const title = element.querySelector("strong") as HTMLElement;
       title.textContent = node.sceneNode.label;
-      const meta = document.createElement("small");
+      const meta = element.querySelector("small") as HTMLElement;
       meta.textContent = node.sceneNode.statsReady
         ? this.text.sourceStats(node.sceneNode.eventCount, node.sceneNode.entityCount)
         : this.text.sourceStatsBuilding(node.sceneNode.eventCount);
-      copy.append(title, meta);
-      element.append(marker, copy);
-      this.labelLayer.appendChild(element);
-      this.labels.push({ nodeId: node.id, kind: "source", element });
+      nextLabels.push({ nodeId: node.id, kind: "source", element });
     });
     activeNodes.forEach((node) => {
       const nodeKind = node.kind === "event" ? "event" : "entity";
-      const element = document.createElement("button");
-      element.type = "button";
-      element.className = "sag-universe-node-label";
+      const labelKey = `node:${node.id}`;
+      const retained = existingLabels.get(labelKey);
+      const element = retained?.element ?? document.createElement("button");
+      if (retained) {
+        reusedLabelCount += 1;
+        existingLabels.delete(labelKey);
+      } else {
+        element.type = "button";
+        element.className = "sag-universe-node-label";
+        const eyebrow = document.createElement("span");
+        eyebrow.className = "sag-universe-node-label__eyebrow";
+        const marker = document.createElement("span");
+        marker.className = "sag-universe-node-label__marker";
+        eyebrow.append(marker, document.createElement("span"));
+        element.append(eyebrow, document.createElement("strong"), document.createElement("p"));
+        this.bindLabelInteraction(element, node);
+        this.labelLayer.appendChild(element);
+      }
       element.dataset.universeNodeId = node.id;
+      element.disabled = this.timelineIsBusy();
       element.dataset.kind = node.kind;
       element.dataset.expanded = String(
-        node.kind === "event" && node.id === focusId,
+        node.kind === "event" && node.id === focusId && !transientHover,
       );
       element.dataset.compact = String(node.kind === "entity");
       element.setAttribute(
         "aria-label",
         this.text.exploreNode(nodeKind, node.sceneNode.label),
       );
-      this.bindLabelInteraction(element, node);
-
-      const eyebrow = document.createElement("span");
-      eyebrow.className = "sag-universe-node-label__eyebrow";
-      const marker = document.createElement("span");
-      marker.className = "sag-universe-node-label__marker";
-      const eyebrowText = document.createElement("span");
+      const eyebrowText = element.querySelector(
+        ".sag-universe-node-label__eyebrow > span:last-child",
+      ) as HTMLElement;
       eyebrowText.textContent = `${this.text.kind(nodeKind)} · ${node.sceneNode.category}`;
-      eyebrow.append(marker, eyebrowText);
-
-      const title = document.createElement("strong");
+      const title = element.querySelector("strong") as HTMLElement;
       title.textContent = node.sceneNode.label;
-      title.title = node.sceneNode.label;
-      const summary = document.createElement("p");
+      title.removeAttribute("title");
+      const summary = element.querySelector("p") as HTMLElement;
       const summaryText = node.sceneNode.description || (node.kind === "entity"
         ? this.text.relatedEvents(node.sceneNode.relatedCount, node.sceneNode.category)
         : node.sceneNode.category || this.text.extractedEvent);
       summary.textContent = summaryText;
-      summary.title = summaryText;
-      element.append(eyebrow, title, summary);
-      this.labelLayer.appendChild(element);
-      this.labels.push({ nodeId: node.id, kind: "node", element });
+      summary.removeAttribute("title");
+      nextLabels.push({ nodeId: node.id, kind: "node", element });
     });
+    existingLabels.forEach((label) => label.element.remove());
+    this.labels = nextLabels;
+    this.host.dataset.universeReusedLabelCount = String(reusedLabelCount);
     this.host.dataset.universeEventLabelCandidateCount = String(
       activeNodes.filter((node) => node.kind === "event").length,
     );
@@ -3270,13 +3620,18 @@ class UniverseForceSceneEngine {
   }
 
   private sortLabelsForLayout() {
+    const focusId = this.labelFocusId();
+    const focusNeighbors = focusId
+      ? this.adjacency.get(focusId) ?? new Set<string>()
+      : null;
     this.labels.sort((left, right) => {
       const layoutRank = (label: SceneLabel) => {
         if (label.nodeId === this.lockedId) return 0;
         if (label.nodeId === this.selectedId) return 1;
         if (label.nodeId === this.keyboardFocusedId) return 2;
         if (label.nodeId === this.hoveredId) return 3;
-        return label.kind === "source" ? 4 : 5;
+        if (focusNeighbors?.has(label.nodeId)) return 4;
+        return label.kind === "source" ? 5 : 6;
       };
       return layoutRank(left) - layoutRank(right);
     });
@@ -3297,6 +3652,7 @@ class UniverseForceSceneEngine {
     };
     element.addEventListener("click", (event) => {
       event.stopPropagation();
+      if (this.timelineIsBusy()) return;
       this.clearKeyboardFocus(false);
       this.callbacks.onNodeClick(node.sceneNode);
     });
@@ -3317,16 +3673,33 @@ class UniverseForceSceneEngine {
     const height = Math.max(1, this.host.clientHeight);
     const mobile = width < 768;
     const camera = this.graph.camera();
-    const panelRect = this.miniPanelRect();
-    const summaryRect = this.relativeOverlayRect("[data-universe-summary='true']", 8);
-    const progressRect = this.relativeOverlayRect("[data-universe-load-progress='true']", 8);
-    const inspectorRect = this.relativeOverlayRect("[data-universe-inspector='true']", 8);
+    // One layout read per pass. Previously each overlay lookup re-read the host
+    // bounds, forcing repeated layout flushes while the camera was moving.
+    const hostRect = this.host.getBoundingClientRect();
+    const panelRect = this.miniPanelRect(hostRect);
+    const summaryRect = this.relativeOverlayRect(
+      "[data-universe-summary='true']",
+      8,
+      hostRect,
+    );
+    const progressRect = this.relativeOverlayRect(
+      "[data-universe-load-progress='true']",
+      8,
+      hostRect,
+    );
+    const inspectorRect = this.relativeOverlayRect(
+      "[data-universe-inspector='true']",
+      8,
+      hostRect,
+    );
     const placed: Array<{ left: number; top: number; right: number; bottom: number }> = [];
     let visibleEventLabels = 0;
     let visibleEntityLabels = 0;
     const cardMorph = universeCardMorph(this.visualDetailMix);
     const sourceReveal = 1 - THREE.MathUtils.smoothstep(this.visualDetailMix, 0, 0.72);
     const labelFocusId = this.labelFocusId();
+    const transientHover = labelFocusId !== null
+      && labelFocusId === this.transientHoverFocusId();
     const overviewCardOverride = Boolean(labelFocusId && this.visualDetailMix < 0.5);
     const nodeCardReveal = overviewCardOverride ? 1 : cardMorph.reveal;
     const nodeCardScale = overviewCardOverride ? 1 : cardMorph.scale;
@@ -3334,6 +3707,9 @@ class UniverseForceSceneEngine {
     const nodeCardSummary = overviewCardOverride ? 1 : cardMorph.summary;
     const labelFocusNeighbors = labelFocusId
       ? this.adjacency.get(labelFocusId) ?? new Set<string>()
+      : null;
+    const focusCardIds = labelFocusId
+      ? new Set([labelFocusId, ...(labelFocusNeighbors ?? [])])
       : null;
     const labelSourceId = labelFocusId
       ? this.nodes.get(labelFocusId)?.sourceId ?? this.visualSourceId
@@ -3346,11 +3722,15 @@ class UniverseForceSceneEngine {
       if (
         node.kind !== "event"
         || node.sourceId !== labelSourceId
-        || (node.entryOpacity ?? 1) * (node.timelineOpacity ?? 1) <= 0.16
+        || (node.entryOpacity ?? 1)
+          * (node.timelineOpacity ?? 1)
+          * presentationOpacity(node.sceneNode.presentationOpacity) <= 0.16
         || !Number.isFinite(node.x)
         || !Number.isFinite(node.y)
         || !Number.isFinite(node.z)
       ) return [];
+      const scaledEventStarRadius = eventStarRadius
+        * presentationScale(node.sceneNode.presentationScale);
       const projected = new THREE.Vector3(node.x, node.y, node.z).project(camera);
       const screen = this.graph.graph2ScreenCoords(node.x, node.y, node.z);
       if (
@@ -3363,10 +3743,10 @@ class UniverseForceSceneEngine {
       ) return [];
       return [{
         nodeId: node.id,
-        left: screen.x - eventStarRadius,
-        top: screen.y - eventStarRadius,
-        right: screen.x + eventStarRadius,
-        bottom: screen.y + eventStarRadius,
+        left: screen.x - scaledEventStarRadius,
+        top: screen.y - scaledEventStarRadius,
+        right: screen.x + scaledEventStarRadius,
+        bottom: screen.y + scaledEventStarRadius,
       }];
     });
 
@@ -3379,7 +3759,9 @@ class UniverseForceSceneEngine {
         return;
       }
       const belongsToLabelSource = node.sourceId === labelSourceId;
-      const kindPlacementFull = label.kind === "node" && (
+      const requiredFocusCard = label.kind === "node"
+        && Boolean(focusCardIds?.has(node.id));
+      const kindPlacementFull = label.kind === "node" && !requiredFocusCard && (
         visibleEventLabels + visibleEntityLabels >= this.labelPlacementBudget.total
         || (node.kind === "event"
           ? visibleEventLabels >= this.labelPlacementBudget.events
@@ -3398,16 +3780,20 @@ class UniverseForceSceneEngine {
         && node.id === (this.keyboardFocusedId ?? this.hoveredId);
       const belongsToFocusNetwork = !labelFocusId
         ? true
-        : node.id === labelFocusId || Boolean(labelFocusNeighbors?.has(node.id));
+        : Boolean(focusCardIds?.has(node.id));
       const layoutOpacity = label.kind === "source"
         ? sourceReveal
         : belongsToLabelSource && belongsToFocusNetwork ? nodeCardReveal : 0;
+      const dataOpacity = presentationOpacity(node.sceneNode.presentationOpacity);
       const entryReveal = label.kind === "node"
         ? THREE.MathUtils.clamp((
             (node.entryOpacity ?? 1) * (node.timelineOpacity ?? 1) - 0.16
           ) / 0.84, 0, 1)
         : 1;
-      const visibleOpacity = layoutOpacity * entryReveal;
+      const calculatedOpacity = layoutOpacity * entryReveal * dataOpacity;
+      const visibleOpacity = requiredFocusCard
+        ? Math.max(0.72, calculatedOpacity)
+        : calculatedOpacity;
       if (visibleOpacity <= 0.01) {
         label.element.hidden = true;
         label.element.style.display = "none";
@@ -3417,7 +3803,15 @@ class UniverseForceSceneEngine {
       }
       const projected = new THREE.Vector3(node.x, node.y, node.z).project(camera);
       const screen = this.graph.graph2ScreenCoords(node.x, node.y, node.z);
-      const inFrame = projected.z > -1
+      const nodeAnchorInFrame = projected.z > -1
+        && projected.z < 1
+        && screen.x > 0
+        && screen.x < width
+        && screen.y > 0
+        && screen.y < height;
+      const inFrame = requiredFocusCard
+        ? nodeAnchorInFrame
+        : projected.z > -1
         && projected.z < 1
         && screen.x > 10
         && screen.x < width - (label.kind === "source" ? 16 : 68)
@@ -3436,7 +3830,9 @@ class UniverseForceSceneEngine {
         ?? this.keyboardFocusedId
         ?? this.hoveredId
       );
-      const expanded = node.kind === "event" && node.id === labelFocusId;
+      const expanded = node.kind === "event"
+        && node.id === labelFocusId
+        && !transientHover;
       const compact = label.kind === "node" && node.kind === "entity";
       label.element.dataset.compact = String(compact);
       const sourceBeaconSize = mobile ? 44 : 48;
@@ -3457,7 +3853,9 @@ class UniverseForceSceneEngine {
         : mobile
           ? expanded ? 82 : 70
           : expanded ? 94 : 78;
-      const labelScale = label.kind === "source" ? 1 : nodeCardScale;
+      const labelScale = label.kind === "source"
+        ? 1
+        : nodeCardScale * presentationScale(node.sceneNode.presentationCardScale);
       const labelWidth = baseLabelWidth * labelScale;
       const labelHeight = baseLabelHeight * labelScale;
       const labelGap = 3 + labelScale * 7;
@@ -3489,8 +3887,11 @@ class UniverseForceSceneEngine {
         sourceBeaconSize,
         "center",
       );
-      const nodeLabelGaps = compact
-        ? [labelGap, labelGap + 18, labelGap + 36]
+      const focusGapStep = compact
+        ? 18
+        : Math.min(72, Math.max(40, labelWidth * 0.25));
+      const nodeLabelGaps = compact || requiredFocusCard
+        ? [labelGap, labelGap + focusGapStep, labelGap + focusGapStep * 2]
         : [labelGap];
       const nodeCandidates = nodeLabelGaps.flatMap((gap) => [
         makeRect(
@@ -3570,18 +3971,54 @@ class UniverseForceSceneEngine {
         && rect.right > other.left - 7
         && rect.top < other.bottom + 6
         && rect.bottom > other.top - 6);
-      const overlapsEventStar = (rect: LabelRect) => compact
+      const overlapsEventStar = (rect: LabelRect) => label.kind === "node"
         && eventStarRects.some((star) => star.nodeId !== label.nodeId
           && rect.left < star.right
           && rect.right > star.left
           && rect.top < star.bottom
           && rect.bottom > star.top);
-      const rect = candidates.find((candidate) =>
+      const clampedCandidates = requiredFocusCard
+        ? candidates.map((candidate) => {
+            const maxLeft = Math.max(10, width - labelWidth - 10);
+            const maxTop = Math.max(58, height - labelHeight - 42);
+            return makeRect(
+              THREE.MathUtils.clamp(candidate.left, 10, maxLeft),
+              THREE.MathUtils.clamp(candidate.top, 58, maxTop),
+              labelWidth,
+              labelHeight,
+              candidate.side,
+            );
+          })
+        : [];
+      const focusGridCandidates: LabelRect[] = [];
+      if (requiredFocusCard) {
+        const stepX = Math.max(72, labelWidth + 8);
+        const stepY = Math.max(34, labelHeight + 8);
+        for (let top = 58; top + labelHeight <= height - 42; top += stepY) {
+          for (let left = 10; left + labelWidth <= width - 10; left += stepX) {
+            const side: LabelSide = left + labelWidth / 2 >= screen.x ? "right" : "left";
+            focusGridCandidates.push(makeRect(left, top, labelWidth, labelHeight, side));
+          }
+        }
+        focusGridCandidates.sort((left, right) => {
+          const distance = (rect: LabelRect) => Math.hypot(
+            rect.left + labelWidth / 2 - screen.x,
+            rect.top + labelHeight / 2 - screen.y,
+          );
+          return distance(left) - distance(right);
+        });
+      }
+      const isOpenPlacement = (candidate: LabelRect) =>
         !blockedByViewportOrPanel(candidate)
         && !overlapsPlacedLabel(candidate)
-        && !overlapsEventStar(candidate))
-        ?? (emphasized
-          ? candidates.find((candidate) => !blockedByViewportOrPanel(candidate))
+        && !overlapsEventStar(candidate);
+      const rect = candidates.find(isOpenPlacement)
+        ?? clampedCandidates.find(isOpenPlacement)
+        ?? focusGridCandidates.find(isOpenPlacement)
+        ?? (requiredFocusCard || emphasized
+          ? [...clampedCandidates, ...focusGridCandidates, ...candidates]
+              .find((candidate) => !blockedByViewportOrPanel(candidate))
+            ?? clampedCandidates[0]
             ?? candidates[0]
           : null);
       if (!rect) {
@@ -3605,7 +4042,7 @@ class UniverseForceSceneEngine {
       );
       label.element.style.pointerEvents = label.kind === "source"
         ? visibleOpacity >= 0.58 ? "auto" : "none"
-        : nodeCardReveal >= 0.72 ? "auto" : "none";
+        : nodeCardReveal >= 0.72 && visibleOpacity >= 0.22 ? "auto" : "none";
       label.element.style.zIndex = emphasized ? "4" : label.kind === "node" ? "2" : "1";
       if (label.kind === "source") {
         label.element.style.transformOrigin = "center";
@@ -3663,14 +4100,18 @@ class UniverseForceSceneEngine {
     this.host.dataset.universeEntityLabelCount = String(visibleEntityLabels);
   }
 
-  private miniPanelRect() {
-    return this.relativeOverlayRect("[data-mini-workspace='true']", 10);
+  private miniPanelRect(hostRect?: DOMRectReadOnly) {
+    return this.relativeOverlayRect("[data-mini-workspace='true']", 10, hostRect);
   }
 
-  private relativeOverlayRect(selector: string, padding: number) {
+  private relativeOverlayRect(
+    selector: string,
+    padding: number,
+    measuredHostRect?: DOMRectReadOnly,
+  ) {
     const panel = document.querySelector<HTMLElement>(selector);
     if (!panel) return null;
-    const hostRect = this.host.getBoundingClientRect();
+    const hostRect = measuredHostRect ?? this.host.getBoundingClientRect();
     const rect = panel.getBoundingClientRect();
     const left = Math.max(0, rect.left - hostRect.left - padding);
     const top = Math.max(0, rect.top - hostRect.top - padding);
@@ -4098,22 +4539,59 @@ class UniverseForceSceneEngine {
     const timelineMoving = this.updateTimelineMotions(now);
     this.updateVisualLayout(now);
     const nebulaAnimating = this.updateNebulaAnimation(now);
+    const highlightFlowing = this.updateHighlightFlowSprites(now);
     this.updateLabels(now);
     this.evaluateLod(now);
-    if (entering || timelineMoving || nebulaAnimating || now < this.loopKeepAliveUntil) {
+    if (
+      entering
+      || timelineMoving
+      || nebulaAnimating
+      || highlightFlowing
+      || now < this.loopKeepAliveUntil
+    ) {
       this.loopFrame = requestAnimationFrame(this.loop);
     } else {
       this.host.dataset.universeLoop = "idle";
     }
   };
 
+  private handleControlsStart = () => {
+    if (this.paused || !this.interactive) return;
+    const camera = this.graph.camera();
+    this.cameraGestureActive = true;
+    this.cameraGestureChanged = false;
+    this.cameraGesturePosition.copy(camera.position);
+    this.cameraGestureTarget.copy(this.controls.target ?? new THREE.Vector3());
+    this.wakeRendering(1_400);
+    this.armNebulaAnimation(1_400);
+    this.lodArmed = true;
+    this.startLoop(this.policy.lod_debounce_ms + 240);
+  };
+
   private handleControlsChange = () => {
     if (this.paused) return;
+    if (this.cameraGestureActive && !this.cameraGestureChanged) {
+      const camera = this.graph.camera();
+      const positionChanged = camera.position.distanceToSquared(
+        this.cameraGesturePosition,
+      ) > 1e-8;
+      const targetChanged = (this.controls.target ?? this.cameraGestureTarget)
+        .distanceToSquared(this.cameraGestureTarget) > 1e-8;
+      if (positionChanged || targetChanged) {
+        this.cameraGestureChanged = true;
+        // Only a real orbit/zoom/pan restores normal presentation. A plain
+        // background click remains a pure selection dismissal.
+        this.callbacks.onCameraInteraction();
+      }
+    }
     this.updateVisualLayout(performance.now());
     this.updateNodeMorphScales();
-    this.armNebulaAnimation(900);
-    this.updateLabels(performance.now(), true);
+    this.updateLabels(performance.now());
     this.evaluateLod(performance.now());
+  };
+
+  private handleControlsEnd = () => {
+    this.cameraGestureActive = false;
   };
 
   private handlePointerMove = (event: PointerEvent) => {
@@ -4189,7 +4667,11 @@ class UniverseForceSceneEngine {
         && screen.y <= height;
     };
     const candidates = [...this.nodes.values()].filter((node) => {
-      if ((node.entryOpacity ?? 1) * (node.timelineOpacity ?? 1) <= 0.12) return false;
+      if (
+        (node.entryOpacity ?? 1)
+          * (node.timelineOpacity ?? 1)
+          * presentationOpacity(node.sceneNode.presentationOpacity) <= 0.12
+      ) return false;
       if (!inViewport(node)) return false;
       if (!detailSourceId) return true;
       return node.kind !== "source"
@@ -4278,14 +4760,16 @@ class UniverseForceSceneEngine {
   private handleKeyDown = (event: KeyboardEvent) => {
     if (this.paused || !this.interactive || event.target !== this.host) return;
     if (event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return;
-    if (
-      this.timelineJourney.enabled
-      && (event.key === "PageDown" || event.key === "PageUp")
-    ) {
-      event.preventDefault();
-      event.stopPropagation();
-      if (!event.repeat) {
-        void this.moveTimeline(event.key === "PageDown" ? "next" : "previous");
+    if (this.timelineIsBusy() && event.key !== "Escape") {
+      if (
+        event.key.startsWith("Arrow")
+        || event.key === "Enter"
+        || event.key === " "
+        || event.key === "Space"
+        || event.key === "Spacebar"
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
       }
       return;
     }
@@ -4336,141 +4820,6 @@ class UniverseForceSceneEngine {
     if (this.lockedId || this.selectedId) this.callbacks.onSelectionClear();
   };
 
-  private armLod = (event: Event) => {
-    if (this.paused || !this.interactive) return;
-    if (event instanceof WheelEvent && event.deltaY >= 0) return;
-    this.wakeRendering(1400);
-    this.lodArmed = true;
-    this.startLoop(this.policy.lod_debounce_ms + 240);
-  };
-
-  private projectedEventCorePixels(node: ForceNode) {
-    const camera = this.graph.camera() as THREE.PerspectiveCamera;
-    if (!camera.isPerspectiveCamera || !Number.isFinite(camera.fov)) return 0;
-    const distance = camera.position.distanceTo(new THREE.Vector3(node.x, node.y, node.z));
-    const visibleWorldHeight = 2 * distance
-      * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
-    const coreSize = node.sceneNode.root ? 9.6 : 7.6;
-    return coreSize * Math.max(1, this.host.clientHeight)
-      / Math.max(1, visibleWorldHeight);
-  }
-
-  private timelineDepthGateReached() {
-    if (
-      !this.timelineJourney.enabled
-      || !this.visualSourceId
-      || this.visualDetailMix < 0.5
-    ) return false;
-    const eventGateReached = [...this.nodes.values()].some((node) => {
-      if (node.kind !== "event" || node.sourceId !== this.visualSourceId) return false;
-      const gate = node.sceneNode.root
-        ? TIMELINE_EVENT_GATE_PX
-        : TIMELINE_EVENT_GATE_PX * 0.78;
-      return this.projectedEventCorePixels(node) >= gate;
-    });
-    const camera = this.graph.camera();
-    const targetDistance = this.controls.target
-      ? camera.position.distanceTo(this.controls.target)
-      : Number.POSITIVE_INFINITY;
-    const source = [...this.nodes.values()].find(
-      (node) => node.kind === "source" && node.sourceId === this.visualSourceId,
-    );
-    camera.updateMatrixWorld();
-    const cameraRight = new THREE.Vector3()
-      .setFromMatrixColumn(camera.matrixWorld, 0)
-      .normalize();
-    const sourceRadius = source ? this.projectedSourceRadius(source, cameraRight) ?? 0 : 0;
-    return eventGateReached
-      || targetDistance <= TIMELINE_CAMERA_MIN_DISTANCE * 1.12
-      || sourceRadius >= Math.min(
-        this.policy.lod_deep_px,
-        this.policy.lod_near_px * 1.3,
-      );
-  }
-
-  private resetTimelineWheelGesture() {
-    this.timelineWheelIdleTimer = null;
-    this.timelineWheelAccumulator = 0;
-    this.timelineWheelDirection = null;
-    this.timelineWheelConsumed = false;
-    this.host.dataset.universeTimelineWheelDelta = "0";
-  }
-
-  private holdTimelineWheelGesture() {
-    if (this.timelineWheelIdleTimer !== null) {
-      window.clearTimeout(this.timelineWheelIdleTimer);
-    }
-    this.timelineWheelConsumed = true;
-    this.timelineWheelIdleTimer = window.setTimeout(
-      () => this.resetTimelineWheelGesture(),
-      TIMELINE_WHEEL_IDLE_MS,
-    );
-  }
-
-  private accumulateTimelineWheel(
-    event: WheelEvent,
-    direction: UniverseTimelineDirection,
-  ) {
-    if (this.timelineWheelIdleTimer !== null) {
-      window.clearTimeout(this.timelineWheelIdleTimer);
-    }
-    this.timelineWheelIdleTimer = window.setTimeout(
-      () => this.resetTimelineWheelGesture(),
-      TIMELINE_WHEEL_IDLE_MS,
-    );
-    if (this.timelineWheelDirection !== direction) {
-      this.timelineWheelDirection = direction;
-      this.timelineWheelAccumulator = 0;
-    }
-    const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE
-      ? 16
-      : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-        ? Math.max(1, this.host.clientHeight)
-        : 1;
-    this.timelineWheelAccumulator += Math.abs(event.deltaY) * unit;
-    this.host.dataset.universeTimelineWheelDelta = this.timelineWheelAccumulator.toFixed(1);
-    if (
-      this.timelineWheelConsumed
-      || this.timelineWheelAccumulator < TIMELINE_WHEEL_THRESHOLD
-      || performance.now() - this.lastTimelineIntentAt < TIMELINE_WHEEL_COOLDOWN_MS
-    ) return;
-    this.timelineWheelConsumed = true;
-    this.timelineWheelAccumulator = 0;
-    this.lastTimelineIntentAt = performance.now();
-    void this.moveTimeline(direction);
-  }
-
-  private handleWheel = (event: WheelEvent) => {
-    if (this.paused || !this.interactive) return;
-    const inward = event.deltaY < 0;
-    const gateReached = this.timelineDepthGateReached();
-    this.host.dataset.universeTimelineDepthGate = String(gateReached);
-    if (!this.timelineJourney.enabled || !gateReached) {
-      if (inward) this.armLod(event);
-      return;
-    }
-    const busy = this.timelineIsBusy();
-    const completed = this.timelineJourney.phase === "complete";
-    const canMove = inward
-      ? this.timelineJourney.hasNext && !completed
-      : this.timelineJourney.hasPrevious;
-    if (!inward && !busy && !canMove) return;
-    this.lodArmed = false;
-    this.pendingLod = null;
-    if (this.lodTimer !== null) {
-      window.clearTimeout(this.lodTimer);
-      this.lodTimer = null;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    if (busy) {
-      this.holdTimelineWheelGesture();
-      return;
-    }
-    if ((inward && completed) || !canMove) return;
-    this.accumulateTimelineWheel(event, inward ? "next" : "previous");
-  };
-
   private updatePixelRatio() {
     const mobile = this.host.clientWidth < 768;
     const concreteNodes = [...this.nodes.values()].filter((node) => node.kind !== "source").length;
@@ -4479,9 +4828,23 @@ class UniverseForceSceneEngine {
       : mobile
         ? concreteNodes > 220 ? 1 : 1.18
         : concreteNodes > 600 ? 1.18 : concreteNodes > 320 ? 1.32 : 1.5;
-    const pixelRatio = Math.min(window.devicePixelRatio || 1, qualityCap);
+    const cssPixelArea = Math.max(1, this.host.clientWidth * this.host.clientHeight);
+    const renderPixelBudget = mobile
+      ? MAX_RENDER_PIXELS_MOBILE
+      : MAX_RENDER_PIXELS_DESKTOP;
+    const areaCap = Math.sqrt(renderPixelBudget / cssPixelArea);
+    const pixelRatio = Math.max(
+      0.75,
+      Math.min(window.devicePixelRatio || 1, qualityCap, areaCap),
+    );
     this.host.dataset.universePixelRatio = pixelRatio.toFixed(2);
-    this.graph.renderer().setPixelRatio(pixelRatio);
+    this.host.dataset.universeRenderPixels = String(
+      Math.round(cssPixelArea * pixelRatio * pixelRatio),
+    );
+    if (this.currentPixelRatio === null || Math.abs(this.currentPixelRatio - pixelRatio) > 0.001) {
+      this.currentPixelRatio = pixelRatio;
+      this.graph.renderer().setPixelRatio(pixelRatio);
+    }
     if (this.nebulaPoints) {
       const material = this.nebulaPoints.material as THREE.ShaderMaterial;
       material.uniforms.uPixelRatio.value = pixelRatio;
@@ -4523,6 +4886,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
       onSourceLod,
       onSelectionClear,
       onTimelineIntent,
+      onCameraInteraction,
       onUnavailable,
     },
     forwardedRef,
@@ -4569,6 +4933,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
       onSourceLod,
       onSelectionClear,
       onTimelineIntent,
+      onCameraInteraction,
       onUnavailable,
       text,
     });
@@ -4588,6 +4953,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
       onSourceLod,
       onSelectionClear,
       onTimelineIntent,
+      onCameraInteraction,
       onUnavailable,
       text,
     };
@@ -4608,7 +4974,8 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
         let ForceGraph3D: typeof import("3d-force-graph")["default"];
         try {
           ({ default: ForceGraph3D } = await import("3d-force-graph"));
-        } catch {
+        } catch (reason) {
+          console.warn("[KnowledgeUniverse] Failed to load the 3D scene module", reason);
           if (!cancelled) notifyUnavailable("dynamic-import");
           return;
         }
@@ -4639,6 +5006,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
             onSourceLod: current.onSourceLod,
             onSelectionClear: current.onSelectionClear,
             onTimelineIntent: current.onTimelineIntent,
+            onCameraInteraction: current.onCameraInteraction,
             onUnavailable: notifyUnavailable,
           });
           engine.setOptions({
@@ -4654,10 +5022,24 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
             engine.setSelection(current.selectedId);
             engine.resume();
           }
-        } catch {
+        } catch (reason) {
+          const unavailableReason = classifyUniverseWebGLContextFailure(reason)
+            ?? "initialization";
+          // A renderer failure is an expected capability boundary, not an
+          // uncaught application error. console.error makes the Next dev
+          // overlay cover the recoverable fallback UI.
+          console.warn(
+            `[KnowledgeUniverse] Failed to initialize the 3D scene (${unavailableReason})`,
+            reason,
+          );
           if (engineRef.current === engine) engineRef.current = null;
-          engine?.dispose();
-          if (!cancelled) notifyUnavailable("initialization");
+          try {
+            engine?.dispose();
+          } catch (cleanupReason) {
+            console.warn("[KnowledgeUniverse] Failed to dispose a partial 3D scene", cleanupReason);
+          }
+          host.replaceChildren();
+          if (!cancelled) notifyUnavailable(unavailableReason);
         }
       })();
       return () => {
@@ -4675,12 +5057,14 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
         onSourceLod,
         onSelectionClear,
         onTimelineIntent,
+        onCameraInteraction,
         onUnavailable: notifyUnavailable,
       });
     }, [
       notifyUnavailable,
       onHover,
       onNodeClick,
+      onCameraInteraction,
       onSelectionClear,
       onSourceLod,
       onTimelineIntent,
@@ -4729,6 +5113,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
         focusNode: (nodeId) => engineRef.current?.focusNode(nodeId),
         lockNode: (nodeId) => engineRef.current?.lockNode(nodeId),
         unlockNode: () => engineRef.current?.unlockNode(),
+        clearSelection: () => engineRef.current?.clearSelection(),
         moveTimeline: (direction) => engineRef.current?.moveTimeline(direction),
         pause: () => engineRef.current?.pause(),
         resume: () => engineRef.current?.resume(),
@@ -4753,7 +5138,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
           tabIndex={interactive ? 0 : -1}
           aria-label={text.aria}
           aria-describedby={keyboardInstructionsId}
-          aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight PageUp PageDown Enter Space Escape"
+          aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Enter Space Escape"
         />
         <span id={keyboardInstructionsId} className="sr-only">
           {text.keyboardInstructions}

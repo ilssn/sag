@@ -107,7 +107,7 @@ describe("universe view preference normalization", () => {
     })).toEqual({
       version: 5,
       visibleEventBundles: 18,
-      cachedEventBundles: 24,
+      cachedEventBundles: 36,
       showEventCards: true,
       showEntityCards: false,
       entityCategories: ["Person"],
@@ -173,16 +173,16 @@ describe("universe view preference normalization", () => {
     expect(preferences({ entityCategories: ["", "  "] }).entityCategories).toBeNull();
   });
 
-  it("rounds cache capacity upward and keeps a six-bundle runway", () => {
+  it("rounds cache capacity upward for one history and two forward pages", () => {
     expect(preferences({
       visibleEventBundles: 2,
       cachedEventBundles: 13,
-    }).cachedEventBundles).toBe(18);
+    }).cachedEventBundles).toBe(24);
     expect(preferences({
       visibleEventBundles: 13,
       cachedEventBundles: 12,
-    }).cachedEventBundles).toBe(24);
-    expect(minimumUniverseCacheBundles(18)).toBe(24);
+    }).cachedEventBundles).toBe(36);
+    expect(minimumUniverseCacheBundles(18)).toBe(36);
   });
 
   it("applies the larger desktop and mobile device caps", () => {

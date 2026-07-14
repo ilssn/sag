@@ -668,20 +668,18 @@ function SearchSummaryCard({
       )}
     >
       <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+        <div
+          className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-300"
+          role={streaming ? "status" : undefined}
+          aria-live={streaming ? "polite" : undefined}
+        >
           <Sparkles className="size-3.5 shrink-0" />
-          <span className="truncate">{t("evidenceAnswer")}</span>
+          <span className="truncate">
+            {streaming ? t("generatingAnswer") : t("evidenceAnswer")}
+          </span>
+          {streaming && <Spinner className="size-3 text-amber-600/70 dark:text-amber-300/70" />}
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          {streaming && (
-            <span
-              className="inline-flex h-7 items-center gap-1.5 px-1.5 text-xs text-muted-foreground"
-              role="status"
-            >
-              <Spinner className="size-3" />
-              {t("generating")}
-            </span>
-          )}
           {streaming && expanded && !following && (
             <button
               type="button"
@@ -691,7 +689,7 @@ function SearchSummaryCard({
               {t("followOutput")}
             </button>
           )}
-          {(canExpand || streaming || (streamLayoutLocked && expanded)) && (
+          {summary && (canExpand || streaming || (streamLayoutLocked && expanded)) && (
             <button
               type="button"
               onClick={() => {
@@ -731,13 +729,14 @@ function SearchSummaryCard({
           updateFollowing(distance <= 32);
         }}
         className={cn(
-          "mt-1.5 text-sm leading-6 text-foreground/80",
+          "text-sm leading-6 text-foreground/80",
+          summary && "mt-1.5",
           !expanded && "overflow-hidden",
           expanded && "overflow-y-auto overscroll-contain pr-1 outline-none [scrollbar-gutter:stable] focus-visible:ring-2 focus-visible:ring-ring",
         )}
         style={{
           maxHeight,
-          height: streamLayoutLocked && expanded ? maxHeight : undefined,
+          height: streamLayoutLocked && expanded && summary ? maxHeight : undefined,
           WebkitMaskImage: collapsed
             ? "linear-gradient(to bottom, black 0, black calc(100% - 2rem), transparent 100%)"
             : undefined,
@@ -754,11 +753,6 @@ function SearchSummaryCard({
               onCitationClick={onCitationClick}
               streaming={streaming}
             />
-          ) : streaming ? (
-            <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
-              <Spinner className="size-3.5" />
-              {t("composingAnswer")}
-            </div>
           ) : null}
         </div>
       </div>
@@ -972,11 +966,10 @@ export function SearchPanel({
     () => search.result?.sections.map(sectionCitation) ?? [],
     [search.result],
   );
-  const resultStatus = search.phase === "loading-more"
-    ? t("loadingMoreEvidence")
-    : search.phase === "streaming"
-      ? t("generatingAnswer")
-      : search.busy
+  const resultStatus =
+    search.phase === "loading-more"
+      ? t("loadingMoreEvidence")
+      : search.busy && search.result === null
         ? t("retrievingEvidence")
         : search.result
           ? t("selectedEvidence", { count: search.result.sections.length })
@@ -1201,10 +1194,8 @@ export function SearchPanel({
             <h2 className="flex items-center gap-2 text-sm font-medium">
               {t("results")}
               <span
-                className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground"
-                aria-live="polite"
+                className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground"
               >
-                {search.busy && <Spinner className="size-3" />}
                 {searchStrategies(
                   getSearchStrategy(search.busy ? search.strategy : search.lastStrategy).labelKey,
                 )}

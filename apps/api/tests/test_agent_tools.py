@@ -101,6 +101,7 @@ async def test_search_tool_prefers_exact_body_window_over_semantic_boilerplate()
         graph_calls = 0
 
         async def search_many(self, targets, query, *, strategy=None, top_k=None):
+            assert strategy == "vector"
             return SearchOutcome(
                 query=query,
                 sections=[
@@ -256,6 +257,86 @@ async def test_search_tool_graph_capacity_covers_every_returned_section():
     assert all(len(citation["event_refs"]) == 1 for citation in result.citations)
 
 
+@pytest.mark.asyncio
+async def test_search_tool_reuses_direct_event_recall_and_loads_traceable_evidence():
+    class SparseEventEngine:
+        event_score_calls = 0
+        chunk_reads: list[tuple[str, str]] = []
+
+        async def search_many(self, targets, query, *, strategy=None, top_k=None):
+            return SearchOutcome(
+                query=query,
+                sections=[
+                    RetrievedSection(
+                        chunk_id="nearby-chunk",
+                        heading="历史",
+                        content="帝国发展相关的背景资料，但这个分块本身没有抽取事项。",
+                        score=0.81,
+                        source_config_id=targets[0][0],
+                    )
+                ],
+            )
+
+        async def search_event_scores(self, query, sources_by_config, *, limit=None):
+            self.event_score_calls += 1
+            assert query == "帝国发展"
+            assert sources_by_config["sc-1"].id == "source-1"
+            assert limit == 2
+            return {("sc-1", "event-direct"): 0.97}
+
+        async def graph_for_sections(self, sections, sources_by_config, **kwargs):
+            assert kwargs["event_scores"] == {("sc-1", "event-direct"): 0.97}
+            return SourceGraphInfo(
+                events=[
+                    GraphEventInfo(
+                        id="event-direct",
+                        source_id="document-1",
+                        source_config_id="sc-1",
+                        chunk_id="event-chunk",
+                        title="帝国运转的信息需求与大脑存储局限",
+                        summary="帝国依赖大规模信息处理体系维持扩张与治理。",
+                        category="历史",
+                        score=0.97,
+                    )
+                ]
+            )
+
+        async def get_chunk(self, source_config_id, chunk_id, *, source=None):
+            self.chunk_reads.append((source_config_id, chunk_id))
+            assert source.id == "source-1"
+            return SimpleNamespace(
+                chunk_id=chunk_id,
+                heading="历史",
+                content="维持复杂社会秩序需要存储并处理大量行政信息。",
+                rank=12,
+            )
+
+    engine = SparseEventEngine()
+    source = SimpleNamespace(id="source-1", name="人类简史", sag_source_config_id="sc-1")
+    result = await SearchContextTool().invoke(
+        {"query": "帝国发展", "top_k": 2},
+        ToolContext(engine_manager=engine, sources=[source]),
+    )
+
+    assert engine.event_score_calls == 1
+    assert engine.chunk_reads == [("sc-1", "event-chunk")]
+    assert result.data["event_candidates"] == 1
+    assert result.data["event_count"] == 1
+    assert result.citations[0]["chunk_id"] == "event-chunk"
+    assert result.citations[0]["source_id"] == "source-1"
+    assert result.citations[0]["event_refs"] == [
+        {
+            "id": "event-direct",
+            "title": "帝国运转的信息需求与大脑存储局限",
+            "summary": "帝国依赖大规模信息处理体系维持扩张与治理。",
+            "category": "历史",
+        }
+    ]
+    assert result.content.startswith("[1] 事项：帝国运转的信息需求与大脑存储局限")
+    assert "摘要：帝国依赖大规模信息处理体系维持扩张与治理。" in result.content
+    assert "原文证据：\n维持复杂社会秩序需要存储并处理大量行政信息。" in result.content
+
+
 def test_visible_sources_mount_builtin_knowledge_tools():
     agent = SimpleNamespace(persona={}, is_default=False)
     assert _enabled_tool_names(agent, has_sources=True) == [
@@ -393,9 +474,7 @@ async def test_open_web_page_extracts_public_html_as_traceable_evidence(monkeypa
 
     assert "广州有雷阵雨" in result.content
     assert result.data["section_count"] == 1
-    assert result.data["external_references"][0]["url"] == (
-        "https://weather.example/guangzhou"
-    )
+    assert result.data["external_references"][0]["url"] == ("https://weather.example/guangzhou")
 
 
 @pytest.mark.asyncio

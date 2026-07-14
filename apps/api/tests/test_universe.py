@@ -22,7 +22,11 @@ def test_universe_evidence_lookup_declares_composite_index():
 
 
 def test_universe_v2_response_models_reject_malformed_or_stalled_pages():
-    from sag_api.schemas.universe import UniverseGraphPatchOut, UniverseTimelineSliceOut
+    from sag_api.schemas.universe import (
+        UniverseGraphPatchOut,
+        UniverseTimelineIn,
+        UniverseTimelineSliceOut,
+    )
 
     now = datetime(2026, 7, 12, tzinfo=UTC)
     node = {
@@ -42,6 +46,14 @@ def test_universe_v2_response_models_reject_malformed_or_stalled_pages():
         "to_id": "missing-entity",
         "kind": "mentions",
     }
+    with pytest.raises(PydanticValidationError, match="向新时间轴续页"):
+        UniverseTimelineIn.model_validate(
+            {
+                "epoch": 1,
+                "source_id": "source-1",
+                "direction": "newer",
+            }
+        )
     with pytest.raises(PydanticValidationError, match="关系端点"):
         UniverseGraphPatchOut.model_validate(
             {
@@ -69,6 +81,7 @@ def test_universe_v2_response_models_reject_malformed_or_stalled_pages():
                 "source_id": "source-1",
                 "source_revision": "revision-1",
                 "snapshot_id": "snapshot-1",
+                "request_direction": "older",
                 "request_cursor": "same-cursor",
                 "page_id": "page-1",
                 "bundles": [
@@ -88,6 +101,7 @@ def test_universe_v2_response_models_reject_malformed_or_stalled_pages():
                             "complete": True,
                             "next_cursor": None,
                         },
+                        "cursor_before": None,
                         "cursor_after": "same-cursor",
                     }
                 ],
@@ -95,6 +109,11 @@ def test_universe_v2_response_models_reject_malformed_or_stalled_pages():
                     "returned_bundles": 1,
                     "returned_unique_nodes": 2,
                     "returned_relations": 1,
+                    "direction": "older",
+                    "has_newer": False,
+                    "newer_cursor": None,
+                    "has_older": True,
+                    "older_cursor": "same-cursor",
                     "has_more": True,
                     "next_cursor": "same-cursor",
                 },

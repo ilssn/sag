@@ -45,7 +45,9 @@ async def test_entity_read_path():
                 )
                 source.document_count = 1
                 source.chunk_count = 1
-                source.event_count = 2
+                # 模拟抽取检查点已经写入文档统计、信源聚合数尚未结算的短暂窗口。
+                # 图谱必须以文档统计作为总量口径，不能把当前切片误报为全部。
+                source.event_count = 0
                 await s.commit()
 
             # 注入事件—实体图谱（模拟 extract 产物）
@@ -110,7 +112,7 @@ async def test_entity_read_path():
                     title="桃园结义",
                     summary="刘备、关羽、张飞结为兄弟。",
                     content="桃园三结义。",
-                    chunk_id="chunk-1",
+                    chunk_id="chunk-2",
                     rank=1,
                     status="DELETED",
                 )
@@ -127,6 +129,17 @@ async def test_entity_read_path():
                         article_id="d1",
                         heading="三国演义",
                         content="关羽过五关斩六将。",
+                    )
+                )
+                s.add(
+                    SourceChunk(
+                        id="chunk-2",
+                        source_config_id=scid,
+                        source_type="ARTICLE",
+                        source_id="d1",
+                        article_id="d1",
+                        heading="桃园结义",
+                        content="刘备、关羽、张飞桃园结义。",
                     )
                 )
                 s.add(EventEntity(id=uuid.uuid4().hex, event_id=ev.id, entity_id=ent.id, weight=1.0))
@@ -159,10 +172,25 @@ async def test_entity_read_path():
                 "contains",
                 "mentions",
             }
+            assert graph["counts"]["events"] == 2
+            assert graph["counts"]["shown_events"] == len(graph["events"]) == 2
             assert graph["counts"]["shown_relations"] == 3
             assert graph["truncated"] is False
             async with sf() as s:
                 assert (await s.get(SourceEvent, hidden_event_id)).status == "COMPLETED"
+
+            # 页面选择较小预算时，展示数可以缩小，但总量仍须与文档的事项统计一致；
+            # 否则 3D 图谱会把“1 / 2”错误显示成“1 / 1”，看起来像漏掉了事项。
+            limited = (
+                await c.get(
+                    f"/api/v1/sources/{sid}/graph?event_limit=1&entity_limit=1000",
+                    headers=H,
+                )
+            ).json()
+            assert len(limited["events"]) == 1
+            assert limited["counts"]["shown_events"] == 1
+            assert limited["counts"]["events"] == 2
+            assert limited["truncated"] is True
 
             # 搜索命中分块可稳定映射回事件标题、摘要及真实事件—实体关系。
             from sag_api.sag import RetrievedSection
@@ -182,6 +210,23 @@ async def test_entity_read_path():
             assert search_graph.events[0].score == pytest.approx(0.91)
             assert search_graph.entities[0].name == "关羽"
             assert search_graph.associations[0].event_id == search_graph.events[0].id
+
+            # 事项向量与块向量并行召回：即使事项所在 chunk-2 没进入块 top-k，
+            # 也必须能通过事项 id 直接回表，并优先使用事项相似度排序。
+            direct_event_graph = await app.state.engine_manager.graph_for_sections(
+                [
+                    RetrievedSection(
+                        chunk_id="chunk-1",
+                        score=0.91,
+                        source_config_id=scid,
+                    )
+                ],
+                {scid: source},
+                event_scores={(scid, hidden_event_id): 0.97},
+            )
+            assert direct_event_graph.events[0].title == "桃园结义"
+            assert direct_event_graph.events[0].chunk_id == "chunk-2"
+            assert direct_event_graph.events[0].score == pytest.approx(0.97)
 
             # 图谱允许界面按性能选择更大的展示量，同时保留防止误请求的上限。
             large = await c.get(
@@ -206,6 +251,7 @@ async def test_entity_read_path():
             async with sf() as s:
                 assert await s.get(Article, "d1") is None
                 assert await s.get(SourceChunk, "chunk-1") is None
+                assert await s.get(SourceChunk, "chunk-2") is None
                 assert await s.get(SourceEvent, event_id) is None
                 assert await s.get(SourceEvent, hidden_event_id) is None
                 assert await s.get(Entity, entity_id) is None

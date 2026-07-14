@@ -84,4 +84,52 @@ describe("sliceEventEntityGraph", () => {
       "entity-isolated",
     ]);
   });
+
+  it("preserves every returned event when only a few events have entity relations", () => {
+    const graph = graphFixture();
+    graph.events = Array.from({ length: 73 }, (_, index) => ({
+      ...graph.events[index === 0 ? 0 : 1],
+      id: `event-${index + 1}`,
+      title: `事件 ${index + 1}`,
+    }));
+    graph.relations = [
+      {
+        source_id: "event-1",
+        source_kind: "event",
+        target_id: "entity-linked",
+        target_kind: "entity",
+        kind: "mentions",
+        weight: 1,
+        description: "",
+      },
+      {
+        source_id: "event-2",
+        source_kind: "event",
+        target_id: "entity-linked",
+        target_kind: "entity",
+        kind: "mentions",
+        weight: 1,
+        description: "",
+      },
+      {
+        source_id: "event-3",
+        source_kind: "event",
+        target_id: "entity-isolated",
+        target_kind: "entity",
+        kind: "mentions",
+        weight: 1,
+        description: "",
+      },
+    ];
+    graph.counts.events = 73;
+    graph.counts.shown_events = 73;
+
+    const slice = sliceEventEntityGraph(graph);
+
+    expect(slice.events).toHaveLength(73);
+    expect(slice.events.map((event) => event.id)).toEqual(
+      Array.from({ length: 73 }, (_, index) => `event-${index + 1}`),
+    );
+    expect(slice.relations).toHaveLength(3);
+  });
 });

@@ -1,8 +1,8 @@
-"""Provider-aware LLM client for generation and Agent tool calls.
+"""Unified LLM client for generation, streaming, and Agent tool calls.
 
-OpenAI-compatible endpoints keep using the OpenAI SDK. Anthropic Messages and
-Gemini GenerateContent are routed through LiteLLM, which normalizes their native
-streaming/tool events into the same OpenAI-shaped chunks consumed by sag_agent.
+Every configured provider uses the same LiteLLM boundary. Provider-specific
+model routing and capability rules live in ``core.model_providers``; this
+adapter only translates the normalized response into sag_agent events.
 """
 
 from __future__ import annotations
@@ -13,8 +13,6 @@ import json
 from collections.abc import AsyncIterator
 from typing import Any
 
-from openai import AsyncOpenAI
-
 from sag_agent import CancellationToken, ModelChunk, ModelRequest, Usage
 from sag_agent import ToolCall as RuntimeToolCall
 from sag_api.core.config import Settings
@@ -23,7 +21,7 @@ from sag_api.core.logging import get_logger
 
 log = get_logger("generation")
 
-Message = dict
+Message = dict[str, Any]
 
 
 async def _litellm_completion(**kwargs: Any) -> Any:
@@ -42,16 +40,6 @@ def _attr(value: Any, name: str, default: Any = None) -> Any:
 class LLMClient:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._client = (
-            AsyncOpenAI(
-                api_key=settings.llm_api_key or "not-configured",
-                base_url=settings.llm_base_url,
-                timeout=settings.llm_timeout_ms / 1000,
-                max_retries=settings.llm_max_retries,
-            )
-            if settings.llm_provider == "openai"
-            else None
-        )
 
     @property
     def configured(self) -> bool:
@@ -67,9 +55,7 @@ class LLMClient:
 
     def _ensure_configured(self) -> None:
         if not self.configured:
-            raise ConfigurationError(
-                "尚未配置 LLM（SAG_LLM_PROVIDER / SAG_LLM_API_KEY / SAG_LLM_MODEL）"
-            )
+            raise ConfigurationError("尚未配置 LLM（SAG_LLM_PROVIDER / SAG_LLM_API_KEY / SAG_LLM_MODEL）")
 
     async def _create_completion(
         self,
@@ -79,38 +65,26 @@ class LLMClient:
         tools: list[dict] | None = None,
         tool_choice: str | dict | None = None,
     ) -> Any:
-        common: dict[str, Any] = {
+        request: dict[str, Any] = {
+            "model": self._settings.routed_llm_model,
+            "api_key": self._settings.llm_api_key,
+            "timeout": self._settings.llm_timeout_ms / 1000,
+            "num_retries": self._settings.llm_max_retries,
             "messages": messages,
-            "temperature": self._settings.llm_temperature,
+            "temperature": self._settings.effective_llm_temperature,
             "max_tokens": self._settings.llm_max_tokens,
             "stream": stream,
         }
         if tools:
-            common["tools"] = tools
+            request["tools"] = tools
             if tool_choice is not None:
-                common["tool_choice"] = tool_choice
-
-        if self._settings.llm_provider == "openai":
-            if self._client is None:  # defensive invariant for future providers
-                raise ConfigurationError("OpenAI 客户端未初始化")
-            extra_body = self._extra_body()
-            if extra_body is not None:
-                common["extra_body"] = extra_body
-            return await self._client.chat.completions.create(
-                model=self._settings.llm_model,
-                **common,
-            )
-
-        native: dict[str, Any] = {
-            "model": self._settings.provider_llm_model,
-            "api_key": self._settings.llm_api_key,
-            "timeout": self._settings.llm_timeout_ms / 1000,
-            "num_retries": self._settings.llm_max_retries,
-            **common,
-        }
+                request["tool_choice"] = tool_choice
+        extra_body = self._extra_body()
+        if extra_body is not None:
+            request["extra_body"] = extra_body
         if self._settings.llm_base_url:
-            native["api_base"] = self._settings.llm_base_url
-        return await _litellm_completion(**native)
+            request["api_base"] = self._settings.llm_base_url
+        return await _litellm_completion(**request)
 
     @staticmethod
     async def _close_stream(stream: Any) -> None:
@@ -135,6 +109,7 @@ class LLMClient:
         self._ensure_configured()
         tool_parts: dict[int, dict[str, str]] = {}
         finish_reason: str | None = None
+        stream = None
         try:
             stream = await self._create_completion(
                 [message.to_model_dict() for message in request.messages],
@@ -171,15 +146,17 @@ class LLMClient:
                     part = tool_parts.setdefault(index, {"id": "", "name": "", "arguments": ""})
                     tool_id = _attr(tool_delta, "id")
                     if tool_id:
-                        part["id"] += tool_id
+                        part["id"] += str(tool_id)
                     function = _attr(tool_delta, "function")
                     if function is not None:
                         name = _attr(function, "name")
                         arguments = _attr(function, "arguments")
                         if name:
-                            part["name"] += name
+                            part["name"] += str(name)
                         if arguments:
-                            part["arguments"] += arguments
+                            part["arguments"] += (
+                                arguments if isinstance(arguments, str) else json.dumps(arguments, ensure_ascii=False)
+                            )
 
             calls: list[RuntimeToolCall] = []
             for index in sorted(tool_parts):
@@ -211,6 +188,12 @@ class LLMClient:
         except Exception as e:  # noqa: BLE001
             log.warning("LLM 轮次流式调用失败：%s", e)
             raise UpstreamError(f"生成失败：{e}") from e
+        finally:
+            if stream is not None:
+                try:
+                    await self._close_stream(stream)
+                except Exception as e:  # noqa: BLE001
+                    log.debug("LLM 轮次流关闭失败：%s", e)
 
     async def complete(self, messages: list[Message]) -> str:
         self._ensure_configured()

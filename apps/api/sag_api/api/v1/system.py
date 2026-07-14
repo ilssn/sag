@@ -10,6 +10,7 @@ from sag_api.core.db import SessionLocal, get_session
 from sag_api.core.deps import get_current_user
 from sag_api.core.errors import ApiError, ConflictError
 from sag_api.core.logging import get_logger
+from sag_api.core.model_providers import model_provider_catalog
 from sag_api.db.models import Source, User
 from sag_api.generation import LLMClient
 from sag_api.mcp.server import MCP_TOOL_DETAILS, MCP_TOOL_NAMES
@@ -73,6 +74,14 @@ async def get_model_config(
 ) -> dict:
     """当前生效的模型与检索配置（密钥脱敏为 *_set 布尔）。"""
     return settings_service.effective_model_config()
+
+
+@router.get("/model-providers")
+async def get_model_providers(
+    _user: User = Depends(get_current_user),
+) -> list[dict[str, object]]:
+    """前后端共享的模型接入能力与技术默认值。"""
+    return model_provider_catalog()
 
 
 @router.get("/preferences")
@@ -147,7 +156,6 @@ async def quick_setup_302(
         raise ConflictError("模型配置已存在，请在设置中修改")
 
     config = await settings_service.save_302_quick_setup(session, body.api_key)
-    request.app.state.llm = LLMClient(settings)
     await request.app.state.engine_manager.aclose_all()
     return {"config": config, "capabilities": _capabilities()}
 
@@ -169,6 +177,8 @@ async def update_model_config(
         "llm_provider",
         "llm_base_url",
         "llm_model",
+        "llm_temperature",
+        "llm_max_tokens",
         "llm_timeout_ms",
         "llm_max_retries",
         "embedding_model",
@@ -177,15 +187,7 @@ async def update_model_config(
         "sag_language",
     }
     engine_changed = any(before.get(key) != config.get(key) for key in engine_fields)
-    engine_changed = engine_changed or bool(
-        patch.get("llm_api_key") or patch.get("embedding_api_key")
-    )
-    llm_client_changed = any(
-        before.get(key) != config.get(key)
-        for key in {"llm_provider", "llm_base_url", "llm_timeout_ms", "llm_max_retries"}
-    )
-    if llm_client_changed or patch.get("llm_api_key"):
-        request.app.state.llm = LLMClient(settings)
+    engine_changed = engine_changed or bool(patch.get("llm_api_key") or patch.get("embedding_api_key"))
     if engine_changed:
         await request.app.state.engine_manager.aclose_all()
     return {"config": config, "capabilities": _capabilities()}
@@ -204,17 +206,30 @@ async def configure_302_mineru(
 @router.post("/model-config/test")
 async def test_model_config(
     request: Request,
+    body: ModelConfigUpdate | None = None,
     _user: User = Depends(get_current_user),
 ) -> dict:
-    """连接测试：用当前配置发一次最小请求，返回是否可用。"""
-    llm: LLMClient = request.app.state.llm
+    """连接测试：优先验证表单草稿，不持久化也不修改运行期单例。"""
+    llm: LLMClient
+    active = settings
+    if body is None:
+        llm = request.app.state.llm
+    else:
+        patch = body.model_dump(exclude_unset=True)
+        updates = {
+            key: (None if key in {"llm_base_url"} and value == "" else value)
+            for key, value in patch.items()
+            if not (key == "llm_api_key" and not value)
+        }
+        active = settings.model_copy(update=updates)
+        llm = LLMClient(active)
     if not llm.configured:
         return {"ok": False, "message": "尚未配置 API Key"}
     try:
         await llm.complete([{"role": "user", "content": "ping"}])
         return {
             "ok": True,
-            "message": f"连接成功 · {settings.llm_provider} / {settings.llm_model}",
+            "message": f"连接成功 · {active.llm_provider} / {active.llm_model}",
         }
     except ApiError as e:
         return {"ok": False, "message": e.message}

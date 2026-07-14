@@ -29,17 +29,15 @@ describe("knowledge universe production interaction policy", () => {
     expect(source).toContain("const ENTITY_EXPANSION_EVENT_LIMIT = 4");
   });
 
-  it("places the active event at the centre and older bundles in stable side lanes", () => {
-    const placement = sourceBetween(
-      "function stableTimelineWindowEventOffset(",
-      "function timelineProjectionBundleIds(",
-    );
-    expect(placement).toContain("const age = Math.max(0, total - index - 1)");
-    expect(placement).toContain("x: 0");
-    expect(placement).toContain(":timeline-side");
-    expect(placement).toContain("side * distance");
+  it("keeps normal layout flat and gives preview a temporal depth projection", () => {
     expect(source).toContain("timelineEventPlacementByKey");
-    expect(source).toContain("stableTimelineWindowEventOffset(");
+    expect(source).toContain("projectUniverseTemporalBatch(");
+    expect(source).toContain('displayModeState.mode === "preview"');
+    expect(source).toContain("temporalProjection.normalizedOffset.z * radius");
+    expect(source).toContain("stableRootEventOffset(");
+    expect(source).toContain("presentationScale:");
+    expect(source).toContain("presentationCardScale:");
+    expect(source).toContain("presentationOpacity:");
   });
 
   it("keeps concrete-node clicks presentation-only", () => {
@@ -49,10 +47,37 @@ describe("knowledge universe production interaction policy", () => {
     );
     expect(handler).toContain("nextUniverseLockedNodeId(");
     expect(handler).toContain("graphRef.current?.lockNode(nextLockedId)");
-    expect(handler).toContain("graphRef.current?.unlockNode()");
+    expect(handler).toContain("graphRef.current?.clearSelection()");
     expect(handler).not.toContain("expandNode(");
     expect(handler).not.toContain("loadSourceTimelinePage(");
     expect(handler).not.toContain("api.");
+  });
+
+  it("clears a canvas lock without changing graph data or the camera", () => {
+    const clearSelection = sourceBetween(
+      "const clearSelection = React.useCallback(",
+      "const handleSceneUnavailable = React.useCallback(",
+    );
+    const handler = sourceBetween(
+      "const handleNodeClick = React.useCallback(",
+      "const clearSelection = React.useCallback(",
+    );
+
+    expect(clearSelection).toContain("graphRef.current?.clearSelection()");
+    expect(clearSelection).toContain("setLockedKey(null)");
+    expect(clearSelection).toContain("setSelectedKey(null)");
+    expect(clearSelection).not.toMatch(/focusOverview\(|resetOverview\(|setData\(|loadSourceTimelinePage\(|api\./);
+    expect(handler).not.toContain("commitWorkingSet(");
+    expect(handler).not.toContain("setUniversePinnedNetwork(");
+    expect(clearSelection).not.toContain("commitWorkingSet(");
+    expect(clearSelection).not.toContain("setUniversePinnedNetwork(");
+  });
+
+  it("keeps transient hover inside the scene instead of mounting a second inspector", () => {
+    expect(source).toContain("const inspectorNode = selectedConcreteNode;");
+    expect(source).toContain("const handleSceneHover = React.useCallback(() => undefined, [])");
+    expect(source).not.toContain("hoveredConcreteKey");
+    expect(source).not.toContain("hoveredConcreteNode");
   });
 
   it("blocks timeline paging while a node is locked", () => {
@@ -115,36 +140,40 @@ describe("knowledge universe production interaction policy", () => {
       "const handleTimelineIntent = React.useCallback(",
       "React.useEffect(() => {\n    const session = sourceSessionRef.current;",
     );
-    expect(source).toContain("state.networkExhausted = true");
-    expect(source).toContain("markUniverseTimelineNetworkExhausted(nextWindow)");
-    expect(intent).toContain("current.activeIndex >= current.cacheBundleIds.length - 1");
-    expect(intent).toContain("session.timeline.networkExhausted");
+    expect(source).toContain("const networkExhausted = !admission.deque.hasOlder");
+    expect(source).toContain("state.deque = dequeAdmission.deque");
+    expect(intent).toContain("session.timeline.deque?.hasOlder");
+    expect(intent).toContain("markUniverseTimelineNetworkExhausted(current)");
     expect(intent).toContain('return "complete"');
   });
 
-  it("prefetches only at a bounded low-water mark with safe FIFO capacity", () => {
+  it("prefetches one safe adjacent page from bidirectional watermarks", () => {
     const prefetch = sourceBetween(
-      "if (!shouldPrefetchUniverseTimelineWindow(",
+      "const plan = planUniverseTimelinePrefetch({",
       "const timelineJourney = React.useMemo<UniverseTimelineJourney>",
     );
     expect(prefetch).toContain("nextPageSize");
-    expect(prefetch).toContain("bundleWindow.cachedEventBundles");
+    expect(prefetch).toContain("hasOlder: session.timeline.deque.hasOlder");
+    expect(prefetch).toContain("hasNewer: session.timeline.deque.hasNewer");
+    expect(prefetch).toContain("preferredDirection: session.timeline.preferredDirection");
     expect(source).toContain('timelineWindow?.phase !== "idle"');
-    expect(prefetch).toContain('loadSourceTimelinePage(session.sourceId, "prefetch")');
+    expect(prefetch).toContain('"prefetch",\n      plan.direction');
   });
 
   it("keeps normal API page size independent from the visible slider", () => {
     const pageSizing = sourceBetween(
-      "const pageBundleLimit = universeTimelinePageBundleLimit(",
-      "const evictionBoundary =",
+      "const pageBundleLimit = state.queryPageSize ?? universeTimelinePageBundleLimit(",
+      "const requestCursor =",
     );
+    expect(pageSizing).toContain("state.queryPageSize ??");
     expect(pageSizing).toContain("manifest.policy.timeline_event_page_size");
     expect(pageSizing).toContain("residentBudgetRef.current");
     expect(pageSizing).not.toContain("bundleWindow.visibleEventBundles");
     const prefetchSizing = sourceBetween(
-      "const nextPageSize = universeTimelinePageBundleLimit(",
-      "if (!shouldPrefetchUniverseTimelineWindow(",
+      "const nextPageSize = session.timeline.queryPageSize ?? universeTimelinePageBundleLimit(",
+      "const plan = planUniverseTimelinePrefetch({",
     );
+    expect(prefetchSizing).toContain("session.timeline.queryPageSize ??");
     expect(prefetchSizing).toContain("manifest?.policy.timeline_event_page_size ?? 6");
     expect(prefetchSizing).toContain("residentBudget");
     expect(prefetchSizing).not.toContain("bundleWindow.visibleEventBundles");
@@ -152,38 +181,53 @@ describe("knowledge universe production interaction policy", () => {
 
   it("reconfigures an idle window without moving the active bundle or dropping cached future", () => {
     const reconfiguration = sourceBetween(
-      "const next = current.phase === \"transitioning\"",
+      "if (current.phase === \"transitioning\") return;",
       "const activateSource = React.useCallback(",
     );
     expect(source).toContain('current.phase === "transitioning"');
     expect(reconfiguration).toContain("bundleWindow.visibleEventBundles");
     expect(reconfiguration).toContain("bundleWindow.cachedEventBundles");
-    expect(reconfiguration).toContain("next.visibleBundleIds");
+    expect(reconfiguration).toContain("resizeUniverseTimelineDeque(");
+    expect(reconfiguration).toContain("activeBundleId");
+    expect(reconfiguration).toContain("next.cacheBundleIds");
     expect(reconfiguration).toContain("timelineRetentionBundleIds(");
     expect(source).not.toContain("const selectedIds = current.cacheBundleIds.slice(start)");
   });
 
-  it("retains every cached bundle but only support bundles for the visible slice", () => {
+  it("retains cached bundles and expansion branches owned by resident timeline roots", () => {
     const retention = sourceBetween(
       "function timelineRetentionBundleIds(",
       "function universeBundleWindowProtection(",
     );
     expect(retention).toContain("...timelineBundleIds");
-    expect(retention).toContain("...timelineProjectionBundleIds(");
-    expect(retention).toContain("visibleTimelineBundleIds");
+    expect(retention).toContain("anchoredSupportIds");
+    expect(retention).toContain("timelineNodeKeys");
+    expect(retention).toContain("lineageQualifiedExpansionBundleIds");
   });
 
-  it("physically releases off-window support on every visible-window advance", () => {
+  it("projects only the bounded visible window while retaining the larger cache", () => {
+    const projection = sourceBetween(
+      "function timelineProjectionBundleIds(",
+      "function timelineRetentionBundleIds(",
+    );
+    expect(projection).toContain("visibleTimelineBundleIds");
+    expect(projection).toContain("visibleNodeKeys");
+    expect(projection).toContain("timelineBundleIds");
+    expect(projection).toContain("if (timelineIds.has(id)) return false");
+    expect(source).toContain("projectUniverseBundleWindowWithinBudget(");
+  });
+
+  it("synchronizes physical retention after a window or cache change", () => {
     const retentionEffect = sourceBetween(
-      "const current = session.timeline.window;\n    const next = current.phase",
+      "if (current.phase === \"transitioning\") return;",
       "const activateSource = React.useCallback(",
     );
     expect(retentionEffect).toContain('current.phase === "transitioning"');
-    expect(retentionEffect).toContain("if (next !== current)");
+    expect(retentionEffect).toContain("if (next !== current) commitTimelineWindow");
     expect(retentionEffect).toContain("const bundleOrderChanged =");
     expect(retentionEffect).toContain("if (!bundleOrderChanged) return");
     expect(retentionEffect.indexOf('session.timeline.pausedReason === "capacity"'))
-      .toBeGreaterThan(retentionEffect.indexOf("if (!bundleOrderChanged) return"));
+      .toBeLessThan(retentionEffect.indexOf("if (!bundleOrderChanged) return"));
     expect(retentionEffect.indexOf("commitWorkingSet(retained)"))
       .toBeGreaterThan(retentionEffect.indexOf("if (!bundleOrderChanged) return"));
   });
@@ -197,17 +241,19 @@ describe("knowledge universe production interaction policy", () => {
       "const expandNode = React.useCallback(",
       "const loadSourceTimelinePage = React.useCallback(",
     );
-    expect(loader).toContain("protectedUniverseTimelineBundleIds(");
-    expect(loader).toContain("state.window");
-    expect(loader).toContain("evictionBoundary");
-    expect(loader).toContain("applyUniverseTimelineBundleEvictions(");
+    expect(loader).toContain("admitUniverseTimelineDequePage(");
+    expect(loader).toContain("synchronizeTimelineWindowWithDeque(");
+    expect(loader).toContain(
+      "const protectedTimelineBundleIds = synchronizedWindow.cacheBundleIds",
+    );
     expect(loader).toContain("admission.evictedBundleIds");
-    expect(loader).toContain("evictedAcknowledgedBundle");
-    expect(loader).toContain("if (!synchronizedWindow || evictedAcknowledgedBundle)");
-    expect(loader.indexOf("applyUniverseTimelineBundleEvictions("))
+    expect(loader).toContain("retainedDequeIds.has(id)");
+    expect(loader).not.toContain("protectedCacheIds");
+    expect(loader).toContain("!admission.pageAcknowledged");
+    expect(loader.indexOf("synchronizeTimelineWindowWithDeque("))
       .toBeLessThan(loader.indexOf("state.snapshotId = page.snapshot_id"));
     expect(expansion).toContain("browseSession.timeline.window.cacheBundleIds");
-    expect(expansion).not.toContain("browseSession.timeline.window.visibleBundleIds");
+    expect(expansion).toContain("visibleSupportBundleIds");
   });
 
   it("reports first-page EOF as complete and exposes capacity pauses", () => {
@@ -215,18 +261,18 @@ describe("knowledge universe production interaction policy", () => {
       "const loadSourceTimelinePage = React.useCallback(",
       "const activateSource = React.useCallback(",
     );
-    const terminalHint = loader.indexOf('nextWindow.phase === "complete"');
+    const terminalHint = loader.indexOf('synchronizedWindow.phase === "complete"');
     const readyHint = loader.indexOf('t("timeline.windowReady"');
     expect(terminalHint).toBeGreaterThanOrEqual(0);
     expect(readyHint).toBeGreaterThan(terminalHint);
     expect(loader).toContain('t("timeline.explorationComplete"');
-    expect(loader).toContain('state.pausedReason === "capacity"');
+    expect(loader).toContain('state.pausedReason = "capacity"');
     expect(loader).toContain('t("timeline.capacityPaused"');
-    expect(source).toContain("activeIndex < cacheLength - 1 || !networkExhausted");
-    expect(source).toContain("current.activeIndex >= current.cacheBundleIds.length - 1");
+    expect(source).toContain("activeIndex < cacheLength - 1 || hasOlder");
+    expect(source).toContain("activeIndex > startActiveIndex || hasNewer");
   });
 
-  it("recovers a capacity-paused tail through single-bundle cursor-safe journeys", () => {
+  it("loads and commits one complete time page per explicit journey", () => {
     const loader = sourceBetween(
       "const loadSourceTimelinePage = React.useCallback(",
       "const activateSource = React.useCallback(",
@@ -235,45 +281,24 @@ describe("knowledge universe production interaction policy", () => {
       "const handleTimelineIntent = React.useCallback(",
       "React.useEffect(() => {\n    const session = sourceSessionRef.current;",
     );
-    expect(loader).toContain('cause === "journey"');
-    expect(loader).toContain('state.pausedReason === "capacity"');
-    expect(loader).toContain("&& atCacheTail");
+    expect(loader).toContain("direction: UniverseTimelineDirection");
+    expect(loader).toContain("admitUniverseTimelineDequePage(");
     expect(loader).toContain("universeTimelinePageBundleLimit(");
-    expect(loader).toContain("capacityRecovery");
-    expect(loader).toContain('? "active-bundle"');
-    expect(loader).toContain('|| (capacityRecovery && !admission.done)');
-    const recoveryLoad = intent.indexOf(
-      "const loadResult = await loadSourceTimelinePage(",
+    expect(loader).toContain("state.queryPageSize ??= pageBundleLimit");
+    expect(intent).toContain(
+      "const queryPageSize = session.timeline.queryPageSize ?? universeTimelinePageBundleLimit(",
     );
-    expect(recoveryLoad).toBeGreaterThanOrEqual(0);
-    expect(recoveryLoad).toBeLessThan(intent.indexOf('t("timeline.capacityPaused"'));
-
-    const recoveryCommit = sourceBetween(
-      "let nextWindow = appendUniverseTimelineBundles(",
-      "const retainedIds = timelineRetentionBundleIds(",
-    );
-    expect(source).toContain(
-      'type SourceTimelineLoadResult = "blocked" | "loaded" | "advanced"',
-    );
-    expect(recoveryCommit).toContain(
-      'advanceUniverseTimelineWindow(nextWindow, "next")',
-    );
-    expect(recoveryCommit).toContain('loadResult = "advanced"');
-    expect(recoveryCommit).toContain('cause: "journey"');
-    expect(recoveryCommit.indexOf("timelineJourneyCommitRef.current ="))
-      .toBeLessThan(recoveryCommit.indexOf("commitTimelineWindow(session, nextWindow)"));
-    expect(
-      recoveryCommit.match(/commitTimelineWindow\(session, nextWindow\)/g),
-    ).toHaveLength(1);
-    expect(loader).toContain('loadResult !== "advanced"');
-
-    const advancedHandler = sourceBetween(
-      'if (loadResult === "advanced") {',
-      "if (\n          current.activeIndex >= current.cacheBundleIds.length - 1",
-    );
-    expect(advancedHandler).toContain("scheduleTimelineSettle(session, current)");
-    expect(advancedHandler).toContain('return "advanced"');
-    expect(advancedHandler).not.toContain("advanceUniverseTimelineWindow(");
+    expect(intent).toContain("const pageStride = Math.min(");
+    expect(intent).toContain("session.timeline.window.visibleLimit");
+    expect(intent).toContain('direction === "next" ? "older" : "newer"');
+    expect(intent).toContain('"journey",\n          requestDirection');
+    expect(intent).toContain("advanceUniverseTimelineWindow(\n        current,\n        direction,\n        pageStride");
+    expect(intent).toContain("const completeTerminalPage = localRunway > 0 && !edgeAvailable");
+    expect(intent).toContain("localRunway < pageStride && !completeTerminalPage");
+    expect(intent).toContain("planUniverseDisplayTimelineIntent(");
+    expect(intent).toContain('commitUniverseDisplayIntent(state, displayPlan, "shifted")');
+    expect(intent.indexOf("timelineJourneyCommitRef.current ="))
+      .toBeLessThan(intent.indexOf("commitTimelineWindow(session, next)"));
   });
 
   it("keeps active timeline bundles out of generic node-level budget trimming", () => {
@@ -298,6 +323,9 @@ describe("knowledge universe production interaction policy", () => {
     expect(source).toContain("windowRevision: sceneWindowRevision");
     expect(source).toContain("timelineJourneyCommitRef");
     expect(source).toContain("windowChangeCause");
+    expect(source).toContain('windowChangeCause: data.windowChangeCause ?? "synchronization"');
+    expect(source).toContain("windowDirection: data.windowDirection ?? null");
+    expect(source).toContain("timelineJourneyCommitRef.current = null");
     expect(source).toContain('? "journey"\n      : "synchronization"');
     expect(intent.indexOf("timelineJourneyCommitRef.current ="))
       .toBeLessThan(intent.indexOf("commitTimelineWindow(session, next)"));
@@ -312,6 +340,24 @@ describe("knowledge universe production interaction policy", () => {
     expect(source).toContain("retainUniverseWorkingSetBundles(");
     expect(source).toContain("universeBundleWindowProtection(");
     expect(source).toContain("protectedRelationKeys: windowProtection.relationKeys");
+    expect(source).toContain("visibleSupportBundleIds");
+    expect(source).toContain("...visibleSupportBundleIds");
+    expect(source).not.toContain("visibleSupportLineageBundleIds");
+  });
+
+  it("bounds the configured timeline window by the effective scene budget", () => {
+    const sizing = sourceBetween(
+      "const configuredBundleWindow = React.useMemo(",
+      "const refreshLoadProgress = React.useCallback(",
+    );
+    expect(sizing).toContain("manifest?.policy.event_entity_limit");
+    expect(sizing).toContain("const packageCapacity = Math.min(");
+    expect(sizing).toContain("requiredTransitionPackages");
+    expect(sizing).toContain("transitionHeadroomPackages");
+    expect(sizing).toContain("budget.nodes - transitionHeadroomPackages * nodesPerPackage");
+    expect(sizing).toContain("budget.edges - transitionHeadroomPackages * edgesPerPackage");
+    expect(sizing).toContain("configuredBundleWindow.visibleEventBundles");
+    expect(sizing).toContain("cachedEventBundles: configuredBundleWindow.cachedEventBundles");
   });
 
   it("uses resident admission only for browse and keeps card flags out of graph data", () => {
@@ -333,11 +379,72 @@ describe("knowledge universe production interaction policy", () => {
     expect(loader).toContain("residentBudgetRef.current");
     expect(graph).toContain("projectedEntityCategories");
     expect(graph).toContain("projectUniverseWorkingSet(");
-    expect(graph.indexOf("projectUniverseBundleWindowWithinBudget("))
-      .toBeLessThan(graph.indexOf("projectUniverseWorkingSet("));
+    expect(graph.indexOf("projectUniverseWorkingSet("))
+      .toBeLessThan(graph.indexOf("timelineProjectionBundleIds("));
+    expect(graph.indexOf("timelineProjectionBundleIds("))
+      .toBeLessThan(graph.indexOf("projectUniverseBundleWindowWithinBudget("));
     expect(graph).not.toContain("showEventCards");
     expect(graph).not.toContain("showEntityCards");
     expect(graph).not.toContain("viewPreferences,");
+  });
+
+  it("projects and retains only expansion bundles owned by window lineage roots", () => {
+    const projection = sourceBetween(
+      "function timelineProjectionBundleIds(",
+      "function universeBundleWindowProtection(",
+    );
+    expect(projection).toContain("lineageQualifiedExpansionBundleIds(");
+    expect(projection).toContain('bundle?.origin === "expansion"');
+    expect(projection).toContain("bundle.lineage_root_key");
+    expect(projection).toContain("if (timelineIds.has(id)) return false");
+  });
+
+  it("keeps expansion cursors independent from FIFO payload eviction", () => {
+    const expansion = sourceBetween(
+      "const expandNode = React.useCallback(",
+      "const loadSourceTimelinePage = React.useCallback(",
+    );
+    const loader = sourceBetween(
+      "const loadSourceTimelinePage = React.useCallback(",
+      "const activateSource = React.useCallback(",
+    );
+    const pruning = sourceBetween(
+      "const pruneExpansionState = React.useCallback(",
+      "React.useEffect(() => {",
+    );
+    expect(expansion).toContain("expansionLineageRootKey(");
+    expect(expansion).toContain("lineageRootKey");
+    expect(expansion).toContain("visibleSupportBundleIds");
+    expect(expansion).toContain("protectedBundleIds:");
+    expect(expansion).not.toContain("currentAnchorExpansionBundleIds");
+    expect(loader).toContain("protectedTimelineBundleIds");
+    expect(loader).toContain("...protectedTimelineBundleIds");
+    expect(loader).toContain("...visibleSupportBundleIds");
+    expect(pruning).not.toContain("cursorsRef.current.set(");
+    expect(source).not.toContain("expansionSeedCursorsRef");
+  });
+
+  it("never reuses an expansion request whose abort signal has fired", () => {
+    const request = sourceBetween(
+      "const requestExpansion = React.useCallback(",
+      "const expandNode = React.useCallback(",
+    );
+    expect(request).toContain("pending && !pending.signal.aborted");
+    expect(request).toContain("pending.promise");
+    expect(request).toContain("{ promise: request, signal }");
+  });
+
+  it("derives browse root roles from the visible window instead of cached ownership", () => {
+    const graph = sourceBetween(
+      "const graphData = React.useMemo(() => {",
+      "const selectedNode = React.useMemo(",
+    );
+    expect(graph).toContain("const visibleTimelineNodeKeys = new Set(");
+    expect(graph).toContain("const isVisualRoot =");
+    expect(graph).toContain("if (!timelineBrowseActive) return node.root");
+    expect(graph).toContain("root: isVisualRoot(node)");
+    expect(graph).toContain("timelineSupportBundleIds = timelineProjectionIds.filter");
+    expect(graph).toContain("!visibleTimelineSet.has(id)).reverse()");
   });
 
   it("unlocks and releases pins when category projection hides the selected node", () => {
@@ -350,6 +457,15 @@ describe("knowledge universe production interaction policy", () => {
     expect(guard).toContain("!visibleNodeIds.has(lockedKey)");
     expect(guard).toContain("clearSelection()");
     expect(guard).toContain("lockedKey, selectedKey");
+  });
+
+  it("keeps transient hover inside WebGL instead of rerendering the universe controller", () => {
+    const hover = sourceBetween(
+      "const handleSceneHover = React.useCallback(",
+      "React.useEffect(() => {",
+    );
+    expect(hover).toContain("() => undefined");
+    expect(hover).not.toContain("setHoveredConcreteKey");
   });
 
   it("routes timeline snapshot changes through the singular invalidation path", () => {
@@ -372,7 +488,7 @@ describe("knowledge universe production interaction policy", () => {
     expect(invalidation).toContain("snapshotReloadAttemptsRef.current");
     expect(invalidation).toContain("if (reloadAttempt > 1)");
     expect(invalidation).toContain('loader(sourceId, "source-entry")');
-    expect(invalidation).toContain('result === "loaded" || result === "advanced"');
+    expect(invalidation).toContain('result === "loaded"');
     expect(invalidation).toContain("sourceSessionRef.current !== refreshedSession");
     expect(invalidation).toContain('t("timeline.snapshotReloading")');
     expect(invalidation).toContain('t("timeline.snapshotReset")');
@@ -388,15 +504,16 @@ describe("knowledge universe production interaction policy", () => {
     expect(loader).toContain("expandedAnchorsRef.current.add(eventKey)");
   });
 
-  it("pins and releases complete one-hop networks, including factual edges", () => {
+  it("keeps click lock presentation-only and out of the working-set projection", () => {
     const click = sourceBetween(
       "const handleNodeClick = React.useCallback(",
       "const clearSelection = React.useCallback(",
     );
-    expect(source).toContain("function universeLockNetwork(");
-    expect(source).toContain("relationKeys.add(universeRelationKey(relation))");
-    expect(click).toContain("updatePinnedNetwork(network.nodeKeys, network.relationKeys)");
-    expect(click).toContain("updatePinnedNetwork([])");
+    expect(click).toContain("graphRef.current?.lockNode(nextLockedId)");
+    expect(click).toContain("graphRef.current?.clearSelection()");
+    expect(click).not.toContain("workingRef.current");
+    expect(click).not.toContain("setUniversePinnedNetwork(");
+    expect(source).not.toContain("function universeLockNetwork(");
   });
 
   it("binds expansion cache identity to revision and snapshot", () => {
@@ -423,30 +540,116 @@ describe("knowledge universe production interaction policy", () => {
       .toBeLessThan(expansion.indexOf("invalidateSourceSnapshot(exactNode.sourceId"));
   });
 
-  it("reopens exhausted anchors after their resident facts are evicted", () => {
+  it("keeps terminal expansion state after old resident facts are evicted", () => {
     const pruning = sourceBetween(
       "const pruneExpansionState = React.useCallback(",
       "React.useEffect(() => {",
     );
-    expect(pruning).toContain("universeAnchorProgress(");
-    expect(pruning).toContain("< node.related_count");
-    expect(source).toContain("residentProgress >= exactNode.relatedCount");
+    expect(pruning).not.toContain("universeAnchorProgress(");
+    expect(source).not.toContain("residentProgress >= exactNode.relatedCount");
+    expect(source).toContain("expandedAnchorsRef.current.has(inspectorAnchorKey)");
+    expect(source).toContain("!cursorsRef.current.has(inspectorAnchorKey)");
     expect(source).toContain("committedCount < totalCount");
   });
 
-  it("exposes touch controls and the same scene journey used by wheel and keyboard", () => {
+  it("uses explicit time buttons and reserves camera gestures for normal view", () => {
     expect(source).toContain("timelineJourney={timelineJourney}");
     expect(source).toContain("onTimelineIntent={handleTimelineIntent}");
     expect(source).toContain('graphRef.current?.moveTimeline("previous")');
     expect(source).toContain('graphRef.current?.moveTimeline("next")');
     expect(source).toContain('data-universe-timeline-controls="true"');
+    expect(source).toContain("onCameraInteraction={restoreNormalPresentation}");
+    expect(source).toContain("data-universe-display-mode={displayModeState.mode}");
+  });
+
+  it("keeps the time-page controls mounted while page availability changes", () => {
+    const visibilityStart = source.indexOf("const timelineControlsVisible = Boolean(");
+    expect(visibilityStart).toBeGreaterThanOrEqual(0);
+    const visibilityEnd = source.indexOf(");", visibilityStart);
+    expect(visibilityEnd).toBeGreaterThan(visibilityStart);
+    const visibility = source.slice(visibilityStart, visibilityEnd + 2);
+
+    expect(visibility).toContain("interactive");
+    expect(visibility).toContain("browseSessionSourceId");
+    expect(visibility).toContain("timelineWindow");
+    expect(visibility).not.toContain("activePartition");
+    expect(visibility).not.toMatch(/cacheBundleIds|hasNext|hasPrevious|phase|timelineJourney/);
+
+    const controlsMarker = 'data-universe-timeline-controls="true"';
+    const markerIndex = source.indexOf(controlsMarker);
+    expect(markerIndex).toBeGreaterThanOrEqual(0);
+
+    const controls = source.slice(
+      Math.max(0, markerIndex - 600),
+      markerIndex + 2_400,
+    );
+
+    // A timeline can be temporarily disabled while its first page or a source
+    // switch is settling. That state must disable navigation, not unmount the
+    // rail and make it appear to have vanished.
+    expect(controls).not.toContain("interactive && timelineJourney.enabled");
+    expect(controls).toContain("timelineControlsVisible && (");
+    expect(controls).not.toMatch(/timelineJourney\.has(?:Previous|Next)\s*&&\s*\(/);
+
+    expect(controls).toContain('graphRef.current?.moveTimeline("previous")');
+    expect(controls).toContain('graphRef.current?.moveTimeline("next")');
+    expect(controls).toContain("disabled={!timelineJourney.hasPrevious");
+    expect(controls).toContain("disabled={!timelineJourney.hasNext");
+    expect(controls.match(/timelineJourney\.phase === "loading"/g)).toHaveLength(2);
+    expect(controls.match(/timelineJourney\.phase === "transitioning"/g)).toHaveLength(2);
+  });
+
+  it("does not let source LOD replace the active browse session", () => {
+    const sourceLod = sourceBetween(
+      "const handleSourceLod = React.useCallback(",
+      "const handleTimelineIntent = React.useCallback(",
+    );
+    const activeSession = sourceLod.indexOf("sourceSessionRef.current?.sourceId");
+    const sourceMismatchGuard = sourceLod.search(
+      /(?:sessionSourceId\s*!==\s*sourceId|sourceId\s*!==\s*sessionSourceId)/,
+    );
+    const partitionWrite = sourceLod.indexOf("setActivePartition(sourceId)");
+
+    expect(activeSession).toBeGreaterThanOrEqual(0);
+    expect(sourceMismatchGuard).toBeGreaterThan(activeSession);
+    expect(partitionWrite).toBeGreaterThan(sourceMismatchGuard);
+    expect(partitionWrite).toBeGreaterThan(activeSession);
+  });
+
+  it("uses the browse session as the single timeline data authority", () => {
+    const activation = sourceBetween(
+      "const activateSource = React.useCallback(",
+      "React.useEffect(() => {",
+    );
+    const intent = sourceBetween(
+      "const handleTimelineIntent = React.useCallback(",
+      "React.useEffect(() => {",
+    );
+    const prefetch = sourceBetween(
+      "React.useEffect(() => {\n    const session = sourceSessionRef.current;",
+      "const timelineJourney = React.useMemo<UniverseTimelineJourney>",
+    );
+    const graph = sourceBetween(
+      "const graphData = React.useMemo(() => {",
+      "const selectedNode = React.useMemo(",
+    );
+
+    expect(activation).toContain('activationOriginRef.current = "browse"');
+    expect(activation).toContain('setActivationOrigin("browse")');
+    expect(intent).not.toContain("session.sourceId !== activePartition");
+    expect(prefetch).not.toContain("session.sourceId !== activePartition");
+    expect(graph).toContain("const timelineBrowseActive = Boolean(browseSessionSourceId)");
+    expect(graph).not.toContain("sourceSessionRef.current?.sourceId === activePartition");
   });
 
   it("keeps WebGL fallback, budget lock release and manifest invalidation", () => {
     expect(source).toContain("onUnavailable={handleSceneUnavailable}");
     expect(source).toContain("webglAvailable === false");
+    expect(source).toContain("sceneUnavailableReason");
+    expect(source).toContain("setSceneAttempt((current) => current + 1)");
+    expect(source).not.toContain("failIfMajorPerformanceCaveat: true");
     expect(source).toContain("next.nodes.length > budget.nodes");
-    expect(source).toContain("setUniversePinnedNetwork(current, [], [])");
+    expect(source).toContain("trimUniverseWorkingSet(\n        current,\n        budget,");
     expect(source).toContain("manifestVersionRef.current === manifest.version");
     expect(source).toContain("resetScene(epochRef.current + 1)");
   });

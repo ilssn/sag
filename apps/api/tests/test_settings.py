@@ -10,6 +10,7 @@ import pytest
 from sag_api.core.config import Settings, settings
 
 _RESTORE = (
+    "llm_provider",
     "llm_base_url",
     "llm_model",
     "llm_temperature",
@@ -65,6 +66,7 @@ def test_provider_base_urls_default_to_302_china_endpoint(monkeypatch):
     for name in ("SAG_LLM_BASE_URL", "SAG_EMBEDDING_BASE_URL", "SAG_MINERU_BASE_URL"):
         monkeypatch.delenv(name, raising=False)
     configured = Settings(_env_file=None)
+    assert configured.llm_provider == "openai"
     assert configured.llm_base_url == "https://api.302ai.cn/v1"
     assert configured.embedding_base_url == "https://api.302ai.cn/v1"
     assert configured.mineru_base_url == "https://api.302ai.cn"
@@ -90,9 +92,7 @@ async def test_legacy_atomic_db_strategy_is_migrated():
     }
     try:
         async with SessionLocal() as session:
-            await session.execute(
-                delete(Setting).where(Setting.scope == "global", Setting.key == "model_config")
-            )
+            await session.execute(delete(Setting).where(Setting.scope == "global", Setting.key == "model_config"))
             session.add(
                 Setting(
                     scope="global",
@@ -114,9 +114,7 @@ async def test_legacy_atomic_db_strategy_is_migrated():
         assert settings.mineru_base_url == "https://api.302ai.cn"
 
         async with SessionLocal() as session:
-            row = await session.scalar(
-                select(Setting).where(Setting.scope == "global", Setting.key == "model_config")
-            )
+            row = await session.scalar(select(Setting).where(Setting.scope == "global", Setting.key == "model_config"))
             assert row is not None
             assert row.value["search_strategy"] == "multi"
             assert row.value["llm_base_url"] == "https://api.302ai.cn/v1"
@@ -124,9 +122,7 @@ async def test_legacy_atomic_db_strategy_is_migrated():
             assert row.value["mineru_base_url"] == "https://api.302ai.cn"
     finally:
         async with SessionLocal() as session:
-            await session.execute(
-                delete(Setting).where(Setting.scope == "global", Setting.key == "model_config")
-            )
+            await session.execute(delete(Setting).where(Setting.scope == "global", Setting.key == "model_config"))
             await session.commit()
         for field, value in previous.items():
             setattr(settings, field, value)
@@ -140,7 +136,7 @@ async def _register(c, email):
 
 
 @pytest.mark.asyncio
-async def test_model_config_crud_masking_and_test():
+async def test_model_config_crud_masking_and_test(monkeypatch: pytest.MonkeyPatch):
     from sqlalchemy import delete
 
     from sag_api.core.db import SessionLocal
@@ -175,6 +171,7 @@ async def test_model_config_crud_masking_and_test():
                 # GET：密钥脱敏为 *_set，离线下未配置
                 body = (await c.get("/api/v1/system/model-config", headers=A)).json()
                 assert "llm_api_key" not in body and body["llm_api_key_set"] is False
+                assert body["llm_provider"] == "openai"
                 assert "mineru_api_key" not in body and body["mineru_api_key_set"] is False
                 assert body["effective_document_parser"] == "markitdown"
                 assert body["document_extract_concurrency"] == 5
@@ -184,15 +181,61 @@ async def test_model_config_crud_masking_and_test():
                 assert body["llm_max_retries"] == 2
                 assert "search_top_k" in body and "sag_language" in body
 
+                providers = (await c.get("/api/v1/system/model-providers", headers=A)).json()
+                assert [provider["id"] for provider in providers] == [
+                    "openai",
+                    "anthropic",
+                    "gemini",
+                ]
+                assert providers[0]["default_model"] == body["llm_model"]
+                assert "litellm_prefix" not in providers[0]
+
                 # 连接测试（未配置）→ 立即 ok False，无网络
                 t = (await c.post("/api/v1/system/model-config/test", headers=A)).json()
                 assert t["ok"] is False and "message" in t
+
+                # 测试表单草稿：应使用未保存的 provider / key，但不写入全局配置。
+                from sag_api.generation.llm import LLMClient
+
+                observed: dict = {}
+
+                async def fake_complete(client, _messages):
+                    observed["provider"] = client._settings.llm_provider
+                    observed["model"] = client._settings.llm_model
+                    observed["key"] = client._settings.llm_api_key
+                    return "pong"
+
+                monkeypatch.setattr(LLMClient, "complete", fake_complete)
+                draft = await c.post(
+                    "/api/v1/system/model-config/test",
+                    headers=A,
+                    json={
+                        "llm_provider": "gemini",
+                        "llm_base_url": None,
+                        "llm_api_key": "draft-secret",
+                        "llm_model": "gemini-3.5-flash",
+                    },
+                )
+                assert draft.status_code == 200
+                assert draft.json() == {
+                    "ok": True,
+                    "message": "连接成功 · gemini / gemini-3.5-flash",
+                }
+                assert observed == {
+                    "provider": "gemini",
+                    "model": "gemini-3.5-flash",
+                    "key": "draft-secret",
+                }
+                assert "draft-secret" not in draft.text
+                assert settings.llm_provider == snapshot["llm_provider"]
+                assert settings.llm_api_key == snapshot["llm_api_key"]
 
                 # PUT 非密钥字段 → 持久化 + 生效 + capabilities 反映
                 r = await c.put(
                     "/api/v1/system/model-config",
                     headers=A,
                     json={
+                        "llm_provider": "anthropic",
                         "llm_model": "test-model-x",
                         "llm_timeout_ms": 45_000,
                         "llm_max_retries": 3,
@@ -204,8 +247,11 @@ async def test_model_config_crud_masking_and_test():
                 )
                 assert r.status_code == 200, r.text
                 assert r.json()["config"]["llm_model"] == "test-model-x"
+                assert r.json()["config"]["llm_provider"] == "anthropic"
+                assert r.json()["capabilities"]["llm_provider"] == "anthropic"
                 assert r.json()["capabilities"]["llm_model"] == "test-model-x"
                 assert settings.llm_model == "test-model-x"  # 单例即时生效
+                assert settings.llm_provider == "anthropic"
                 assert settings.llm_timeout_ms == 45_000
                 assert settings.llm_max_retries == 3
                 assert settings.document_chunk_max_tokens == 1_600
@@ -265,24 +311,19 @@ async def test_model_config_crud_masking_and_test():
 
                 # 非法值 → 422（Literal / 越界）
                 assert (
-                    await c.put(
-                        "/api/v1/system/model-config", headers=A, json={"search_strategy": "nope"}
-                    )
+                    await c.put("/api/v1/system/model-config", headers=A, json={"search_strategy": "nope"})
                 ).status_code == 422
                 assert (
-                    await c.put(
-                        "/api/v1/system/model-config", headers=A, json={"search_strategy": "atomic"}
-                    )
+                    await c.put("/api/v1/system/model-config", headers=A, json={"llm_provider": "nope"})
                 ).status_code == 422
                 assert (
-                    await c.put(
-                        "/api/v1/system/model-config", headers=A, json={"search_top_k": 999}
-                    )
+                    await c.put("/api/v1/system/model-config", headers=A, json={"search_strategy": "atomic"})
                 ).status_code == 422
                 assert (
-                    await c.put(
-                        "/api/v1/system/model-config", headers=A, json={"document_parser": None}
-                    )
+                    await c.put("/api/v1/system/model-config", headers=A, json={"search_top_k": 999})
+                ).status_code == 422
+                assert (
+                    await c.put("/api/v1/system/model-config", headers=A, json={"document_parser": None})
                 ).status_code == 422
                 assert (
                     await c.put(
@@ -301,9 +342,7 @@ async def test_model_config_crud_masking_and_test():
                     {"document_chunk_mode": "overlap"},
                     {"document_chunk_mode": None},
                 ):
-                    assert (
-                        await c.put("/api/v1/system/model-config", headers=A, json=invalid)
-                    ).status_code == 422
+                    assert (await c.put("/api/v1/system/model-config", headers=A, json=invalid)).status_code == 422
                 assert (
                     await c.put(
                         "/api/v1/system/model-config",

@@ -6,6 +6,7 @@ import pytest
 from sag_api.core.config import settings
 
 _RESTORE = (
+    "llm_provider",
     "llm_base_url",
     "llm_api_key",
     "llm_model",
@@ -100,6 +101,7 @@ async def test_302_quick_model_setup(monkeypatch: pytest.MonkeyPatch):
                 body = response.json()
                 config = body["config"]
                 assert config == {
+                    "llm_provider": "openai",
                     "llm_base_url": "https://api.302ai.cn/v1",
                     "llm_model": "qwen3.6-flash",
                     "llm_temperature": 0.3,
@@ -125,6 +127,7 @@ async def test_302_quick_model_setup(monkeypatch: pytest.MonkeyPatch):
                     "sag_language": "zh",
                 }
                 assert body["capabilities"]["llm_configured"] is True
+                assert body["capabilities"]["llm_provider"] == "openai"
                 assert body["capabilities"]["search_strategy"] == "vector"
                 assert settings.llm_api_key == fake_key
                 assert settings.embedding_api_key == fake_key

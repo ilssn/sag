@@ -54,6 +54,7 @@ function validBundleContract(
   );
   const neighborPage = bundle.neighbor_page;
   return validOpaqueValue(bundle.bundle_id, 512)
+    && validNullableCursor(bundle.cursor_before)
     && validNullableCursor(bundle.cursor_after)
     && validNullableCursor(neighborPage.next_cursor)
     && bundle.event.kind === "event"
@@ -99,34 +100,50 @@ export function admitUniverseTimelinePage(
     0,
   );
   const lastBundle = page.bundles.at(-1);
+  const firstBundle = page.bundles[0];
   const eventIds = page.bundles.map((bundle) => bundle.event.id);
-  const cursors = page.bundles
+  const afterCursors = page.bundles
     .map((bundle) => bundle.cursor_after)
     .filter((cursor): cursor is string => cursor !== null);
+  const beforeCursors = page.bundles
+    .map((bundle) => bundle.cursor_before)
+    .filter((cursor): cursor is string => cursor !== null);
+  const directionalCursor = page.request_direction === "older"
+    ? page.page.older_cursor
+    : page.page.newer_cursor;
   const invalidContract = page.schema_version !== 2
     || !validOpaqueValue(page.source_id, 64)
     || !validOpaqueValue(page.source_revision, 128)
     || !validOpaqueValue(page.snapshot_id, 2048)
     || !validOpaqueValue(page.page_id, 128)
     || !validTimestamp(page.as_of)
+    || !["older", "newer"].includes(page.request_direction)
+    || page.page.direction !== page.request_direction
     || !validNullableCursor(page.request_cursor)
+    || !validNullableCursor(page.page.newer_cursor)
+    || !validNullableCursor(page.page.older_cursor)
     || !validNullableCursor(page.page.next_cursor)
     || page.page.returned_bundles !== page.bundles.length
     || page.page.returned_unique_nodes !== uniqueNodeCount(page)
     || page.page.returned_relations !== relationCount
     || new Set(bundleIds).size !== bundleIds.length
     || new Set(eventIds).size !== eventIds.length
-    || new Set(cursors).size !== cursors.length
-    || (
-      page.request_cursor !== null
-      && cursors.includes(page.request_cursor)
-    )
+    || new Set(afterCursors).size !== afterCursors.length
+    || new Set(beforeCursors).size !== beforeCursors.length
+    || (page.request_direction === "newer" && page.request_cursor === null)
     || (page.bundles.length === 0 && page.page.has_more)
-    || (lastBundle?.cursor_after ?? null) !== page.page.next_cursor
-    || (page.page.has_more && !page.page.next_cursor)
-    || (!page.page.has_more && page.page.next_cursor !== null)
+    || (page.bundles.length > 0
+      && firstBundle?.cursor_before !== page.page.newer_cursor)
+    || (page.bundles.length > 0
+      && lastBundle?.cursor_after !== page.page.older_cursor)
+    || page.page.has_newer !== (page.page.newer_cursor !== null)
+    || page.page.has_older !== (page.page.older_cursor !== null)
+    || page.page.has_more !== (directionalCursor !== null)
+    || page.page.next_cursor !== directionalCursor
+    || (page.request_cursor !== null && page.request_cursor === directionalCursor)
     || page.bundles.some((bundle, index) =>
       (!validBundleContract(bundle, page.source_id)
+        || (index > 0 && !bundle.cursor_before)
         || (index < page.bundles.length - 1 && !bundle.cursor_after)));
   if (invalidContract) {
     throw new Error("invalid timeline bundle contract");
@@ -136,6 +153,7 @@ export function admitUniverseTimelinePage(
     current,
     page.bundles.map((bundle) => ({
       id: bundle.bundle_id,
+      origin: "timeline" as const,
       epoch: page.epoch,
       source_id: page.source_id,
       nodes: [bundle.event, ...bundle.nodes],

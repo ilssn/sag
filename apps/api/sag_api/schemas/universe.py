@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, model_validator
 
 UniverseNodeKind = Literal["event", "entity"]
 UniverseNodeState = Literal["latent", "active"]
+UniverseTimelineDirection = Literal["older", "newer"]
 
 
 class UniverseTimeBucketOut(BaseModel):
@@ -125,6 +126,7 @@ class UniverseTimelineIn(BaseModel):
     epoch: int = Field(ge=1)
     source_id: str = Field(min_length=1, max_length=64)
     limit: int = Field(default=6, ge=1, le=6)
+    direction: UniverseTimelineDirection = "older"
     cursor: str | None = Field(default=None, max_length=2048)
     snapshot_id: str | None = Field(default=None, max_length=2048)
 
@@ -132,6 +134,8 @@ class UniverseTimelineIn(BaseModel):
     def validate_snapshot(self) -> UniverseTimelineIn:
         if self.cursor is not None and self.snapshot_id is None:
             raise ValueError("时间轴续页必须携带 snapshot_id")
+        if self.direction == "newer" and self.cursor is None:
+            raise ValueError("向新时间轴续页必须携带 cursor")
         return self
 
 
@@ -190,6 +194,7 @@ class UniverseTimelineBundleOut(BaseModel):
     nodes: list[UniverseTimelineEntityOut] = Field(default_factory=list)
     relations: list[UniverseTimelineRelationOut] = Field(default_factory=list)
     neighbor_page: UniverseNeighborPageOut
+    cursor_before: str | None = Field(default=None, max_length=2048)
     cursor_after: str | None = Field(default=None, max_length=2048)
 
     @model_validator(mode="after")
@@ -198,10 +203,7 @@ class UniverseTimelineBundleOut(BaseModel):
         if len(set(entity_ids)) != len(entity_ids):
             raise ValueError("时间轴事件包包含重复实体")
         entity_id_set = set(entity_ids)
-        relation_keys = {
-            (relation.from_id, relation.to_id)
-            for relation in self.relations
-        }
+        relation_keys = {(relation.from_id, relation.to_id) for relation in self.relations}
         if len(relation_keys) != len(self.relations):
             raise ValueError("时间轴事件包包含重复关系")
         if any(
@@ -226,8 +228,26 @@ class UniverseTimelinePageOut(BaseModel):
     returned_bundles: int = Field(default=0, ge=0)
     returned_unique_nodes: int = Field(default=0, ge=0)
     returned_relations: int = Field(default=0, ge=0)
+    direction: UniverseTimelineDirection
+    has_newer: bool
+    newer_cursor: str | None = Field(default=None, max_length=2048)
+    has_older: bool
+    older_cursor: str | None = Field(default=None, max_length=2048)
     has_more: bool = False
     next_cursor: str | None = Field(default=None, max_length=2048)
+
+    @model_validator(mode="after")
+    def validate_directional_cursors(self) -> UniverseTimelinePageOut:
+        if self.has_newer != (self.newer_cursor is not None):
+            raise ValueError("has_newer 与 newer_cursor 不一致")
+        if self.has_older != (self.older_cursor is not None):
+            raise ValueError("has_older 与 older_cursor 不一致")
+        directional_cursor = self.older_cursor if self.direction == "older" else self.newer_cursor
+        if self.has_more != (directional_cursor is not None):
+            raise ValueError("has_more 与请求方向的游标不一致")
+        if self.next_cursor != directional_cursor:
+            raise ValueError("next_cursor 与请求方向的游标不一致")
+        return self
 
 
 class UniverseTimelineSliceOut(BaseModel):
@@ -236,6 +256,7 @@ class UniverseTimelineSliceOut(BaseModel):
     source_id: str = Field(min_length=1, max_length=64)
     source_revision: str = Field(min_length=1, max_length=128)
     snapshot_id: str = Field(min_length=1, max_length=2048)
+    request_direction: UniverseTimelineDirection
     request_cursor: str | None = Field(default=None, max_length=2048)
     page_id: str = Field(min_length=1, max_length=128)
     bundles: list[UniverseTimelineBundleOut] = Field(default_factory=list)
@@ -246,31 +267,18 @@ class UniverseTimelineSliceOut(BaseModel):
     def validate_page_contract(self) -> UniverseTimelineSliceOut:
         bundle_ids = [bundle.bundle_id for bundle in self.bundles]
         event_ids = [bundle.event.id for bundle in self.bundles]
-        cursors = [
-            bundle.cursor_after
-            for bundle in self.bundles
-            if bundle.cursor_after is not None
-        ]
+        after_cursors = [bundle.cursor_after for bundle in self.bundles if bundle.cursor_after is not None]
+        before_cursors = [bundle.cursor_before for bundle in self.bundles if bundle.cursor_before is not None]
         if len(set(bundle_ids)) != len(bundle_ids):
             raise ValueError("时间轴页面包含重复事件包")
         if len(set(event_ids)) != len(event_ids):
             raise ValueError("时间轴页面包含重复事件")
-        if len(set(cursors)) != len(cursors):
+        if len(set(after_cursors)) != len(after_cursors) or len(set(before_cursors)) != len(before_cursors):
             raise ValueError("时间轴页面包含重复游标")
-        if any(
-            bundle.event.source_id != self.source_id
-            for bundle in self.bundles
-        ):
+        if any(bundle.event.source_id != self.source_id for bundle in self.bundles):
             raise ValueError("时间轴页面跨越了信息源")
-        unique_nodes = {
-            (bundle.event.kind, bundle.event.id)
-            for bundle in self.bundles
-        }
-        unique_nodes.update(
-            (node.kind, node.id)
-            for bundle in self.bundles
-            for node in bundle.nodes
-        )
+        unique_nodes = {(bundle.event.kind, bundle.event.id) for bundle in self.bundles}
+        unique_nodes.update((node.kind, node.id) for bundle in self.bundles for node in bundle.nodes)
         relation_count = sum(len(bundle.relations) for bundle in self.bundles)
         if self.page.returned_bundles != len(self.bundles):
             raise ValueError("returned_bundles 与事件包数不一致")
@@ -278,19 +286,20 @@ class UniverseTimelineSliceOut(BaseModel):
             raise ValueError("returned_unique_nodes 与节点数不一致")
         if self.page.returned_relations != relation_count:
             raise ValueError("returned_relations 与关系数不一致")
+        if self.page.direction != self.request_direction:
+            raise ValueError("页面方向与请求方向不一致")
         if self.page.has_more and not self.bundles:
             raise ValueError("空页面不能声明 has_more")
-        if self.page.has_more != (self.page.next_cursor is not None):
-            raise ValueError("has_more 与 next_cursor 不一致")
         if any(bundle.cursor_after is None for bundle in self.bundles[:-1]):
             raise ValueError("非末尾事件包缺少 cursor_after")
-        final_cursor = self.bundles[-1].cursor_after if self.bundles else None
-        if final_cursor != self.page.next_cursor:
-            raise ValueError("末尾事件包游标与页面游标不一致")
-        if self.request_cursor is not None and (
-            self.request_cursor == self.page.next_cursor
-            or self.request_cursor in cursors
-        ):
+        if any(bundle.cursor_before is None for bundle in self.bundles[1:]):
+            raise ValueError("非首部事件包缺少 cursor_before")
+        if self.bundles:
+            if self.bundles[0].cursor_before != self.page.newer_cursor:
+                raise ValueError("首部事件包游标与 newer_cursor 不一致")
+            if self.bundles[-1].cursor_after != self.page.older_cursor:
+                raise ValueError("末尾事件包游标与 older_cursor 不一致")
+        if self.request_cursor is not None and self.request_cursor == self.page.next_cursor:
             raise ValueError("时间轴游标没有前进")
         return self
 

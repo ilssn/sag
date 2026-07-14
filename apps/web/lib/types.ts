@@ -130,8 +130,23 @@ export interface Binding {
   config: Record<string, unknown>;
 }
 
+export type ModelProviderId = "openai" | "anthropic" | "gemini";
+
+export interface ModelProviderSpec {
+  id: ModelProviderId;
+  display_name: string;
+  protocol: string;
+  default_model: string;
+  default_base_url: string | null;
+  default_context_window: number;
+  default_temperature: number;
+  temperature_configurable: boolean;
+  can_reuse_embedding_credentials: boolean;
+  api_key_placeholder: string;
+}
+
 export interface ModelConfig {
-  llm_provider: "openai" | "anthropic" | "gemini";
+  llm_provider: ModelProviderId;
   llm_base_url: string | null;
   llm_model: string;
   llm_context_window: number;
@@ -549,12 +564,15 @@ export interface UniverseTimelineRelation extends UniverseRelation {
   kind: "mentions";
 }
 
+export type UniverseTimelineDirection = "older" | "newer";
+
 export interface UniverseTimelineSlice {
   schema_version: 2;
   epoch: number;
   source_id: string;
   source_revision: string;
   snapshot_id: string;
+  request_direction: UniverseTimelineDirection;
   request_cursor: string | null;
   page_id: string;
   bundles: Array<{
@@ -568,12 +586,18 @@ export interface UniverseTimelineSlice {
       complete: boolean;
       next_cursor: string | null;
     };
+    cursor_before: string | null;
     cursor_after: string | null;
   }>;
   page: {
     returned_bundles: number;
     returned_unique_nodes: number;
     returned_relations: number;
+    direction: UniverseTimelineDirection;
+    has_newer: boolean;
+    newer_cursor: string | null;
+    has_older: boolean;
+    older_cursor: string | null;
     has_more: boolean;
     next_cursor: string | null;
   };
@@ -624,7 +648,7 @@ export interface ExplorationDetail {
 
 export interface Capabilities {
   llm_configured: boolean;
-  llm_provider: "openai" | "anthropic" | "gemini";
+  llm_provider: ModelProviderId;
   llm_model: string;
   context_window?: number;
   embedding_model: string;

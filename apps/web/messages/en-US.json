@@ -395,10 +395,22 @@
     "parserTitle": "Parser model",
     "parserLoading": "Loading file parser settings.",
     "keyConfigured": "Configured; leave blank to keep unchanged",
-    "generationDescription": "An OpenAI-compatible endpoint for answer generation and information extraction.",
+    "generationDescription": "Used for answer generation and information extraction, with OpenAI-compatible, Anthropic, and native Gemini protocols.",
     "connectionTitle": "Connection",
-    "connectionDescription": "Service endpoint and access key.",
-    "baseUrlDescription": "Enter an OpenAI-compatible API endpoint.",
+    "connectionDescription": "Choose a provider protocol, then configure its endpoint and access key.",
+    "provider": "Provider protocol",
+    "providerDescription": {
+      "openai": "Works with OpenAI and compatible gateways such as 302.AI or private deployments.",
+      "anthropic": "Uses the Anthropic Messages protocol with Claude streaming and tool calls.",
+      "gemini": "Uses Gemini GenerateContent with streaming and function calling."
+    },
+    "baseUrlDescription": {
+      "openai": "Enter the API root for an OpenAI-compatible Chat Completions endpoint.",
+      "anthropic": "Leave blank for Anthropic's official endpoint, or enter a custom proxy URL.",
+      "gemini": "Leave blank for Google Gemini's official endpoint, or enter a custom proxy URL."
+    },
+    "officialEndpoint": "Leave blank to use the official endpoint",
+    "providerChangedKeyDescription": "The provider changed. Enter its API key; leaving this blank keeps the previously saved key.",
     "generationParams": "Generation parameters",
     "generationParamsDescription": "Control the model, context, and request policy.",
     "model": "Model",
@@ -407,6 +419,7 @@
     "maxOutputTokens": "Maximum output tokens",
     "temperature": "Temperature · {value}",
     "temperatureDescription": "Lower values are more deterministic; higher values are more varied.",
+    "fixedTemperatureDescription": "This provider uses its required default sampling value for model compatibility.",
     "timeout": "Request timeout (ms)",
     "timeoutDescription": "Maximum wait time for a single model request.",
     "retries": "Retry attempts",
@@ -414,10 +427,12 @@
     "embeddingDescription": "Used for document embeddings and semantic retrieval.",
     "modelAndConnection": "Model and connection",
     "embeddingConnectionDescription": "Leave the endpoint or key blank to reuse the generation model settings.",
+    "embeddingNativeConnectionDescription": "Anthropic and Gemini do not share this embedding format. Configure a separate OpenAI-compatible embedding endpoint and key.",
     "dimensions": "Vector dimensions (optional)",
     "modelDefault": "Use model default",
     "optionalBaseUrl": "Base URL (optional)",
     "reuseGeneration": "Reuse generation model",
+    "separateEmbeddingKey": "Configure a separate embedding key",
     "optionalApiKey": "API Key (optional)",
     "parserDescription": "Configure parsing for PDF and other files. Falls back to MarkItDown when MinerU is unavailable or fails.",
     "parserEngine": "Parser engine",
@@ -969,7 +984,7 @@
   },
   "UniverseScene": {
     "aria": "3D knowledge universe graph",
-    "keyboardInstructions": "Use the arrow keys to browse the graph, Enter or Space to activate or lock the current item, and Escape to clear focus.",
+    "keyboardInstructions": "Use the arrow keys to browse, Enter or Space to activate or lock, and Escape to clear focus. Drag to orbit and use the wheel for smooth zoom.",
     "keyboardStatus": "{label}. Item {index, number} of {total, number}.",
     "exploreSource": "Explore source {label}",
     "sourceStats": "{events, plural, one {# event} other {# events}} · {entities, plural, one {# entity} other {# entities}}",
@@ -990,13 +1005,13 @@
     },
     "loadProgress": {
       "rowAria": "Loading progress for {label}",
-      "complete": "All event bundles have been explored; the window is stable",
-      "loading": "Prefetching the next page of event bundles",
+      "complete": "The full time range has been explored; the current view is stable",
+      "loading": "Prefetching adjacent times",
       "clickContinue": "Choose Explore more in the inspector",
-      "scrollContinue": "Scroll inward to advance the event bundles",
+      "browseContinue": "Use the controls below to continue through time",
       "clickStart": "Choose a source to start exploring",
-      "scrollStart": "Enter a galaxy and scroll inward to start exploring",
-      "title": "3D event-bundle window",
+      "browseStart": "Choose a source, then use the controls below to start exploring",
+      "title": "3D time exploration",
       "events": "Queried events / source total",
       "entities": "Resident entities / source total",
       "sourceComplete": "Finished exploring {source}’s timeline; queried {events, plural, one {# event} other {# events}} with {entities, plural, one {# entity} other {# entities}} currently resident"
@@ -1014,15 +1029,16 @@
       "noEventEntities": "No related entities have been extracted for this event yet."
     },
     "timeline": {
-      "loading": "Loading the next page of event bundles and their entities",
+      "loading": "Loading the adjacent page in time",
       "defaultTitle": "Knowledge timeline",
       "thisGalaxy": "this galaxy",
-      "windowReady": "Loaded {visible, plural, one {# event bundle} other {# event bundles}}; the bounded cache fills automatically",
-      "windowAdvanced": "Explored through event bundle {current, number}",
-      "explorationComplete": "Finished every event in {source}; the timeline cannot advance further",
-      "unlockToContinue": "Unlock the current node before advancing the timeline window",
-      "capacityPaused": "Queried {count, plural, one {# event} other {# events}}; the next complete bundle exceeds the device safety capacity.",
-      "lockReleasedForCapacity": "The device display budget decreased, so the temporary lock was released while keeping every event bundle intact.",
+      "windowReady": "Loaded {visible, plural, one {# time entry} other {# time entries}}; adjacent pages preload in the background",
+      "movedEarlier": "Moved into the next, earlier time range",
+      "movedLater": "Returned to the previous, more recent time range",
+      "explorationComplete": "Finished exploring the full timeline in {source}; it cannot advance further",
+      "unlockToContinue": "Unlock the current node before advancing through time",
+      "capacityPaused": "Queried {count, plural, one {# event} other {# events}}; the next complete time page exceeds the device safety capacity.",
+      "lockReleasedForCapacity": "The device display budget decreased, so the temporary lock was released while keeping the current time range intact.",
       "snapshotReloading": "The graph changed, so the old timeline was safely cleared. Loading the latest snapshot automatically.",
       "snapshotReset": "The graph is still changing and automatic reload could not stabilize. Choose the source again to retry."
     },
@@ -1036,7 +1052,17 @@
     },
     "webgl": {
       "title": "The 3D knowledge universe is unavailable",
-      "description": "Statistics and search still work. Refresh to retry, or make sure hardware acceleration is enabled."
+      "description": "This browser does not expose the WebGL2 capability required by Three.js. Enable hardware acceleration and use a current browser.",
+      "contextDisabledTitle": "3D graphics are disabled by the browser",
+      "contextDisabledDescription": "Chrome reports GL_VENDOR / GL_RENDERER as Disabled, which the page cannot override. Enable Use graphics acceleration when available in Chrome Settings → System, then fully relaunch Chrome.",
+      "contextCreationTitle": "The 3D graphics context is temporarily unavailable",
+      "contextCreationDescription": "The browser supports WebGL2 but could not allocate a graphics context this time, usually because of temporary GPU pressure or another busy page. Close GPU-heavy pages and retry; graph data will not reload.",
+      "moduleTitle": "The 3D scene module did not load",
+      "moduleDescription": "Browser graphics are available, but the scene code did not finish loading, usually because of a network interruption or version update. Retry directly.",
+      "sceneTitle": "The 3D scene did not start",
+      "sceneDescription": "A WebGL2 context is available, but graph scene initialization failed. Current data is retained; retry directly and use the console diagnostic for the initialization cause.",
+      "contextLostDescription": "The browser released the graphics context, usually because of temporary GPU pressure or a page transition. Current graph data is retained; retry to restore it.",
+      "retry": "Retry 3D scene"
     },
     "stats": {
       "source": "{events} events · {entities} entities",
@@ -1049,15 +1075,14 @@
     "legend": { "entities": "Topic entities", "events": "Related events" },
     "searchLocked": {
       "label": "Explicit exploration",
-      "description": "Scrolling never loads data in search view. Lock a node, then choose Explore more in the inspector."
+      "description": "The wheel only zooms the view. Lock a node, then choose Explore more in the inspector."
     },
     "inspector": {
-      "hover": "Hover",
+      "lockedNetwork": "Related network locked",
+      "blankToUnlock": "Click an empty area to unlock",
       "viewSource": "View original details",
       "ask": "Ask the astronaut",
       "clear": "Clear selection",
-      "entityFallback": "{category}. Continue exploring its related events.",
-      "eventFallback": "{category}. Related entities are shown with the event.",
       "expanding": "Expanding the next group of relationships",
       "remaining": "{count, plural, one {# relationship remains} other {# relationships remain}} to explore",
       "clickExplore": "Choose Explore more to view related content",
@@ -1068,9 +1093,17 @@
     },
     "controls": {
       "currentResult": "Return to current result",
-      "previousEventBundle": "Return to the previous event bundle",
-      "nextEventBundle": "Enter the next event bundle",
-      "bundlePosition": "Explored {current, number} · cached {cached, number}",
+      "normalMode": "Normal",
+      "previewMode": "Preview",
+      "normalModeHint": "View the current time range steadily · drag to orbit · wheel to zoom",
+      "previewModeHint": "Preview by temporal distance · use Previous and Next to move through time",
+      "cameraRestored": "Normal view restored. Drag to orbit and use the wheel to zoom.",
+      "previousTimePage": "Return to the previous time range",
+      "nextTimePage": "Explore the next time range",
+      "timePosition": "{time}",
+      "completedTimePosition": "{time} · Exploration complete",
+      "partialTime": "{time} (some times are not specified)",
+      "unknownTime": "Time not specified",
       "explorationComplete": "Exploration complete",
       "overview": "Return to full universe",
       "reset": "Reset exploration and view",
@@ -1080,7 +1113,7 @@
   "GraphSettings": {
     "drawer": {
       "title": "Graph display settings",
-      "description": "Adjust node cards, entity types, and the event-bundle window independently. Changes apply to the current graph immediately."
+      "description": "Adjust node cards, entity types, and the time window independently. Changes apply to the current graph immediately."
     },
     "cards": {
       "title": "Node cards",
@@ -1105,21 +1138,21 @@
     },
     "window": {
       "title": "Exploration window",
-      "description": "Control the event bundles on screen separately from reusable cache capacity so long explorations stay bounded."
+      "description": "Control visible time points separately from reusable cache capacity so long explorations stay bounded."
     },
     "visibleEventBundles": {
-      "title": "Visible event-bundle window",
-      "description": "Control how many complete event bundles enter the 3D window together; scrolling still advances one bundle at a time.",
-      "current": "Effective on this device",
-      "aria": "Visible event bundle count",
+      "title": "Visible time window",
+      "description": "Cap visible time points. Each time point stays complete with its entities and enters or retires naturally at the edge.",
+      "current": "Configured upper limit",
+      "aria": "Visible time point count",
       "recommended": "Recommended: {count, number}"
     },
     "cachedEventBundles": {
-      "title": "Event-bundle cache capacity",
-      "description": "This is a memory capacity limit, not a fill target. Bundles load only for paging or low-water prefetch, and existing bundles are reused first.",
+      "title": "Timeline cache capacity",
+      "description": "This caps the memory used for earlier and later times. Adjacent times are prefetched as needed, and existing cache is reused first.",
       "current": "Capacity on this device",
-      "aria": "Event bundle cache capacity",
-      "runway": "Up to {count, number} ahead"
+      "aria": "Timeline cache capacity",
+      "runway": "Up to {count, number} time points reserved"
     },
     "reset": {
       "savedLocally": "Changes apply to the current graph immediately and are saved in this browser.",

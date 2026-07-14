@@ -372,6 +372,11 @@
     z-index: 3;
   }
 
+  .sag-space-sparkles[data-universe-view="detail"]
+    :is(.sag-space-dust, .sag-space-meteor, .sag-space-sparkle) {
+    animation-play-state: paused;
+  }
+
   .sag-space-sparkle::before,
   .sag-space-sparkle::after {
     position: absolute;

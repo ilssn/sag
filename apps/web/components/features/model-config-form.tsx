@@ -22,7 +22,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
 import { Spinner } from "@/components/ui/spinner";
 import { api, ApiError } from "@/lib/api";
-import type { ModelConfig, ModelConfigPatch } from "@/lib/types";
+import type {
+  ModelConfig,
+  ModelConfigPatch,
+  ModelProviderId,
+  ModelProviderSpec,
+} from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 function is302Api(url: string | null) {
@@ -38,11 +43,13 @@ export function ModelConfigForm() {
   const t = useTranslations("ModelConfig");
   const { refreshCapabilities } = useApp();
   const [cfg, setCfg] = React.useState<ModelConfig | null>(null);
+  const [providers, setProviders] = React.useState<ModelProviderSpec[]>([]);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [saving, setSaving] = React.useState(false);
   const [testing, setTesting] = React.useState(false);
   const [testResult, setTestResult] = React.useState<{ ok: boolean; message: string } | null>(null);
 
+  const [llmProvider, setLlmProvider] = React.useState<ModelProviderId>("openai");
   const [llmBaseUrl, setLlmBaseUrl] = React.useState("");
   const [llmKey, setLlmKey] = React.useState("");
   const [llmModel, setLlmModel] = React.useState("");
@@ -64,6 +71,7 @@ export function ModelConfigForm() {
 
   const hydrate = React.useCallback((config: ModelConfig) => {
     setCfg(config);
+    setLlmProvider(config.llm_provider);
     setLlmBaseUrl(config.llm_base_url ?? "");
     setLlmModel(config.llm_model);
     setTemperature(config.llm_temperature);
@@ -85,7 +93,15 @@ export function ModelConfigForm() {
   const load = React.useCallback(async () => {
     setLoadError(null);
     try {
-      hydrate(await api.getModelConfig());
+      const [config, providerCatalog] = await Promise.all([
+        api.getModelConfig(),
+        api.getModelProviders(),
+      ]);
+      if (!providerCatalog.some((provider) => provider.id === config.llm_provider)) {
+        throw new Error("Configured model provider is missing from the provider catalog");
+      }
+      setProviders(providerCatalog);
+      hydrate(config);
     } catch (error) {
       setLoadError(error instanceof ApiError ? error.message : t("loadFailed"));
     }
@@ -95,29 +111,34 @@ export function ModelConfigForm() {
     void load();
   }, [load]);
 
+  function currentPatch(): ModelConfigPatch {
+    const patch: ModelConfigPatch = {
+      llm_provider: llmProvider,
+      llm_base_url: llmBaseUrl.trim() || null,
+      llm_model: llmModel.trim(),
+      llm_temperature: temperature,
+      llm_max_tokens: maxTokens,
+      llm_timeout_ms: timeoutMs,
+      llm_max_retries: maxRetries,
+      llm_context_window: ctxWindow,
+      embedding_model: embModel.trim(),
+      embedding_base_url: embBaseUrl.trim(),
+      embedding_dimensions: embDims.trim() ? Number(embDims) : null,
+      document_parser: documentParser,
+      mineru_base_url: mineruBaseUrl.trim() || null,
+      mineru_version: mineruVersion,
+    };
+    if (llmKey.trim()) patch.llm_api_key = llmKey.trim();
+    if (embKey.trim()) patch.embedding_api_key = embKey.trim();
+    if (mineruKey.trim()) patch.mineru_api_key = mineruKey.trim();
+    return patch;
+  }
+
   async function save() {
     setSaving(true);
     setTestResult(null);
     try {
-      const patch: ModelConfigPatch = {
-        llm_base_url: llmBaseUrl.trim(),
-        llm_model: llmModel.trim(),
-        llm_temperature: temperature,
-        llm_max_tokens: maxTokens,
-        llm_timeout_ms: timeoutMs,
-        llm_max_retries: maxRetries,
-        llm_context_window: ctxWindow,
-        embedding_model: embModel.trim(),
-        embedding_base_url: embBaseUrl.trim(),
-        embedding_dimensions: embDims.trim() ? Number(embDims) : null,
-        document_parser: documentParser,
-        mineru_base_url: mineruBaseUrl.trim() || null,
-        mineru_version: mineruVersion,
-      };
-      if (llmKey.trim()) patch.llm_api_key = llmKey.trim();
-      if (embKey.trim()) patch.embedding_api_key = embKey.trim();
-      if (mineruKey.trim()) patch.mineru_api_key = mineruKey.trim();
-
+      const patch = currentPatch();
       const { config } = await api.saveModelConfig(patch);
       hydrate(config);
       await refreshCapabilities();
@@ -133,7 +154,7 @@ export function ModelConfigForm() {
     setTesting(true);
     setTestResult(null);
     try {
-      setTestResult(await api.testModelConfig());
+      setTestResult(await api.testModelConfig(currentPatch()));
     } catch (error) {
       setTestResult({
         ok: false,
@@ -142,6 +163,38 @@ export function ModelConfigForm() {
     } finally {
       setTesting(false);
     }
+  }
+
+  function changeProvider(value: string) {
+    const next = providers.find((provider) => provider.id === value);
+    const current = providers.find((provider) => provider.id === llmProvider);
+    if (!next) return;
+    const knownUrls = new Set(
+      providers.map((provider) => provider.default_base_url).filter(Boolean),
+    );
+    const knownModels = new Set(providers.map((provider) => provider.default_model));
+    const knownContextWindows = new Set(
+      providers.map((provider) => provider.default_context_window),
+    );
+    if (!llmBaseUrl.trim() || knownUrls.has(llmBaseUrl.trim())) {
+      setLlmBaseUrl(next.default_base_url ?? "");
+    }
+    if (!llmModel.trim() || knownModels.has(llmModel.trim())) {
+      setLlmModel(next.default_model);
+    }
+    if (knownContextWindows.has(ctxWindow)) {
+      setCtxWindow(next.default_context_window);
+    }
+    if (
+      !next.temperature_configurable ||
+      !current ||
+      !current.temperature_configurable ||
+      temperature === current.default_temperature
+    ) {
+      setTemperature(next.default_temperature);
+    }
+    setLlmProvider(next.id);
+    setTestResult(null);
   }
 
   async function setup302MinerU() {
@@ -177,7 +230,7 @@ export function ModelConfigForm() {
     );
   }
 
-  if (!cfg) {
+  if (!cfg || providers.length === 0) {
     return (
       <div className="flex flex-col gap-6">
         {[
@@ -196,7 +249,13 @@ export function ModelConfigForm() {
     );
   }
 
+  const providerSpec = providers.find((provider) => provider.id === llmProvider)!;
+
   const keyPlaceholder = (isSet: boolean) => (isSet ? t("keyConfigured") : "sk-…");
+  const generationKeyPlaceholder =
+    cfg.llm_api_key_set && cfg.llm_provider === llmProvider
+      ? t("keyConfigured")
+      : providerSpec.api_key_placeholder;
   const canReuse302Key =
     (cfg.llm_api_key_set && is302Api(cfg.llm_base_url)) ||
     (cfg.embedding_api_key_set && is302Api(cfg.embedding_base_url));
@@ -207,14 +266,30 @@ export function ModelConfigForm() {
         <SettingsRow title={t("connectionTitle")} description={t("connectionDescription")}>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field>
+              <FieldLabel htmlFor="llm-provider">{t("provider")}</FieldLabel>
+              <Select value={llmProvider} onValueChange={changeProvider}>
+                <SelectTrigger id="llm-provider">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {providers.map((provider) => (
+                    <SelectItem key={provider.id} value={provider.id}>
+                      {provider.display_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FieldDescription>{t(`providerDescription.${llmProvider}`)}</FieldDescription>
+            </Field>
+            <Field>
               <FieldLabel htmlFor="llm-url">Base URL</FieldLabel>
               <Input
                 id="llm-url"
                 value={llmBaseUrl}
                 onChange={(event) => setLlmBaseUrl(event.target.value)}
-                placeholder="https://api.302ai.cn/v1"
+                placeholder={providerSpec.default_base_url ?? t("officialEndpoint")}
               />
-              <FieldDescription>{t("baseUrlDescription")}</FieldDescription>
+              <FieldDescription>{t(`baseUrlDescription.${llmProvider}`)}</FieldDescription>
             </Field>
             <Field>
               <FieldLabel htmlFor="llm-key">API Key</FieldLabel>
@@ -224,8 +299,13 @@ export function ModelConfigForm() {
                 autoComplete="off"
                 value={llmKey}
                 onChange={(event) => setLlmKey(event.target.value)}
-                placeholder={keyPlaceholder(cfg.llm_api_key_set)}
+                placeholder={generationKeyPlaceholder}
               />
+              <FieldDescription>
+                {cfg.llm_provider !== llmProvider && cfg.llm_api_key_set
+                  ? t("providerChangedKeyDescription")
+                  : t("secretDescription")}
+              </FieldDescription>
             </Field>
           </div>
         </SettingsRow>
@@ -238,7 +318,7 @@ export function ModelConfigForm() {
                 id="llm-model"
                 value={llmModel}
                 onChange={(event) => setLlmModel(event.target.value)}
-                placeholder="gpt-4o-mini"
+                placeholder={providerSpec.default_model}
               />
             </Field>
             <Field>
@@ -269,17 +349,36 @@ export function ModelConfigForm() {
               />
             </Field>
             <Field>
-              <FieldLabel>{t("temperature", { value: temperature.toFixed(1) })}</FieldLabel>
+              <FieldLabel>
+                {t("temperature", {
+                  value: (
+                    providerSpec.temperature_configurable
+                      ? temperature
+                      : providerSpec.default_temperature
+                  ).toFixed(1),
+                })}
+              </FieldLabel>
               <div className="flex h-9 items-center">
                 <Slider
-                  value={[temperature]}
+                  value={[
+                    providerSpec.temperature_configurable
+                      ? temperature
+                      : providerSpec.default_temperature,
+                  ]}
                   min={0}
                   max={2}
                   step={0.1}
+                  disabled={!providerSpec.temperature_configurable}
                   onValueChange={([value]) => setTemperature(value)}
                 />
               </div>
-              <FieldDescription>{t("temperatureDescription")}</FieldDescription>
+              <FieldDescription>
+                {t(
+                  !providerSpec.temperature_configurable
+                    ? "fixedTemperatureDescription"
+                    : "temperatureDescription",
+                )}
+              </FieldDescription>
             </Field>
             <Field>
               <FieldLabel htmlFor="llm-timeout">{t("timeout")}</FieldLabel>
@@ -318,7 +417,14 @@ export function ModelConfigForm() {
       </SettingsSection>
 
       <SettingsSection title={t("embeddingTitle")} description={t("embeddingDescription")}>
-        <SettingsRow title={t("modelAndConnection")} description={t("embeddingConnectionDescription")}>
+        <SettingsRow
+          title={t("modelAndConnection")}
+          description={t(
+            providerSpec.can_reuse_embedding_credentials
+              ? "embeddingConnectionDescription"
+              : "embeddingNativeConnectionDescription",
+          )}
+        >
           <div className="grid gap-4 sm:grid-cols-2">
             <Field>
               <FieldLabel htmlFor="emb-model">{t("model")}</FieldLabel>
@@ -359,7 +465,11 @@ export function ModelConfigForm() {
                 value={embKey}
                 onChange={(event) => setEmbKey(event.target.value)}
                 placeholder={
-                  cfg.embedding_api_key_set ? t("keyConfigured") : t("reuseGeneration")
+                  cfg.embedding_api_key_set
+                    ? t("keyConfigured")
+                    : providerSpec.can_reuse_embedding_credentials
+                      ? t("reuseGeneration")
+                      : t("separateEmbeddingKey")
                 }
               />
             </Field>

@@ -153,14 +153,18 @@ describe("universe view settings drawer", () => {
     expect(en.GraphSettings.visibleEventBundles.title).toBeTruthy();
     expect(zh.GraphSettings.cachedEventBundles.title).toBeTruthy();
     expect(en.GraphSettings.cachedEventBundles.title).toBeTruthy();
-    expect(zh.GraphSettings.visibleEventBundles.current).toContain("本设备实际");
-    expect(en.GraphSettings.visibleEventBundles.current).toContain("device");
-    expect(zh.GraphSettings.visibleEventBundles.description).toContain("平滑推进");
+    expect(zh.GraphSettings.visibleEventBundles.current).toContain("配置上限");
+    expect(en.GraphSettings.visibleEventBundles.current).toContain("upper limit");
+    expect(zh.GraphSettings.visibleEventBundles.title).toContain("时间");
+    expect(en.GraphSettings.visibleEventBundles.title).toContain("time");
+    expect(zh.GraphSettings.visibleEventBundles.description).toContain("边缘自然进出");
     expect(en.GraphSettings.visibleEventBundles.description).toContain(
-      "one bundle at a time",
+      "retires naturally at the edge",
     );
-    expect(zh.GraphSettings.cachedEventBundles.description).toContain("不会主动填满");
-    expect(en.GraphSettings.cachedEventBundles.description).toContain("not a fill target");
+    expect(zh.GraphSettings.cachedEventBundles.description).toContain("相邻时间");
+    expect(en.GraphSettings.cachedEventBundles.description).toContain("Adjacent times");
+    expect(JSON.stringify(zh.GraphSettings)).not.toContain("事件包");
+    expect(JSON.stringify(en.GraphSettings).toLowerCase()).not.toContain("event bundle");
     expect(zh.GraphSettings.cards.event.title).toBeTruthy();
     expect(en.GraphSettings.cards.entity.title).toBeTruthy();
     expect(zh.GraphSettings.entityTypes.description).toContain("实体及其事项连线一起隐藏");

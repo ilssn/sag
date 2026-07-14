@@ -13,6 +13,7 @@ import type {
   MessagePage,
   ModelConfig,
   ModelConfigPatch,
+  ModelProviderSpec,
   ModelSetupStatus,
   KnowledgeMcpDescriptor,
   Persona,
@@ -373,6 +374,8 @@ export const api = {
 
   // 模型与检索配置
   getModelConfig: () => request<ModelConfig>("/api/v1/system/model-config"),
+  getModelProviders: () =>
+    request<ModelProviderSpec[]>("/api/v1/system/model-providers"),
   modelSetupStatus: () => request<ModelSetupStatus>("/api/v1/system/model-setup"),
   quickSetup302: (apiKey: string) =>
     request<{ config: ModelConfig; capabilities: Capabilities }>(
@@ -392,9 +395,10 @@ export const api = {
       "/api/v1/system/model-config/mineru/302",
       { method: "POST" },
     ),
-  testModelConfig: () =>
+  testModelConfig: (b?: ModelConfigPatch) =>
     request<{ ok: boolean; message: string }>("/api/v1/system/model-config/test", {
       method: "POST",
+      body: b ? JSON.stringify(b) : undefined,
     }),
 
   // 信源
@@ -567,6 +571,7 @@ export const api = {
     epoch: number;
     source_id: string;
     limit?: number;
+    direction?: "older" | "newer";
     cursor?: string | null;
     snapshot_id?: string | null;
   }, signal?: AbortSignal) =>

@@ -1,5 +1,4 @@
 """Aggregate universe overview, bounded expansion, and exploration history."""
-
 from __future__ import annotations
 
 import asyncio
@@ -81,12 +80,12 @@ async def _source_graph_revision(
             raise NotFoundError("信息源不存在")
         overview_id = await revision_session.scalar(
             select(UniverseOverview.id)
-            .where(
-                UniverseOverview.user_id == user_id,
-                UniverseOverview.is_active.is_(True),
-                UniverseOverview.status == "ready",
-            )
-            .order_by(UniverseOverview.created_at.desc())
+        .where(
+            UniverseOverview.user_id == user_id,
+            UniverseOverview.is_active.is_(True),
+            UniverseOverview.status == "ready",
+        )
+        .order_by(UniverseOverview.created_at.desc())
         )
         dirty_revision = await revision_session.scalar(
             select(UniverseDirtySource.revision).where(
@@ -115,18 +114,19 @@ def _universe_schedule_lock() -> asyncio.Lock:
     loop = asyncio.get_running_loop()
     return _UNIVERSE_SCHEDULE_LOCKS.setdefault(loop, asyncio.Lock())
 
+
 async def _previous_partition_positions(
     session: AsyncSession, user_id: str
 ) -> dict[tuple[str, str, str], tuple[float, float, float]]:
     active = (
         await session.execute(
             select(UniverseOverview.id, UniverseOverview.schema_version)
-        .where(
-            UniverseOverview.user_id == user_id,
-            UniverseOverview.is_active.is_(True),
-            UniverseOverview.status == "ready",
-        )
-        .order_by(UniverseOverview.created_at.desc())
+            .where(
+                UniverseOverview.user_id == user_id,
+                UniverseOverview.is_active.is_(True),
+                UniverseOverview.status == "ready",
+            )
+            .order_by(UniverseOverview.created_at.desc())
         )
     ).first()
     if active is None or int(active.schema_version or 1) < 3:
@@ -765,6 +765,7 @@ async def universe_timeline(
     user_id: str,
     source_id: str,
     limit: int,
+    direction: str,
     cursor: str | None,
     snapshot_id: str | None,
 ) -> dict[str, Any]:
@@ -783,6 +784,7 @@ async def universe_timeline(
                 source=source,
                 limit=max(1, min(int(limit), 6)),
                 entity_limit=settings.universe_event_entity_limit,
+                direction=direction,
                 cursor=cursor,
                 snapshot_id=snapshot_id,
                 source_revision=source_revision,
@@ -812,6 +814,7 @@ async def universe_timeline(
             source.id,
             source_revision,
             page.as_of.isoformat(),
+            direction,
             cursor or "root",
             str(limit),
             *(bundle.bundle_id for bundle in page.bundles),
@@ -825,45 +828,38 @@ async def universe_timeline(
         {
             "bundle_id": f"{source.id}:{bundle.bundle_id}",
             "event": {**bundle.event, "source_id": source.id},
-            "nodes": [
-                {**node, "source_id": source.id} for node in bundle.nodes
-            ],
-            "relations": [
-                {**relation, "source_id": source.id}
-                for relation in bundle.relations
-            ],
+            "nodes": [{**node, "source_id": source.id} for node in bundle.nodes],
+            "relations": [{**relation, "source_id": source.id} for relation in bundle.relations],
             "neighbor_page": {
                 "total_unique": bundle.neighbor_total,
                 "returned_unique": bundle.neighbor_returned,
                 "complete": bundle.complete,
                 "next_cursor": bundle.neighbor_next_cursor,
             },
+            "cursor_before": bundle.cursor_before,
             "cursor_after": bundle.cursor_after,
         }
         for bundle in page.bundles
     ]
-    returned_node_keys = {
-        (bundle["event"]["kind"], bundle["event"]["id"])
-        for bundle in bundles
-    }
-    returned_node_keys.update(
-        (node["kind"], node["id"])
-        for bundle in bundles
-        for node in bundle["nodes"]
-    )
+    returned_node_keys = {(bundle["event"]["kind"], bundle["event"]["id"]) for bundle in bundles}
+    returned_node_keys.update((node["kind"], node["id"]) for bundle in bundles for node in bundle["nodes"])
     return {
         "source_id": source.id,
         "source_revision": source_revision,
         "snapshot_id": page.snapshot_id,
+        "request_direction": direction,
         "request_cursor": cursor,
         "page_id": page_id,
         "bundles": bundles,
         "page": {
             "returned_bundles": len(page.bundles),
             "returned_unique_nodes": len(returned_node_keys),
-            "returned_relations": sum(
-                len(bundle["relations"]) for bundle in bundles
-            ),
+            "returned_relations": sum(len(bundle["relations"]) for bundle in bundles),
+            "direction": page.direction,
+            "has_newer": page.has_newer,
+            "newer_cursor": page.newer_cursor,
+            "has_older": page.has_older,
+            "older_cursor": page.older_cursor,
             "has_more": page.has_more,
             "next_cursor": page.next_cursor,
         },
