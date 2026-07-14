@@ -33,6 +33,7 @@ import {
   UNIVERSE_ACTIVATE_EVENT,
   UNIVERSE_FOCUS_EVENT,
   UNIVERSE_RESET_EVENT,
+  UNIVERSE_SOURCE_FOCUS_EVENT,
   dispatchUniverseAsk,
   dispatchUniverseDetail,
   dispatchUniversePatch,
@@ -396,6 +397,7 @@ export function KnowledgeUniverse({
   const completedSourcesRef = React.useRef(new Set<string>());
   const activationOriginRef = React.useRef<UniverseActivationOrigin>("browse");
   const viewportSourceRef = React.useRef<string | null>(null);
+  const selectedKeyRef = React.useRef<string | null>(null);
   const previousWorkspacePanelRef = React.useRef(workspacePanel);
   const cursorsRef = React.useRef(new Map<string, string>());
   const expandedAnchorsRef = React.useRef(new Set<string>());
@@ -407,7 +409,7 @@ export function KnowledgeUniverse({
   const [visibleCount, setVisibleCount] = React.useState(0);
   const [activePartition, setActivePartition] = React.useState<string | null>(null);
   const [viewportSourceId, setViewportSourceId] = React.useState<string | null>(null);
-  const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
+  const [selectedKey, setSelectedKeyState] = React.useState<string | null>(null);
   const [hoveredConcreteKey, setHoveredConcreteKey] = React.useState<string | null>(null);
   const [sourceHits, setSourceHits] = React.useState<
     NonNullable<UniverseActivation["source_hits"]>
@@ -422,6 +424,11 @@ export function KnowledgeUniverse({
   const [rebuilding, setRebuilding] = React.useState(false);
   const [error, setError] = React.useState("");
   const [webglAvailable, setWebglAvailable] = React.useState<boolean | null>(null);
+
+  const setSelectedKey = React.useCallback((key: string | null) => {
+    selectedKeyRef.current = key;
+    setSelectedKeyState(key);
+  }, []);
 
   const mobile = dimensions.width < 768;
   const policyBudget = React.useMemo(
@@ -600,8 +607,11 @@ export function KnowledgeUniverse({
   ]);
 
   const focusOverview = React.useCallback(() => {
+    graphRef.current?.unlockNode();
+    setSelectedKey(null);
+    setHoveredConcreteKey(null);
     graphRef.current?.focusOverview();
-  }, []);
+  }, [setSelectedKey]);
 
   const focusResult = React.useCallback(() => {
     graphRef.current?.focusResult();
@@ -711,7 +721,7 @@ export function KnowledgeUniverse({
         });
       }
     },
-    [clearCameraSchedule, clearStageTimer, focusOverview, refreshLoadProgress],
+    [clearCameraSchedule, clearStageTimer, focusOverview, refreshLoadProgress, setSelectedKey],
   );
 
   React.useEffect(() => {
@@ -794,6 +804,7 @@ export function KnowledgeUniverse({
     recordLoadedContent,
     reducedMotion,
     resetScene,
+    setSelectedKey,
     stageTo,
   ]);
 
@@ -1228,7 +1239,10 @@ export function KnowledgeUniverse({
             },
             budgetRef.current,
             Date.now(),
-            { roots: state.pages === 0 },
+            {
+              roots: state.pages === 0,
+              protectedKeys: selectedKeyRef.current ? [selectedKeyRef.current] : [],
+            },
           );
           workingRef.current = next;
           setWorking(next);
@@ -1287,14 +1301,37 @@ export function KnowledgeUniverse({
     ],
   );
 
-  const activatePartition = React.useCallback(
-    (node: Universe3DNode) => {
+  const activateSource = React.useCallback(
+    (sourceId: string) => {
+      if (!sourceById.has(sourceId)) return;
       clearCameraSchedule();
-      setActivePartition(node.sourceId);
-      focusPartition(node.sourceId);
-      void loadSourceTimeline(node.sourceId, 1);
+      expandAbortRef.current?.abort();
+      expandAbortRef.current = null;
+      setExpandingKey(null);
+      graphRef.current?.unlockNode();
+      setSelectedKey(null);
+      setHoveredConcreteKey(null);
+      setActivePartition(sourceId);
+      focusPartition(sourceId);
+      void loadSourceTimeline(sourceId, 1);
     },
-    [clearCameraSchedule, focusPartition, loadSourceTimeline],
+    [clearCameraSchedule, focusPartition, loadSourceTimeline, setSelectedKey, sourceById],
+  );
+
+  React.useEffect(() => {
+    const onSourceFocus = (event: Event) => {
+      const sourceId = (
+        event as CustomEvent<{ source_id: string }>
+      ).detail?.source_id;
+      if (sourceId) activateSource(sourceId);
+    };
+    window.addEventListener(UNIVERSE_SOURCE_FOCUS_EVENT, onSourceFocus);
+    return () => window.removeEventListener(UNIVERSE_SOURCE_FOCUS_EVENT, onSourceFocus);
+  }, [activateSource]);
+
+  const activatePartition = React.useCallback(
+    (node: Universe3DNode) => activateSource(node.sourceId),
+    [activateSource],
   );
 
   const handleSourceLod = React.useCallback(
@@ -1365,14 +1402,14 @@ export function KnowledgeUniverse({
       }
       void expandNode(exact);
     },
-    [activatePartition, expandNode, t],
+    [activatePartition, expandNode, setSelectedKey, t],
   );
 
   const clearSelection = React.useCallback(() => {
     graphRef.current?.unlockNode();
     setSelectedKey(null);
     setHoveredConcreteKey(null);
-  }, []);
+  }, [setSelectedKey]);
 
   const resetUniversePresentation = React.useCallback(() => {
     graphRef.current?.resetOverview();
@@ -1381,7 +1418,7 @@ export function KnowledgeUniverse({
     setActivePartition(null);
     setSelectedKey(null);
     setHoveredConcreteKey(null);
-  }, []);
+  }, [setSelectedKey]);
 
   React.useEffect(() => {
     if (!selectedKey || graphData.nodes.some((node) => node.id === selectedKey)) return;

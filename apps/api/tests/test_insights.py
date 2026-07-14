@@ -39,13 +39,13 @@ async def test_entity_read_path():
                         storage_path="/tmp/three-kingdoms.md",
                         status=DocumentStatus.READY,
                         chunk_count=1,
-                        event_count=1,
+                        event_count=2,
                         sag_source_id="d1",
                     )
                 )
                 source.document_count = 1
                 source.chunk_count = 1
-                source.event_count = 1
+                source.event_count = 2
                 await s.commit()
 
             # 注入事件—实体图谱（模拟 extract 产物）
@@ -102,6 +102,21 @@ async def test_entity_read_path():
                 s.add(ev)
                 await s.flush()
                 event_id = ev.id
+                hidden_event = SourceEvent(
+                    id=uuid.uuid4().hex,
+                    source_config_id=scid,
+                    source_type="doc",
+                    source_id="d1",
+                    title="桃园结义",
+                    summary="刘备、关羽、张飞结为兄弟。",
+                    content="桃园三结义。",
+                    chunk_id="chunk-1",
+                    rank=1,
+                    status="DELETED",
+                )
+                s.add(hidden_event)
+                await s.flush()
+                hidden_event_id = hidden_event.id
                 entity_id = ent.id
                 s.add(
                     SourceChunk(
@@ -134,15 +149,20 @@ async def test_entity_read_path():
             assert response.status_code == 200
             graph = response.json()
             assert graph["documents"][0]["id"] == document_id
-            assert graph["events"][0]["title"] == "过五关斩六将"
-            assert graph["events"][0]["document_id"] == document_id
+            assert {event["title"] for event in graph["events"]} == {
+                "过五关斩六将",
+                "桃园结义",
+            }
+            assert all(event["document_id"] == document_id for event in graph["events"])
             assert graph["entities"][0]["name"] == "关羽"
             assert {relation["kind"] for relation in graph["relations"]} == {
                 "contains",
                 "mentions",
             }
-            assert graph["counts"]["shown_relations"] == 2
+            assert graph["counts"]["shown_relations"] == 3
             assert graph["truncated"] is False
+            async with sf() as s:
+                assert (await s.get(SourceEvent, hidden_event_id)).status == "COMPLETED"
 
             # 搜索命中分块可稳定映射回事件标题、摘要及真实事件—实体关系。
             from sag_api.sag import RetrievedSection
@@ -163,8 +183,14 @@ async def test_entity_read_path():
             assert search_graph.entities[0].name == "关羽"
             assert search_graph.associations[0].event_id == search_graph.events[0].id
 
-            # 参数有硬上限，避免调用方绕过服务端性能护栏。
-            invalid = await c.get(f"/api/v1/sources/{sid}/graph?event_limit=121", headers=H)
+            # 图谱允许界面按性能选择更大的展示量，同时保留防止误请求的上限。
+            large = await c.get(
+                f"/api/v1/sources/{sid}/graph"
+                "?document_limit=2000&event_limit=2000&entity_limit=2000",
+                headers=H,
+            )
+            assert large.status_code == 200
+            invalid = await c.get(f"/api/v1/sources/{sid}/graph?event_limit=10001", headers=H)
             assert invalid.status_code == 422
 
             # 删除文档必须同步清理统计与引擎中的块、事件及孤立实体。
@@ -181,6 +207,7 @@ async def test_entity_read_path():
                 assert await s.get(Article, "d1") is None
                 assert await s.get(SourceChunk, "chunk-1") is None
                 assert await s.get(SourceEvent, event_id) is None
+                assert await s.get(SourceEvent, hidden_event_id) is None
                 assert await s.get(Entity, entity_id) is None
 
             empty_source = (

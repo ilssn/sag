@@ -385,11 +385,30 @@ async def active_overview(
     )
 
 
-async def overview_is_stale(session: AsyncSession, user_id: str) -> bool:
+async def overview_is_stale(
+    session: AsyncSession,
+    user_id: str,
+    overview: UniverseOverview | None = None,
+) -> bool:
     count = await session.scalar(
         select(func.count(UniverseDirtySource.id)).where(UniverseDirtySource.user_id == user_id)
     )
-    return bool(count)
+    if count or overview is None:
+        return bool(count)
+
+    source_count = await session.scalar(select(func.count(Source.id)))
+    if int(overview.source_count or 0) != int(source_count or 0):
+        return True
+    undercounted_sources = await session.scalar(
+        select(func.count(UniversePartition.id))
+        .join(Source, Source.id == UniversePartition.source_id)
+        .where(
+            UniversePartition.overview_id == overview.id,
+            UniversePartition.kind == "source",
+            UniversePartition.event_count < Source.event_count,
+        )
+    )
+    return bool(undercounted_sources)
 
 
 async def universe_rebuild_is_pending(session: AsyncSession, user_id: str) -> bool:
@@ -409,7 +428,7 @@ async def universe_manifest(
     user_id: str,
 ) -> dict[str, Any]:
     overview = await active_overview(session, user_id)
-    stale = await overview_is_stale(session, user_id)
+    stale = await overview_is_stale(session, user_id, overview)
     if overview is None:
         rebuilding = await universe_rebuild_is_pending(session, user_id)
         latest_failed = await session.scalar(

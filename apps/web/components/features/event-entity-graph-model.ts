@@ -49,12 +49,9 @@ export function sliceEventEntityGraph(graph: SourceGraphResponse): EventEntityGr
     relations.push({ id: `mention:${key}`, eventId, entityId });
   });
 
-  const linkedEventIds = new Set(relations.map((relation) => relation.eventId));
-  const linkedEntityIds = new Set(relations.map((relation) => relation.entityId));
-
   return {
-    events: graph.events.filter((event) => linkedEventIds.has(event.id)),
-    entities: graph.entities.filter((entity) => linkedEntityIds.has(entity.id)),
+    events: graph.events,
+    entities: graph.entities,
     relations,
   };
 }

@@ -9,6 +9,23 @@ export interface LiveStep extends MessageStep {
   progress?: string;
 }
 
+export interface ToolScope {
+  kind: "knowledge" | "internet" | null;
+  sources: NonNullable<NonNullable<MessageStep["details"]>["sources"]>;
+}
+
+export function toolScope(step: MessageStep): ToolScope {
+  if (step.name === "web_search" || step.details?.scope === "internet") {
+    return { kind: "internet", sources: [] };
+  }
+  const isKnowledgeTool = step.name === "search_context" || step.name === "get_entity";
+  if (step.details?.scope === "knowledge" || isKnowledgeTool) {
+    const sources = step.details?.sources?.filter((source) => Boolean(source.name)) ?? [];
+    return { kind: "knowledge", sources };
+  }
+  return { kind: null, sources: [] };
+}
+
 export function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)

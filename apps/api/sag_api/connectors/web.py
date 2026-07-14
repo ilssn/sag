@@ -49,7 +49,7 @@ def _filename_for(url: str) -> str:
     return f"{p.netloc}-{slug}.md" if p.netloc else f"{slug}.md"
 
 
-def _title(html: str) -> str | None:
+def extract_web_title(html: str) -> str | None:
     m = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
     return re.sub(r"\s+", " ", m.group(1)).strip() if m else None
 
@@ -59,6 +59,25 @@ def _strip_tags(html: str) -> str:
     text = re.sub(r"(?s)<[^>]+>", " ", html)
     text = re.sub(r"[ \t]+", " ", text)
     return re.sub(r"\n\s*\n\s*\n+", "\n\n", text).strip()
+
+
+def extract_web_markdown(html: str) -> str:
+    """Extract readable Markdown from an HTML page."""
+    try:
+        import trafilatura
+
+        md = trafilatura.extract(
+            html,
+            output_format="markdown",
+            include_comments=False,
+            include_tables=True,
+            favor_precision=True,
+        )
+        if md and md.strip():
+            return md
+    except Exception as e:  # noqa: BLE001
+        log.warning("trafilatura 抽取失败，回退裸文本：%s", e)
+    return _strip_tags(html)
 
 
 class WebConnector(Connector):
@@ -107,11 +126,11 @@ class WebConnector(Connector):
         except Exception as e:  # noqa: BLE001
             raise UpstreamError(f"抓取失败 {doc.external_id}：{e}") from e
 
-        body = self._extract_markdown(html)
+        body = extract_web_markdown(html)
         if not body.strip():
             raise UpstreamError(f"未能从页面提取到正文：{doc.external_id}")
 
-        title = _title(html) or doc.filename
+        title = extract_web_title(html) or doc.filename
         content = f"# {title}\n\n> 来源：{doc.external_id}\n\n{body}\n"
 
         digest = hashlib.md5(doc.external_id.encode()).hexdigest()[:12]
@@ -124,22 +143,3 @@ class WebConnector(Connector):
             content_type="text/markdown",
             size_bytes=len(content.encode("utf-8")),
         )
-
-    @staticmethod
-    def _extract_markdown(html: str) -> str:
-        """优先用 trafilatura 抽取正文（干净、去样板）；不可用时回退到裸文本。"""
-        try:
-            import trafilatura
-
-            md = trafilatura.extract(
-                html,
-                output_format="markdown",
-                include_comments=False,
-                include_tables=True,
-                favor_precision=True,
-            )
-            if md and md.strip():
-                return md
-        except Exception as e:  # noqa: BLE001
-            log.warning("trafilatura 抽取失败，回退裸文本：%s", e)
-        return _strip_tags(html)

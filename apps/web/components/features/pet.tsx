@@ -679,11 +679,9 @@ export function Pet({
     openSettings("agent", "appearance");
   }
 
-  function collapseToHead() {
+  function switchToSimpleForm() {
     if (ambient || characterState.motion !== "idle") return;
-    setOpen(false);
     setPetOverlay("none");
-    hideWorkspace();
     setCurious(false);
     setRevealing(false);
     if (expandActionTimerRef.current !== null) {
@@ -1024,8 +1022,7 @@ export function Pet({
                   disabled={!collapsed && characterState.motion !== "idle"}
                   onClick={() => {
                     if (collapsed) return;
-                    setPetOverlay("none");
-                    collapseToHead();
+                    switchToSimpleForm();
                   }}
                   className={cn(
                     "h-6 rounded px-2 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-35",

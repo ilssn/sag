@@ -16,7 +16,7 @@ from sag_api.sag import GraphEventInfo, RetrievedSection, SearchOutcome, SourceG
 from sag_api.services.agent_service import _adapt_tool, _enabled_tool_names
 from sag_api.tools import registry
 from sag_api.tools.base import Tool, ToolContext, ToolMeta, ToolResult
-from sag_api.tools.builtin import GetTimeTool, SearchContextTool
+from sag_api.tools.builtin import GetTimeTool, OpenWebPageTool, SearchContextTool, WebSearchTool
 
 ECHO_CITATION = {
     "n": 1,
@@ -78,6 +78,21 @@ class ExternalEvidenceTool(Tool):
 
 
 registry.register(ExternalEvidenceTool())
+
+
+class StubWebSearchTool(Tool):
+    meta = ToolMeta(
+        name="web_search",
+        description="测试工具：返回一条互联网搜索结果。",
+        parameters={"type": "object", "properties": {}},
+    )
+
+    async def invoke(self, args, ctx):
+        del args, ctx
+        return ToolResult(
+            content="网页 1：广州天气预报",
+            data={"section_count": 1},
+        )
 
 
 @pytest.mark.asyncio
@@ -162,8 +177,30 @@ async def test_search_tool_prefers_exact_body_window_over_semantic_boilerplate()
 
     assert adapter_engine.graph_calls == 1
     assert collected_citations[0]["event_refs"][0]["id"] == "event-1"
+    assert runtime_result.details["sources"] == [{"id": "source-1", "name": "娱乐新闻"}]
     assert runtime_result.artifacts["citations"][0]["event_refs"][0]["summary"] == ("林俊杰于 12 月 29 日公开恋情。")
     assert runtime_result.details["matches"][0]["event_refs"][0]["category"] == "娱乐"
+
+
+@pytest.mark.asyncio
+async def test_web_search_trace_uses_internet_scope_instead_of_mounted_knowledge_sources():
+    mounted_sources = [
+        SimpleNamespace(id="source-1", name="西游记"),
+        SimpleNamespace(id="source-2", name="SAG"),
+    ]
+    adapted = _adapt_tool(
+        StubWebSearchTool(),
+        ToolContext(engine_manager=SimpleNamespace(), sources=mounted_sources),
+        [],
+    )
+
+    result = await adapted.execute(
+        {"query": "广州明天天气"},
+        SimpleNamespace(cancellation=SimpleNamespace(raise_if_cancelled=lambda: None)),
+    )
+
+    assert result.details["scope"] == "internet"
+    assert "sources" not in result.details
 
 
 @pytest.mark.asyncio
@@ -225,7 +262,149 @@ def test_visible_sources_mount_builtin_knowledge_tools():
         "get_time",
         "search_context",
         "get_entity",
+        "web_search",
+        "open_webpage",
     ]
+
+
+@pytest.mark.asyncio
+async def test_web_search_uses_302_endpoint_and_returns_traceable_sources(monkeypatch):
+    from sag_api.core.config import settings
+    from sag_api.tools import builtin
+
+    requests: list[dict] = []
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "search_results": [
+                    {
+                        "url": "https://weather.example/guangzhou",
+                        "title": "广州天气预报",
+                        "content": "  7月15日有雷阵雨，出行请携带雨具。  ",
+                        "published_at": "2026-07-14T06:30:00+08:00",
+                    },
+                    {
+                        "url": "javascript:alert(1)",
+                        "title": "不安全结果",
+                    },
+                    {
+                        "url": "https://weather.example/guangzhou",
+                        "title": "重复结果",
+                    },
+                ]
+            }
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, url, **kwargs):
+            requests.append({"url": url, **kwargs})
+            return Response()
+
+    monkeypatch.setattr(settings, "llm_base_url", "https://api.302ai.cn/v1")
+    monkeypatch.setattr(settings, "llm_api_key", "sk-private-test")
+    monkeypatch.setattr(builtin.httpx, "AsyncClient", lambda **_kwargs: Client())
+
+    result = await WebSearchTool().invoke(
+        {"query": "广州明天（2026-07-15）天气", "count": 4},
+        ToolContext(engine_manager=SimpleNamespace()),
+    )
+
+    assert requests[0]["url"] == "https://api.302ai.cn/302/general/search"
+    assert requests[0]["json"] == {
+        "query": "广州明天（2026-07-15）天气",
+        "provider": "tavily",
+        "max_results": 4,
+        "time_range": "week",
+    }
+    assert requests[0]["headers"]["Authorization"] == "Bearer sk-private-test"
+    assert result.data["section_count"] == 1
+    assert result.data["external_references"] == [
+        {
+            "title": "广州天气预报",
+            "url": "https://weather.example/guangzhou",
+            "source": "weather.example",
+            "snippet": "7月15日有雷阵雨，出行请携带雨具。",
+        }
+    ]
+    assert "https://weather.example/guangzhou" in result.content
+    assert "2026-07-14T06:30:00+08:00" in result.content
+    assert "javascript:" not in result.content
+    assert "sk-private-test" not in result.content
+
+
+@pytest.mark.asyncio
+async def test_web_search_is_unavailable_without_302_configuration(monkeypatch):
+    from sag_api.core.config import settings
+
+    monkeypatch.setattr(settings, "llm_base_url", "https://api.openai.com/v1")
+    monkeypatch.setattr(settings, "llm_api_key", "sk-test")
+
+    assert WebSearchTool.configured() is False
+    result = await WebSearchTool().invoke(
+        {"query": "最新消息"},
+        ToolContext(engine_manager=SimpleNamespace()),
+    )
+    assert result.data["section_count"] == 0
+    assert "尚未配置" in result.content
+
+
+@pytest.mark.asyncio
+async def test_open_web_page_extracts_public_html_as_traceable_evidence(monkeypatch):
+    from sag_api.tools import builtin
+
+    original_client = httpx.AsyncClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url == "https://weather.example/guangzhou"
+        assert request.headers["user-agent"].startswith("sag-bot/")
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/html; charset=utf-8"},
+            text=(
+                "<html><head><title>广州天气预报</title></head>"
+                "<body><main><h1>7月15日</h1><p>广州有雷阵雨，最高温 32℃。</p></main></body></html>"
+            ),
+        )
+
+    async def allow_test_url(url: str) -> str:
+        return url
+
+    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(builtin, "_validated_public_web_url", allow_test_url)
+    monkeypatch.setattr(
+        builtin.httpx,
+        "AsyncClient",
+        lambda **kwargs: original_client(transport=transport, **kwargs),
+    )
+
+    result = await OpenWebPageTool().invoke(
+        {"url": "https://weather.example/guangzhou"},
+        ToolContext(engine_manager=SimpleNamespace()),
+    )
+
+    assert "广州有雷阵雨" in result.content
+    assert result.data["section_count"] == 1
+    assert result.data["external_references"][0]["url"] == (
+        "https://weather.example/guangzhou"
+    )
+
+
+@pytest.mark.asyncio
+async def test_open_web_page_rejects_private_network_targets():
+    with pytest.raises(RuntimeError, match="公开网页"):
+        await OpenWebPageTool().invoke(
+            {"url": "http://127.0.0.1:8000/api/v1/system/health"},
+            ToolContext(engine_manager=SimpleNamespace()),
+        )
 
 
 @pytest.mark.asyncio

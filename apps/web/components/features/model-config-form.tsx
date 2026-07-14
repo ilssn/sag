@@ -212,7 +212,7 @@ export function ModelConfigForm() {
                 id="llm-url"
                 value={llmBaseUrl}
                 onChange={(event) => setLlmBaseUrl(event.target.value)}
-                placeholder="https://api.openai.com/v1"
+                placeholder="https://api.302ai.cn/v1"
               />
               <FieldDescription>{t("baseUrlDescription")}</FieldDescription>
             </Field>
@@ -347,7 +347,7 @@ export function ModelConfigForm() {
                 id="emb-url"
                 value={embBaseUrl}
                 onChange={(event) => setEmbBaseUrl(event.target.value)}
-                placeholder={t("reuseGeneration")}
+                placeholder="https://api.302ai.cn/v1"
               />
             </Field>
             <Field>
@@ -421,7 +421,7 @@ export function ModelConfigForm() {
                 id="mineru-url"
                 value={mineruBaseUrl}
                 onChange={(event) => setMineruBaseUrl(event.target.value)}
-                placeholder="https://api.302.ai"
+                placeholder="https://api.302ai.cn"
               />
               <FieldDescription>{t("mineruPricing")}</FieldDescription>
               {canReuse302Key && !cfg.mineru_api_key_set && (

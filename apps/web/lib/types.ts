@@ -244,6 +244,7 @@ export interface MessageStep {
   arguments?: Record<string, unknown>;
   details?: {
     count?: number;
+    scope?: "knowledge" | "internet";
     sources?: { id?: string; name?: string }[];
     matches?: {
       n?: number;

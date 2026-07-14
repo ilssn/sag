@@ -127,6 +127,7 @@ class IncrementalDocumentProcessor:
                 should_pause=should_pause,
             )
 
+        await self._restore_checkpoint_events(current.event_ids)
         paused = len(current.processed_chunk_ids) < len(current.chunk_ids)
         if not paused:
             await self._normalize_event_ranks(current.chunk_ids)
@@ -226,6 +227,32 @@ class IncrementalDocumentProcessor:
         finally:
             chat_owner.chat = original_chat
         return [event.id for event in events], token_usage
+
+    async def _restore_checkpoint_events(self, event_ids: list[str]) -> None:
+        """分块提交结束后，恢复当前断点已经产出的全部事件。
+
+        zleap-sag 每次保存都会替换整篇文章的事件；断点适配层逐块提交时，
+        后提交的块会把先前块的事件标为已删除，因此要按断点统一恢复。
+        """
+        if not event_ids:
+            return
+        from sqlalchemy import update
+        from zleap.sag.db import SourceEvent, get_session_factory
+
+        unique_ids = list(dict.fromkeys(event_ids))
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            for offset in range(0, len(unique_ids), 500):
+                batch = unique_ids[offset : offset + 500]
+                await session.execute(
+                    update(SourceEvent)
+                    .where(
+                        SourceEvent.source_config_id == self._source_config_id,
+                        SourceEvent.id.in_(batch),
+                    )
+                    .values(status="COMPLETED")
+                )
+            await session.commit()
 
     async def _normalize_event_ranks(self, chunk_ids: list[str]) -> None:
         if not chunk_ids:

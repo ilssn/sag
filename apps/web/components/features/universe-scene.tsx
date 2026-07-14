@@ -493,6 +493,7 @@ class UniverseForceSceneEngine {
   private visualDetailMix = 0;
   private visualDetailTarget = 0;
   private reportedViewSourceId: string | null = null;
+  private requestedSourceId: string | null = null;
   private overviewRequested = true;
   private lodLevels = new Map<string, 0 | 1 | 2 | 3>();
   private deepLodMilestones = new Map<string, number>();
@@ -751,6 +752,7 @@ class UniverseForceSceneEngine {
       this.visualDetailMix = 0;
       this.visualDetailTarget = 0;
       this.reportedViewSourceId = null;
+      this.requestedSourceId = null;
       this.overviewRequested = true;
       this.lodLevels.clear();
       this.deepLodMilestones.clear();
@@ -1025,6 +1027,7 @@ class UniverseForceSceneEngine {
     this.visualDetailMix = 0;
     this.visualDetailTarget = 0;
     this.reportedViewSourceId = null;
+    this.requestedSourceId = null;
     this.overviewRequested = true;
     this.pendingLod = null;
     this.lodArmed = false;
@@ -1051,6 +1054,7 @@ class UniverseForceSceneEngine {
   }
 
   private frameOverview(duration: number, canonical: boolean) {
+    this.requestedSourceId = null;
     this.overviewRequested = true;
     this.host.dataset.universeCameraTarget = "overview";
     const sources = [...this.nodes.values()].filter((node) => node.kind === "source");
@@ -1094,13 +1098,35 @@ class UniverseForceSceneEngine {
   }
 
   focusSource(sourceId: string) {
-    this.overviewRequested = false;
-    this.host.dataset.universeResetState = "";
-    this.host.dataset.universeCameraTarget = `source:${sourceId}`;
     const node = [...this.nodes.values()].find(
       (candidate) => candidate.kind === "source" && candidate.sourceId === sourceId,
     );
     if (!node) return;
+    const sourceChanged = this.visualSourceId !== sourceId;
+    const reportedChanged = this.reportedViewSourceId !== sourceId;
+    this.requestedSourceId = sourceId;
+    this.latchedDetailSourceId = sourceId;
+    this.visualSourceId = sourceId;
+    this.overviewRequested = false;
+    this.host.dataset.universeResetState = "";
+    this.host.dataset.universeCameraTarget = `source:${sourceId}`;
+    this.host.dataset.universeDetailLatched = sourceId;
+    if (this.visualDetailMix >= 0.5) {
+      this.reportedViewSourceId = sourceId;
+      this.host.dataset.universeVisualMode = "detail";
+      this.host.dataset.universeDetailSource = sourceId;
+      if (reportedChanged) {
+        this.callbacks.onViewChange({
+          mode: "detail",
+          sourceId,
+          progress: this.visualDetailMix,
+        });
+      }
+    }
+    if (sourceChanged) {
+      this.rebuildLabels();
+      this.applyHighlight();
+    }
     const concreteNodes = [...this.nodes.values()].filter(
       (candidate) =>
         candidate.kind !== "source"
@@ -2864,7 +2890,7 @@ class UniverseForceSceneEngine {
           currentRadiusPx,
           candidateSourceId: inferredVisual?.node.sourceId ?? null,
           candidateRadiusPx: inferredVisual?.radiusPx ?? null,
-          explicitSourceId: explicitSource?.sourceId,
+          explicitSourceId: this.requestedSourceId ?? explicitSource?.sourceId,
           enterRadiusPx: this.policy.lod_near_px,
           exitRadiusPx: this.policy.lod_orbit_px,
         });
@@ -2884,7 +2910,7 @@ class UniverseForceSceneEngine {
     const visualRadiusPx = visual
       ? this.projectedSourceRadius(visual, cameraRight)
       : null;
-    const nextTarget = visual
+    const naturalTarget = visual
       ? universeVisualDetailProgress(
           visualRadiusPx,
           this.policy.lod_orbit_px,
@@ -2892,6 +2918,15 @@ class UniverseForceSceneEngine {
           this.policy.lod_deep_px,
         )
       : 0;
+    const nextTarget = this.requestedSourceId === visual?.sourceId
+      ? Math.max(previousMix, naturalTarget)
+      : naturalTarget;
+    if (
+      this.requestedSourceId === visual?.sourceId
+      && naturalTarget >= 0.5
+    ) {
+      this.requestedSourceId = null;
+    }
     this.visualDetailTarget = nextTarget;
     let nextSourceId = nextTarget > 0.001 || nextLatchedSourceId
       ? visual?.sourceId ?? null

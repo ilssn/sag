@@ -68,7 +68,7 @@ function graphFixture(): SourceGraphResponse {
 }
 
 describe("sliceEventEntityGraph", () => {
-  it("normalizes relation direction, deduplicates edges, and omits isolated nodes", () => {
+  it("normalizes relation direction, deduplicates edges, and preserves all graph nodes", () => {
     const slice = sliceEventEntityGraph(graphFixture());
 
     expect(slice.relations).toEqual([
@@ -78,7 +78,10 @@ describe("sliceEventEntityGraph", () => {
         entityId: "entity-linked",
       },
     ]);
-    expect(slice.events.map((event) => event.id)).toEqual(["event-linked"]);
-    expect(slice.entities.map((entity) => entity.id)).toEqual(["entity-linked"]);
+    expect(slice.events.map((event) => event.id)).toEqual(["event-linked", "event-isolated"]);
+    expect(slice.entities.map((entity) => entity.id)).toEqual([
+      "entity-linked",
+      "entity-isolated",
+    ]);
   });
 });

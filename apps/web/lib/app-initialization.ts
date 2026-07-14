@@ -4,6 +4,7 @@ import {
 } from "./workspace";
 
 export type WorkspacePanelMode = "hidden" | "mini" | "normal";
+export type ThemePreference = "light" | "dark" | "system";
 
 export const APP_INITIALIZATION_DEFAULTS = Object.freeze({
   workspacePanel: "mini" as WorkspacePanelMode,
@@ -19,11 +20,16 @@ export const APP_INITIALIZATION_STORAGE_KEYS = Object.freeze({
   petEnabled: "sag:pet",
   petCollapsed: "sag:pet-collapsed",
   quickModelSetupDismissed: "sag:onboarding:model-setup-dismissed:v1",
+  themeBeforeWorkspaceCollapse: "sag:theme-before-workspace-collapse",
 });
 
 export interface InitializationStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
+}
+
+export interface RemovableInitializationStorage extends InitializationStorage {
+  removeItem(key: string): void;
 }
 
 function safelyRead(storage: InitializationStorage | null | undefined, key: string) {
@@ -44,6 +50,54 @@ function safelyWrite(
   } catch {
     /* In-memory state still follows the requested preference. */
   }
+}
+
+function safelyRemove(
+  storage: RemovableInitializationStorage | null | undefined,
+  key: string,
+) {
+  try {
+    storage?.removeItem(key);
+  } catch {
+    /* The in-memory restore state remains available for this session. */
+  }
+}
+
+function isThemePreference(value: string | null | undefined): value is ThemePreference {
+  return value === "light" || value === "dark" || value === "system";
+}
+
+export function resolveThemePreference(
+  theme: string | undefined,
+  resolvedTheme: string | undefined,
+): ThemePreference {
+  if (isThemePreference(theme)) return theme;
+  if (resolvedTheme === "dark" || resolvedTheme === "light") return resolvedTheme;
+  return "system";
+}
+
+export function rememberThemeBeforeWorkspaceCollapse(
+  storage: InitializationStorage | null | undefined,
+  theme: ThemePreference,
+) {
+  const saved = safelyRead(
+    storage,
+    APP_INITIALIZATION_STORAGE_KEYS.themeBeforeWorkspaceCollapse,
+  );
+  if (isThemePreference(saved)) return saved;
+  safelyWrite(storage, APP_INITIALIZATION_STORAGE_KEYS.themeBeforeWorkspaceCollapse, theme);
+  return theme;
+}
+
+export function restoreThemeBeforeWorkspaceCollapse(
+  storage: RemovableInitializationStorage | null | undefined,
+) {
+  const saved = safelyRead(
+    storage,
+    APP_INITIALIZATION_STORAGE_KEYS.themeBeforeWorkspaceCollapse,
+  );
+  safelyRemove(storage, APP_INITIALIZATION_STORAGE_KEYS.themeBeforeWorkspaceCollapse);
+  return isThemePreference(saved) ? saved : null;
 }
 
 export function readInitialWorkspace(

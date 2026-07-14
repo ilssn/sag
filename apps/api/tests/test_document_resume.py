@@ -30,12 +30,17 @@ async def test_incremental_processor_pauses_after_inflight_chunks_and_resumes(mo
         return [f"event-{chunk_id}"], 100
 
     normalized: list[list[str]] = []
+    restored: list[list[str]] = []
 
     async def normalize(chunk_ids: list[str]):
         normalized.append(chunk_ids)
 
+    async def restore(event_ids: list[str]):
+        restored.append(list(event_ids))
+
     monkeypatch.setattr(processor, "_extract_chunk", extract_chunk)
     monkeypatch.setattr(processor, "_normalize_event_ranks", normalize)
+    monkeypatch.setattr(processor, "_restore_checkpoint_events", restore)
 
     snapshots: list[ProcessCheckpoint] = []
     pause_requested = False
@@ -61,6 +66,8 @@ async def test_incremental_processor_pauses_after_inflight_chunks_and_resumes(mo
     assert len(paused.processed_chunk_ids) == 2
     assert paused.token_usage == 200
     assert normalized == []
+    assert len(restored) == 1
+    assert set(restored[0]) == {"event-c1", "event-c2"}
 
     pause_requested = False
     resumed = await processor.process(
@@ -75,6 +82,14 @@ async def test_incremental_processor_pauses_after_inflight_chunks_and_resumes(mo
     assert resumed.event_count == 5
     assert resumed.token_usage == 500
     assert normalized == [["c1", "c2", "c3", "c4", "c5"]]
+    assert len(restored) == 2
+    assert set(restored[1]) == {
+        "event-c1",
+        "event-c2",
+        "event-c3",
+        "event-c4",
+        "event-c5",
+    }
 
 
 @pytest.mark.asyncio

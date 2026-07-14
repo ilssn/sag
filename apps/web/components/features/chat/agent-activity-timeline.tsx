@@ -5,6 +5,7 @@ import { Check, ChevronDown, ChevronRight, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import type { MessageStep } from "@/lib/types";
+import { toolScope } from "@/lib/agent-run-activity";
 import { cn } from "@/lib/utils";
 import { Spinner } from "@/components/ui/spinner";
 
@@ -65,9 +66,9 @@ function ToolRunDetails({
   const t = useTranslations("AgentActivity");
   const details = step.details;
   const entries = Object.entries(step.arguments ?? {});
-  const sources = details?.sources?.filter((source) => source.name) ?? [];
+  const scope = toolScope(step);
   const matches = details?.matches ?? [];
-  const hasHeader = entries.length > 0 || sources.length > 0;
+  const hasHeader = entries.length > 0 || scope.kind !== null;
 
   return (
     <div
@@ -81,11 +82,13 @@ function ToolRunDetails({
               <dd className="break-words font-mono text-foreground/80">{String(value)}</dd>
             </React.Fragment>
           ))}
-          {sources.length > 0 && (
+          {scope.kind !== null && (
             <>
               <dt>{t("scope")}</dt>
               <dd className="break-words text-foreground/80">
-                {sources.map((source) => source.name).join(t("separator"))}
+                {scope.kind === "internet"
+                  ? t("internet")
+                  : scope.sources.map((source) => source.name).join(t("separator"))}
               </dd>
             </>
           )}
@@ -240,6 +243,7 @@ export function AgentActivityTimeline({
               step.kind === "tool" &&
               (Boolean(step.arguments && Object.keys(step.arguments).length) ||
                 Boolean(step.details?.matches?.length) ||
+                Boolean(toolScope(step).kind) ||
                 Boolean(step.details?.sources?.length) ||
                 Boolean(step.details?.output_preview));
             const expanded = expandedTools.has(key);
@@ -249,6 +253,10 @@ export function AgentActivityTimeline({
                 ? t("tools.getEntity")
                 : step.name === "get_time"
                   ? t("tools.getTime")
+                  : step.name === "web_search"
+                    ? t("tools.webSearch")
+                    : step.name === "open_webpage"
+                      ? t("tools.openWebPage")
                   : step.label || step.name || t("tool");
 
             return (

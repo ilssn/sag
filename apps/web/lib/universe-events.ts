@@ -10,6 +10,7 @@ import { clientErrorMessage } from "../i18n/client-errors";
 export const UNIVERSE_ACTIVATE_EVENT = "sag:universe-activate";
 export const UNIVERSE_RESET_EVENT = "sag:universe-reset";
 export const UNIVERSE_FOCUS_EVENT = "sag:universe-focus";
+export const UNIVERSE_SOURCE_FOCUS_EVENT = "sag:universe-source-focus";
 export const UNIVERSE_DETAIL_EVENT = "sag:universe-detail";
 export const UNIVERSE_ASK_EVENT = "sag:universe-ask";
 export const UNIVERSE_PATCH_EVENT = "sag:universe-patch";
@@ -171,6 +172,15 @@ export function dispatchUniverseFocus(
   window.dispatchEvent(
     new CustomEvent(UNIVERSE_FOCUS_EVENT, {
       detail: { kind, id, source_id: sourceId },
+    }),
+  );
+}
+
+export function dispatchUniverseSourceFocus(sourceId: string) {
+  if (typeof window === "undefined" || !sourceId) return;
+  window.dispatchEvent(
+    new CustomEvent(UNIVERSE_SOURCE_FOCUS_EVENT, {
+      detail: { source_id: sourceId },
     }),
   );
 }

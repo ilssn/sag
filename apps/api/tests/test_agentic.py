@@ -28,12 +28,20 @@ def test_default_agent_gets_builtin_tools():
         "get_time",
         "search_context",
         "get_entity",
+        "web_search",
+        "open_webpage",
     ]
-    assert _enabled_tool_names(_A(is_default=False)) == ["get_time"]
+    assert _enabled_tool_names(_A(is_default=False)) == [
+        "get_time",
+        "web_search",
+        "open_webpage",
+    ]
     assert _enabled_tool_names(_A(is_default=True, tools=["echo"])) == [
         "get_time",
         "search_context",
         "get_entity",
+        "web_search",
+        "open_webpage",
         "echo",
     ]
     assert _enabled_tool_names(_A(is_default=True), knowledge_only=True) == [

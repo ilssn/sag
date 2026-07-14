@@ -48,6 +48,13 @@ import {
   type GraphPoint,
 } from "@/components/features/graph-canvas";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const OrbitalEventEntityGraph = dynamic(
@@ -136,6 +143,9 @@ function GraphNode({ data, selected }: NodeProps) {
 }
 
 const nodeTypes = { sourceGraph: GraphNode };
+const DEFAULT_GRAPH_LIMIT = 1_000;
+const GRAPH_LIMIT_STORAGE_KEY = "sag:source-graph-limit";
+const GRAPH_LIMIT_OPTIONS = [100, 300, 600, 1_000, 2_000, 5_000, 10_000] as const;
 
 function makeNodes(
   slice: EventEntityGraphSlice,
@@ -566,19 +576,29 @@ export function SourceGraph({
   mode?: "2d" | "3d";
 }) {
   const t = useTranslations("SourceGraph");
+  const locale = useLocale();
   const { open } = useDetailPanel();
   const [graph, setGraph] = React.useState<SourceGraphResponse | null>(null);
   const [error, setError] = React.useState("");
   const [refreshVersion, setRefreshVersion] = React.useState(0);
   const [refreshing, setRefreshing] = React.useState(false);
+  const [graphLimit, setGraphLimit] = React.useState(DEFAULT_GRAPH_LIMIT);
+  const [graphLimitReady, setGraphLimitReady] = React.useState(false);
 
   React.useEffect(() => {
+    const saved = Number(window.localStorage.getItem(GRAPH_LIMIT_STORAGE_KEY));
+    if (GRAPH_LIMIT_OPTIONS.some((value) => value === saved)) setGraphLimit(saved);
+    setGraphLimitReady(true);
+  }, []);
+
+  React.useEffect(() => {
+    if (!graphLimitReady) return;
     let alive = true;
     const controller = new AbortController();
     setError("");
     setRefreshing(Boolean(graph));
     api
-      .getSourceGraph(source.id, controller.signal)
+      .getSourceGraph(source.id, graphLimit, controller.signal)
       .then((response) => {
         if (!alive) return;
         setGraph(response);
@@ -596,7 +616,7 @@ export function SourceGraph({
     };
     // graph 不能加入依赖；刷新时保留旧画面，避免闪烁。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source.id, refreshKey, refreshVersion, t]);
+  }, [source.id, refreshKey, refreshVersion, graphLimit, graphLimitReady, t]);
 
   if (!graph && !error) {
     return (
@@ -631,17 +651,42 @@ export function SourceGraph({
   if (!graph) return null;
 
   const toolbarActions = (
-    <Button
-      variant="outline"
-      size="icon"
-      className="size-8 bg-card/95 shadow-soft backdrop-blur-sm"
-      onClick={() => setRefreshVersion((value) => value + 1)}
-      disabled={refreshing}
-      aria-label={t("refresh")}
-      title={t("refresh")}
-    >
-      <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
-    </Button>
+    <>
+      <Select
+        value={String(graphLimit)}
+        onValueChange={(value) => {
+          const next = Number(value);
+          setGraphLimit(next);
+          window.localStorage.setItem(GRAPH_LIMIT_STORAGE_KEY, String(next));
+        }}
+      >
+        <SelectTrigger
+          aria-label={t("limitAria")}
+          title={t("limitTitle")}
+          className="h-8 w-[6.5rem] bg-card/95 px-2 text-xs shadow-soft backdrop-blur-sm"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {GRAPH_LIMIT_OPTIONS.map((value) => (
+            <SelectItem key={value} value={String(value)}>
+              {t("limitOption", { value: value.toLocaleString(locale) })}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Button
+        variant="outline"
+        size="icon"
+        className="size-8 bg-card/95 shadow-soft backdrop-blur-sm"
+        onClick={() => setRefreshVersion((value) => value + 1)}
+        disabled={refreshing}
+        aria-label={t("refresh")}
+        title={t("refresh")}
+      >
+        <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
+      </Button>
+    </>
   );
   const onOpenEvent = (event: SourceGraphEvent) => {
     if (!event.chunk_id) return;
@@ -655,7 +700,7 @@ export function SourceGraph({
   };
   const sharedProps = {
     graph,
-    refreshKey: `${refreshKey}-${refreshVersion}`,
+    refreshKey: `${refreshKey}-${refreshVersion}-${graphLimit}`,
     toolbarActions,
     onOpenEvent,
   };

@@ -81,7 +81,7 @@ class Settings(BaseSettings):
     sag_pg_database: str = "sag"
 
     # ── LLM（答案生成 + 抽取），OpenAI 兼容 ────────────────────────────
-    llm_base_url: str | None = None
+    llm_base_url: str | None = "https://api.302ai.cn/v1"
     llm_api_key: str | None = None
     llm_model: str = "qwen3.6-flash"
     llm_temperature: float = 0.3
@@ -95,14 +95,14 @@ class Settings(BaseSettings):
 
     # ── Embedding（缺省复用 LLM 的 key / base_url）─────────────────────
     embedding_model: str = "bge-large-en-v1.5"
-    embedding_base_url: str | None = None
+    embedding_base_url: str | None = "https://api.302ai.cn/v1"
     embedding_api_key: str | None = None
     embedding_dimensions: int | None = None
 
     # ── 文档解析（进入 zleap-sag 前统一转为 Markdown）─────────────────
     # auto：PDF 优先 MinerU，未配置或 MinerU 失败时回退本地 MarkItDown。
     document_parser: Literal["auto", "markitdown", "mineru"] = "auto"
-    mineru_base_url: str | None = None
+    mineru_base_url: str | None = "https://api.302ai.cn"
     mineru_api_key: str | None = None
     mineru_version: Literal["2.0", "2.5"] = "2.5"
     mineru_parse_method: Literal["auto", "txt", "ocr"] = "auto"
