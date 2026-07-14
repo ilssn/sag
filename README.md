@@ -204,6 +204,14 @@ The default Agent searches the bound knowledge sources, streams the answer, and 
   <img src="docs/assets/readme/product-chat.png" alt="Agent answer with source citations" width="940" />
 </p>
 
+### Explore mode
+
+Explore mode unfolds the entire knowledge base into an interactive knowledge universe. Search events and entities, travel through their relationships, and open event details or original sources without leaving the same view.
+
+<p align="center">
+  <img src="docs/assets/readme/product-explore-mode.gif" alt="SAG Explore mode" width="940" />
+</p>
+
 ### Explore the event-entity graph
 
 Switch a source from list view to graph view to inspect the events, entities, and associations produced by the SAG index.
