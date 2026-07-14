@@ -1057,7 +1057,6 @@
       "exploreMore": "Explore more"
     },
     "controls": {
-      "openPanel": "Open full workspace",
       "currentResult": "Return to current result",
       "overview": "Return to full universe",
       "reset": "Reset exploration and view",

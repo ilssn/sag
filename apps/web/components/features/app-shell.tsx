@@ -676,7 +676,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <KnowledgeUniverse
                   interactive={panelMode !== "normal"}
                   workspacePanel={panelMode}
-                  onOpenWorkspace={expandWorkspace}
                 />
                 {panelMode !== "normal" && (
                   <motion.div

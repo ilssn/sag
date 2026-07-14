@@ -14,7 +14,6 @@ import {
   LockKeyhole,
   LocateFixed,
   MessageCircleQuestion,
-  PanelRightOpen,
   RefreshCw,
   RotateCcw,
   Sparkles,
@@ -362,11 +361,9 @@ function IconControl({
 export function KnowledgeUniverse({
   interactive = true,
   workspacePanel = "hidden",
-  onOpenWorkspace,
 }: {
   interactive?: boolean;
   workspacePanel?: "hidden" | "mini" | "normal";
-  onOpenWorkspace: () => void;
 }) {
   const locale = useLocale();
   const t = useTranslations("KnowledgeUniverse");
@@ -1896,9 +1893,6 @@ export function KnowledgeUniverse({
       {interactive && (
         <TooltipProvider delayDuration={240}>
           <div className="absolute bottom-5 right-5 z-10 flex flex-col gap-1.5">
-            <IconControl label={t("controls.openPanel")} onClick={onOpenWorkspace}>
-              <PanelRightOpen className="size-3.5" />
-            </IconControl>
             <IconControl
               label={t("controls.currentResult")}
               onClick={focusResult}
