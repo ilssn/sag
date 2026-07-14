@@ -16,6 +16,7 @@ import { AnimatePresence, motion } from "motion/react";
 
 import { relativeTime } from "@/lib/format";
 import type { Source } from "@/lib/types";
+import { dispatchUniverseSourceFocus } from "@/lib/universe-events";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/components/features/app-shell";
 import { CreateSourceDialog } from "@/components/features/create-source-dialog";
@@ -28,6 +29,7 @@ import { SourceCreateForm } from "@/components/features/source-create-form";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import styles from "./knowledge-workspace.module.css";
 
 type View = "grid" | "list";
 type KnowledgeWorkspaceVariant = "normal" | "compact";
@@ -258,9 +260,10 @@ export function KnowledgeWorkspace({
                     <CompactSourceRow
                       key={source.id}
                       source={source}
-                      onOpen={(item) =>
-                        setSelectedSource({ id: item.id, initialScreen: "documents" })
-                      }
+                      onOpen={(item) => {
+                        dispatchUniverseSourceFocus(item.id);
+                        setSelectedSource({ id: item.id, initialScreen: "documents" });
+                      }}
                     />
                   ))}
                 </div>
@@ -273,7 +276,7 @@ export function KnowledgeWorkspace({
   }
 
   return (
-    <div className="flex flex-col gap-6 p-4 md:p-6">
+    <div className={cn(styles.workspace, "flex flex-col gap-6 p-4 md:p-6")}>
       <PageHeader
         title={t("title")}
         description={t("description")}
@@ -316,8 +319,8 @@ export function KnowledgeWorkspace({
           </div>
         )}
         {sources === null ? (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {Array.from({ length: 3 }).map((_, index) => (
+          <div className={styles.sourceGrid}>
+            {Array.from({ length: 4 }).map((_, index) => (
               <Skeleton key={index} className="h-[168px]" />
             ))}
           </div>
@@ -329,7 +332,7 @@ export function KnowledgeWorkspace({
             action={<CreateSourceDialog onCreated={addSource} />}
           />
         ) : view === "grid" ? (
-          <div className="grid animate-fade-in gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div className={cn(styles.sourceGrid, "animate-fade-in")}>
             {sources.map((source) => (
               <SourceCard key={source.id} source={source} onChanged={refresh} />
             ))}

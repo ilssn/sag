@@ -1,16 +1,22 @@
 import { describe, expect, it } from "vitest";
 
-import type { UniverseWorkingNode, UniverseWorkingSet } from "./universe-working-set";
+import {
+  replaceUniverseWorkingSet,
+  type UniverseWorkingNode,
+} from "./universe-working-set";
 import {
   DEFAULT_UNIVERSE_VIEW_PREFERENCES,
+  UNIVERSE_VIEW_PREFERENCES_STORAGE_KEY,
   UNIVERSE_VIEW_LIMITS,
+  effectiveUniverseBundleWindow,
   effectiveUniverseBudget,
   loadUniverseEntityCategories,
+  loadUniverseViewPreferences,
+  minimumUniverseCacheBundles,
   normalizeUniverseViewPreferences,
-  publishUniverseEntityCategories,
   projectUniverseWorkingSet,
-  shouldAutoLoadUniverseTimeline,
-  universeLabelBudget,
+  publishUniverseEntityCategories,
+  universeCardBudget,
   type UniverseViewPreferences,
 } from "./universe-view-preferences";
 
@@ -48,10 +54,16 @@ function node(
   };
 }
 
-function workingSet(nodes: UniverseWorkingNode[]): UniverseWorkingSet {
-  return {
+function workingSet() {
+  return replaceUniverseWorkingSet({
     epoch: 7,
-    nodes,
+    query: "projection",
+    nodes: [
+      node("event-1", "event"),
+      node("person-1", "entity", "Person"),
+      node("event-2", "event"),
+      node("org-1", "entity", "Organization"),
+    ],
     relations: [
       {
         source_id: "source-a",
@@ -78,188 +90,202 @@ function workingSet(nodes: UniverseWorkingNode[]): UniverseWorkingSet {
         description: "",
       },
     ],
-    root_keys: nodes.map((item) => `source-a:${item.kind}:${item.id}`),
-    node_order: nodes.map((item) => `source-a:${item.kind}:${item.id}`),
-  };
+  }, { nodes: 100, edges: 100 }, 1);
 }
 
 describe("universe view preference normalization", () => {
-  it("repairs untrusted values, de-duplicates filters and upgrades the schema", () => {
+  it("repairs untrusted values inside the strict v5 schema", () => {
     expect(normalizeUniverseViewPreferences({
-      version: -1,
-      maxNodes: 99_999,
-      visibleKinds: ["entity", "unknown", "entity"],
+      version: 5,
+      visibleEventBundles: 99.9,
+      cachedEventBundles: -100,
+      showEventCards: "yes",
+      showEntityCards: false,
       entityCategories: [" Person ", "", "Person", 42],
-      priority: "newest",
-      labelDensity: "maximum",
-      edgeDensity: "everything",
-      browseAutoExpand: false,
-    })).toEqual({
-      version: 1,
-      maxNodes: UNIVERSE_VIEW_LIMITS.maxNodes.max,
       visibleKinds: ["entity"],
+      priority: "events",
+    })).toEqual({
+      version: 5,
+      visibleEventBundles: 18,
+      cachedEventBundles: 36,
+      showEventCards: true,
+      showEntityCards: false,
       entityCategories: ["Person"],
-      priority: "balanced",
-      labelDensity: "balanced",
-      edgeDensity: "focus",
-      browseAutoExpand: false,
     });
   });
 
-  it("never allows an empty visible kind selection", () => {
-    const normalized = normalizeUniverseViewPreferences({
-      maxNodes: -10,
-      visibleKinds: [],
+  it("enables both card kinds by default and permits both to be disabled", () => {
+    expect(DEFAULT_UNIVERSE_VIEW_PREFERENCES.showEventCards).toBe(true);
+    expect(DEFAULT_UNIVERSE_VIEW_PREFERENCES.showEntityCards).toBe(true);
+    expect(preferences({
+      showEventCards: false,
+      showEntityCards: false,
+    })).toMatchObject({
+      showEventCards: false,
+      showEntityCards: false,
     });
-    expect(normalized.visibleKinds).toEqual(["event", "entity"]);
-    expect(normalized.maxNodes).toBe(UNIVERSE_VIEW_LIMITS.maxNodes.min);
+  });
+
+  it("exposes the production window and cache ranges", () => {
+    expect(UNIVERSE_VIEW_LIMITS.visibleEventBundles).toMatchObject({
+      min: 2,
+      max: 18,
+      step: 1,
+      default: 6,
+    });
+    expect(UNIVERSE_VIEW_LIMITS.cachedEventBundles).toMatchObject({
+      min: 12,
+      max: 96,
+      step: 6,
+      default: 24,
+    });
+  });
+
+  it("reads only the current storage key and schema", () => {
+    const storage = memoryStorage({
+      "sag:universe-view-preferences:v4": JSON.stringify({
+        version: 4,
+        visibleEventBundles: 2,
+      }),
+    });
+    expect(loadUniverseViewPreferences(storage)).toEqual(
+      DEFAULT_UNIVERSE_VIEW_PREFERENCES,
+    );
+
+    storage.setItem(UNIVERSE_VIEW_PREFERENCES_STORAGE_KEY, JSON.stringify({
+      ...DEFAULT_UNIVERSE_VIEW_PREFERENCES,
+      showEventCards: false,
+    }));
+    expect(loadUniverseViewPreferences(storage).showEventCards).toBe(false);
+  });
+
+  it("rejects every non-current schema without migration", () => {
+    expect(normalizeUniverseViewPreferences({
+      version: 4,
+      visibleEventBundles: 18,
+      cachedEventBundles: 96,
+      showEventCards: false,
+    })).toEqual(DEFAULT_UNIVERSE_VIEW_PREFERENCES);
+  });
+
+  it("normalizes an empty category selection back to all categories", () => {
+    expect(preferences({ entityCategories: [] }).entityCategories).toBeNull();
+    expect(preferences({ entityCategories: ["", "  "] }).entityCategories).toBeNull();
+  });
+
+  it("rounds cache capacity upward for one history and two forward pages", () => {
+    expect(preferences({
+      visibleEventBundles: 2,
+      cachedEventBundles: 13,
+    }).cachedEventBundles).toBe(24);
+    expect(preferences({
+      visibleEventBundles: 13,
+      cachedEventBundles: 12,
+    }).cachedEventBundles).toBe(36);
+    expect(minimumUniverseCacheBundles(18)).toBe(36);
+  });
+
+  it("applies the larger desktop and mobile device caps", () => {
+    expect(effectiveUniverseBundleWindow(
+      DEFAULT_UNIVERSE_VIEW_PREFERENCES,
+      false,
+    )).toEqual({
+      visibleEventBundles: 6,
+      cachedEventBundles: 24,
+    });
+    expect(effectiveUniverseBundleWindow(preferences({
+      visibleEventBundles: 18,
+      cachedEventBundles: 96,
+    }), false)).toEqual({
+      visibleEventBundles: 18,
+      cachedEventBundles: 96,
+    });
+    expect(effectiveUniverseBundleWindow(preferences({
+      visibleEventBundles: 18,
+      cachedEventBundles: 96,
+    }), true)).toEqual({
+      visibleEventBundles: 8,
+      cachedEventBundles: 36,
+    });
   });
 });
 
 describe("universe rendering budgets", () => {
-  it("combines policy and user node caps and scales edge detail monotonically", () => {
-    const policy = { nodes: 800, edges: 1500 };
-    const focus = effectiveUniverseBudget(policy, 500, "focus");
-    const context = effectiveUniverseBudget(policy, 500, "context");
-    const all = effectiveUniverseBudget(policy, 500, "all");
-
-    expect(focus).toEqual({ nodes: 500, edges: 625 });
-    expect(context).toEqual({ nodes: 500, edges: 1250 });
-    expect(all).toEqual({ nodes: 500, edges: 1500 });
+  it("keeps the factual budget independent from presentation settings", () => {
+    expect(effectiveUniverseBudget({ nodes: 800, edges: 1500 })).toEqual({
+      nodes: 240,
+      edges: 360,
+    });
   });
 
   it("never exceeds a smaller renderer policy", () => {
-    expect(effectiveUniverseBudget({ nodes: 24, edges: 30 }, 500, "all"))
+    expect(effectiveUniverseBudget({ nodes: 24, edges: 30 }))
       .toEqual({ nodes: 24, edges: 30 });
   });
 });
 
-describe("universe working-set projection", () => {
-  const current = workingSet([
-    node("event-1", "event"),
-    node("person-1", "entity", "Person"),
-    node("event-2", "event"),
-    node("org-1", "entity", "Organization"),
-    node("person-2", "entity", "Person"),
-  ]);
-
-  it("filters categories, removes dangling edges and stably honors kind priority", () => {
-    const projected = projectUniverseWorkingSet(current, preferences({
-      entityCategories: ["Person"],
-      priority: "entities",
-    }));
+describe("entity-category projection", () => {
+  it("always keeps events while filtering entities and their dangling mentions", () => {
+    const current = workingSet();
+    const projected = projectUniverseWorkingSet(current, ["Person"]);
 
     expect(projected.nodes.map((item) => item.id)).toEqual([
-      "person-1",
-      "person-2",
       "event-1",
+      "person-1",
       "event-2",
     ]);
     expect(projected.relations.map((relation) => relation.kind)).toEqual([
       "mentions",
       "subevent",
     ]);
-    expect(projected.root_keys).not.toContain("source-a:entity:org-1");
-    expect(current.nodes.map((item) => item.id)).toEqual([
-      "event-1",
-      "person-1",
-      "event-2",
-      "org-1",
-      "person-2",
-    ]);
+    expect(projected.nodes.some((item) => item.id === "org-1")).toBe(false);
+    expect(projected.relations.some((relation) => relation.to_id === "org-1"))
+      .toBe(false);
+    const nodeIds = new Set(projected.nodes.map((item) => item.id));
+    expect(projected.relations.every((relation) =>
+      nodeIds.has(relation.from_id) && nodeIds.has(relation.to_id)))
+      .toBe(true);
+    expect(projected.relations.some((relation) => relation.kind === "subevent"))
+      .toBe(true);
+    expect(current.nodes).toHaveLength(4);
   });
 
-  it("removes every relation whose event endpoint is hidden", () => {
-    const projected = projectUniverseWorkingSet(current, preferences({
-      visibleKinds: ["entity"],
-    }));
-    expect(projected.nodes.every((item) => item.kind === "entity")).toBe(true);
-    expect(projected.relations).toEqual([]);
-  });
-
-  it("caps the projection after applying priority without disturbing stable order", () => {
-    const manyNodes = [
-      node("entity-anchor", "entity"),
-      ...Array.from({ length: UNIVERSE_VIEW_LIMITS.maxNodes.min + 1 }, (_, index) =>
-        node(`event-${index}`, "event")),
-    ];
-    const projected = projectUniverseWorkingSet(
-      workingSet(manyNodes),
-      preferences({
-        maxNodes: UNIVERSE_VIEW_LIMITS.maxNodes.min,
-        priority: "events",
-      }),
-    );
-
-    expect(projected.nodes).toHaveLength(UNIVERSE_VIEW_LIMITS.maxNodes.min);
-    expect(projected.nodes[0]?.id).toBe("event-0");
-    expect(projected.nodes.at(-1)?.id).toBe(
-      `event-${UNIVERSE_VIEW_LIMITS.maxNodes.min - 1}`,
-    );
+  it("returns the full network for all or an empty untrusted selection", () => {
+    const current = workingSet();
+    expect(projectUniverseWorkingSet(current, null)).toBe(current);
+    expect(projectUniverseWorkingSet(current, [])).toBe(current);
   });
 });
 
-describe("adaptive universe labels", () => {
-  it("increases monotonically with density", () => {
-    const low = universeLabelBudget(1280, 720, "low", "balanced", ["event", "entity"]);
-    const balanced = universeLabelBudget(
-      1280,
-      720,
-      "balanced",
-      "balanced",
-      ["event", "entity"],
-    );
-    const high = universeLabelBudget(1280, 720, "high", "balanced", ["event", "entity"]);
-
-    expect(low.total).toBeLessThan(balanced.total);
-    expect(balanced.total).toBeLessThan(high.total);
+describe("adaptive universe cards", () => {
+  it("uses the fixed balanced budget when both card kinds are enabled", () => {
+    const budget = universeCardBudget(1280, 720, true, true);
+    expect(budget.total).toBe(14);
+    expect(budget.events).toBe(6);
+    expect(budget.entities).toBe(8);
   });
 
-  it("allocates labels to the selected kind and shifts the share by priority", () => {
-    const events = universeLabelBudget(
-      1280,
-      720,
-      "balanced",
-      "events",
-      ["event", "entity"],
-    );
-    const entities = universeLabelBudget(
-      1280,
-      720,
-      "balanced",
-      "entities",
-      ["event", "entity"],
-    );
-    const onlyEntities = universeLabelBudget(
-      1280,
-      720,
-      "balanced",
-      "events",
-      ["entity"],
-    );
-
-    expect(events.events).toBeGreaterThan(entities.events);
-    expect(events.total).toBe(entities.total);
-    expect(onlyEntities).toEqual({
+  it("assigns the full budget to one enabled kind and allows no persistent cards", () => {
+    expect(universeCardBudget(1280, 720, true, false)).toEqual({
+      events: 14,
+      entities: 0,
+      total: 14,
+    });
+    expect(universeCardBudget(1280, 720, false, true)).toEqual({
       events: 0,
-      entities: onlyEntities.total,
-      total: onlyEntities.total,
+      entities: 14,
+      total: 14,
+    });
+    expect(universeCardBudget(1280, 720, false, false)).toEqual({
+      events: 0,
+      entities: 0,
+      total: 0,
     });
   });
 });
 
-describe("timeline auto-loading policy", () => {
-  it("locks search and assistant activations while preserving optional browsing LOD", () => {
-    expect(shouldAutoLoadUniverseTimeline("search", 3, true)).toBe(false);
-    expect(shouldAutoLoadUniverseTimeline("assistant", 3, true)).toBe(false);
-    expect(shouldAutoLoadUniverseTimeline("browse", 1, true)).toBe(false);
-    expect(shouldAutoLoadUniverseTimeline("browse", 2, true)).toBe(true);
-    expect(shouldAutoLoadUniverseTimeline("browse", 3, false)).toBe(false);
-  });
-});
-
 describe("universe entity category registry", () => {
-  it("merges, trims and sorts discovered categories for the settings page", () => {
+  it("merges, trims and sorts discovered categories", () => {
     const storage = memoryStorage();
 
     publishUniverseEntityCategories([" organization ", "concept"], storage);

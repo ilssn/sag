@@ -27,6 +27,8 @@ from sag_api.schemas.search import (
     SectionOut,
 )
 from sag_api.services.retrieval_service import (
+    EventScoreMap,
+    recall_event_scores,
     retrieve_relevant_sections,
     stream_synthesize_search_answer,
     synthesize_search_answer,
@@ -89,13 +91,17 @@ async def _event_graph_fields(
     engine_manager: EngineManager,
     sections: list[RetrievedSection],
     sources_by_config: dict[str, Source],
+    *,
+    event_scores: EventScoreMap | None = None,
 ) -> _EventGraphFields:
-    if not sections:
+    event_scores = event_scores or {}
+    if not sections and not event_scores:
         return {"events": [], "entities": [], "relations": []}
     graph = await engine_manager.graph_for_sections(
         sections,
         sources_by_config,
-        event_limit=max(1, len(sections)),
+        event_limit=max(1, len(sections), len(event_scores)),
+        event_scores=event_scores,
     )
     events = []
     for event in graph.events:
@@ -160,14 +166,33 @@ async def _prepare_global_search(
         )
 
     refs = {source.sag_source_config_id: source for source in sources}
-    outcome = await retrieve_relevant_sections(
-        engine_manager,
-        sources,
-        body.query,
-        strategy=body.strategy,
-        top_k=body.top_k,
+    outcome, event_scores = await asyncio.gather(
+        retrieve_relevant_sections(
+            engine_manager,
+            sources,
+            body.query,
+            strategy=body.strategy,
+            top_k=body.top_k,
+        ),
+        recall_event_scores(
+            engine_manager,
+            body.query,
+            refs,
+            limit=body.top_k,
+        ),
     )
-    graph_fields = await _event_graph_fields(engine_manager, outcome.sections, refs)
+    graph_fields = await _event_graph_fields(
+        engine_manager,
+        outcome.sections,
+        refs,
+        event_scores=event_scores,
+    )
+    stats = {
+        **outcome.stats,
+        "event_candidates": len(event_scores),
+        "event_hits": len(graph_fields["events"]),
+        "event_recall": "vector+chunk" if event_scores else "chunk",
+    }
 
     section_outputs = []
     for section in outcome.sections:
@@ -190,7 +215,7 @@ async def _prepare_global_search(
             sections=section_outputs,
             **graph_fields,
             source_hits=_source_hits(graph_fields["events"]),
-            stats=outcome.stats,
+            stats=stats,
         ),
     )
 
@@ -231,9 +256,7 @@ async def _complete_global_search(
         )
         exploration_id = exploration.id
 
-    return prepared.response.model_copy(
-        update={"summary": summary, "exploration_id": exploration_id}
-    )
+    return prepared.response.model_copy(update={"summary": summary, "exploration_id": exploration_id})
 
 
 def _sse(event: str, payload: dict) -> dict[str, str]:
@@ -250,26 +273,35 @@ async def search(
     llm: LLMClient = Depends(get_llm),
 ) -> SearchResponse:
     source = await get_source(session, source_id)
-    outcome = await retrieve_relevant_sections(
-        engine_manager,
-        [source],
-        body.query,
-        strategy=body.strategy,
-        top_k=body.top_k,
+    refs = {source.sag_source_config_id: source}
+    outcome, event_scores = await asyncio.gather(
+        retrieve_relevant_sections(
+            engine_manager,
+            [source],
+            body.query,
+            strategy=body.strategy,
+            top_k=body.top_k,
+        ),
+        recall_event_scores(
+            engine_manager,
+            body.query,
+            refs,
+            limit=body.top_k,
+        ),
     )
     for section in outcome.sections:
         section.source_config_id = section.source_config_id or source.sag_source_config_id
     graph_fields = await _event_graph_fields(
         engine_manager,
         outcome.sections,
-        {source.sag_source_config_id: source},
+        refs,
+        event_scores=event_scores,
     )
     # 对外 source_id = sag 信源 id（可路由 / 取原文），不泄漏引擎内部 id
     return SearchResponse(
         query=outcome.query,
         sections=[
-            SectionOut(**{**s.model_dump(), "source_id": source.id}, source_name=source.name)
-            for s in outcome.sections
+            SectionOut(**{**s.model_dump(), "source_id": source.id}, source_name=source.name) for s in outcome.sections
         ],
         **graph_fields,
         source_hits=_source_hits(graph_fields["events"]),
@@ -278,7 +310,12 @@ async def search(
             outcome.sections,
             llm=llm,
         ),
-        stats=outcome.stats,
+        stats={
+            **outcome.stats,
+            "event_candidates": len(event_scores),
+            "event_hits": len(graph_fields["events"]),
+            "event_recall": "vector+chunk" if event_scores else "chunk",
+        },
     )
 
 

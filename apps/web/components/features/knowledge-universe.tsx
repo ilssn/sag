@@ -6,6 +6,8 @@ import { useLocale, useTranslations } from "next-intl";
 import { useTheme } from "next-themes";
 import {
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   CircleDot,
   Focus,
   GitBranch,
@@ -14,7 +16,6 @@ import {
   LockKeyhole,
   LocateFixed,
   MessageCircleQuestion,
-  PanelRightOpen,
   RefreshCw,
   RotateCcw,
   Sparkles,
@@ -28,33 +29,69 @@ import type {
   UniverseGraphPatch,
   UniverseManifest,
   UniverseNodeKind,
+  UniverseTimelineDirection,
 } from "@/lib/types";
 import {
   UNIVERSE_ACTIVATE_EVENT,
   UNIVERSE_FOCUS_EVENT,
   UNIVERSE_RESET_EVENT,
+  UNIVERSE_SOURCE_FOCUS_EVENT,
   dispatchUniverseAsk,
   dispatchUniverseDetail,
   dispatchUniversePatch,
+  dispatchUniversePatchReset,
   dispatchUniverseView,
 } from "@/lib/universe-events";
 import {
+  UNIVERSE_RESIDENT_BUDGET,
   UNIVERSE_SCENE_BUDGET,
   emptyUniverseWorkingSet,
-  mergeUniverseActivation,
-  mergeUniverseGraphPatch,
   replaceUniverseWorkingSet,
-  sourceTimelinePageTargetForLod,
   trimUniverseWorkingSet,
   universeAnchorProgress,
   universeNodeKey,
+  universeRelationKey,
   type UniverseWorkingSet,
 } from "@/lib/universe-working-set";
 import {
+  advanceUniverseTimelineWindow,
+  createUniverseTimelineWindow,
+  markUniverseTimelineNetworkExhausted,
+  projectUniverseBundleWindowWithinBudget,
+  queriedUniverseTimelineEventCount,
+  reconfigureUniverseTimelineWindow,
+  retainUniverseWorkingSetBundles,
+  settleUniverseTimelineWindow,
+  universeTimelinePageBundleLimit,
+  universeTimelineRewindStartActiveIndex,
+  type UniverseTimelineWindowState,
+} from "@/lib/universe-timeline-window";
+import { admitUniverseExpansionPage } from "@/lib/universe-expansion-admission";
+import { admitUniverseTimelinePage } from "@/lib/universe-timeline-admission";
+import {
+  admitUniverseTimelineDequePage,
+  resizeUniverseTimelineDeque,
+  syncUniverseTimelineWindowToDeque,
+  type UniverseTimelineDequeAdmission,
+  type UniverseTimelineDeque,
+} from "@/lib/universe-timeline-deque";
+import {
+  commitUniverseDisplayIntent,
+  createUniverseDisplayModeState,
+  planUniverseDisplayTimelineIntent,
+  projectUniverseTemporalBatch,
+  setUniverseDisplayMode,
+  universeTemporalRankProgress,
+  type UniverseDisplayIntentPlan,
+  type UniverseDisplayModeState,
+} from "@/lib/universe-display-mode";
+import { planUniverseTimelinePrefetch } from "@/lib/universe-timeline-prefetch";
+import { detectUniverseWebGLCapability } from "@/lib/universe-webgl-capability";
+import {
   effectiveUniverseBudget,
+  effectiveUniverseBundleWindow,
   projectUniverseWorkingSet,
   publishUniverseEntityCategories,
-  shouldAutoLoadUniverseTimeline,
   useUniverseViewPreferences,
 } from "@/lib/universe-view-preferences";
 import { cn } from "@/lib/utils";
@@ -62,9 +99,11 @@ import {
   UniverseScene,
   type UniverseSceneData,
   type UniverseSceneHandle,
-  type UniverseSceneHover,
   type UniverseSceneLink,
   type UniverseSceneNode,
+  type UniverseSceneUnavailableReason,
+  type UniverseTimelineIntentResult,
+  type UniverseTimelineJourney,
   type UniverseSceneView,
 } from "@/components/features/universe-scene";
 import { Button } from "@/components/ui/button";
@@ -97,16 +136,31 @@ interface Position3D {
 }
 
 interface SourceTimelinePageState {
-  cursor: string | null;
-  pages: number;
-  targetPages: number;
-  done: boolean;
+  deque: UniverseTimelineDeque | null;
+  snapshotId: string | null;
+  sourceRevision: string | null;
+  asOf: string | null;
+  /** Stable network page size for the lifetime of one source snapshot. */
+  queryPageSize: number | null;
+  preferredDirection: UniverseTimelineDirection;
   loading: boolean;
+  pausedReason: "capacity" | null;
+  window: UniverseTimelineWindowState;
 }
 
-interface SourceContentLedger {
-  events: Set<string>;
-  entities: Set<string>;
+type SourceTimelineLoadCause = "source-entry" | "prefetch" | "journey";
+type SourceTimelineLoadResult = "blocked" | "loaded";
+
+interface SourceBrowseSession {
+  sourceId: string;
+  working: UniverseWorkingSet;
+  timeline: SourceTimelinePageState;
+}
+
+interface ExpansionSnapshotContext {
+  snapshotId: string;
+  sourceRevision: string;
+  asOf: string;
 }
 
 interface SourceLoadMetric {
@@ -126,6 +180,123 @@ interface SourceLoadProgress {
 }
 
 const PARTITION_RENDER_LIMIT = { desktop: 160, mobile: 64 } as const;
+const EVENT_ENTITY_PROJECTION_LIMIT = 8;
+const ENTITY_EXPANSION_EVENT_LIMIT = 4;
+const EMPTY_TIMELINE_BUNDLE_IDS: string[] = [];
+
+function emptySourceTimelinePageState(
+  visibleEventBundles: number,
+  cachedEventBundles: number,
+): SourceTimelinePageState {
+  return {
+    deque: null,
+    snapshotId: null,
+    sourceRevision: null,
+    asOf: null,
+    queryPageSize: null,
+    preferredDirection: "older",
+    loading: false,
+    pausedReason: null,
+    window: createUniverseTimelineWindow(
+      visibleEventBundles,
+      cachedEventBundles,
+    ),
+  };
+}
+
+function emptySourceBrowseSession(
+  epoch: number,
+  sourceId: string,
+  visibleEventBundles: number,
+  cachedEventBundles: number,
+): SourceBrowseSession {
+  return {
+    sourceId,
+    working: emptyUniverseWorkingSet(epoch),
+    timeline: emptySourceTimelinePageState(
+      visibleEventBundles,
+      cachedEventBundles,
+    ),
+  };
+}
+
+function synchronizeTimelineWindowWithDeque(
+  current: UniverseTimelineWindowState,
+  previousDeque: UniverseTimelineDeque | null,
+  admission: UniverseTimelineDequeAdmission,
+) {
+  const activeBundleId = current.activeIndex >= 0
+    ? current.cacheBundleIds[current.activeIndex] ?? null
+    : null;
+  const anchor = syncUniverseTimelineWindowToDeque(admission.deque, {
+    activeBundleId,
+    activeIndex: current.activeIndex,
+    visibleLimit: current.visibleLimit,
+  });
+  if (!anchor) return null;
+
+  const initial = previousDeque === null;
+  const cacheStartOffset = initial
+    ? 0
+    : Math.max(
+        0,
+        current.cacheStartOffset
+          + admission.evictedNewerBundleIds.length
+          - admission.prependedBundleIds.length,
+      );
+  const rewindStartOffset = initial
+    ? cacheStartOffset + anchor.activeIndex
+    : current.rewindStartOffset;
+  const networkExhausted = !admission.deque.hasOlder;
+  const atOlderEdge = anchor.activeIndex === anchor.cacheBundleIds.length - 1;
+  return {
+    ...current,
+    cacheBundleIds: anchor.cacheBundleIds,
+    activeIndex: anchor.activeIndex,
+    visibleBundleIds: anchor.visibleBundleIds,
+    visitedCount: Math.max(
+      current.visitedCount,
+      cacheStartOffset + anchor.activeIndex + 1,
+    ),
+    queriedCount: Math.max(
+      current.queriedCount,
+      cacheStartOffset + anchor.cacheBundleIds.length,
+    ),
+    networkExhausted,
+    phase: networkExhausted && atOlderEdge ? "complete" as const : current.phase,
+    revision: current.revision + 1,
+    cacheLimit: Math.max(current.visibleLimit, current.cacheLimit),
+    cacheStartOffset,
+    rewindStartOffset,
+  };
+}
+
+function nextUniverseLockedNodeId(
+  currentLockedId: string | null,
+  clickedId: string,
+) {
+  return currentLockedId === clickedId ? null : clickedId;
+}
+
+function universeExpansionCacheKey(
+  epoch: number,
+  sourceId: string,
+  sourceRevision: string,
+  snapshotId: string,
+  kind: UniverseNodeKind,
+  nodeId: string,
+  cursor: string | null,
+) {
+  return [
+    epoch,
+    sourceId,
+    sourceRevision,
+    snapshotId,
+    kind,
+    nodeId,
+    cursor ?? "root",
+  ].join(":");
+}
 
 function waitForAbortableDelay(duration: number, signal: AbortSignal) {
   if (signal.aborted) return Promise.resolve();
@@ -161,6 +332,123 @@ function stableOffset(key: string, radius: number): Position3D {
   };
 }
 
+function stableRootEventOffset(
+  sourceId: string,
+  key: string,
+  radius: number,
+  index: number,
+  total: number,
+): Position3D {
+  // Root events define the readable timeline skeleton. A shallow golden-angle
+  // spiral keeps their default camera projection separated while retaining a
+  // small, deterministic Z variation for 3D depth.
+  const count = Math.max(1, total);
+  const progress = (index + 0.65) / count;
+  const distance = radius * (0.5 + Math.sqrt(progress) * 0.43);
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  const phase = stableUnit(`${sourceId}:root-event-phase`) * Math.PI * 2;
+  const angle = phase + index * goldenAngle;
+  return {
+    x: Math.cos(angle) * distance,
+    y: Math.sin(angle) * distance * 0.82,
+    z: (stableUnit(`${key}:root-event-depth`) - 0.5) * radius * 0.18,
+  };
+}
+
+function timelineProjectionBundleIds(
+  current: UniverseWorkingSet,
+  timelineBundleIds: readonly string[],
+  visibleTimelineBundleIds: readonly string[],
+) {
+  const timelineIds = new Set(timelineBundleIds);
+  const visibleIds = new Set(visibleTimelineBundleIds);
+  const availableNodeKeys = new Set(current.nodes.map((node) =>
+    universeNodeKey(node.kind, node.id, node.source_id)));
+  const visibleNodeKeys = new Set<string>(
+    visibleTimelineBundleIds
+      .flatMap((id) => current.bundles[id]?.node_keys ?? [])
+      .filter((key) => availableNodeKeys.has(key)),
+  );
+  const supportIds = lineageQualifiedExpansionBundleIds(
+    current,
+    visibleNodeKeys,
+  );
+  return current.bundle_order.filter((id) => {
+    if (visibleIds.has(id)) return true;
+    if (timelineIds.has(id)) return false;
+    return supportIds.has(id);
+  });
+}
+
+function lineageQualifiedExpansionBundleIds(
+  current: UniverseWorkingSet,
+  seedNodeKeys: Iterable<string>,
+) {
+  const roots = new Set(seedNodeKeys);
+  const supportIds = new Set<string>();
+  current.bundle_order.forEach((id) => {
+    const bundle = current.bundles[id];
+    if (
+      bundle?.origin === "expansion"
+      && bundle.lineage_root_key
+      && roots.has(bundle.lineage_root_key)
+    ) supportIds.add(id);
+  });
+  return supportIds;
+}
+
+function expansionLineageRootKey(
+  current: UniverseWorkingSet,
+  timelineBundleIds: readonly string[],
+  anchorKey: string,
+) {
+  const timelineNodeKeys = new Set(
+    timelineBundleIds.flatMap((id) => current.bundles[id]?.node_keys ?? []),
+  );
+  if (timelineNodeKeys.has(anchorKey)) return anchorKey;
+  for (let index = current.bundle_order.length - 1; index >= 0; index -= 1) {
+    const bundle = current.bundles[current.bundle_order[index]];
+    if (
+      bundle?.origin === "expansion"
+      && bundle.node_keys.includes(anchorKey)
+      && bundle.lineage_root_key
+      && timelineNodeKeys.has(bundle.lineage_root_key)
+    ) return bundle.lineage_root_key;
+  }
+  return null;
+}
+
+function timelineRetentionBundleIds(
+  current: UniverseWorkingSet,
+  timelineBundleIds: readonly string[],
+) {
+  const timelineIds = new Set(timelineBundleIds);
+  const timelineNodeKeys = new Set(
+    timelineBundleIds.flatMap((id) => current.bundles[id]?.node_keys ?? []),
+  );
+  const supportIds = lineageQualifiedExpansionBundleIds(current, timelineNodeKeys);
+  const anchoredSupportIds = current.bundle_order.filter((id) =>
+    !timelineIds.has(id) && supportIds.has(id));
+  // Cached timeline bundles are the virtual list's data backing and must stay
+  // resident even while off-screen. Expansion payloads remain eligible only
+  // while their stable timeline lineage root is still in that cache.
+  return [...new Set([...timelineBundleIds, ...anchoredSupportIds])];
+}
+
+function universeBundleWindowProtection(
+  current: UniverseWorkingSet,
+  bundleIds: readonly string[],
+) {
+  const nodeKeys = new Set<string>();
+  const relationKeys = new Set<string>();
+  bundleIds.forEach((id) => {
+    const bundle = current.bundles[id];
+    bundle?.node_keys.forEach((key) => nodeKeys.add(key));
+    bundle?.relation_keys.forEach((key) => relationKeys.add(key));
+  });
+  return { nodeKeys: [...nodeKeys], relationKeys: [...relationKeys] };
+}
+
 function compactCount(value: number, locale: string) {
   return new Intl.NumberFormat(locale, {
     notation: value >= 10_000 ? "compact" : "standard",
@@ -168,30 +456,15 @@ function compactCount(value: number, locale: string) {
   }).format(value);
 }
 
-function rememberLoadedContent(
-  ledger: Map<string, SourceContentLedger>,
-  nodes: ReadonlyArray<{
-    id: string;
-    kind: UniverseNodeKind;
-    source_id?: string | null;
-  }>,
-  fallbackSourceId?: string,
-) {
-  let changed = false;
-  nodes.forEach((node) => {
-    const sourceId = node.source_id || fallbackSourceId;
-    if (!sourceId) return;
-    let source = ledger.get(sourceId);
-    if (!source) {
-      source = { events: new Set<string>(), entities: new Set<string>() };
-      ledger.set(sourceId, source);
-    }
-    const target = node.kind === "event" ? source.events : source.entities;
-    const previousSize = target.size;
-    target.add(node.id);
-    if (target.size !== previousSize) changed = true;
+function universeSceneDataSignature(data: UniverseSceneData) {
+  return JSON.stringify({
+    epoch: data.epoch,
+    windowRevision: data.windowRevision ?? 0,
+    windowChangeCause: data.windowChangeCause ?? "synchronization",
+    windowDirection: data.windowDirection ?? null,
+    nodes: data.nodes,
+    links: data.links,
   });
-  return changed;
 }
 
 function LoadProgressRow({
@@ -245,11 +518,11 @@ function LoadProgressRow({
 function UniverseLoadProgressPanel({
   progress,
   reducedMotion,
-  clickOnly,
+  explicitOnly,
 }: {
   progress: SourceLoadProgress;
   reducedMotion: boolean;
-  clickOnly: boolean;
+  explicitOnly: boolean;
 }) {
   const t = useTranslations("KnowledgeUniverse");
   const started = progress.events.loaded > 0 || progress.entities.loaded > 0;
@@ -258,8 +531,8 @@ function UniverseLoadProgressPanel({
     : progress.loading
       ? t("loadProgress.loading")
       : started
-        ? clickOnly ? t("loadProgress.clickContinue") : t("loadProgress.zoomContinue")
-        : clickOnly ? t("loadProgress.clickStart") : t("loadProgress.zoomStart");
+        ? explicitOnly ? t("loadProgress.clickContinue") : t("loadProgress.browseContinue")
+        : explicitOnly ? t("loadProgress.clickStart") : t("loadProgress.browseStart");
   return (
     <motion.div
       data-universe-load-progress="true"
@@ -360,12 +633,8 @@ function IconControl({
 
 export function KnowledgeUniverse({
   interactive = true,
-  workspacePanel = "hidden",
-  onOpenWorkspace,
 }: {
   interactive?: boolean;
-  workspacePanel?: "hidden" | "mini" | "normal";
-  onOpenWorkspace: () => void;
 }) {
   const locale = useLocale();
   const t = useTranslations("KnowledgeUniverse");
@@ -376,7 +645,6 @@ export function KnowledgeUniverse({
   const graphRef = React.useRef<UniverseSceneHandle | null>(null);
   const interactiveRef = React.useRef(interactive);
   interactiveRef.current = interactive;
-  const stageTimerRef = React.useRef<number | null>(null);
   const focusTimerRef = React.useRef<number | null>(null);
   const cameraFrameRef = React.useRef<number | null>(null);
   const epochRef = React.useRef(0);
@@ -384,31 +652,71 @@ export function KnowledgeUniverse({
   const budgetRef = React.useRef<{ nodes: number; edges: number }>(
     UNIVERSE_SCENE_BUDGET.mobile,
   );
-  const visibleCountRef = React.useRef(0);
+  const residentBudgetRef = React.useRef<{ nodes: number; edges: number }>(
+    UNIVERSE_RESIDENT_BUDGET.mobile,
+  );
   const expandAbortRef = React.useRef<AbortController | null>(null);
   const expansionCacheRef = React.useRef(new Map<string, UniverseGraphPatch>());
-  const expansionInflightRef = React.useRef(new Map<string, Promise<UniverseGraphPatch>>());
+  const expansionInflightRef = React.useRef(new Map<string, {
+    promise: Promise<UniverseGraphPatch>;
+    signal: AbortSignal;
+  }>());
   const rebuildAbortRef = React.useRef<AbortController | null>(null);
   const autoRebuildAttemptedRef = React.useRef(false);
+  const observedManifestRef = React.useRef(false);
+  const manifestVersionRef = React.useRef<string | null>(null);
   const timelineAbortRef = React.useRef<AbortController | null>(null);
-  const sourceTimelinePagesRef = React.useRef(new Map<string, SourceTimelinePageState>());
-  const sourceContentLedgerRef = React.useRef(new Map<string, SourceContentLedger>());
+  const timelineLoadCauseRef = React.useRef<SourceTimelineLoadCause | null>(null);
+  const timelineRequestRef = React.useRef<Promise<SourceTimelineLoadResult> | null>(null);
+  const timelinePageLoaderRef = React.useRef<((
+    sourceId: string,
+    cause: SourceTimelineLoadCause,
+    direction?: UniverseTimelineDirection,
+  ) => Promise<SourceTimelineLoadResult>) | null>(null);
+  const snapshotReloadTimerRef = React.useRef<number | null>(null);
+  const snapshotReloadAttemptsRef = React.useRef(new Map<string, number>());
+  const timelineSettleTimerRef = React.useRef<number | null>(null);
+  const sourceSessionRef = React.useRef<SourceBrowseSession | null>(null);
+  const timelineJourneyCommitRef = React.useRef<{
+    session: SourceBrowseSession;
+    revision: number;
+    cause: "journey";
+    direction: "next" | "previous";
+  } | null>(null);
+  const expansionSnapshotsRef = React.useRef(new Map<string, ExpansionSnapshotContext>());
   const completedSourcesRef = React.useRef(new Set<string>());
   const activationOriginRef = React.useRef<UniverseActivationOrigin>("browse");
   const viewportSourceRef = React.useRef<string | null>(null);
-  const previousWorkspacePanelRef = React.useRef(workspacePanel);
+  const lockedKeyRef = React.useRef<string | null>(null);
   const cursorsRef = React.useRef(new Map<string, string>());
   const expandedAnchorsRef = React.useRef(new Set<string>());
+  const expandingAnchorRef = React.useRef<string | null>(null);
   const nodeByIdRef = React.useRef(new Map<string, Universe3DNode>());
+  const graphDataCacheRef = React.useRef<{
+    signature: string;
+    data: UniverseSceneData;
+  } | null>(null);
   const { preferences: viewPreferences } = useUniverseViewPreferences();
+  const entityCategorySignature = viewPreferences.entityCategories === null
+    ? "null"
+    : JSON.stringify([...viewPreferences.entityCategories].sort());
+  const projectedEntityCategories = React.useMemo<string[] | null>(
+    () => JSON.parse(entityCategorySignature) as string[] | null,
+    [entityCategorySignature],
+  );
   const [dimensions, setDimensions] = React.useState({ width: 1, height: 1 });
   const [manifest, setManifest] = React.useState<UniverseManifest | null>(null);
   const [working, setWorking] = React.useState<UniverseWorkingSet>(emptyUniverseWorkingSet());
-  const [visibleCount, setVisibleCount] = React.useState(0);
+  const [timelineWindow, setTimelineWindow] =
+    React.useState<UniverseTimelineWindowState | null>(null);
+  const [displayModeState, setDisplayModeState] =
+    React.useState<UniverseDisplayModeState>(() => createUniverseDisplayModeState());
+  const displayModeRef = React.useRef(displayModeState);
+  displayModeRef.current = displayModeState;
   const [activePartition, setActivePartition] = React.useState<string | null>(null);
   const [viewportSourceId, setViewportSourceId] = React.useState<string | null>(null);
-  const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
-  const [hoveredConcreteKey, setHoveredConcreteKey] = React.useState<string | null>(null);
+  const [selectedKey, setSelectedKeyState] = React.useState<string | null>(null);
+  const [lockedKey, setLockedKeyState] = React.useState<string | null>(null);
   const [sourceHits, setSourceHits] = React.useState<
     NonNullable<UniverseActivation["source_hits"]>
   >([]);
@@ -422,50 +730,191 @@ export function KnowledgeUniverse({
   const [rebuilding, setRebuilding] = React.useState(false);
   const [error, setError] = React.useState("");
   const [webglAvailable, setWebglAvailable] = React.useState<boolean | null>(null);
+  const [sceneUnavailableReason, setSceneUnavailableReason] =
+    React.useState<UniverseSceneUnavailableReason | null>(null);
+  const [sceneAttempt, setSceneAttempt] = React.useState(0);
+  const sceneRetryFrameRef = React.useRef<number | null>(null);
+
+  // The loaded browse session is the data authority for timeline paging.
+  // `activePartition` is intentionally kept as camera/presentation state so
+  // visual LOD changes cannot disconnect a valid cached timeline.
+  const browseSessionSourceId = activationOrigin === "browse" && timelineWindow
+    ? sourceSessionRef.current?.sourceId ?? null
+    : null;
+
+  const setSelectedKey = React.useCallback((key: string | null) => {
+    setSelectedKeyState(key);
+  }, []);
+
+  const updateDisplayMode = React.useCallback((
+    update: (current: UniverseDisplayModeState) => UniverseDisplayModeState,
+  ) => {
+    setDisplayModeState((current) => {
+      const next = update(current);
+      displayModeRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const restoreNormalPresentation = React.useCallback(() => {
+    if (displayModeRef.current.mode === "normal") return;
+    setMoreHint(t("controls.cameraRestored"));
+    updateDisplayMode((current) => current.mode === "normal"
+      ? current
+      : setUniverseDisplayMode(
+          current,
+          "normal",
+          sourceSessionRef.current?.timeline.window.revision ?? 0,
+        ));
+  }, [t, updateDisplayMode]);
+
+  const setLockedKey = React.useCallback((key: string | null) => {
+    lockedKeyRef.current = key;
+    setLockedKeyState(key);
+  }, []);
+
+  const commitWorkingSet = React.useCallback((next: UniverseWorkingSet) => {
+    workingRef.current = next;
+    const session = sourceSessionRef.current;
+    if (session && session.working.epoch === next.epoch) {
+      session.working = next;
+    }
+    setWorking(next);
+  }, []);
+
+  const commitTimelineWindow = React.useCallback((
+    session: SourceBrowseSession,
+    next: UniverseTimelineWindowState,
+  ) => {
+    if (sourceSessionRef.current !== session) return;
+    session.timeline.window = next;
+    setTimelineWindow(next);
+  }, []);
+
+  const scheduleTimelineSettle = React.useCallback((
+    session: SourceBrowseSession,
+    next: UniverseTimelineWindowState,
+  ) => {
+    if (timelineSettleTimerRef.current !== null) {
+      window.clearTimeout(timelineSettleTimerRef.current);
+    }
+    if (next.phase !== "transitioning") {
+      timelineSettleTimerRef.current = null;
+      return;
+    }
+    timelineSettleTimerRef.current = window.setTimeout(() => {
+      timelineSettleTimerRef.current = null;
+      if (
+        sourceSessionRef.current !== session
+        || session.timeline.window.revision !== next.revision
+      ) return;
+      commitTimelineWindow(session, settleUniverseTimelineWindow(next));
+    }, reducedMotion ? 0 : 520);
+  }, [commitTimelineWindow, reducedMotion]);
+
+  const clearTimelineSettle = React.useCallback(() => {
+    if (timelineSettleTimerRef.current !== null) {
+      window.clearTimeout(timelineSettleTimerRef.current);
+      timelineSettleTimerRef.current = null;
+    }
+  }, []);
 
   const mobile = dimensions.width < 768;
-  const policyBudget = React.useMemo(
-    () => manifest
-      ? mobile
-        ? {
-            nodes: manifest.policy.node_budget_mobile,
-            edges: manifest.policy.edge_budget_mobile,
-          }
-        : {
-            nodes: manifest.policy.node_budget_desktop,
-            edges: manifest.policy.edge_budget_desktop,
-          }
-      : mobile
-        ? UNIVERSE_SCENE_BUDGET.mobile
-        : UNIVERSE_SCENE_BUDGET.desktop,
-    [manifest, mobile],
+  const configuredBundleWindow = React.useMemo(
+    () => effectiveUniverseBundleWindow(viewPreferences, mobile),
+    [mobile, viewPreferences],
   );
+  const policyBudget = React.useMemo(() => {
+    const hardLimit = mobile
+      ? UNIVERSE_SCENE_BUDGET.mobile
+      : UNIVERSE_SCENE_BUDGET.desktop;
+    if (!manifest) return hardLimit;
+    return {
+      nodes: Math.min(
+        hardLimit.nodes,
+        mobile
+          ? manifest.policy.node_budget_mobile
+          : manifest.policy.node_budget_desktop,
+      ),
+      edges: Math.min(
+        hardLimit.edges,
+        mobile
+          ? manifest.policy.edge_budget_mobile
+          : manifest.policy.edge_budget_desktop,
+      ),
+    };
+  }, [manifest, mobile]);
   const budget = React.useMemo(
-    () => effectiveUniverseBudget(
-      policyBudget,
-      viewPreferences.maxNodes,
-      viewPreferences.edgeDensity,
-    ),
-    [policyBudget, viewPreferences.edgeDensity, viewPreferences.maxNodes],
+    () => effectiveUniverseBudget(policyBudget),
+    [policyBudget],
   );
+  const timelineBundleEntityLimit = Math.max(0, Math.min(
+    EVENT_ENTITY_PROJECTION_LIMIT,
+    manifest?.policy.event_entity_limit ?? EVENT_ENTITY_PROJECTION_LIMIT,
+  ));
+  const timelineWindowPlan = React.useMemo(() => {
+    const nodesPerPackage = Math.max(1, timelineBundleEntityLimit + 1);
+    const edgesPerPackage = timelineBundleEntityLimit;
+    const nodeCapacity = Math.max(0, Math.floor(budget.nodes / nodesPerPackage));
+    const edgeCapacity = edgesPerPackage > 0
+      ? Math.max(0, Math.floor(budget.edges / edgesPerPackage))
+      : nodeCapacity;
+    const packageCapacity = Math.min(nodeCapacity, edgeCapacity);
+    let visibleEventBundles = Math.max(
+      1,
+      Math.min(configuredBundleWindow.visibleEventBundles, packageCapacity || 1),
+    );
+    const requiredTransitionPackages = (visible: number) => Math.max(
+      1,
+      Math.min(ENTITY_EXPANSION_EVENT_LIMIT, Math.max(0, visible - 1)),
+    );
+    while (
+      visibleEventBundles > 1
+      && visibleEventBundles + requiredTransitionPackages(visibleEventBundles)
+        > packageCapacity
+    ) visibleEventBundles -= 1;
+    const transitionHeadroomPackages = Math.max(0, Math.min(
+      requiredTransitionPackages(visibleEventBundles),
+      packageCapacity - visibleEventBundles,
+    ));
+    return {
+      window: {
+        visibleEventBundles,
+        cachedEventBundles: configuredBundleWindow.cachedEventBundles,
+      },
+      projectionBudget: {
+        nodes: Math.max(
+          0,
+          budget.nodes - transitionHeadroomPackages * nodesPerPackage,
+        ),
+        edges: Math.max(
+          0,
+          budget.edges - transitionHeadroomPackages * edgesPerPackage,
+        ),
+      },
+      transitionHeadroomPackages,
+    };
+  }, [
+    budget,
+    configuredBundleWindow,
+    timelineBundleEntityLimit,
+  ]);
+  const bundleWindow = timelineWindowPlan.window;
+  const timelineProjectionBudget = timelineWindowPlan.projectionBudget;
+  const residentBudget = mobile
+    ? UNIVERSE_RESIDENT_BUDGET.mobile
+    : UNIVERSE_RESIDENT_BUDGET.desktop;
+  const timelineCacheBundleIds = timelineWindow?.cacheBundleIds
+    ?? EMPTY_TIMELINE_BUNDLE_IDS;
+  const timelineVisibleBundleIds = timelineWindow?.visibleBundleIds
+    ?? EMPTY_TIMELINE_BUNDLE_IDS;
+  const timelineWindowRevision = timelineWindow?.revision ?? -1;
   budgetRef.current = budget;
+  residentBudgetRef.current = residentBudget;
 
   const refreshLoadProgress = React.useCallback(() => {
     setLoadProgressRevision((current) => current + 1);
   }, []);
-
-  const recordLoadedContent = React.useCallback((
-    nodes: ReadonlyArray<{
-      id: string;
-      kind: UniverseNodeKind;
-      source_id?: string | null;
-    }>,
-    fallbackSourceId?: string,
-  ) => {
-    if (rememberLoadedContent(sourceContentLedgerRef.current, nodes, fallbackSourceId)) {
-      refreshLoadProgress();
-    }
-  }, [refreshLoadProgress]);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -484,13 +933,17 @@ export function KnowledgeUniverse({
   }, []);
 
   React.useEffect(() => {
-    const canvas = document.createElement("canvas");
-    const context = (
-      canvas.getContext("webgl2", { failIfMajorPerformanceCaveat: true })
-      || canvas.getContext("webgl", { failIfMajorPerformanceCaveat: true })
-    );
-    setWebglAvailable(Boolean(context));
-    context?.getExtension("WEBGL_lose_context")?.loseContext();
+    // Do not allocate a disposable probe context here. Chrome has a small
+    // per-process context pool, so a probe can fail transiently or compete with
+    // the real Three renderer and incorrectly look like permanent lack of WebGL.
+    const capability = detectUniverseWebGLCapability(window);
+    setWebglAvailable(capability === "available");
+  }, [sceneAttempt]);
+
+  React.useEffect(() => () => {
+    if (sceneRetryFrameRef.current !== null) {
+      window.cancelAnimationFrame(sceneRetryFrameRef.current);
+    }
   }, []);
 
   const loadManifest = React.useCallback(async () => {
@@ -537,22 +990,40 @@ export function KnowledgeUniverse({
     : null;
   const viewportLoadProgress: SourceLoadProgress | null = (() => {
     if (!viewportSource) return null;
-    const ledger = sourceContentLedgerRef.current.get(viewportSource.source_id);
-    const eventState = sourceTimelinePagesRef.current.get(viewportSource.source_id);
+    const session = sourceSessionRef.current?.sourceId === viewportSource.source_id
+      ? sourceSessionRef.current
+      : null;
+    const eventState = session?.timeline;
     const entityTotal = Math.max(0, viewportSource.entity_count);
     const eventTotal = Math.max(0, viewportSource.event_count);
-    const entityLoaded = Math.min(entityTotal, ledger?.entities.size ?? 0);
-    const eventLoaded = Math.min(eventTotal, ledger?.events.size ?? 0);
+    const residentNodes = working.nodes.filter(
+      (node) => node.source_id === viewportSource.source_id,
+    );
+    // Entity progress is deliberately resident, not an all-time unique count:
+    // the working set is bounded while a source may contain arbitrarily many
+    // identities across its full timeline.
+    const entityLoaded = Math.min(
+      entityTotal,
+      residentNodes.filter((node) => node.kind === "entity").length,
+    );
+    const eventLoaded = Math.min(eventTotal, eventState
+      ? queriedUniverseTimelineEventCount(eventState.window)
+      : residentNodes.filter((node) => node.kind === "event").length);
+    const timelineComplete = eventState?.window.phase === "complete";
     const entities = {
       loaded: entityLoaded,
       total: entityTotal,
-      done: entityTotal === 0 || entityLoaded >= entityTotal || Boolean(eventState?.done),
+      done: eventState
+        ? timelineComplete
+        : entityTotal === 0 || entityLoaded >= entityTotal,
       loading: Boolean(eventState?.loading),
     };
     const events = {
       loaded: eventLoaded,
       total: eventTotal,
-      done: eventTotal === 0 || eventLoaded >= eventTotal || Boolean(eventState?.done),
+      done: eventState
+        ? timelineComplete
+        : eventTotal === 0 || eventLoaded >= eventTotal,
       loading: Boolean(eventState?.loading),
     };
     return {
@@ -581,8 +1052,9 @@ export function KnowledgeUniverse({
       ? ranked.filter((partition) => relevantSourceIds.has(partition.source_id))
       : ranked;
     const rendered = candidates.slice(0, limit);
-    if (activePartition && !rendered.some((item) => item.source_id === activePartition)) {
-      const active = sourceById.get(activePartition);
+    const retainedSourceId = browseSessionSourceId ?? activePartition;
+    if (retainedSourceId && !rendered.some((item) => item.source_id === retainedSourceId)) {
+      const active = sourceById.get(retainedSourceId);
       if (active) {
         if (rendered.length >= limit) rendered.pop();
         rendered.push(active);
@@ -592,6 +1064,7 @@ export function KnowledgeUniverse({
   }, [
     activationOrigin,
     activePartition,
+    browseSessionSourceId,
     mobile,
     sourceById,
     sourceHits,
@@ -600,8 +1073,11 @@ export function KnowledgeUniverse({
   ]);
 
   const focusOverview = React.useCallback(() => {
+    graphRef.current?.unlockNode();
+    setLockedKey(null);
+    setSelectedKey(null);
     graphRef.current?.focusOverview();
-  }, []);
+  }, [setLockedKey, setSelectedKey]);
 
   const focusResult = React.useCallback(() => {
     graphRef.current?.focusResult();
@@ -620,11 +1096,6 @@ export function KnowledgeUniverse({
     graphRef.current?.focusNode(node.id);
   }, []);
 
-  const clearStageTimer = React.useCallback(() => {
-    if (stageTimerRef.current !== null) window.clearTimeout(stageTimerRef.current);
-    stageTimerRef.current = null;
-  }, []);
-
   const clearCameraSchedule = React.useCallback(() => {
     if (focusTimerRef.current !== null) window.clearTimeout(focusTimerRef.current);
     if (cameraFrameRef.current !== null) window.cancelAnimationFrame(cameraFrameRef.current);
@@ -632,44 +1103,80 @@ export function KnowledgeUniverse({
     cameraFrameRef.current = null;
   }, []);
 
-  const pruneExpansionState = React.useCallback((nodes: UniverseWorkingSet["nodes"]) => {
-    const kept = new Set(
-      nodes.map((node) => universeNodeKey(node.kind, node.id, node.source_id)),
+  const pruneExpansionState = React.useCallback((current: UniverseWorkingSet) => {
+    const kept = new Map(
+      current.nodes.map((node) => [
+        universeNodeKey(node.kind, node.id, node.source_id),
+        node,
+      ]),
     );
+    const invalidatedAnchors = new Set<string>();
     for (const key of cursorsRef.current.keys()) {
-      if (!kept.has(key)) cursorsRef.current.delete(key);
+      if (!kept.has(key)) {
+        cursorsRef.current.delete(key);
+        invalidatedAnchors.add(key);
+      }
     }
     for (const key of expandedAnchorsRef.current) {
-      if (!kept.has(key)) expandedAnchorsRef.current.delete(key);
+      if (!kept.has(key)) {
+        expandedAnchorsRef.current.delete(key);
+        invalidatedAnchors.add(key);
+      }
     }
+    if (
+      expandingAnchorRef.current
+      && invalidatedAnchors.has(expandingAnchorRef.current)
+    ) expandAbortRef.current?.abort();
   }, []);
 
   React.useEffect(() => {
     const current = workingRef.current;
-    const next = trimUniverseWorkingSet(
+    const session = sourceSessionRef.current;
+    if (session) {
+      if (session.timeline.pausedReason === "capacity") {
+        session.timeline.pausedReason = null;
+        setMoreHint("");
+        refreshLoadProgress();
+      }
+      // Timeline cache eviction is bundle-atomic. Let page admission and the
+      // timeline-window reconfiguration path converge under the new budget;
+      // generic node trimming would desynchronise bundle ownership from cache.
+      return;
+    }
+    let next = trimUniverseWorkingSet(
       current,
       budget,
-      selectedKey ? [selectedKey] : [],
+      lockedKey ? [lockedKey] : [],
     );
+    if (
+      next.nodes.length > budget.nodes
+      || next.relations.length > budget.edges
+    ) {
+      graphRef.current?.unlockNode();
+      setLockedKey(null);
+      setSelectedKey(null);
+      next = trimUniverseWorkingSet(
+        current,
+        budget,
+      );
+      setMoreHint(t("timeline.lockReleasedForCapacity"));
+    }
     const unchanged = next.nodes.length === current.nodes.length
       && next.relations.length === current.relations.length
-      && next.node_order?.every((key, index) => key === current.node_order?.[index]);
+      && next.node_order.every((key, index) => key === current.node_order[index]);
     if (unchanged) return;
-    workingRef.current = next;
-    pruneExpansionState(next.nodes);
-    setWorking(next);
-    visibleCountRef.current = Math.min(visibleCountRef.current, next.nodes.length);
-    setVisibleCount((count) => Math.min(count, next.nodes.length));
-  }, [budget, pruneExpansionState, selectedKey]);
-
-  const stageTo = React.useCallback(
-    (_from: number, target: number) => {
-      clearStageTimer();
-      visibleCountRef.current = target;
-      setVisibleCount(target);
-    },
-    [clearStageTimer],
-  );
+    commitWorkingSet(next);
+    pruneExpansionState(next);
+  }, [
+    budget,
+    commitWorkingSet,
+    lockedKey,
+    pruneExpansionState,
+    refreshLoadProgress,
+    setLockedKey,
+    setSelectedKey,
+    t,
+  ]);
 
   const resetScene = React.useCallback(
     (epoch: number) => {
@@ -677,28 +1184,37 @@ export function KnowledgeUniverse({
       epochRef.current = epoch;
       expandAbortRef.current?.abort();
       expandAbortRef.current = null;
+      expandingAnchorRef.current = null;
       timelineAbortRef.current?.abort();
       timelineAbortRef.current = null;
-      sourceTimelinePagesRef.current.clear();
-      sourceContentLedgerRef.current.clear();
+      timelineLoadCauseRef.current = null;
+      timelineRequestRef.current = null;
+      if (snapshotReloadTimerRef.current !== null) {
+        window.clearTimeout(snapshotReloadTimerRef.current);
+        snapshotReloadTimerRef.current = null;
+      }
+      snapshotReloadAttemptsRef.current.clear();
+      clearTimelineSettle();
+      sourceSessionRef.current = null;
+      setTimelineWindow(null);
+      updateDisplayMode(() => createUniverseDisplayModeState());
+      expansionSnapshotsRef.current.clear();
       completedSourcesRef.current.clear();
       refreshLoadProgress();
       expansionCacheRef.current.clear();
       expansionInflightRef.current.clear();
-      clearStageTimer();
+      dispatchUniversePatchReset();
+      graphRef.current?.unlockNode();
       clearCameraSchedule();
       cursorsRef.current.clear();
       expandedAnchorsRef.current.clear();
       const empty = emptyUniverseWorkingSet(epoch);
-      workingRef.current = empty;
-      setWorking(empty);
-      visibleCountRef.current = 0;
-      setVisibleCount(0);
+      commitWorkingSet(empty);
       setSummary(null);
       activationOriginRef.current = "browse";
       setActivationOrigin("browse");
+      setLockedKey(null);
       setSelectedKey(null);
-      setHoveredConcreteKey(null);
       setSourceHits([]);
       setActivePartition(null);
       setExpandingKey(null);
@@ -711,8 +1227,105 @@ export function KnowledgeUniverse({
         });
       }
     },
-    [clearCameraSchedule, clearStageTimer, focusOverview, refreshLoadProgress],
+    [
+      clearCameraSchedule,
+      clearTimelineSettle,
+      commitWorkingSet,
+      focusOverview,
+      refreshLoadProgress,
+      setLockedKey,
+      setSelectedKey,
+      updateDisplayMode,
+    ],
   );
+
+  React.useEffect(() => {
+    if (!manifest) return;
+    if (!observedManifestRef.current) {
+      observedManifestRef.current = true;
+      manifestVersionRef.current = manifest.version;
+      return;
+    }
+    if (manifestVersionRef.current === manifest.version) return;
+    manifestVersionRef.current = manifest.version;
+    if (workingRef.current.nodes.length > 0 || sourceSessionRef.current) {
+      resetScene(epochRef.current + 1);
+    }
+  }, [manifest, resetScene]);
+
+  const invalidateSourceSnapshot = React.useCallback((sourceId: string, epoch: number) => {
+    if (epoch !== epochRef.current) return;
+    const currentSession = sourceSessionRef.current;
+    if (currentSession && currentSession.sourceId !== sourceId) return;
+    expandAbortRef.current?.abort();
+    expandAbortRef.current = null;
+    expandingAnchorRef.current = null;
+    timelineAbortRef.current?.abort();
+    timelineAbortRef.current = null;
+    timelineLoadCauseRef.current = null;
+    timelineRequestRef.current = null;
+    clearTimelineSettle();
+    expansionCacheRef.current.clear();
+    expansionInflightRef.current.clear();
+    dispatchUniversePatchReset();
+    expansionSnapshotsRef.current.clear();
+    cursorsRef.current.clear();
+    expandedAnchorsRef.current.clear();
+    completedSourcesRef.current.delete(sourceId);
+    graphRef.current?.unlockNode();
+    setLockedKey(null);
+    setSelectedKey(null);
+    setExpandingKey(null);
+    const refreshedSession = emptySourceBrowseSession(
+      epoch,
+      sourceId,
+      bundleWindow.visibleEventBundles,
+      bundleWindow.cachedEventBundles,
+    );
+    sourceSessionRef.current = refreshedSession;
+    updateDisplayMode(() => createUniverseDisplayModeState());
+    commitWorkingSet(refreshedSession.working);
+    setTimelineWindow(refreshedSession.timeline.window);
+    refreshLoadProgress();
+    setSummary({
+      query: sourceById.get(sourceId)?.label ?? t("timeline.defaultTitle"),
+      events: 0,
+      entities: 0,
+      relations: 0,
+    });
+    const reloadAttempt = (snapshotReloadAttemptsRef.current.get(sourceId) ?? 0) + 1;
+    snapshotReloadAttemptsRef.current.set(sourceId, reloadAttempt);
+    if (snapshotReloadTimerRef.current !== null) {
+      window.clearTimeout(snapshotReloadTimerRef.current);
+      snapshotReloadTimerRef.current = null;
+    }
+    if (reloadAttempt > 1) {
+      setMoreHint(t("timeline.snapshotReset"));
+      return;
+    }
+    setMoreHint(t("timeline.snapshotReloading"));
+    snapshotReloadTimerRef.current = window.setTimeout(() => {
+      snapshotReloadTimerRef.current = null;
+      if (
+        !interactiveRef.current
+        || epochRef.current !== epoch
+        || sourceSessionRef.current !== refreshedSession
+      ) return;
+      const loader = timelinePageLoaderRef.current;
+      if (!loader) {
+        setMoreHint(t("timeline.snapshotReset"));
+        return;
+      }
+      void loader(sourceId, "source-entry").then((result) => {
+        if (
+          result === "loaded"
+          && sourceSessionRef.current === refreshedSession
+        ) {
+          snapshotReloadAttemptsRef.current.delete(sourceId);
+        }
+      });
+    }, 0);
+  }, [bundleWindow, clearTimelineSettle, commitWorkingSet, refreshLoadProgress, setLockedKey, setSelectedKey, sourceById, t, updateDisplayMode]);
 
   React.useEffect(() => {
     const onActivate = (event: Event) => {
@@ -721,21 +1334,32 @@ export function KnowledgeUniverse({
       if (!activation || epoch < epochRef.current) return;
       epochRef.current = epoch;
       expandAbortRef.current?.abort();
+      expandAbortRef.current = null;
+      expandingAnchorRef.current = null;
       timelineAbortRef.current?.abort();
-      sourceTimelinePagesRef.current.clear();
-      sourceContentLedgerRef.current.clear();
+      timelineLoadCauseRef.current = null;
+      timelineRequestRef.current = null;
+      if (snapshotReloadTimerRef.current !== null) {
+        window.clearTimeout(snapshotReloadTimerRef.current);
+        snapshotReloadTimerRef.current = null;
+      }
+      snapshotReloadAttemptsRef.current.clear();
+      clearTimelineSettle();
+      sourceSessionRef.current = null;
+      setTimelineWindow(null);
+      expansionSnapshotsRef.current.clear();
       completedSourcesRef.current.clear();
       expansionCacheRef.current.clear();
       expansionInflightRef.current.clear();
+      dispatchUniversePatchReset();
+      graphRef.current?.unlockNode();
       clearCameraSchedule();
       cursorsRef.current.clear();
       expandedAnchorsRef.current.clear();
       const next = replaceUniverseWorkingSet({ ...activation, epoch }, budget);
-      recordLoadedContent(activation.nodes);
-      workingRef.current = next;
-      setWorking(next);
+      commitWorkingSet(next);
+      setLockedKey(null);
       setSelectedKey(null);
-      setHoveredConcreteKey(null);
       setSourceHits(activation.source_hits ?? []);
       const origin = activation.origin ?? "assistant";
       activationOriginRef.current = origin;
@@ -753,8 +1377,7 @@ export function KnowledgeUniverse({
       });
       const sourceId = dominantSource(activation);
       setActivePartition(sourceId);
-      stageTo(0, next.nodes.length);
-      if (sourceId && interactiveRef.current) {
+      if (sourceId && !(activation.source_hits?.length) && interactiveRef.current) {
         const activationEpoch = epoch;
         focusTimerRef.current = window.setTimeout(() => {
           focusTimerRef.current = null;
@@ -775,6 +1398,8 @@ export function KnowledgeUniverse({
       const exactKey = universeNodeKey(value.kind, value.id, value.source_id);
       const node = nodeByIdRef.current.get(exactKey);
       if (!node) return;
+      graphRef.current?.unlockNode();
+      setLockedKey(null);
       setSelectedKey(node.id);
       if (interactiveRef.current) focusNode(node);
     };
@@ -789,12 +1414,14 @@ export function KnowledgeUniverse({
   }, [
     budget,
     clearCameraSchedule,
+    clearTimelineSettle,
+    commitWorkingSet,
     focusNode,
     focusPartition,
-    recordLoadedContent,
     reducedMotion,
     resetScene,
-    stageTo,
+    setLockedKey,
+    setSelectedKey,
   ]);
 
   const graphData = React.useMemo(() => {
@@ -833,7 +1460,30 @@ export function KnowledgeUniverse({
     }));
     const links: Universe3DLink[] = [];
 
-    const projectedWorking = projectUniverseWorkingSet(working, viewPreferences);
+    const visibleTimelineBundleIds = timelineVisibleBundleIds;
+    const categoryProjectedWorking = projectUniverseWorkingSet(
+      working,
+      projectedEntityCategories,
+    );
+    const timelineProjectionIds = timelineProjectionBundleIds(
+      categoryProjectedWorking,
+      timelineCacheBundleIds,
+      visibleTimelineBundleIds,
+    );
+    const visibleTimelineSet = new Set(visibleTimelineBundleIds);
+    const timelineSupportBundleIds = timelineProjectionIds.filter((id) =>
+      !visibleTimelineSet.has(id)).reverse();
+    const projectedWorking = browseSessionSourceId
+      && timelineProjectionIds.length > 0
+      ? projectUniverseBundleWindowWithinBudget(
+          categoryProjectedWorking,
+          visibleTimelineBundleIds,
+          timelineSupportBundleIds,
+          timelineProjectionBudget,
+          bundleWindow.visibleEventBundles,
+          timelineBundleEntityLimit,
+        )
+      : categoryProjectedWorking;
     const relationsByEvent = new Map<string, UniverseWorkingSet["relations"]>();
     const relationsByEntity = new Map<string, UniverseWorkingSet["relations"]>();
     const relationSourceByEvent = new Map<string, string>();
@@ -858,22 +1508,126 @@ export function KnowledgeUniverse({
         node,
       ]),
     );
-    const visibleNodes = projectedWorking.nodes.slice(
-      0,
-      Math.min(visibleCount, projectedWorking.nodes.length),
-    ).map((node) => workingNodeByKey.get(
+    const visibleNodes = projectedWorking.nodes.map((node) => workingNodeByKey.get(
       universeNodeKey(node.kind, node.id, node.source_id),
     ) ?? node);
+    const timelineEventPlacementByKey = new Map<string, {
+      bundleId: string;
+      index: number;
+      total: number;
+    }>();
+    const timelineBrowseActive = Boolean(browseSessionSourceId);
+    const projectedBundleIds = new Set(projectedWorking.bundle_order);
+    const temporalProjectionByBundleId = new Map(
+      projectUniverseTemporalBatch(
+        visibleTimelineBundleIds.map((bundleId, index) => ({
+          bundleId,
+          ageProgress: universeTemporalRankProgress(
+            visibleTimelineBundleIds.length - index - 1,
+            visibleTimelineBundleIds.length,
+          ),
+        })),
+        {
+          mode: displayModeState.mode,
+          direction: displayModeState.preview?.direction,
+        },
+      ).map((projection) => [projection.bundleId, projection]),
+    );
+    const temporalBundleByEventKey = new Map<string, string>();
+    visibleTimelineBundleIds.forEach((bundleId) => {
+      working.bundles[bundleId]?.node_keys.forEach((key) => {
+        if (workingNodeByKey.get(key)?.kind === "event") {
+          temporalBundleByEventKey.set(key, bundleId);
+        }
+      });
+    });
+    const temporalBundleByEntityKey = new Map<string, string>();
+    projectedWorking.relations.forEach((relation) => {
+      if (relation.kind !== "mentions") return;
+      const eventBundleId = temporalBundleByEventKey.get(
+        universeNodeKey("event", relation.from_id, relation.source_id),
+      );
+      if (!eventBundleId) return;
+      const entityKey = universeNodeKey("entity", relation.to_id, relation.source_id);
+      const currentBundleId = temporalBundleByEntityKey.get(entityKey);
+      const currentAge = currentBundleId
+        ? temporalProjectionByBundleId.get(currentBundleId)?.ageProgress
+        : Number.POSITIVE_INFINITY;
+      const candidateAge = temporalProjectionByBundleId.get(eventBundleId)?.ageProgress
+        ?? Number.POSITIVE_INFINITY;
+      if (candidateAge < (currentAge ?? Number.POSITIVE_INFINITY)) {
+        temporalBundleByEntityKey.set(entityKey, eventBundleId);
+      }
+    });
+    const visibleTimelineNodeKeys = new Set(
+      visibleTimelineBundleIds
+        .filter((bundleId) => projectedBundleIds.has(bundleId))
+        .flatMap((bundleId) => working.bundles[bundleId]?.node_keys ?? []),
+    );
+    const placementBundleByEvent = new Map<string, string>();
+    const appendPlacement = (eventKey: string, bundleId: string) => {
+      if (workingNodeByKey.get(eventKey)?.kind !== "event") return;
+      // A recent explicit support owner promotes the same canonical event to
+      // the current exploration focus without creating a second scene node.
+      placementBundleByEvent.delete(eventKey);
+      placementBundleByEvent.set(eventKey, bundleId);
+    };
+    visibleTimelineBundleIds.forEach((bundleId) => {
+      if (!projectedBundleIds.has(bundleId)) return;
+      working.bundles[bundleId]?.node_keys.forEach((key) =>
+        appendPlacement(key, bundleId));
+    });
+    projectedWorking.bundle_order.forEach((bundleId) => {
+      const bundle = projectedWorking.bundles[bundleId];
+      if (bundle?.origin !== "expansion") return;
+      bundle.node_keys.forEach((key) => appendPlacement(key, bundleId));
+    });
+    const placementEntries = [...placementBundleByEvent.entries()];
+    placementEntries.forEach(([eventKey, bundleId], index) => {
+      timelineEventPlacementByKey.set(eventKey, {
+        bundleId,
+        index,
+        total: placementEntries.length,
+      });
+    });
+    const isVisualRoot = (node: (typeof visibleNodes)[number]) => {
+      if (!timelineBrowseActive) return node.root;
+      const key = universeNodeKey(node.kind, node.id, node.source_id);
+      if (node.kind === "event") return timelineEventPlacementByKey.has(key);
+      return visibleTimelineNodeKeys.has(
+        key,
+      );
+    };
+    const projectedEventIdentity = visibleNodes
+      .filter((node) => node.kind === "event")
+      .map((node) => universeNodeKey(node.kind, node.id, node.source_id))
+      .sort();
+    const sceneWindowRevision = visibleTimelineBundleIds.length > 0
+      ? Math.floor(stableUnit(
+          [
+            "timeline",
+            browseSessionSourceId ?? activePartition ?? "none",
+            displayModeState.mode,
+            String(displayModeState.revision),
+            visibleTimelineBundleIds.join("|"),
+            projectedEventIdentity.join("|"),
+          ].join(":"),
+        ) * 0x7fffffff)
+      : 0;
     const resolvedSource = (kind: UniverseNodeKind, id: string, sourceId: string) => {
       if (sourceId) return sourceId;
       return (kind === "event"
         ? relationSourceByEvent.get(id)
-        : relationSourceByEntity.get(id)) || activePartition || "";
+        : relationSourceByEntity.get(id)) || browseSessionSourceId || activePartition || "";
     };
     const exactByRaw = new Map<string, string>();
     const positionByRaw = new Map<string, Position3D>();
 
-    const addExactNode = (node: (typeof visibleNodes)[number], anchor?: Position3D) => {
+    const addExactNode = (
+      node: (typeof visibleNodes)[number],
+      anchor?: Position3D,
+      rootEventPlacement?: { index: number; total: number },
+    ) => {
       const sourceId = resolvedSource(node.kind, node.id, node.source_id);
       const key = universeNodeKey(node.kind, node.id, sourceId);
       const partition = sourceById.get(sourceId);
@@ -885,7 +1639,36 @@ export function KnowledgeUniverse({
       const radius = anchor
         ? 34 + stableUnit(`${key}:local-radius`) * 42
         : Math.max(72, (visualRadiusBySource.get(sourceId) ?? 72) * 1.02);
-      const offset = stableOffset(key, radius);
+      const timelinePlacement = timelineEventPlacementByKey.get(key);
+      const temporalBundleId = node.kind === "event"
+        ? temporalBundleByEventKey.get(key)
+        : temporalBundleByEntityKey.get(key);
+      const temporalProjection = temporalBundleId
+        ? temporalProjectionByBundleId.get(temporalBundleId)
+        : undefined;
+      const offset = timelinePlacement
+        ? displayModeState.mode === "preview" && temporalProjection
+          ? {
+              x: temporalProjection.normalizedOffset.x * radius * 1.8,
+              y: temporalProjection.normalizedOffset.y * radius * 1.8,
+              z: temporalProjection.normalizedOffset.z * radius,
+            }
+          : stableRootEventOffset(
+              sourceId,
+              key,
+              radius,
+              timelinePlacement.index,
+              timelinePlacement.total,
+            )
+        : rootEventPlacement
+          ? stableRootEventOffset(
+            sourceId,
+            key,
+            radius,
+            rootEventPlacement.index,
+            rootEventPlacement.total,
+          )
+          : stableOffset(key, radius);
       const position = {
         x: center.x + offset.x,
         y: center.y + offset.y,
@@ -909,22 +1692,44 @@ export function KnowledgeUniverse({
         importance: node.importance ?? 0.5,
         statsReady: true,
         state: node.state ?? "active",
-        root: node.root,
+        root: isVisualRoot(node),
+        presentationScale: node.kind === "event"
+          ? temporalProjection?.eventStarScale
+          : temporalProjection?.nodeScale,
+        presentationCardScale: temporalProjection?.cardScale,
+        presentationOpacity: temporalProjection?.opacity,
         ...position,
       });
       exactByRaw.set(key, key);
       positionByRaw.set(key, position);
     };
+    const preferredEntityRelation = (entityKey: string) =>
+      [...(relationsByEntity.get(entityKey) ?? [])]
+        .sort((left, right) => {
+          const leftPlacement = timelineEventPlacementByKey.get(
+            universeNodeKey("event", left.from_id, left.source_id),
+          );
+          const rightPlacement = timelineEventPlacementByKey.get(
+            universeNodeKey("event", right.from_id, right.source_id),
+          );
+          return (rightPlacement?.index ?? -1) - (leftPlacement?.index ?? -1)
+            || universeRelationKey(left).localeCompare(universeRelationKey(right));
+        })[0];
 
+    const rootEvents = visibleNodes.filter((node) => {
+      if (node.kind !== "event") return false;
+      return isVisualRoot(node);
+    });
+    rootEvents.forEach((node, index) => addExactNode(node, undefined, {
+      index,
+      total: rootEvents.length,
+    }));
     visibleNodes
-      .filter((node) => node.root && node.kind === "event")
-      .forEach((node) => addExactNode(node));
-    visibleNodes
-      .filter((node) => node.root && node.kind === "entity")
+      .filter((node) => node.kind === "entity" && isVisualRoot(node))
       .forEach((node) => {
-        const relation = relationsByEntity.get(
+        const relation = preferredEntityRelation(
           universeNodeKey("entity", node.id, node.source_id),
-        )?.[0];
+        );
         addExactNode(
           node,
           relation
@@ -933,12 +1738,15 @@ export function KnowledgeUniverse({
         );
       });
     visibleNodes
-      .filter((node) => !node.root)
+      .filter((node) => {
+        const key = universeNodeKey(node.kind, node.id, node.source_id);
+        return !exactByRaw.has(key);
+      })
       .forEach((node) => {
         const key = universeNodeKey(node.kind, node.id, node.source_id);
-        const relation = (node.kind === "entity"
-          ? relationsByEntity.get(key)
-          : relationsByEvent.get(key))?.[0];
+        const relation = node.kind === "entity"
+          ? preferredEntityRelation(key)
+          : relationsByEvent.get(key)?.[0];
         const anchor = relation
           ? node.kind === "entity"
             ? positionByRaw.get(
@@ -960,24 +1768,62 @@ export function KnowledgeUniverse({
         universeNodeKey(targetKind, relation.to_id, relation.source_id),
       );
       if (!source || !target) return;
+      const temporalBundleId = temporalBundleByEventKey.get(
+        universeNodeKey("event", relation.from_id, relation.source_id),
+      );
       links.push({
         id: `${relation.source_id}:${relation.kind}:${relation.from_id}:${relation.to_id}`,
         source,
         target,
         weight: relation.weight,
         virtual: false,
+        presentationOpacity: temporalBundleId
+          ? temporalProjectionByBundleId.get(temporalBundleId)?.linkOpacity
+          : undefined,
       });
     });
-    nodeByIdRef.current = new Map(nodes.map((node) => [node.id, node]));
-    return { epoch: working.epoch, nodes, links } satisfies UniverseSceneData;
+    const journeyCommit = timelineJourneyCommitRef.current;
+    const windowChangeCause = timelineWindowRevision >= 0
+      && journeyCommit?.session === sourceSessionRef.current
+      && journeyCommit.revision === timelineWindowRevision
+      && journeyCommit.cause === "journey"
+      ? "journey"
+      : "synchronization";
+    const candidate = {
+      epoch: working.epoch,
+      windowRevision: sceneWindowRevision,
+      windowChangeCause,
+      windowDirection: windowChangeCause === "journey"
+        ? journeyCommit?.direction
+        : undefined,
+      nodes,
+      links,
+    } satisfies UniverseSceneData;
+    const signature = universeSceneDataSignature(candidate);
+    const cached = graphDataCacheRef.current;
+    const stableData = cached?.signature === signature
+      ? cached.data
+      : candidate;
+    if (stableData === candidate) {
+      graphDataCacheRef.current = { signature, data: candidate };
+    }
+    nodeByIdRef.current = new Map(stableData.nodes.map((node) => [node.id, node]));
+    return stableData;
   }, [
     activePartition,
+    browseSessionSourceId,
     manifest?.version,
     renderedSourcePartitions,
     sourceById,
     t,
-    visibleCount,
-    viewPreferences,
+    bundleWindow.visibleEventBundles,
+    displayModeState,
+    projectedEntityCategories,
+    timelineBundleEntityLimit,
+    timelineProjectionBudget,
+    timelineCacheBundleIds,
+    timelineVisibleBundleIds,
+    timelineWindowRevision,
     working,
   ]);
   const selectedNode = React.useMemo(
@@ -986,15 +1832,23 @@ export function KnowledgeUniverse({
       : null,
     [graphData, selectedKey],
   );
+  React.useEffect(() => {
+    const journeyCommit = timelineJourneyCommitRef.current;
+    if (
+      graphData.windowChangeCause !== "journey"
+      || !journeyCommit
+      || journeyCommit.session !== sourceSessionRef.current
+      || journeyCommit.revision !== timelineWindowRevision
+    ) return;
+    // A journey marker describes exactly one scene delivery. Consuming it
+    // prevents later expansion/filter synchronizations at the same timeline
+    // revision from inheriting a stale forward/backward edge animation.
+    timelineJourneyCommitRef.current = null;
+  }, [graphData, timelineWindowRevision]);
   const selectedConcreteNode = React.useMemo(
     () => isConcreteUniverseNode(selectedNode) ? selectedNode : null,
     [selectedNode],
   );
-  const hoveredConcreteNode = React.useMemo(() => {
-    if (!hoveredConcreteKey) return null;
-    const node = graphData.nodes.find((item) => item.id === hoveredConcreteKey) ?? null;
-    return isConcreteUniverseNode(node) ? node : null;
-  }, [graphData.nodes, hoveredConcreteKey]);
   const visibleGraphCounts = React.useMemo(() => ({
     events: graphData.nodes.filter((node) => node.kind === "event").length,
     entities: graphData.nodes.filter((node) => node.kind === "entity").length,
@@ -1013,7 +1867,7 @@ export function KnowledgeUniverse({
       publishUniverseEntityCategories(entityCategories);
     }
   }, [entityCategories]);
-  const inspectorNode = hoveredConcreteNode ?? selectedConcreteNode;
+  const inspectorNode = selectedConcreteNode;
   const inspectorProgress = inspectorNode
     ? universeAnchorProgress(
         working,
@@ -1035,7 +1889,7 @@ export function KnowledgeUniverse({
   const inspectorExhausted = Boolean(
     inspectorAnchorKey
     && expandedAnchorsRef.current.has(inspectorAnchorKey)
-    && !cursorsRef.current.has(inspectorAnchorKey),
+    && !cursorsRef.current.has(inspectorAnchorKey)
   );
   const inspectorCanExpand = !inspectorExhausted
     && (!inspectorTotalKnown || (inspectorRemaining ?? 0) > 0);
@@ -1044,18 +1898,39 @@ export function KnowledgeUniverse({
     (
       node: Universe3DNode & { kind: "event" | "entity" },
       cursor: string | null,
-      signal?: AbortSignal,
+      snapshot: ExpansionSnapshotContext | null,
+      signal: AbortSignal,
     ) => {
       const epoch = epochRef.current;
-      const cacheKey = [epoch, node.sourceId, node.kind, node.rawId, cursor ?? "root"].join(":");
-      const cached = expansionCacheRef.current.get(cacheKey);
-      if (cached) {
-        expansionCacheRef.current.delete(cacheKey);
-        expansionCacheRef.current.set(cacheKey, cached);
-        return Promise.resolve(cached);
+      const boundCacheKey = snapshot
+        ? universeExpansionCacheKey(
+            epoch,
+            node.sourceId,
+            snapshot.sourceRevision,
+            snapshot.snapshotId,
+            node.kind,
+            node.rawId,
+            cursor,
+          )
+        : null;
+      if (boundCacheKey) {
+        const cached = expansionCacheRef.current.get(boundCacheKey);
+        if (cached) {
+          expansionCacheRef.current.delete(boundCacheKey);
+          expansionCacheRef.current.set(boundCacheKey, cached);
+          return Promise.resolve(cached);
+        }
       }
-      const pending = expansionInflightRef.current.get(cacheKey);
-      if (pending) return pending;
+      const inflightKey = boundCacheKey ?? [
+        epoch,
+        node.sourceId,
+        "unsigned-root",
+        node.kind,
+        node.rawId,
+      ].join(":");
+      const pending = expansionInflightRef.current.get(inflightKey);
+      if (pending && !pending.signal.aborted) return pending.promise;
+      if (pending) expansionInflightRef.current.delete(inflightKey);
       const request = api
         .universeExpand(
           {
@@ -1065,34 +1940,29 @@ export function KnowledgeUniverse({
             node_id: node.rawId,
             limit: node.kind === "event"
               ? Math.min(
+                  EVENT_ENTITY_PROJECTION_LIMIT,
                   manifest?.policy.event_entity_limit ?? budgetRef.current.nodes,
                   Math.max(1, budgetRef.current.nodes - 1),
                 )
               : Math.min(
-                  manifest?.policy.timeline_event_page_size ?? 8,
-                  mobile ? 4 : 8,
+                  ENTITY_EXPANSION_EVENT_LIMIT,
+                  Math.max(1, bundleWindow.visibleEventBundles - 1),
                   Math.max(1, budgetRef.current.nodes - 1),
                 ),
             cursor,
+            snapshot_id: snapshot?.snapshotId ?? null,
           },
           signal,
         )
-        .then((patch) => {
-          if (patch.epoch === epochRef.current) {
-            expansionCacheRef.current.set(cacheKey, patch);
-            while (expansionCacheRef.current.size > 24) {
-              const oldest = expansionCacheRef.current.keys().next().value;
-              if (typeof oldest !== "string") break;
-              expansionCacheRef.current.delete(oldest);
-            }
+        .finally(() => {
+          if (expansionInflightRef.current.get(inflightKey)?.promise === request) {
+            expansionInflightRef.current.delete(inflightKey);
           }
-          return patch;
-        })
-        .finally(() => expansionInflightRef.current.delete(cacheKey));
-      expansionInflightRef.current.set(cacheKey, request);
+        });
+      expansionInflightRef.current.set(inflightKey, { promise: request, signal });
       return request;
     },
-    [manifest?.policy.event_entity_limit, manifest?.policy.timeline_event_page_size, mobile],
+    [bundleWindow.visibleEventBundles, manifest?.policy.event_entity_limit],
   );
 
   const expandNode = React.useCallback(
@@ -1102,10 +1972,51 @@ export function KnowledgeUniverse({
       const exactNode = node as Universe3DNode & { kind: "event" | "entity" };
       const anchorKey = universeNodeKey(exactNode.kind, exactNode.rawId, exactNode.sourceId);
       const cursor = cursorsRef.current.get(anchorKey) ?? null;
-      if (expandedAnchorsRef.current.has(anchorKey) && !cursor) return;
+      if (
+        expandedAnchorsRef.current.has(anchorKey)
+        && !cursor
+      ) return;
+      const browseSession = activationOriginRef.current === "browse"
+        ? sourceSessionRef.current
+        : null;
+      const requestSession = sourceSessionRef.current;
+      const lineageRootKey = browseSession
+        ? expansionLineageRootKey(
+            workingRef.current,
+            browseSession.timeline.window.cacheBundleIds,
+            anchorKey,
+          )
+        : anchorKey;
+      if (!lineageRootKey) {
+        setMoreHint(t("errors.relatedLoadFailed"));
+        return;
+      }
+      let snapshot = expansionSnapshotsRef.current.get(exactNode.sourceId) ?? null;
+      if (activationOriginRef.current === "browse") {
+        const timeline = browseSession?.sourceId === exactNode.sourceId
+          ? browseSession.timeline
+          : null;
+        if (!timeline?.snapshotId || !timeline.sourceRevision || !timeline.asOf) {
+          setMoreHint(t("timeline.loading"));
+          return;
+        }
+        snapshot = {
+          snapshotId: timeline.snapshotId,
+          sourceRevision: timeline.sourceRevision,
+          asOf: timeline.asOf,
+        };
+        expansionSnapshotsRef.current.set(exactNode.sourceId, snapshot);
+      }
+      if (cursor && !snapshot) {
+        cursorsRef.current.delete(anchorKey);
+        expandedAnchorsRef.current.delete(anchorKey);
+        setMoreHint(t("errors.relatedLoadFailed"));
+        return;
+      }
       expandAbortRef.current?.abort();
       const controller = new AbortController();
       expandAbortRef.current = controller;
+      expandingAnchorRef.current = anchorKey;
       const requestEpoch = epochRef.current;
       setExpandingKey(node.id);
       setMoreHint("");
@@ -1113,33 +2024,135 @@ export function KnowledgeUniverse({
         const patch = await requestExpansion(
           exactNode,
           cursor,
+          snapshot,
           controller.signal,
         );
         if (
           patch.epoch !== epochRef.current
           || controller.signal.aborted
           || !interactiveRef.current
+          || sourceSessionRef.current !== requestSession
+          || (cursorsRef.current.get(anchorKey) ?? null) !== cursor
+          || !workingRef.current.nodes.some((item) =>
+            universeNodeKey(item.kind, item.id, item.source_id) === anchorKey)
         ) return;
-        recordLoadedContent(patch.nodes, exactNode.sourceId);
-        dispatchUniversePatch(patch);
-        const previousCount = workingRef.current.nodes.length;
-        const next = mergeUniverseGraphPatch(
-          workingRef.current,
+        const admissionWorking = workingRef.current;
+        const currentLineageRootKey = browseSession
+          ? expansionLineageRootKey(
+              admissionWorking,
+              browseSession.timeline.window.cacheBundleIds,
+              anchorKey,
+            )
+          : anchorKey;
+        if (currentLineageRootKey !== lineageRootKey) return;
+        const windowProtection = browseSession
+          ? universeBundleWindowProtection(
+              admissionWorking,
+              browseSession.timeline.window.cacheBundleIds,
+            )
+          : { nodeKeys: [], relationKeys: [] };
+        let visibleSupportBundleIds: string[] = [];
+        if (browseSession) {
+          const categoryProjectedAdmission = projectUniverseWorkingSet(
+            admissionWorking,
+            projectedEntityCategories,
+          );
+          const projectionIds = timelineProjectionBundleIds(
+            categoryProjectedAdmission,
+            browseSession.timeline.window.cacheBundleIds,
+            browseSession.timeline.window.visibleBundleIds,
+          );
+          const visibleTimelineIds = new Set(
+            browseSession.timeline.window.visibleBundleIds,
+          );
+          const supportIds = projectionIds.filter((id) =>
+            !visibleTimelineIds.has(id));
+          const visibleProjection = projectUniverseBundleWindowWithinBudget(
+            categoryProjectedAdmission,
+            browseSession.timeline.window.visibleBundleIds,
+            [...supportIds].reverse(),
+            timelineProjectionBudget,
+            browseSession.timeline.window.visibleLimit,
+            timelineBundleEntityLimit,
+          );
+          visibleSupportBundleIds = visibleProjection.bundle_order.filter((id) =>
+            categoryProjectedAdmission.bundles[id]?.origin === "expansion");
+        }
+        const admission = admitUniverseExpansionPage(
+          admissionWorking,
           patch,
-          budgetRef.current,
+          {
+            epoch: requestEpoch,
+            sourceId: exactNode.sourceId,
+            nodeKind: exactNode.kind,
+            nodeId: exactNode.rawId,
+            lineageRootKey,
+            requestCursor: cursor,
+            snapshotId: snapshot?.snapshotId ?? null,
+            sourceRevision: snapshot?.sourceRevision ?? null,
+            asOf: snapshot?.asOf ?? null,
+          },
+          browseSession ? residentBudgetRef.current : budgetRef.current,
+          Date.now(),
+          {
+            protectedKeys: [anchorKey, ...windowProtection.nodeKeys],
+            protectedRelationKeys: windowProtection.relationKeys,
+            protectedBundleIds: [
+              ...(browseSession?.timeline.window.cacheBundleIds ?? []),
+              ...visibleSupportBundleIds,
+            ],
+          },
         );
-        workingRef.current = next;
-        pruneExpansionState(next.nodes);
-        setWorking(next);
+        if (!admission.accepted) {
+          setMoreHint(
+            admission.reason === "protected_capacity"
+              || admission.reason === "over_budget"
+              ? t("expansion.capacityReached")
+              : t("errors.relatedLoadFailed"),
+          );
+          return;
+        }
+        const admittedBundle = admission.workingSet.bundles[patch.bundle_id];
+        if (
+          !admittedBundle
+          || admittedBundle.lineage_root_key !== lineageRootKey
+          || (
+            browseSession
+            && !browseSession.timeline.window.cacheBundleIds.some((id) =>
+              admission.workingSet.bundles[id]?.node_keys.includes(lineageRootKey))
+          )
+        ) return;
+        const next = admission.workingSet;
+        const responseSnapshot = {
+          snapshotId: patch.snapshot_id,
+          sourceRevision: patch.source_revision,
+          asOf: patch.as_of,
+        };
+        expansionSnapshotsRef.current.set(exactNode.sourceId, responseSnapshot);
+        const cacheKey = universeExpansionCacheKey(
+          requestEpoch,
+          exactNode.sourceId,
+          responseSnapshot.sourceRevision,
+          responseSnapshot.snapshotId,
+          exactNode.kind,
+          exactNode.rawId,
+          cursor,
+        );
+        expansionCacheRef.current.set(cacheKey, patch);
+        while (expansionCacheRef.current.size > 24) {
+          const oldest = expansionCacheRef.current.keys().next().value;
+          if (typeof oldest !== "string") break;
+          expansionCacheRef.current.delete(oldest);
+        }
+        commitWorkingSet(next);
+        pruneExpansionState(next);
+        dispatchUniversePatch(patch);
         setSummary((current) => ({
           query: current?.query ?? node.label,
           events: next.nodes.filter((item) => item.kind === "event").length,
           entities: next.nodes.filter((item) => item.kind === "entity").length,
           relations: next.relations.length,
         }));
-        expandedAnchorsRef.current.add(anchorKey);
-        if (patch.page.next_cursor) cursorsRef.current.set(anchorKey, patch.page.next_cursor);
-        else cursorsRef.current.delete(anchorKey);
         const committedCount = universeAnchorProgress(
           next,
           exactNode.kind,
@@ -1147,67 +2160,123 @@ export function KnowledgeUniverse({
           exactNode.sourceId,
         );
         const totalCount = Math.max(committedCount, patch.anchor.related_count);
+        if (admission.nextCursor) {
+          expandedAnchorsRef.current.add(anchorKey);
+          cursorsRef.current.set(anchorKey, admission.nextCursor);
+        } else {
+          cursorsRef.current.delete(anchorKey);
+          if (committedCount >= totalCount) expandedAnchorsRef.current.add(anchorKey);
+          else expandedAnchorsRef.current.delete(anchorKey);
+        }
         const relationLabel = exactNode.kind === "entity"
           ? t("nodeKinds.relatedEvents")
           : t("nodeKinds.relatedEntities");
         setMoreHint(
-          patch.page.has_more
+          patch.page.has_more || committedCount < totalCount
             ? t("expansion.pageMore", { committed: committedCount, total: totalCount, relation: relationLabel })
             : t("expansion.complete", { total: totalCount, relation: relationLabel }),
         );
-        stageTo(Math.min(previousCount, next.nodes.length), next.nodes.length);
       } catch (reason) {
         if (reason instanceof ApiError && reason.code === "aborted") return;
+        if (
+          controller.signal.aborted
+          || requestEpoch !== epochRef.current
+          || !interactiveRef.current
+          || sourceSessionRef.current !== requestSession
+        ) return;
+        if (reason instanceof ApiError && reason.code === "snapshot_changed") {
+          invalidateSourceSnapshot(exactNode.sourceId, requestEpoch);
+          return;
+        }
         setMoreHint(reason instanceof ApiError ? reason.message : t("errors.relatedLoadFailed"));
       } finally {
         if (expandAbortRef.current === controller) {
           expandAbortRef.current = null;
+          expandingAnchorRef.current = null;
           if (requestEpoch === epochRef.current) setExpandingKey(null);
         }
       }
     },
-    [pruneExpansionState, recordLoadedContent, requestExpansion, stageTo, t],
+    [
+      commitWorkingSet,
+      invalidateSourceSnapshot,
+      pruneExpansionState,
+      projectedEntityCategories,
+      requestExpansion,
+      t,
+      timelineBundleEntityLimit,
+      timelineProjectionBudget,
+    ],
   );
 
-  const loadSourceTimeline = React.useCallback(
-    async (sourceId: string, requestedPages: number) => {
-      if (!manifest || !interactiveRef.current) return;
-      let state = sourceTimelinePagesRef.current.get(sourceId);
-      if (!state) {
-        state = { cursor: null, pages: 0, targetPages: 0, done: false, loading: false };
-        sourceTimelinePagesRef.current.set(sourceId, state);
-      }
-      state.targetPages = Math.max(
-        state.targetPages,
-        requestedPages,
-      );
-      if (state.loading || state.done || state.pages >= state.targetPages) return;
+  const loadSourceTimelinePage = React.useCallback(
+    (
+      sourceId: string,
+      cause: SourceTimelineLoadCause,
+      direction: UniverseTimelineDirection = "older",
+    ): Promise<SourceTimelineLoadResult> => {
+      if (!manifest || !interactiveRef.current) return Promise.resolve("blocked");
+      const inFlight = timelineRequestRef.current;
+      if (inFlight) return inFlight;
 
-      if (epochRef.current === 0) {
-        epochRef.current = 1;
-        const empty = emptyUniverseWorkingSet(1);
-        workingRef.current = empty;
-        setWorking(empty);
+      const session = sourceSessionRef.current;
+      if (!session || session.sourceId !== sourceId) {
+        return Promise.resolve("blocked");
       }
+      const state = session.timeline;
+      if (state.loading || state.pausedReason) return Promise.resolve("blocked");
+      if (lockedKeyRef.current && cause !== "source-entry") {
+        return Promise.resolve("blocked");
+      }
+      if (state.deque === null && direction !== "older") {
+        return Promise.resolve("blocked");
+      }
+      if (
+        state.deque
+        && (
+          (direction === "older" && !state.deque.hasOlder)
+          || (direction === "newer" && !state.deque.hasNewer)
+        )
+      ) return Promise.resolve("blocked");
+
       const epoch = epochRef.current;
       const source = sourceById.get(sourceId);
+      const pageBundleLimit = state.queryPageSize ?? universeTimelinePageBundleLimit(
+        manifest.policy.timeline_event_page_size,
+        Math.min(EVENT_ENTITY_PROJECTION_LIMIT, manifest.policy.event_entity_limit),
+        residentBudgetRef.current,
+      );
+      const requestCursor = state.deque === null
+        ? null
+        : direction === "older"
+          ? state.deque.olderCursor
+          : state.deque.newerCursor;
+      const controller = new AbortController();
       state.loading = true;
+      if (cause !== "prefetch") {
+        commitTimelineWindow(session, {
+          ...state.window,
+          phase: "loading",
+        });
+        setMoreHint(t("timeline.loading"));
+      }
       refreshLoadProgress();
       timelineAbortRef.current?.abort();
-      const controller = new AbortController();
       timelineAbortRef.current = controller;
-      setMoreHint(t("timeline.loading"));
-      try {
-        while (!state.done && state.pages < state.targetPages) {
-          const firstPage = state.pages === 0;
+      timelineLoadCauseRef.current = cause;
+
+      let loadResult: SourceTimelineLoadResult = "blocked";
+      const request = (async (): Promise<SourceTimelineLoadResult> => {
+        try {
+          const firstPage = state.deque === null;
           const page = await api.universeTimeline(
             {
               epoch,
               source_id: sourceId,
-              limit: mobile
-                ? Math.min(4, manifest.policy.timeline_event_page_size)
-                : manifest.policy.timeline_event_page_size,
-              cursor: state.cursor,
+              limit: pageBundleLimit,
+              direction,
+              cursor: requestCursor,
+              snapshot_id: state.snapshotId,
             },
             controller.signal,
           );
@@ -1215,29 +2284,150 @@ export function KnowledgeUniverse({
             page.epoch !== epochRef.current
             || controller.signal.aborted
             || !interactiveRef.current
-          ) return;
-          recordLoadedContent(page.nodes, sourceId);
-          const previousCount = workingRef.current.nodes.length;
-          const next = mergeUniverseActivation(
-            workingRef.current,
-            {
-              epoch,
-              query: source?.label ?? t("timeline.defaultTitle"),
-              nodes: page.nodes,
-              relations: page.relations,
-            },
-            budgetRef.current,
-            Date.now(),
-            { roots: state.pages === 0 },
+            || sourceSessionRef.current !== session
+          ) return "blocked";
+          if (
+            page.source_id !== sourceId
+            || page.request_direction !== direction
+            || page.request_cursor !== requestCursor
+            || (state.snapshotId !== null && page.snapshot_id !== state.snapshotId)
+            || (
+              state.sourceRevision !== null
+              && page.source_revision !== state.sourceRevision
+            )
+            || (state.asOf !== null && page.as_of !== state.asOf)
+          ) {
+            throw new Error("timeline response does not match the active snapshot");
+          }
+
+          const previousDeque = state.deque;
+          const dequeAdmission = admitUniverseTimelineDequePage(
+            previousDeque,
+            page,
+            state.window.cacheLimit,
           );
-          workingRef.current = next;
-          setWorking(next);
-          stageTo(previousCount, next.nodes.length);
-          state.pages += 1;
-          state.cursor = page.page.next_cursor;
-          state.done = !page.page.has_more || !page.page.next_cursor;
+          const synchronizedWindow = synchronizeTimelineWindowWithDeque(
+            state.window,
+            previousDeque,
+            dequeAdmission,
+          );
+          if (!synchronizedWindow) {
+            state.pausedReason = "capacity";
+            if (cause !== "prefetch") {
+              setMoreHint(t("timeline.capacityPaused", {
+                count: queriedUniverseTimelineEventCount(state.window),
+              }));
+            }
+            return "blocked";
+          }
+
+          // The deque has already decided the fixed-cache edge retirement.
+          // Protect only its final retained identities so the working set can
+          // release the retired edge while admitting the complete new page.
+          const protectedTimelineBundleIds = synchronizedWindow.cacheBundleIds;
+          const admissionWorking = workingRef.current;
+          const windowProtection = universeBundleWindowProtection(
+            admissionWorking,
+            protectedTimelineBundleIds,
+          );
+          const categoryProjectedAdmission = projectUniverseWorkingSet(
+            admissionWorking,
+            projectedEntityCategories,
+          );
+          const currentProjectionIds = timelineProjectionBundleIds(
+            categoryProjectedAdmission,
+            synchronizedWindow.cacheBundleIds,
+            synchronizedWindow.visibleBundleIds,
+          );
+          const visibleTimelineIds = new Set(synchronizedWindow.visibleBundleIds);
+          const visibleSupportBundleIds = projectUniverseBundleWindowWithinBudget(
+            categoryProjectedAdmission,
+            synchronizedWindow.visibleBundleIds,
+            currentProjectionIds
+              .filter((id) => !visibleTimelineIds.has(id))
+              .reverse(),
+            timelineProjectionBudget,
+            synchronizedWindow.visibleLimit,
+            timelineBundleEntityLimit,
+          ).bundle_order.filter(
+            (id) => categoryProjectedAdmission.bundles[id]?.origin === "expansion",
+          );
+          const admission = admitUniverseTimelinePage(
+            admissionWorking,
+            page,
+            residentBudgetRef.current,
+            Date.now(),
+            {
+              roots: true,
+              protectedKeys: [
+                ...windowProtection.nodeKeys,
+                ...(lockedKeyRef.current ? [lockedKeyRef.current] : []),
+              ],
+              protectedRelationKeys: windowProtection.relationKeys,
+              protectedBundleIds: [
+                ...protectedTimelineBundleIds,
+                ...visibleSupportBundleIds,
+              ],
+            },
+          );
+          const retainedDequeIds = new Set(
+            dequeAdmission.deque.bundles.map((bundle) => bundle.bundle_id),
+          );
+          if (
+            !admission.pageAcknowledged
+            || admission.evictedBundleIds.some((id) => retainedDequeIds.has(id))
+          ) {
+            state.pausedReason = "capacity";
+            if (cause !== "prefetch") {
+              setMoreHint(t("timeline.capacityPaused", {
+                count: queriedUniverseTimelineEventCount(state.window),
+              }));
+            }
+            return "blocked";
+          }
+
+          state.snapshotId = page.snapshot_id;
+          state.sourceRevision = page.source_revision;
+          state.asOf = page.as_of;
+          state.queryPageSize ??= pageBundleLimit;
+          state.deque = dequeAdmission.deque;
+          state.pausedReason = null;
+          expansionSnapshotsRef.current.set(sourceId, {
+            snapshotId: page.snapshot_id,
+            sourceRevision: page.source_revision,
+            asOf: page.as_of,
+          });
+          commitTimelineWindow(session, synchronizedWindow);
+
+          const retainedIds = timelineRetentionBundleIds(
+            admission.workingSet,
+            synchronizedWindow.cacheBundleIds,
+          );
+          const retainedWorking = retainUniverseWorkingSetBundles(
+            admission.workingSet,
+            retainedIds,
+          );
+          commitWorkingSet(retainedWorking);
+          pruneExpansionState(retainedWorking);
+
+          const residentKeys = new Set(retainedWorking.nodes.map((node) =>
+            universeNodeKey(node.kind, node.id, node.source_id)));
+          page.bundles.forEach((bundle) => {
+            const eventKey = universeNodeKey("event", bundle.event.id, sourceId);
+            if (!residentKeys.has(eventKey)) return;
+            if (
+              expandedAnchorsRef.current.has(eventKey)
+              || cursorsRef.current.has(eventKey)
+            ) return;
+            expandedAnchorsRef.current.add(eventKey);
+            if (bundle.neighbor_page.next_cursor) {
+              cursorsRef.current.set(eventKey, bundle.neighbor_page.next_cursor);
+            }
+          });
+          loadResult = "loaded";
           refreshLoadProgress();
-          if (firstPage && page.nodes.length) {
+
+          if (firstPage && admission.committedNodes.length) {
             const focusEpoch = epoch;
             cameraFrameRef.current = window.requestAnimationFrame(() => {
               cameraFrameRef.current = null;
@@ -1250,74 +2440,529 @@ export function KnowledgeUniverse({
           if (activationOriginRef.current === "browse") {
             setSummary({
               query: source?.label ?? t("timeline.defaultTitle"),
-              events: next.nodes.filter((item) => item.kind === "event").length,
-              entities: next.nodes.filter((item) => item.kind === "entity").length,
-              relations: next.relations.length,
+              events: queriedUniverseTimelineEventCount(synchronizedWindow),
+              entities: retainedWorking.nodes.filter((node) =>
+                node.kind === "entity" && node.source_id === sourceId).length,
+              relations: retainedWorking.relations.length,
             });
           }
+          if (cause !== "prefetch" && synchronizedWindow.phase === "complete") {
+            setMoreHint(t("timeline.explorationComplete", {
+              source: source?.label ?? t("timeline.thisGalaxy"),
+            }));
+          } else if (cause !== "prefetch") {
+            setMoreHint(t("timeline.windowReady", {
+              visible: synchronizedWindow.visibleBundleIds.length,
+            }));
+          }
+          return loadResult;
+        } catch (reason) {
+          if (reason instanceof ApiError && reason.code === "aborted") {
+            return "blocked";
+          }
+          if (
+            reason instanceof ApiError
+            && reason.code === "snapshot_changed"
+            && sourceSessionRef.current === session
+          ) {
+            invalidateSourceSnapshot(sourceId, epoch);
+            return "blocked";
+          }
+          if (cause !== "prefetch") {
+            setMoreHint(
+              reason instanceof ApiError ? reason.message : t("errors.timelineLoadFailed"),
+            );
+          }
+          return "blocked";
+        } finally {
+          state.loading = false;
+          if (sourceSessionRef.current === session) {
+            commitTimelineWindow(session, settleUniverseTimelineWindow(state.window));
+          }
+          refreshLoadProgress();
+          if (timelineAbortRef.current === controller) {
+            timelineAbortRef.current = null;
+            timelineLoadCauseRef.current = null;
+          }
         }
-        const loadedEvents = workingRef.current.nodes.filter(
-          (item) => item.source_id === sourceId && item.kind === "event",
-        ).length;
-        setMoreHint(
-          state.done
-            ? t("timeline.startReached", { source: source?.label ?? t("timeline.thisGalaxy") })
-            : activationOriginRef.current === "browse"
-              ? t("timeline.loadedZoom", { count: loadedEvents })
-              : t("timeline.loadedClick", { count: loadedEvents }),
-        );
-      } catch (reason) {
-        if (reason instanceof ApiError && reason.code === "aborted") return;
-        setMoreHint(reason instanceof ApiError ? reason.message : t("errors.timelineLoadFailed"));
-      } finally {
-        state.loading = false;
-        refreshLoadProgress();
-        if (timelineAbortRef.current === controller) timelineAbortRef.current = null;
-      }
+      })();
+      timelineRequestRef.current = request;
+      void request.finally(() => {
+        if (timelineRequestRef.current === request) timelineRequestRef.current = null;
+      });
+      return request;
     },
     [
+      commitTimelineWindow,
+      commitWorkingSet,
+      invalidateSourceSnapshot,
       manifest,
-      mobile,
-      recordLoadedContent,
+      pruneExpansionState,
+      projectedEntityCategories,
       reducedMotion,
       refreshLoadProgress,
       sourceById,
-      stageTo,
       t,
+      timelineBundleEntityLimit,
+      timelineProjectionBudget,
+    ],
+  );
+  timelinePageLoaderRef.current = loadSourceTimelinePage;
+
+  React.useEffect(() => {
+    const session = sourceSessionRef.current;
+    if (!session || session.timeline.loading) return;
+    const current = session.timeline.window;
+    if (current.phase === "transitioning") return;
+
+    let next = current;
+    const deque = session.timeline.deque;
+    if (deque && current.activeIndex >= 0) {
+      const activeBundleId = current.cacheBundleIds[current.activeIndex];
+      const pageSize = session.timeline.queryPageSize
+        ?? Math.max(1, manifest?.policy.timeline_event_page_size ?? 6);
+      const resized = activeBundleId
+        ? resizeUniverseTimelineDeque(
+            deque,
+            bundleWindow.cachedEventBundles,
+            activeBundleId,
+            bundleWindow.visibleEventBundles,
+            pageSize,
+          )
+        : null;
+      const anchor = resized && activeBundleId
+        ? syncUniverseTimelineWindowToDeque(resized.deque, {
+            activeBundleId,
+            activeIndex: current.activeIndex,
+            visibleLimit: bundleWindow.visibleEventBundles,
+          })
+        : null;
+      if (resized && anchor) {
+        session.timeline.deque = resized.deque;
+        const cacheStartOffset = current.cacheStartOffset
+          + resized.evictedNewerBundleIds.length;
+        const networkExhausted = !resized.deque.hasOlder;
+        const phase = networkExhausted
+          && anchor.activeIndex === anchor.cacheBundleIds.length - 1
+          ? "complete" as const
+          : "idle" as const;
+        const changed = current.visibleLimit !== bundleWindow.visibleEventBundles
+          || current.cacheLimit !== bundleWindow.cachedEventBundles
+          || current.activeIndex !== anchor.activeIndex
+          || current.phase !== phase
+          || current.cacheBundleIds.length !== anchor.cacheBundleIds.length
+          || current.cacheBundleIds.some(
+            (id, index) => id !== anchor.cacheBundleIds[index],
+          )
+          || current.visibleBundleIds.length !== anchor.visibleBundleIds.length
+          || current.visibleBundleIds.some(
+            (id, index) => id !== anchor.visibleBundleIds[index],
+          );
+        if (changed) {
+          next = {
+            ...current,
+            cacheBundleIds: anchor.cacheBundleIds,
+            activeIndex: anchor.activeIndex,
+            visibleBundleIds: anchor.visibleBundleIds,
+            visitedCount: Math.max(
+              current.visitedCount,
+              cacheStartOffset + anchor.activeIndex + 1,
+            ),
+            networkExhausted,
+            phase,
+            revision: current.revision + 1,
+            visibleLimit: bundleWindow.visibleEventBundles,
+            cacheLimit: bundleWindow.cachedEventBundles,
+            cacheStartOffset,
+          };
+        }
+      }
+    } else {
+      next = reconfigureUniverseTimelineWindow(
+        current,
+        bundleWindow.visibleEventBundles,
+        bundleWindow.cachedEventBundles,
+      );
+    }
+    if (next !== current) commitTimelineWindow(session, next);
+
+    const resident = workingRef.current;
+    const retainedIds = timelineRetentionBundleIds(
+      resident,
+      next.cacheBundleIds,
+    );
+    const retained = retainUniverseWorkingSetBundles(
+      resident,
+      retainedIds,
+    );
+    if (session.timeline.pausedReason === "capacity") {
+      session.timeline.pausedReason = null;
+      setMoreHint("");
+      refreshLoadProgress();
+    }
+    const bundleOrderChanged = retained.bundle_order.length
+      !== resident.bundle_order.length
+      || retained.bundle_order.some((id, index) => id !== resident.bundle_order[index]);
+    if (!bundleOrderChanged) return;
+    commitWorkingSet(retained);
+    pruneExpansionState(retained);
+  }, [
+    bundleWindow,
+    commitTimelineWindow,
+    commitWorkingSet,
+    manifest?.policy.timeline_event_page_size,
+    pruneExpansionState,
+    refreshLoadProgress,
+    timelineWindow,
+  ]);
+
+  const activateSource = React.useCallback(
+    (sourceId: string) => {
+      if (!sourceById.has(sourceId)) return;
+      // Explicit source navigation starts a timeline browse session even when
+      // the user arrived from search or an assistant-provided activation.
+      activationOriginRef.current = "browse";
+      setActivationOrigin("browse");
+      setSourceHits([]);
+      clearCameraSchedule();
+      expandAbortRef.current?.abort();
+      expandAbortRef.current = null;
+      expandingAnchorRef.current = null;
+      expansionCacheRef.current.clear();
+      expansionInflightRef.current.clear();
+      dispatchUniversePatchReset();
+      expansionSnapshotsRef.current.clear();
+      cursorsRef.current.clear();
+      expandedAnchorsRef.current.clear();
+      const previousSession = sourceSessionRef.current;
+      if (previousSession) previousSession.timeline.loading = false;
+      timelineAbortRef.current?.abort();
+      timelineAbortRef.current = null;
+      timelineLoadCauseRef.current = null;
+      timelineRequestRef.current = null;
+      if (snapshotReloadTimerRef.current !== null) {
+        window.clearTimeout(snapshotReloadTimerRef.current);
+        snapshotReloadTimerRef.current = null;
+      }
+      snapshotReloadAttemptsRef.current.clear();
+      clearTimelineSettle();
+      setExpandingKey(null);
+      graphRef.current?.unlockNode();
+      setLockedKey(null);
+      setSelectedKey(null);
+
+      if (epochRef.current === 0) epochRef.current = 1;
+      const session = emptySourceBrowseSession(
+        epochRef.current,
+        sourceId,
+        bundleWindow.visibleEventBundles,
+        bundleWindow.cachedEventBundles,
+      );
+      sourceSessionRef.current = session;
+      updateDisplayMode(() => createUniverseDisplayModeState());
+      completedSourcesRef.current.clear();
+
+      commitWorkingSet(session.working);
+      pruneExpansionState(session.working);
+      setTimelineWindow(session.timeline.window);
+      refreshLoadProgress();
+      setActivePartition(sourceId);
+      focusPartition(sourceId);
+      void loadSourceTimelinePage(sourceId, "source-entry");
+    },
+    [
+      bundleWindow,
+      clearCameraSchedule,
+      clearTimelineSettle,
+      commitWorkingSet,
+      focusPartition,
+      loadSourceTimelinePage,
+      pruneExpansionState,
+      refreshLoadProgress,
+      setLockedKey,
+      setSelectedKey,
+      sourceById,
+      updateDisplayMode,
     ],
   );
 
+  React.useEffect(() => {
+    const onSourceFocus = (event: Event) => {
+      const sourceId = (
+        event as CustomEvent<{ source_id: string }>
+      ).detail?.source_id;
+      if (sourceId) activateSource(sourceId);
+    };
+    window.addEventListener(UNIVERSE_SOURCE_FOCUS_EVENT, onSourceFocus);
+    return () => window.removeEventListener(UNIVERSE_SOURCE_FOCUS_EVENT, onSourceFocus);
+  }, [activateSource]);
+
   const activatePartition = React.useCallback(
-    (node: Universe3DNode) => {
-      clearCameraSchedule();
-      setActivePartition(node.sourceId);
-      focusPartition(node.sourceId);
-      void loadSourceTimeline(node.sourceId, 1);
-    },
-    [clearCameraSchedule, focusPartition, loadSourceTimeline],
+    (node: Universe3DNode) => activateSource(node.sourceId),
+    [activateSource],
   );
 
   const handleSourceLod = React.useCallback(
     (sourceId: string, level: 0 | 1 | 2 | 3) => {
       if (!interactiveRef.current) return;
       if (level < 1) return;
+      // Camera LOD is visual feedback, not source navigation. Once a browse
+      // session owns the timeline, a nearby partition must not replace its
+      // active source and unmount the pager for the loaded session.
+      const sessionSourceId = sourceSessionRef.current?.sourceId;
+      if (sessionSourceId && sessionSourceId !== sourceId) return;
       setActivePartition(sourceId);
-      if (!shouldAutoLoadUniverseTimeline(
-        activationOriginRef.current,
-        level,
-        viewPreferences.browseAutoExpand,
-      )) return;
-      const timelinePages = sourceTimelinePagesRef.current.get(sourceId)?.pages ?? 0;
-      const autoPageLimit = Math.max(0, manifest?.policy.auto_page_limit ?? 0);
-      if (timelinePages >= autoPageLimit) return;
-      const requestedTimelinePages = Math.min(
-        autoPageLimit,
-        sourceTimelinePageTargetForLod(level, timelinePages),
-      );
-      void loadSourceTimeline(sourceId, requestedTimelinePages);
     },
-    [loadSourceTimeline, manifest?.policy.auto_page_limit, viewPreferences.browseAutoExpand],
+    [],
   );
+
+  const handleTimelineIntent = React.useCallback(
+    async (direction: "next" | "previous"): Promise<UniverseTimelineIntentResult> => {
+      const session = sourceSessionRef.current;
+      if (
+        !session
+        || activationOriginRef.current !== "browse"
+      ) return "blocked";
+      if (lockedKeyRef.current) {
+        setMoreHint(t("timeline.unlockToContinue"));
+        return "blocked";
+      }
+
+      const queryPageSize = session.timeline.queryPageSize ?? universeTimelinePageBundleLimit(
+        manifest?.policy.timeline_event_page_size ?? 6,
+        Math.min(
+          EVENT_ENTITY_PROJECTION_LIMIT,
+          manifest?.policy.event_entity_limit ?? EVENT_ENTITY_PROJECTION_LIMIT,
+        ),
+        residentBudgetRef.current,
+      );
+      // Network pages remain large for efficient bidirectional prefetch. The
+      // visual page is capped by the configured window so every queried event
+      // is eventually shown instead of being skipped by a wider stride.
+      const pageStride = Math.min(
+        queryPageSize,
+        session.timeline.window.visibleLimit,
+      );
+      const requestDirection: UniverseTimelineDirection =
+        direction === "next" ? "older" : "newer";
+      session.timeline.preferredDirection = requestDirection;
+      const displayPlan: UniverseDisplayIntentPlan =
+        planUniverseDisplayTimelineIntent(
+          displayModeRef.current,
+          direction,
+          session.timeline.window.revision,
+        );
+
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const current = session.timeline.window;
+        const rewindFloor = universeTimelineRewindStartActiveIndex(current);
+        const localRunway = direction === "next"
+          ? current.cacheBundleIds.length - current.activeIndex - 1
+          : current.activeIndex - rewindFloor;
+        if (localRunway >= pageStride) break;
+        const edgeAvailable = direction === "next"
+          ? session.timeline.deque?.hasOlder
+          : session.timeline.deque?.hasNewer;
+        if (!edgeAvailable) break;
+        await loadSourceTimelinePage(
+          session.sourceId,
+          "journey",
+          requestDirection,
+        );
+        if (sourceSessionRef.current !== session) return "blocked";
+      }
+
+      const current = session.timeline.window;
+      const rewindFloor = universeTimelineRewindStartActiveIndex(current);
+      const localRunway = direction === "next"
+        ? current.cacheBundleIds.length - current.activeIndex - 1
+        : current.activeIndex - rewindFloor;
+      const edgeAvailable = direction === "next"
+        ? session.timeline.deque?.hasOlder
+        : session.timeline.deque?.hasNewer;
+      const completeTerminalPage = localRunway > 0 && !edgeAvailable;
+      if (localRunway < pageStride && !completeTerminalPage) {
+        if (session.timeline.pausedReason === "capacity") {
+          setMoreHint(t("timeline.capacityPaused", {
+            count: queriedUniverseTimelineEventCount(current),
+          }));
+        }
+        return "blocked";
+      }
+      const next = advanceUniverseTimelineWindow(
+        current,
+        direction,
+        pageStride,
+      );
+      if (next === current || next.revision === current.revision) {
+        if (direction === "next" && !session.timeline.deque?.hasOlder) {
+          const complete = markUniverseTimelineNetworkExhausted(current);
+          commitTimelineWindow(session, complete);
+          setMoreHint(t("timeline.explorationComplete", {
+            source: sourceById.get(session.sourceId)?.label ?? t("timeline.thisGalaxy"),
+          }));
+          return "complete";
+        }
+        if (session.timeline.pausedReason === "capacity") {
+          setMoreHint(t("timeline.capacityPaused", {
+            count: queriedUniverseTimelineEventCount(current),
+          }));
+        }
+        return "blocked";
+      }
+
+      updateDisplayMode((state) =>
+        commitUniverseDisplayIntent(state, displayPlan, "shifted"));
+      timelineJourneyCommitRef.current = {
+        session,
+        revision: next.revision,
+        cause: "journey",
+        direction,
+      };
+      commitTimelineWindow(session, next);
+      scheduleTimelineSettle(session, next);
+      if (next.phase === "complete") {
+        setMoreHint(t("timeline.explorationComplete", {
+          source: sourceById.get(session.sourceId)?.label ?? t("timeline.thisGalaxy"),
+        }));
+      } else {
+        setMoreHint(t(direction === "next"
+          ? "timeline.movedEarlier"
+          : "timeline.movedLater"));
+      }
+      return "advanced";
+    },
+    [
+      commitTimelineWindow,
+      loadSourceTimelinePage,
+      manifest?.policy.event_entity_limit,
+      manifest?.policy.timeline_event_page_size,
+      scheduleTimelineSettle,
+      sourceById,
+      t,
+      updateDisplayMode,
+    ],
+  );
+
+  React.useEffect(() => {
+    const session = sourceSessionRef.current;
+    if (
+      !interactive
+      || activationOrigin !== "browse"
+      || !session
+      || session.timeline.loading
+      || session.timeline.pausedReason
+      || lockedKey
+      || timelineWindow?.phase !== "idle"
+      || !session.timeline.deque
+    ) return;
+    const current = session.timeline.window;
+    const nextPageSize = session.timeline.queryPageSize ?? universeTimelinePageBundleLimit(
+      manifest?.policy.timeline_event_page_size ?? 6,
+      Math.min(
+        EVENT_ENTITY_PROJECTION_LIMIT,
+        manifest?.policy.event_entity_limit ?? EVENT_ENTITY_PROJECTION_LIMIT,
+      ),
+      residentBudget,
+    );
+    const plan = planUniverseTimelinePrefetch({
+      cacheLength: current.cacheBundleIds.length,
+      activeIndex: current.activeIndex,
+      visibleLimit: current.visibleLimit,
+      cacheLimit: current.cacheLimit,
+      hasOlder: session.timeline.deque.hasOlder,
+      hasNewer: session.timeline.deque.hasNewer,
+      pageSize: nextPageSize,
+      preferredDirection: session.timeline.preferredDirection,
+    });
+    if (!plan.direction) return;
+    void loadSourceTimelinePage(
+      session.sourceId,
+      "prefetch",
+      plan.direction,
+    );
+  }, [
+    activationOrigin,
+    interactive,
+    loadSourceTimelinePage,
+    lockedKey,
+    manifest?.policy.event_entity_limit,
+    manifest?.policy.timeline_event_page_size,
+    residentBudget,
+    timelineWindow,
+  ]);
+
+  const timelineJourney = React.useMemo<UniverseTimelineJourney>(() => {
+    const enabled = Boolean(
+      interactive
+      && browseSessionSourceId
+      && timelineWindow
+      && timelineWindow.cacheBundleIds.length > 0,
+    );
+    const activeIndex = timelineWindow?.activeIndex ?? -1;
+    const cacheLength = timelineWindow?.cacheBundleIds.length ?? 0;
+    const startActiveIndex = timelineWindow
+      ? universeTimelineRewindStartActiveIndex(timelineWindow)
+      : -1;
+    const activeDeque = browseSessionSourceId
+      ? sourceSessionRef.current?.timeline.deque ?? null
+      : null;
+    const hasOlder = activeDeque?.hasOlder ?? false;
+    const hasNewer = activeDeque?.hasNewer ?? false;
+    const networkExhausted = !hasOlder;
+    return {
+      enabled,
+      phase: timelineWindow?.phase ?? "idle",
+      hasNext: enabled
+        && (activeIndex < cacheLength - 1 || hasOlder),
+      hasPrevious: enabled && (activeIndex > startActiveIndex || hasNewer),
+      networkExhausted,
+      revision: timelineWindow?.revision ?? 0,
+    };
+  }, [
+    browseSessionSourceId,
+    interactive,
+    timelineWindow,
+  ]);
+
+  // Keep the pager mounted for the lifetime of an active browse session.
+  // Journey readiness only controls the individual buttons: coupling the
+  // whole toolbar to a populated cache made it disappear during page loads,
+  // deque synchronization, and other short-lived timeline transitions.
+  const timelineControlsVisible = Boolean(
+    interactive
+    && browseSessionSourceId
+    && timelineWindow,
+  );
+
+  const visibleTimelineRange = React.useMemo(() => {
+    const session = sourceSessionRef.current;
+    if (!session?.timeline.deque || !timelineWindow || timelineWindow.activeIndex < 0) {
+      return t("controls.unknownTime");
+    }
+    const visibleIds = new Set(timelineWindow.visibleBundleIds);
+    const visibleBundles = session.timeline.deque.bundles
+      .filter((bundle) => visibleIds.has(bundle.bundle_id));
+    const values = visibleBundles
+      .map((bundle) => bundle.event.start_time)
+      .filter((value): value is string => typeof value === "string")
+      .map((value) => ({ value, timestamp: Date.parse(value) }))
+      .filter((item) => Number.isFinite(item.timestamp));
+    if (values.length === 0) return t("controls.unknownTime");
+    const includesClock = values.some(({ value }) =>
+      !/T00:00(?::00(?:\.\d+)?)?(?:Z|[+-]\d\d:\d\d)?$/.test(value));
+    const formatter = new Intl.DateTimeFormat(locale, includesClock
+      ? { dateStyle: "medium", timeStyle: "short" }
+      : { dateStyle: "medium" });
+    const oldest = Math.min(...values.map((item) => item.timestamp));
+    const newest = Math.max(...values.map((item) => item.timestamp));
+    const oldestLabel = formatter.format(new Date(oldest));
+    const newestLabel = formatter.format(new Date(newest));
+    const range = oldest === newest ? oldestLabel : `${oldestLabel} – ${newestLabel}`;
+    return values.length < visibleBundles.length
+      ? t("controls.partialTime", { time: range })
+      : range;
+  }, [locale, t, timelineWindow]);
 
   const handleSceneViewChange = React.useCallback(
     (view: UniverseSceneView) => {
@@ -1330,9 +2975,6 @@ export function KnowledgeUniverse({
       if (viewportSourceRef.current === view.sourceId) return;
       viewportSourceRef.current = view.sourceId;
       setViewportSourceId(view.sourceId);
-      if (!view.sourceId) {
-        setHoveredConcreteKey(null);
-      }
     },
     [],
   );
@@ -1340,38 +2982,56 @@ export function KnowledgeUniverse({
   const handleNodeClick = React.useCallback(
     (node: UniverseSceneNode) => {
       if (node.kind === "source") {
-        setHoveredConcreteKey(null);
         activatePartition(node as Universe3DNode);
         return;
       }
       const exact = node as Universe3DNode & { kind: "event" | "entity" };
-      setSelectedKey(exact.id);
-      graphRef.current?.lockNode(exact.id);
-      if (exact.kind === "event" && exact.relatedCountKnown) {
-        const loadedEntities = universeAnchorProgress(
-          workingRef.current,
-          "event",
-          exact.rawId,
-          exact.sourceId,
-        );
-        if (loadedEntities >= exact.relatedCount) {
-          setMoreHint(
-            exact.relatedCount > 0
-              ? t("expansion.eventEntitiesComplete", { count: exact.relatedCount })
-              : t("expansion.noEventEntities"),
-          );
-          return;
-        }
+      const nextLockedId = nextUniverseLockedNodeId(
+        lockedKeyRef.current,
+        exact.id,
+      );
+      if (!nextLockedId) {
+        graphRef.current?.clearSelection();
+        setLockedKey(null);
+        setSelectedKey(null);
+        return;
       }
-      void expandNode(exact);
+
+      // A node click is a presentation-only action. Explicit expansion remains
+      // available from the inspector, while locking cancels any in-flight
+      // automatic timeline request before it can mutate the working set.
+      if (timelineLoadCauseRef.current !== "source-entry") {
+        timelineAbortRef.current?.abort();
+      }
+      setLockedKey(nextLockedId);
+      setSelectedKey(nextLockedId);
+      graphRef.current?.lockNode(nextLockedId);
     },
-    [activatePartition, expandNode, t],
+    [activatePartition, setLockedKey, setSelectedKey],
   );
 
   const clearSelection = React.useCallback(() => {
-    graphRef.current?.unlockNode();
+    graphRef.current?.clearSelection();
+    setLockedKey(null);
     setSelectedKey(null);
-    setHoveredConcreteKey(null);
+  }, [setLockedKey, setSelectedKey]);
+
+  const handleSceneUnavailable = React.useCallback((reason: UniverseSceneUnavailableReason) => {
+    // Rendering failure must not invalidate the already loaded cache/window.
+    // Retaining it makes a renderer retry a visual remount instead of a data reload.
+    setSceneUnavailableReason((current) => current ?? reason);
+  }, []);
+
+  const retryScene = React.useCallback(() => {
+    if (sceneRetryFrameRef.current !== null) return;
+    setSceneUnavailableReason(null);
+    setWebglAvailable(null);
+    // Keep one paint with no canvas so Chrome can retire the previous context
+    // before the renderer asks for another one.
+    sceneRetryFrameRef.current = window.requestAnimationFrame(() => {
+      sceneRetryFrameRef.current = null;
+      setSceneAttempt((current) => current + 1);
+    });
   }, []);
 
   const resetUniversePresentation = React.useCallback(() => {
@@ -1379,23 +3039,23 @@ export function KnowledgeUniverse({
     viewportSourceRef.current = null;
     setViewportSourceId(null);
     setActivePartition(null);
+    setLockedKey(null);
     setSelectedKey(null);
-    setHoveredConcreteKey(null);
-  }, []);
+  }, [setLockedKey, setSelectedKey]);
 
   React.useEffect(() => {
-    if (!selectedKey || graphData.nodes.some((node) => node.id === selectedKey)) return;
+    const visibleNodeIds = new Set(graphData.nodes.map((node) => node.id));
+    const selectedMissing = Boolean(selectedKey && !visibleNodeIds.has(selectedKey));
+    const lockedMissing = Boolean(lockedKey && !visibleNodeIds.has(lockedKey));
+    if (!selectedMissing && !lockedMissing) return;
     clearSelection();
-  }, [clearSelection, graphData.nodes, selectedKey]);
+  }, [clearSelection, graphData.nodes, lockedKey, selectedKey]);
 
-  const handleSceneHover = React.useCallback((value: UniverseSceneHover | null) => {
-    if (!value || value.node.kind === "source") {
-      setHoveredConcreteKey(null);
-      return;
-    }
-    const node = value.node as Universe3DNode & { kind: "event" | "entity" };
-    setHoveredConcreteKey(node.id);
-  }, []);
+  // Transient hover is rendered entirely inside the scene. Promoting it into
+  // React state mounted the inspector and re-rendered this large controller on
+  // every hover transition, which made a lightweight highlight feel like a
+  // mode change. Click/keyboard selection still owns the persistent inspector.
+  const handleSceneHover = React.useCallback(() => undefined, []);
 
   React.useEffect(() => {
     if (!interactive || !manifest || !webglAvailable) return;
@@ -1406,28 +3066,19 @@ export function KnowledgeUniverse({
   }, [focusOverview, interactive, manifest, webglAvailable]);
 
   React.useEffect(() => {
-    const previous = previousWorkspacePanelRef.current;
-    previousWorkspacePanelRef.current = workspacePanel;
-    if (previous === workspacePanel || workspacePanel === "normal") return;
-    const timer = window.setTimeout(() => {
-      if (previous === "normal") resetUniversePresentation();
-      else if (summary) graphRef.current?.focusResult();
-      else graphRef.current?.focusOverview();
-    }, workspacePanel === "hidden" ? 220 : 80);
-    return () => window.clearTimeout(timer);
-  }, [resetUniversePresentation, summary, workspacePanel]);
-
-  React.useEffect(() => {
     if (interactive) return;
     resetUniversePresentation();
     graphRef.current?.pause();
     expandAbortRef.current?.abort();
     timelineAbortRef.current?.abort();
+    if (snapshotReloadTimerRef.current !== null) {
+      window.clearTimeout(snapshotReloadTimerRef.current);
+      snapshotReloadTimerRef.current = null;
+    }
     rebuildAbortRef.current?.abort();
-    clearStageTimer();
     clearCameraSchedule();
-    setHoveredConcreteKey(null);
-  }, [clearCameraSchedule, clearStageTimer, interactive, resetUniversePresentation]);
+    clearTimelineSettle();
+  }, [clearCameraSchedule, clearTimelineSettle, interactive, resetUniversePresentation]);
 
   React.useEffect(() => {
     if (!viewportLoadProgress) return;
@@ -1441,8 +3092,8 @@ export function KnowledgeUniverse({
     setMoreHint(
       t("loadProgress.sourceComplete", {
         source: viewportLoadProgress.label,
-        events: viewportLoadProgress.events.total,
-        entities: viewportLoadProgress.entities.total,
+        events: viewportLoadProgress.events.loaded,
+        entities: viewportLoadProgress.entities.loaded,
       }),
     );
   }, [t, viewportLoadProgress]);
@@ -1465,10 +3116,15 @@ export function KnowledgeUniverse({
       expansionInflightRef.current.clear();
       rebuildAbortRef.current?.abort();
       timelineAbortRef.current?.abort();
-      clearStageTimer();
+      if (snapshotReloadTimerRef.current !== null) {
+        window.clearTimeout(snapshotReloadTimerRef.current);
+        snapshotReloadTimerRef.current = null;
+      }
+      snapshotReloadAttemptsRef.current.clear();
       clearCameraSchedule();
+      clearTimelineSettle();
     },
-    [clearCameraSchedule, clearStageTimer],
+    [clearCameraSchedule, clearTimelineSettle],
   );
 
   const rebuild = React.useCallback(async () => {
@@ -1529,14 +3185,27 @@ export function KnowledgeUniverse({
       aria-label={t("aria")}
       aria-hidden={!interactive}
       data-universe-suspended={!interactive}
-      data-universe-workspace-panel={workspacePanel}
+      data-universe-mode={interactive ? "explore" : "normal"}
       data-universe-activation-origin={activationOrigin}
       data-universe-search-locked={activationOrigin === "search"}
+      data-universe-engine={
+        sceneUnavailableReason
+        ?? (webglAvailable === true ? "ready" : webglAvailable === false ? "api-unavailable" : "probing")
+      }
       data-universe-node-budget={budget.nodes}
+      data-universe-projection-node-budget={timelineProjectionBudget.nodes}
+      data-universe-resident-node-budget={residentBudget.nodes}
+      data-universe-timeline-phase={timelineJourney.phase}
+      data-universe-display-mode={displayModeState.mode}
+      data-universe-visible-bundle-limit={bundleWindow.visibleEventBundles}
+      data-universe-transition-headroom={timelineWindowPlan.transitionHeadroomPackages}
+      data-universe-visible-bundles={timelineWindow?.visibleBundleIds.length ?? 0}
+      data-universe-cached-bundles={timelineWindow?.cacheBundleIds.length ?? 0}
     >
-      {webglAvailable === true && manifest ? (
+      {webglAvailable === true && sceneUnavailableReason === null && manifest ? (
         <div className="sag-universe-graph absolute inset-0">
           <UniverseScene
+            key={`universe-scene:${sceneAttempt}`}
             ref={graphRef}
             data={graphData}
             policy={manifest.policy}
@@ -1546,20 +3215,58 @@ export function KnowledgeUniverse({
             interactive={interactive}
             reducedMotion={Boolean(reducedMotion)}
             viewPreferences={viewPreferences}
+            timelineJourney={timelineJourney}
             onNodeClick={handleNodeClick}
             onHover={handleSceneHover}
+            onTimelineIntent={handleTimelineIntent}
+            onCameraInteraction={restoreNormalPresentation}
             onViewChange={handleSceneViewChange}
             onSourceLod={handleSourceLod}
             onSelectionClear={clearSelection}
+            onUnavailable={handleSceneUnavailable}
           />
         </div>
-      ) : webglAvailable === false ? (
+      ) : webglAvailable === false || sceneUnavailableReason !== null ? (
         <div className="absolute inset-0 grid place-items-center p-8">
           <div className="max-w-sm rounded-lg border border-border/70 bg-background/75 p-5 text-center shadow-soft backdrop-blur-md">
-            <p className="text-sm font-medium">{t("webgl.title")}</p>
-            <p className="mt-2 text-xs leading-5 text-muted-foreground">
-              {t("webgl.description")}
+            <p className="text-sm font-medium">
+              {t(
+                sceneUnavailableReason === "context-disabled"
+                  ? "webgl.contextDisabledTitle"
+                  : sceneUnavailableReason === "context-creation"
+                    ? "webgl.contextCreationTitle"
+                    : sceneUnavailableReason === "dynamic-import"
+                      ? "webgl.moduleTitle"
+                      : sceneUnavailableReason
+                        ? "webgl.sceneTitle"
+                        : "webgl.title",
+              )}
             </p>
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">
+              {t(
+                sceneUnavailableReason === "context-lost"
+                  ? "webgl.contextLostDescription"
+                  : sceneUnavailableReason === "context-disabled"
+                    ? "webgl.contextDisabledDescription"
+                    : sceneUnavailableReason === "context-creation"
+                      ? "webgl.contextCreationDescription"
+                      : sceneUnavailableReason === "dynamic-import"
+                        ? "webgl.moduleDescription"
+                        : sceneUnavailableReason
+                          ? "webgl.sceneDescription"
+                          : "webgl.description",
+              )}
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="mt-4"
+              onClick={retryScene}
+            >
+              <RefreshCw className="size-3.5" />
+              {t("webgl.retry")}
+            </Button>
           </div>
         </div>
       ) : null}
@@ -1696,7 +3403,7 @@ export function KnowledgeUniverse({
               key={viewportLoadProgress.sourceId}
               progress={viewportLoadProgress}
               reducedMotion={Boolean(reducedMotion)}
-              clickOnly={activationOrigin !== "browse"}
+              explicitOnly={activationOrigin !== "browse"}
             />
           )}
         </AnimatePresence>
@@ -1705,6 +3412,7 @@ export function KnowledgeUniverse({
       {(moreHint || error) && (
         <div className={cn(
           "pointer-events-none absolute bottom-5 left-1/2 z-10 max-w-md -translate-x-1/2 rounded-md border border-border/60 bg-background/72 px-3 py-2 text-[11px] text-muted-foreground shadow-soft backdrop-blur-md",
+          timelineJourney.enabled && "bottom-20",
           inspectorNode && viewportSource && "bottom-44",
         )} role="status" aria-live="polite">
           {error || moreHint}
@@ -1717,26 +3425,22 @@ export function KnowledgeUniverse({
             data-universe-inspector="true"
             className="absolute bottom-48 left-4 z-20 w-[min(360px,calc(100vw-5.5rem))] rounded-md border border-border/70 bg-background/90 p-3 shadow-soft backdrop-blur-xl sm:bottom-5 sm:left-6"
           >
-            <div className="flex items-start gap-2.5">
+            <div className="flex items-center gap-2.5">
               <span
                 className={cn(
-                  "mt-1 size-2 shrink-0 rounded-full",
+                  "size-2 shrink-0 rounded-full",
                   inspectorNode.kind === "entity"
                     ? "bg-cyan-300 shadow-[0_0_10px_rgb(103_232_249_/_0.75)]"
                     : "bg-amber-300 shadow-[0_0_10px_rgb(252_211_77_/_0.75)]",
                 )}
               />
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <p className="truncate text-xs font-medium">{inspectorNode.label}</p>
-                  {hoveredConcreteNode && (
-                    <span className="shrink-0 text-[9px] text-muted-foreground">{t("inspector.hover")}</span>
-                  )}
-                </div>
+                <p className="truncate text-xs font-medium">
+                  {t("inspector.lockedNetwork")}
+                  <span className="sr-only">：{inspectorNode.label}</span>
+                </p>
                 <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
-                  {t(`nodeKinds.${inspectorNode.kind}`)}
-                  {" · "}
-                  {sourceById.get(inspectorNode.sourceId)?.label ?? inspectorNode.category}
+                  {t("inspector.blankToUnlock")}
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-0.5">
@@ -1791,13 +3495,6 @@ export function KnowledgeUniverse({
                 </Tooltip>
               </div>
             </div>
-            <p className="mt-2 line-clamp-2 text-[11px] leading-4 text-muted-foreground">
-              {inspectorNode.description || (
-                inspectorNode.kind === "entity"
-                  ? t("inspector.entityFallback", { category: inspectorNode.category })
-                  : t("inspector.eventFallback", { category: inspectorNode.category })
-              )}
-            </p>
             <div className="mt-2 flex items-center gap-2 text-[10px] text-muted-foreground">
               <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted/70">
                 <div
@@ -1836,7 +3533,7 @@ export function KnowledgeUniverse({
                   variant="outline"
                   size="sm"
                   className="h-7 shrink-0 gap-1.5 border-border/70 bg-background/70 px-2.5 text-[10px] shadow-none"
-                  onClick={() => handleNodeClick(inspectorNode)}
+                  onClick={() => void expandNode(inspectorNode)}
                   disabled={expandingKey === inspectorNode.id}
                 >
                   {expandingKey === inspectorNode.id
@@ -1856,12 +3553,63 @@ export function KnowledgeUniverse({
         </div>
       )}
 
+      {timelineControlsVisible && (
+        <TooltipProvider delayDuration={200}>
+          <div
+            className="absolute bottom-5 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border/65 bg-background/76 p-1.5 shadow-soft backdrop-blur-xl"
+            data-universe-timeline-controls="true"
+          >
+            <IconControl
+              label={t("controls.previousTimePage")}
+              onClick={() => void graphRef.current?.moveTimeline("previous")}
+              disabled={!timelineJourney.hasPrevious
+                || timelineJourney.phase === "loading"
+                || timelineJourney.phase === "transitioning"}
+            >
+              <ChevronLeft className="size-3.5" />
+            </IconControl>
+            <span
+              className={cn(
+                "rounded-full px-2 py-1 text-[9px] font-medium",
+                displayModeState.mode === "preview"
+                  ? "bg-amber-400/12 text-amber-200"
+                  : "bg-muted/55 text-muted-foreground",
+              )}
+              title={t(displayModeState.mode === "preview"
+                ? "controls.previewModeHint"
+                : "controls.normalModeHint")}
+              data-universe-display-mode-indicator={displayModeState.mode}
+            >
+              {t(displayModeState.mode === "preview"
+                ? "controls.previewMode"
+                : "controls.normalMode")}
+            </span>
+            <span className="min-w-32 px-2 text-center text-[10px] tabular-nums text-muted-foreground">
+              {t(timelineJourney.phase === "complete"
+                ? "controls.completedTimePosition"
+                : "controls.timePosition", {
+                  time: visibleTimelineRange,
+                })}
+            </span>
+            <IconControl
+              label={t("controls.nextTimePage")}
+              onClick={() => void graphRef.current?.moveTimeline("next")}
+              disabled={!timelineJourney.hasNext
+                || timelineJourney.phase === "loading"
+                || timelineJourney.phase === "transitioning"}
+            >
+              <ChevronRight className="size-3.5" />
+            </IconControl>
+          </div>
+        </TooltipProvider>
+      )}
+
       {interactive && (
         <TooltipProvider delayDuration={240}>
-          <div className="absolute bottom-5 right-5 z-10 flex flex-col gap-1.5">
-            <IconControl label={t("controls.openPanel")} onClick={onOpenWorkspace}>
-              <PanelRightOpen className="size-3.5" />
-            </IconControl>
+          <div
+            className="absolute bottom-5 right-5 z-10 flex flex-col gap-1.5"
+            data-universe-controls="true"
+          >
             <IconControl
               label={t("controls.currentResult")}
               onClick={focusResult}

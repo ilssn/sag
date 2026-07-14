@@ -1,4 +1,4 @@
-"""Aggregate universe overview and bounded activation stay strictly separated."""
+"""Aggregate universe overview and bounded exploration stay strictly separated."""
 
 import asyncio
 import uuid
@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import delete
 
 
@@ -18,6 +19,107 @@ def test_universe_evidence_lookup_declares_composite_index():
         if item.name == "ix_documents_source_sag_source"
     )
     assert tuple(column.name for column in index.columns) == ("source_id", "sag_source_id")
+
+
+def test_universe_v2_response_models_reject_malformed_or_stalled_pages():
+    from sag_api.schemas.universe import (
+        UniverseGraphPatchOut,
+        UniverseTimelineIn,
+        UniverseTimelineSliceOut,
+    )
+
+    now = datetime(2026, 7, 12, tzinfo=UTC)
+    node = {
+        "id": "event-1",
+        "kind": "event",
+        "source_id": "source-1",
+        "related_count": 1,
+    }
+    entity = {
+        "id": "entity-1",
+        "kind": "entity",
+        "source_id": "source-1",
+    }
+    relation = {
+        "source_id": "source-1",
+        "from_id": "event-1",
+        "to_id": "missing-entity",
+        "kind": "mentions",
+    }
+    with pytest.raises(PydanticValidationError, match="向新时间轴续页"):
+        UniverseTimelineIn.model_validate(
+            {
+                "epoch": 1,
+                "source_id": "source-1",
+                "direction": "newer",
+            }
+        )
+    with pytest.raises(PydanticValidationError, match="关系端点"):
+        UniverseGraphPatchOut.model_validate(
+            {
+                "schema_version": 2,
+                "epoch": 1,
+                "source_id": "source-1",
+                "source_revision": "revision-1",
+                "snapshot_id": "snapshot-1",
+                "request_cursor": None,
+                "page_id": "page-1",
+                "bundle_id": "bundle-1",
+                "anchor": node,
+                "nodes": [entity],
+                "relations": [relation],
+                "page": {"returned": 1, "has_more": False, "next_cursor": None},
+                "as_of": now,
+            }
+        )
+
+    with pytest.raises(PydanticValidationError, match="游标没有前进"):
+        UniverseTimelineSliceOut.model_validate(
+            {
+                "schema_version": 2,
+                "epoch": 1,
+                "source_id": "source-1",
+                "source_revision": "revision-1",
+                "snapshot_id": "snapshot-1",
+                "request_direction": "older",
+                "request_cursor": "same-cursor",
+                "page_id": "page-1",
+                "bundles": [
+                    {
+                        "bundle_id": "bundle-1",
+                        "event": node,
+                        "nodes": [entity],
+                        "relations": [
+                            {
+                                **relation,
+                                "to_id": "entity-1",
+                            }
+                        ],
+                        "neighbor_page": {
+                            "total_unique": 1,
+                            "returned_unique": 1,
+                            "complete": True,
+                            "next_cursor": None,
+                        },
+                        "cursor_before": None,
+                        "cursor_after": "same-cursor",
+                    }
+                ],
+                "page": {
+                    "returned_bundles": 1,
+                    "returned_unique_nodes": 2,
+                    "returned_relations": 1,
+                    "direction": "older",
+                    "has_newer": False,
+                    "newer_cursor": None,
+                    "has_older": True,
+                    "older_cursor": "same-cursor",
+                    "has_more": True,
+                    "next_cursor": "same-cursor",
+                },
+                "as_of": now,
+            }
+        )
 
 
 @pytest.mark.asyncio
@@ -35,7 +137,6 @@ async def test_universe_overview_expand_detail_and_reset_contract():
         SearchOutcome,
         SourceGraphInfo,
         UniverseExpansionInfo,
-        UniverseSeedInfo,
         UniverseSourceStatsInfo,
         UniverseTimeBucketInfo,
     )
@@ -75,7 +176,8 @@ async def test_universe_overview_expand_detail_and_reset_contract():
                         "id": event_id,
                         "kind": "event",
                         "label": "知识宇宙开始发光",
-                        "description": "事件激活一个有界实体邻域。",
+                        "description": "事件返回一个有界实体邻域。",
+                        "related_count": 1,
                     },
                     neighbors=[
                         {
@@ -86,6 +188,17 @@ async def test_universe_overview_expand_detail_and_reset_contract():
                             "weight": 1.0,
                         }
                     ][:limit],
+                    relations=[
+                        {
+                            "from_id": event_id,
+                            "to_id": entity_id,
+                            "kind": "mentions",
+                            "weight": 1.0,
+                        }
+                    ],
+                    returned=1,
+                    snapshot_id="test-source-read-snapshot",
+                    as_of=datetime(2026, 7, 12, tzinfo=UTC),
                 )
             if node_kind == "entity" and node_id == entity_id:
                 return UniverseExpansionInfo(
@@ -94,6 +207,7 @@ async def test_universe_overview_expand_detail_and_reset_contract():
                         "kind": "entity",
                         "label": "知识宇宙",
                         "description": "实体只展开最新的有界事件。",
+                        "related_count": 1,
                     },
                     neighbors=[
                         {
@@ -104,27 +218,19 @@ async def test_universe_overview_expand_detail_and_reset_contract():
                             "weight": 1.0,
                         }
                     ][:limit],
+                    relations=[
+                        {
+                            "from_id": event_id,
+                            "to_id": entity_id,
+                            "kind": "mentions",
+                            "weight": 1.0,
+                        }
+                    ],
+                    returned=1,
+                    snapshot_id="test-source-read-snapshot",
                     as_of=datetime(2026, 7, 12, tzinfo=UTC),
                 )
             return None
-
-        async def universe_partition_seed(
-            self, source_config_id, *, category=None, limit=12, **_kwargs
-        ):
-            return UniverseSeedInfo(
-                nodes=[
-                    {
-                        "id": f"entity-{source_config_id}",
-                        "kind": "entity",
-                        "label": "知识宇宙",
-                        "description": "从信息源进入最近活跃实体。",
-                        "category": category or "产品概念",
-                        "importance": 1.0,
-                        "related_count": 1,
-                    }
-                ][:limit],
-                as_of=datetime(2026, 7, 12, tzinfo=UTC),
-            )
 
         async def universe_node_detail(
             self, source_config_id, node_kind, node_id, **_kwargs
@@ -185,7 +291,7 @@ async def test_universe_overview_expand_detail_and_reset_contract():
                         source_id=source_ref,
                         chunk_id=f"chunk-{source_config_id}",
                         title="知识宇宙开始发光",
-                        summary="搜索只激活当前真实工作集。",
+                        summary="搜索只聚焦当前真实工作集。",
                         category="产品设计",
                         score=0.92,
                     )
@@ -306,6 +412,22 @@ async def test_universe_overview_expand_detail_and_reset_contract():
                 assert partition["time_buckets"][0]["count"] == 1
                 assert all(key in partition for key in ("x", "y", "z", "density"))
 
+                # 快照事件数与信源完成数不一致时，即使脏标记遗漏也必须触发重建。
+                async with SessionLocal() as session:
+                    source = await session.get(Source, source_id)
+                    assert source is not None
+                    source.event_count = 2
+                    await session.commit()
+                drifted = await client.get("/api/v1/universe/manifest", headers=headers)
+                assert drifted.status_code == 200
+                assert drifted.json()["status"] == "stale"
+                assert drifted.json()["stale"] is True
+                async with SessionLocal() as session:
+                    source = await session.get(Source, source_id)
+                    assert source is not None
+                    source.event_count = 1
+                    await session.commit()
+
                 second = await client.post("/api/v1/universe/rebuild", headers=headers)
                 assert second.status_code == 202, second.text
                 assert (await wait_for_job(second.json()["id"]))["status"] == "succeeded"
@@ -323,21 +445,6 @@ async def test_universe_overview_expand_detail_and_reset_contract():
 
                 event_id = f"event-{source_config_id}"
                 entity_id = f"entity-{source_config_id}"
-                activated = await client.post(
-                    "/api/v1/universe/activate",
-                    headers=headers,
-                    json={
-                        "epoch": 6,
-                        "source_id": source_id,
-                        "category": "产品概念",
-                        "limit": 12,
-                    },
-                )
-                assert activated.status_code == 200, activated.text
-                assert activated.json()["epoch"] == 6
-                assert activated.json()["seed_kind"] == "entity"
-                assert activated.json()["nodes"][0]["id"] == entity_id
-
                 too_large = await client.post(
                     "/api/v1/universe/expand",
                     headers=headers,
@@ -346,7 +453,7 @@ async def test_universe_overview_expand_detail_and_reset_contract():
                         "source_id": source_id,
                         "node_kind": "event",
                         "node_id": event_id,
-                            "limit": 129,
+                        "limit": 9,
                     },
                 )
                 assert too_large.status_code == 422

@@ -100,10 +100,7 @@ function SettingsPageContent() {
         </TabsContent>
 
         <TabsContent value="agent" className="m-0 animate-fade-in">
-          <div className="flex flex-col gap-6">
-            <AgentSettingsCard />
-            <McpSettingsCard />
-          </div>
+          <AgentSettingsCard />
         </TabsContent>
 
         <TabsContent value="model" className="m-0 animate-fade-in">
@@ -115,7 +112,10 @@ function SettingsPageContent() {
         </TabsContent>
 
         <TabsContent value="integrations" className="m-0 animate-fade-in">
-          <McpServiceSettings />
+          <div className="flex flex-col gap-6">
+            <McpSettingsCard />
+            <McpServiceSettings />
+          </div>
         </TabsContent>
 
         <TabsContent value="appearance" className="m-0 animate-fade-in">

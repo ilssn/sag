@@ -30,11 +30,11 @@ async def get_source_graph(
     engine_manager: EngineManager,
     source: Source,
     *,
-    document_limit: int = 16,
-    event_limit: int = 60,
-    entity_limit: int = 48,
+    document_limit: int = 1_000,
+    event_limit: int = 1_000,
+    entity_limit: int = 1_000,
 ) -> SourceGraphOut:
-    """拼装 Web 文档与引擎事件/实体，返回一个可安全渲染的图谱切片。"""
+    """拼装 Web 文档与引擎事件/实体，按调用方给出的性能预算返回图谱。"""
     documents = list(
         (
             await session.execute(
@@ -48,12 +48,14 @@ async def get_source_graph(
         .all()
     )
     source_id_to_document_id = {document.sag_source_id: document.id for document in documents if document.sag_source_id}
+    document_event_count = sum(max(0, int(document.event_count or 0)) for document in documents)
     graph = await engine_manager.source_graph(
         source.sag_source_config_id,
         list(source_id_to_document_id),
         source=source,
         event_limit=event_limit,
         entity_limit=entity_limit,
+        expected_event_count=document_event_count,
     )
 
     document_nodes = [
@@ -129,7 +131,11 @@ async def get_source_graph(
 
     counts = GraphCountsOut(
         documents=max(source.document_count, len(document_nodes)),
-        events=max(source.event_count, len(event_nodes)),
+        # Document checkpoints advance while extraction is still running;
+        # Source.event_count is committed only after the whole document. Use
+        # the strongest available total so a live graph reports 3 / 73 rather
+        # than claiming its current three-node slice is the entire dataset.
+        events=max(source.event_count, document_event_count, len(event_nodes)),
         entities=max(graph.total_entities, len(entity_nodes)),
         shown_documents=len(document_nodes),
         shown_events=len(event_nodes),

@@ -1,14 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import type { UniverseActivation, UniverseGraphPatch } from "./types";
+import type { UniverseActivation } from "./types";
 import {
+  admitUniverseBundle,
+  admitUniverseBundles,
   emptyUniverseWorkingSet,
-  mergeUniverseActivation,
-  mergeUniverseGraphPatch,
   replaceUniverseWorkingSet,
-  sourceTimelinePageTargetForLod,
+  setUniversePinnedKeys,
+  setUniversePinnedNetwork,
   trimUniverseWorkingSet,
   universeAnchorProgress,
+  universeNodeKey,
+  universeRelationKey,
+  type UniverseAdmissionBundle,
+  type UniverseWorkingSet,
+  UNIVERSE_RESIDENT_BUDGET,
+  UNIVERSE_SCENE_BUDGET,
 } from "./universe-working-set";
 
 function activation(epoch: number, prefix: string, count = 4): UniverseActivation {
@@ -39,310 +46,253 @@ function activation(epoch: number, prefix: string, count = 4): UniverseActivatio
   };
 }
 
-function patch(epoch: number, index: number): UniverseGraphPatch {
+function eventBundle(
+  id: string,
+  eventId: string,
+  entityId?: string,
+  includeEntity = true,
+): UniverseAdmissionBundle {
   return {
-    epoch,
-    anchor: {
-      id: "root-event",
-      kind: "event",
-      source_id: "source-a",
-      label: "根事件",
-      description: "",
-      category: "事件",
-      chunk_id: null,
-      start_time: null,
-      importance: 1,
-      related_count: 0,
-      state: "active",
-    },
+    id,
+    epoch: 12,
+    source_id: "source-a",
     nodes: [
-      {
-        id: `entity-${index}`,
-        kind: "entity",
-        source_id: "source-a",
-        label: `实体 ${index}`,
-        description: "",
-        category: "实体",
-        chunk_id: null,
-        start_time: null,
-        importance: 0.5,
-        related_count: 1,
-        state: "active",
-      },
+      { id: eventId, kind: "event", source_id: "source-a", label: eventId },
+      ...(entityId && includeEntity
+        ? [{ id: entityId, kind: "entity" as const, source_id: "source-a", label: entityId }]
+        : []),
     ],
-    relations: [
-      {
-        source_id: "source-a",
-        from_id: "root-event",
-        to_id: `entity-${index}`,
-        kind: "mentions",
-        weight: 1,
-        description: "",
-      },
-    ],
-    page: {
-      returned: 1,
-      has_more: index < 99,
-      next_cursor: index < 99 ? `cursor-${index}` : null,
-    },
-    as_of: "2026-07-12T00:00:00Z",
+    relations: entityId
+      ? [{
+          source_id: "source-a",
+          from_id: eventId,
+          to_id: entityId,
+          kind: "mentions",
+          weight: 1,
+          description: "",
+        }]
+      : [],
   };
 }
 
-describe("universe working set", () => {
-  it("evicts nodes in exact FIFO order", () => {
-    let current = emptyUniverseWorkingSet(1);
-    for (const id of ["a", "b", "c", "d", "e"]) {
-      current = mergeUniverseActivation(current, {
-        epoch: 1,
-        query: id,
-        nodes: [{ id, kind: "entity", source_id: "source-a", label: id }],
-        relations: [],
-      }, { nodes: 3, edges: 3 });
-    }
-
-    expect(current.node_order).toEqual([
-      "source-a:entity:c",
-      "source-a:entity:d",
-      "source-a:entity:e",
-    ]);
-    expect(current.nodes.map((node) => node.id)).toEqual(["c", "d", "e"]);
-  });
-
-  it("updates an existing node without moving it to the FIFO tail", () => {
-    let current = mergeUniverseActivation(emptyUniverseWorkingSet(2), {
-      epoch: 2,
-      query: "initial",
-      nodes: ["a", "b", "c"].map((id) => ({
-        id,
+function denseEventBundle(id: string, index: number): UniverseAdmissionBundle {
+  const eventId = `dense-event-${index}`;
+  const entityIds = Array.from(
+    { length: 8 },
+    (_, entityIndex) => `dense-entity-${index}-${entityIndex}`,
+  );
+  return {
+    id,
+    epoch: 12,
+    source_id: "source-a",
+    nodes: [
+      { id: eventId, kind: "event", source_id: "source-a", label: eventId },
+      ...entityIds.map((entityId) => ({
+        id: entityId,
         kind: "entity" as const,
         source_id: "source-a",
-        label: id,
+        label: entityId,
       })),
-      relations: [],
-    }, { nodes: 3, edges: 3 });
-    current = mergeUniverseActivation(current, {
-      epoch: 2,
-      query: "update",
-      nodes: [{ id: "b", kind: "entity", source_id: "source-a", label: "B updated" }],
-      relations: [],
-    }, { nodes: 3, edges: 3 });
-
-    expect(current.node_order).toEqual([
-      "source-a:entity:a",
-      "source-a:entity:b",
-      "source-a:entity:c",
-    ]);
-    expect(current.nodes.find((node) => node.id === "b")?.label).toBe("B updated");
-
-    for (const id of ["d", "e"]) {
-      current = mergeUniverseActivation(current, {
-        epoch: 2,
-        query: id,
-        nodes: [{ id, kind: "entity", source_id: "source-a", label: id }],
-        relations: [],
-      }, { nodes: 3, edges: 3 });
-    }
-    expect(current.nodes.map((node) => node.id)).toEqual(["c", "d", "e"]);
-  });
-
-  it("protects a newly inserted batch while evicting enough oldest nodes", () => {
-    const current = mergeUniverseActivation(emptyUniverseWorkingSet(3), {
-      epoch: 3,
-      query: "initial",
-      nodes: ["a", "b", "c", "d"].map((id) => ({
-        id,
-        kind: "entity" as const,
-        source_id: "source-a",
-        label: id,
-      })),
-      relations: [],
-    }, { nodes: 4, edges: 4 });
-    const merged = mergeUniverseActivation(current, {
-      epoch: 3,
-      query: "batch",
-      nodes: ["e", "f"].map((id) => ({
-        id,
-        kind: "entity" as const,
-        source_id: "source-a",
-        label: id,
-      })),
-      relations: [],
-    }, { nodes: 4, edges: 4 });
-
-    expect(merged.nodes.map((node) => node.id)).toEqual(["c", "d", "e", "f"]);
-  });
-
-  it("admits a clicked expansion after initial roots fill the whole budget", () => {
-    const current = replaceUniverseWorkingSet({
-      epoch: 4,
-      query: "roots",
-      nodes: ["root", "old-a", "old-b", "old-c"].map((id) => ({
-        id,
-        kind: "event" as const,
-        source_id: "source-a",
-        label: id,
-      })),
-      relations: [],
-    }, { nodes: 4, edges: 4 });
-    const nextPatch = patch(4, 99);
-    nextPatch.anchor = { ...nextPatch.anchor, id: "root" };
-    nextPatch.relations = [{
+    ],
+    relations: entityIds.map((entityId) => ({
       source_id: "source-a",
-      from_id: "root",
-      to_id: "entity-99",
-      kind: "mentions",
+      from_id: eventId,
+      to_id: entityId,
+      kind: "mentions" as const,
       weight: 1,
       description: "",
-    }];
+    })),
+  };
+}
 
-    const merged = mergeUniverseGraphPatch(current, nextPatch, { nodes: 4, edges: 4 });
-    expect(merged.nodes.map((node) => node.id)).toEqual([
-      "root",
-      "old-b",
-      "old-c",
-      "entity-99",
-    ]);
-    expect(merged.root_keys).not.toContain("source-a:event:old-a");
+function expectBundleInvariants(
+  current: UniverseWorkingSet,
+  budget: { nodes: number; edges: number },
+) {
+  expect(current.nodes.length).toBeLessThanOrEqual(budget.nodes);
+  expect(current.relations.length).toBeLessThanOrEqual(budget.edges);
+  const nodeKeys = new Set(current.nodes.map((node) =>
+    universeNodeKey(node.kind, node.id, node.source_id)));
+  const relationKeys = new Set(current.relations.map((relation) =>
+    universeRelationKey(relation)));
+  const bundleIds = new Set(current.bundle_order);
+
+  expect(Object.keys(current.node_owners).sort()).toEqual([...nodeKeys].sort());
+  expect(Object.keys(current.relation_owners).sort()).toEqual([...relationKeys].sort());
+  current.relations.forEach((relation) => {
+    expect(nodeKeys.has(universeNodeKey("event", relation.from_id, relation.source_id))).toBe(true);
+    expect(nodeKeys.has(universeNodeKey(
+      relation.kind === "subevent" ? "event" : "entity",
+      relation.to_id,
+      relation.source_id,
+    ))).toBe(true);
+  });
+  Object.entries(current.node_owners).forEach(([key, owners]) => {
+    expect(nodeKeys.has(key)).toBe(true);
+    expect(owners.length).toBeGreaterThan(0);
+    expect(new Set(owners).size).toBe(owners.length);
+    owners.forEach((owner) => expect(bundleIds.has(owner)).toBe(true));
+  });
+  Object.entries(current.relation_owners).forEach(([key, owners]) => {
+    expect(relationKeys.has(key)).toBe(true);
+    expect(owners.length).toBeGreaterThan(0);
+    expect(new Set(owners).size).toBe(owners.length);
+    owners.forEach((owner) => expect(bundleIds.has(owner)).toBe(true));
+  });
+  expect(new Set(current.pinned_keys).size).toBe(current.pinned_keys.length);
+  expect(new Set(current.pinned_relation_keys).size).toBe(
+    current.pinned_relation_keys.length,
+  );
+  current.pinned_keys.forEach((key) => expect(nodeKeys.has(key)).toBe(true));
+  current.pinned_relation_keys.forEach((key) =>
+    expect(relationKeys.has(key)).toBe(true));
+}
+
+describe("universe working set", () => {
+  it("uses bounded production fallbacks when the manifest policy is unavailable", () => {
+    expect(UNIVERSE_SCENE_BUDGET).toEqual({
+      desktop: { nodes: 240, edges: 360 },
+      mobile: { nodes: 120, edges: 180 },
+    });
+    expect(UNIVERSE_RESIDENT_BUDGET).toEqual({
+      desktop: { nodes: 1_152, edges: 1_152 },
+      mobile: { nodes: 480, edges: 480 },
+    });
   });
 
-  it("shrinks immediately and can temporarily protect a selected old node", () => {
-    const current = mergeUniverseActivation(emptyUniverseWorkingSet(5), {
-      epoch: 5,
-      query: "large",
-      nodes: ["a", "b", "c", "d", "e"].map((id) => ({
-        id,
-        kind: "entity" as const,
-        source_id: "source-a",
-        label: id,
-      })),
-      relations: [],
-    }, { nodes: 5, edges: 5 });
-
-    const shrunk = trimUniverseWorkingSet(current, { nodes: 3, edges: 3 });
-    expect(shrunk.nodes.map((node) => node.id)).toEqual(["c", "d", "e"]);
-
-    const protectedShrink = trimUniverseWorkingSet(
-      current,
-      { nodes: 3, edges: 3 },
-      ["source-a:entity:a"],
-    );
-    expect(protectedShrink.nodes.map((node) => node.id)).toEqual(["a", "d", "e"]);
-  });
-
-  it("keeps the newest valid edges when the edge budget is exceeded", () => {
-    let current = replaceUniverseWorkingSet({
-      epoch: 6,
-      query: "root",
-      nodes: [{
-        id: "root-event",
-        kind: "event",
-        source_id: "source-a",
-        label: "root",
-      }],
-      relations: [],
-    }, { nodes: 10, edges: 2 });
-    for (let index = 0; index < 3; index += 1) {
-      current = mergeUniverseGraphPatch(current, patch(6, index), { nodes: 10, edges: 2 });
-    }
-
-    expect(current.relations.map((relation) => relation.to_id)).toEqual([
-      "entity-1",
-      "entity-2",
-    ]);
-    const withoutEdges = trimUniverseWorkingSet(current, { nodes: 10, edges: 0 });
-    expect(withoutEdges.relations).toEqual([]);
-  });
-
-  it("advances deep LOD one page at a time", () => {
-    expect(sourceTimelinePageTargetForLod(1, 0)).toBe(0);
-    expect(sourceTimelinePageTargetForLod(2, 0)).toBe(1);
-    expect(sourceTimelinePageTargetForLod(3, 0)).toBe(1);
-    expect(sourceTimelinePageTargetForLod(2, 2)).toBe(2);
-    expect(sourceTimelinePageTargetForLod(3, 2)).toBe(3);
-  });
-
-  it("keeps the initial event bundle as protected exploration roots", () => {
-    const current = mergeUniverseActivation(
-      emptyUniverseWorkingSet(9),
+  it("holds dense desktop and mobile cache capacities in resident memory only", () => {
+    const cases = [
       {
-        epoch: 9,
-        query: "source",
-        nodes: Array.from({ length: 6 }, (_, index) => ({
-          id: `entity-${index}`,
-          kind: "entity" as const,
-          source_id: "source-a",
-          label: `实体 ${index}`,
-        })),
-        relations: [],
+        count: 96,
+        budget: UNIVERSE_RESIDENT_BUDGET.desktop,
+        expectedNodes: 864,
+        expectedEdges: 768,
       },
-      { nodes: 4, edges: 4 },
-      1,
-      { roots: true },
-    );
-
-    expect(current.nodes).toHaveLength(4);
-    expect(current.nodes.every((node) => node.root)).toBe(true);
-    expect(current.root_keys).toHaveLength(4);
+      {
+        count: 36,
+        budget: UNIVERSE_RESIDENT_BUDGET.mobile,
+        expectedNodes: 324,
+        expectedEdges: 288,
+      },
+    ];
+    cases.forEach(({ count, budget, expectedNodes, expectedEdges }) => {
+      let current = emptyUniverseWorkingSet(12);
+      for (let index = 0; index < count; index += 1) {
+        const admission = admitUniverseBundle(
+          current,
+          denseEventBundle(`dense-bundle-${index}`, index),
+          budget,
+          index + 1,
+          { roots: true },
+        );
+        expect(admission.accepted).toBe(true);
+        expect(admission.evictedBundleIds).toEqual([]);
+        current = admission.workingSet;
+      }
+      expect(current.bundle_order).toHaveLength(count);
+      expect(current.nodes).toHaveLength(expectedNodes);
+      expect(current.relations).toHaveLength(expectedEdges);
+      expectBundleInvariants(current, budget);
+    });
   });
 
-  it("replaces instead of accumulating across searches", () => {
-    const first = replaceUniverseWorkingSet(activation(1, "first"), { nodes: 20, edges: 20 });
-    const second = replaceUniverseWorkingSet(activation(2, "second"), { nodes: 20, edges: 20 });
-
-    expect(first.nodes.some((node) => node.id.startsWith("first"))).toBe(true);
-    expect(second.nodes.every((node) => node.id.startsWith("second"))).toBe(true);
-    expect(second.epoch).toBe(2);
-  });
-
-  it("ignores a late expansion from an older epoch", () => {
-    const current = replaceUniverseWorkingSet(activation(8, "current", 1), {
+  it("replaces results with complete event-bundle ownership", () => {
+    const first = replaceUniverseWorkingSet(activation(1, "first"), {
       nodes: 20,
       edges: 20,
     });
-    const late = mergeUniverseGraphPatch(current, patch(7, 1), { nodes: 20, edges: 20 });
-
-    expect(late).toBe(current);
-  });
-
-  it("hydrates a latent timeline star in place when it is expanded", () => {
-    const latent = mergeUniverseActivation(
-      {
-        epoch: 6,
-        nodes: [],
-        relations: [],
-        root_keys: [],
-      },
-      {
-        epoch: 6,
-        query: "timeline",
-        nodes: [
-          {
-            id: "root-event",
-            kind: "event",
-            source_id: "source-a",
-            label: "",
-            state: "latent",
-          },
-        ],
-        relations: [],
-      },
-      { nodes: 20, edges: 20 },
-      1,
-    );
-    const hydrated = mergeUniverseGraphPatch(latent, patch(6, 1), {
+    const second = replaceUniverseWorkingSet(activation(2, "second"), {
       nodes: 20,
       edges: 20,
-    }, 2);
+    });
 
-    const root = hydrated.nodes.find((node) => node.id === "root-event");
-    expect(root?.label).toBe("根事件");
-    expect(root?.state).toBe("active");
-    expect(hydrated.nodes.filter((node) => node.id === "root-event")).toHaveLength(1);
+    expect(first.nodes.some((node) => node.id.startsWith("first"))).toBe(true);
+    expect(second.nodes.every((node) => node.id.startsWith("second"))).toBe(true);
+    expect(second.bundle_order).toHaveLength(4);
+    expect(second.epoch).toBe(2);
+    expectBundleInvariants(second, { nodes: 20, edges: 20 });
+  });
+
+  it("trims replacement results only at event-bundle boundaries", () => {
+    const current = replaceUniverseWorkingSet(activation(3, "bounded"), {
+      nodes: 4,
+      edges: 4,
+    });
+
+    expect(current.nodes.map((node) => node.id)).toEqual([
+      "bounded-event-2",
+      "bounded-event-3",
+      "bounded-entity-2",
+      "bounded-entity-3",
+    ]);
+    expect(current.relations).toHaveLength(2);
+    expect(current.bundle_order).toHaveLength(2);
+    expectBundleInvariants(current, { nodes: 4, edges: 4 });
+  });
+
+  it("rejects an oversized replacement bundle instead of slicing it", () => {
+    const current = replaceUniverseWorkingSet({
+      epoch: 4,
+      query: "oversized",
+      nodes: [
+        { id: "event", kind: "event", source_id: "source-a", label: "event" },
+        ...["a", "b", "c"].map((id) => ({
+          id,
+          kind: "entity" as const,
+          source_id: "source-a",
+          label: id,
+        })),
+      ],
+      relations: ["a", "b", "c"].map((id) => ({
+        source_id: "source-a",
+        from_id: "event",
+        to_id: id,
+        kind: "mentions" as const,
+        weight: 1,
+        description: "",
+      })),
+    }, { nodes: 3, edges: 3 });
+
+    expect(current.nodes).toEqual([]);
+    expect(current.relations).toEqual([]);
+    expect(current.bundle_order).toEqual([]);
+  });
+
+  it("keeps identical raw ids isolated by source and drops dangling input relations", () => {
+    const current = replaceUniverseWorkingSet({
+      epoch: 5,
+      query: "multi-source",
+      nodes: ["source-a", "source-b"].flatMap((sourceId) => [
+        { id: "same-event", kind: "event" as const, source_id: sourceId, label: sourceId },
+        { id: "same-entity", kind: "entity" as const, source_id: sourceId, label: sourceId },
+      ]),
+      relations: [
+        ...["source-a", "source-b"].map((sourceId) => ({
+          source_id: sourceId,
+          from_id: "same-event",
+          to_id: "same-entity",
+          kind: "mentions" as const,
+          weight: 1,
+          description: "",
+        })),
+        {
+          source_id: "source-a",
+          from_id: "same-event",
+          to_id: "missing",
+          kind: "mentions" as const,
+          weight: 1,
+          description: "",
+        },
+      ],
+    }, { nodes: 10, edges: 10 });
+
+    expect(current.nodes).toHaveLength(4);
+    expect(current.relations).toHaveLength(2);
+    expectBundleInvariants(current, { nodes: 10, edges: 10 });
   });
 
   it("counts committed neighbors by source and anchor kind", () => {
-    const current = replaceUniverseWorkingSet(activation(3, "count", 3), {
+    const current = replaceUniverseWorkingSet(activation(6, "count", 3), {
       nodes: 12,
       edges: 12,
     });
@@ -351,137 +301,477 @@ describe("universe working set", () => {
     expect(universeAnchorProgress(current, "entity", "count-entity-1", "source-a")).toBe(1);
     expect(universeAnchorProgress(current, "entity", "count-entity-1", "source-b")).toBe(0);
   });
+});
 
-  it("keeps identical raw ids isolated by source", () => {
-    const current = replaceUniverseWorkingSet(
+describe("transactional universe bundle admission", () => {
+  it("deduplicates an expanded network when a later timeline bundle owns it", () => {
+    const budget = { nodes: 8, edges: 8 };
+    const expanded = eventBundle("expansion:entity-1", "event-1", "entity-1");
+    const timeline = eventBundle("timeline:event-1", "event-1", "entity-1");
+    const first = admitUniverseBundle(
+      emptyUniverseWorkingSet(12),
+      expanded,
+      budget,
+      1,
+    );
+    const second = admitUniverseBundle(first.workingSet, timeline, budget, 2);
+
+    expect(second.accepted).toBe(true);
+    expect(second.workingSet.nodes.map((node) => node.id).sort()).toEqual([
+      "entity-1",
+      "event-1",
+    ]);
+    expect(second.workingSet.relations).toHaveLength(1);
+    expect(second.workingSet.node_owners["source-a:event:event-1"]).toEqual([
+      "expansion:entity-1",
+      "timeline:event-1",
+    ]);
+    expect(second.workingSet.node_owners["source-a:entity:entity-1"]).toEqual([
+      "expansion:entity-1",
+      "timeline:event-1",
+    ]);
+    expect(second.workingSet.relation_owners[
+      "source-a:mentions:event-1:entity-1"
+    ]).toEqual([
+      "expansion:entity-1",
+      "timeline:event-1",
+    ]);
+    expectBundleInvariants(second.workingSet, budget);
+  });
+
+  it("keeps a shared entity resident when its oldest owner bundle is evicted", () => {
+    const budget = { nodes: 4, edges: 4 };
+    let current = admitUniverseBundle(
+      emptyUniverseWorkingSet(12),
+      eventBundle("bundle-1", "event-1", "shared-entity"),
+      budget,
+      1,
+    ).workingSet;
+    const second = admitUniverseBundle(
+      current,
+      eventBundle("bundle-2", "event-2", "shared-entity", false),
+      budget,
+      2,
+    );
+    expect(second.accepted).toBe(true);
+    current = second.workingSet;
+    expect(current.node_owners["source-a:entity:shared-entity"]).toEqual([
+      "bundle-1",
+      "bundle-2",
+    ]);
+
+    const third = admitUniverseBundle(
+      current,
+      eventBundle("bundle-3", "event-3", "entity-3"),
+      budget,
+      3,
+    );
+    expect(third.accepted).toBe(true);
+    expect(third.evictedBundleIds).toEqual(["bundle-1"]);
+    expect(third.workingSet.nodes.some((node) => node.id === "event-1")).toBe(false);
+    expect(third.workingSet.nodes.some((node) => node.id === "shared-entity")).toBe(true);
+    expect(third.workingSet.relations.some((relation) =>
+      relation.from_id === "event-2" && relation.to_id === "shared-entity")).toBe(true);
+    expect(third.workingSet.node_owners["source-a:entity:shared-entity"]).toEqual([
+      "bundle-2",
+    ]);
+    expectBundleInvariants(third.workingSet, budget);
+  });
+
+  it("rejects an incomplete or oversized bundle without committing a partial graph", () => {
+    const budget = { nodes: 2, edges: 2 };
+    const initial = admitUniverseBundle(
+      emptyUniverseWorkingSet(12),
+      eventBundle("base", "base-event"),
+      budget,
+      1,
+    ).workingSet;
+    const incomplete = admitUniverseBundle(
+      initial,
+      eventBundle("incomplete", "event-2", "missing-entity", false),
+      budget,
+      2,
+    );
+    expect(incomplete.accepted).toBe(false);
+    expect(incomplete.reason).toBe("invalid_bundle");
+    expect(incomplete.workingSet).toBe(initial);
+
+    const oversized = admitUniverseBundle(initial, {
+      id: "oversized",
+      epoch: 12,
+      source_id: "source-a",
+      nodes: ["a", "b", "c"].map((id) => ({
+        id,
+        kind: "entity" as const,
+        source_id: "source-a",
+        label: id,
+      })),
+      relations: [],
+    }, budget, 3);
+    expect(oversized.accepted).toBe(false);
+    expect(oversized.reason).toBe("over_budget");
+    expect(oversized.workingSet).toBe(initial);
+  });
+
+  it("evicts deterministically around transient protection and persistent pins", () => {
+    const budget = { nodes: 2, edges: 0 };
+    let current = emptyUniverseWorkingSet(12);
+    for (const id of ["a", "b"]) {
+      current = admitUniverseBundle(
+        current,
+        eventBundle(id, `event-${id}`),
+        budget,
+        1,
+      ).workingSet;
+    }
+    const protectedAdmission = admitUniverseBundle(
+      current,
+      eventBundle("c", "event-c"),
+      budget,
+      2,
+      { protectedKeys: ["source-a:event:event-a"] },
+    );
+    expect(protectedAdmission.accepted).toBe(true);
+    expect(protectedAdmission.evictedBundleIds).toEqual(["b"]);
+    expect(protectedAdmission.workingSet.bundle_order).toEqual(["a", "c"]);
+
+    current = setUniversePinnedKeys(protectedAdmission.workingSet, [
+      "source-a:event:event-a",
+      "source-a:event:event-c",
+    ]);
+    const blocked = admitUniverseBundle(
+      current,
+      eventBundle("d", "event-d"),
+      budget,
+      3,
+    );
+    expect(blocked.accepted).toBe(false);
+    expect(blocked.reason).toBe("protected_capacity");
+    expect(blocked.workingSet).toBe(current);
+  });
+
+  it("protects complete cache bundles even when their nodes have other owners", () => {
+    const budget = { nodes: 2, edges: 0 };
+    let current = admitUniverseBundle(
+      emptyUniverseWorkingSet(12),
       {
-        epoch: 4,
-        query: "multi-source",
-        nodes: ["source-a", "source-b"].flatMap((sourceId) => [
-          {
-            id: "same-event",
-            kind: "event" as const,
-            source_id: sourceId,
-            label: sourceId,
-          },
-          {
-            id: "same-entity",
-            kind: "entity" as const,
-            source_id: sourceId,
-            label: sourceId,
-          },
-        ]),
-        relations: ["source-a", "source-b"].map((sourceId) => ({
-          source_id: sourceId,
-          from_id: "same-event",
-          to_id: "same-entity",
-          kind: "mentions" as const,
-          weight: 1,
-          description: "",
-        })),
+        id: "cached-timeline",
+        origin: "timeline",
+        epoch: 12,
+        source_id: "source-a",
+        nodes: [{
+          id: "shared",
+          kind: "entity",
+          source_id: "source-a",
+          label: "shared",
+        }],
+        relations: [],
       },
-      { nodes: 10, edges: 10 },
+      budget,
+      1,
+    ).workingSet;
+    current = admitUniverseBundle(
+      current,
+      {
+        id: "other-owner",
+        origin: "activation",
+        epoch: 12,
+        source_id: "source-a",
+        nodes: [
+          {
+            id: "shared",
+            kind: "entity",
+            source_id: "source-a",
+            label: "shared",
+          },
+          {
+            id: "old-event",
+            kind: "event",
+            source_id: "source-a",
+            label: "old-event",
+          },
+        ],
+        relations: [],
+      },
+      budget,
+      2,
+    ).workingSet;
+
+    const admitted = admitUniverseBundle(
+      current,
+      {
+        ...eventBundle("new-timeline", "new-event"),
+        origin: "timeline",
+      },
+      budget,
+      3,
+      { protectedBundleIds: ["cached-timeline"] },
     );
 
-    expect(current.nodes).toHaveLength(4);
-    expect(current.relations).toHaveLength(2);
+    expect(admitted.accepted).toBe(true);
+    expect(admitted.evictedBundleIds).toEqual(["other-owner"]);
+    expect(admitted.workingSet.bundle_order).toEqual([
+      "cached-timeline",
+      "new-timeline",
+    ]);
+    expect(admitted.workingSet.nodes.map((node) => node.id).sort()).toEqual([
+      "new-event",
+      "shared",
+    ]);
+    expectBundleInvariants(admitted.workingSet, budget);
   });
 
-  it("enforces budgets while preserving the root and newest expansion", () => {
-    const rootActivation: UniverseActivation = {
-      epoch: 5,
-      query: "root",
-      nodes: [
-        {
-          id: "root-event",
-          kind: "event",
-          source_id: "source-a",
-          label: "根事件",
-        },
-      ],
-      relations: [],
-    };
-    let current = replaceUniverseWorkingSet(rootActivation, { nodes: 10, edges: 12 });
-    for (let index = 0; index < 100; index += 1) {
-      current = mergeUniverseGraphPatch(current, patch(5, index), {
-        nodes: 10,
-        edges: 12,
-      }, index + 1);
-      expect(current.nodes.length).toBeLessThanOrEqual(10);
-      expect(current.relations.length).toBeLessThanOrEqual(12);
-      const nodeIds = new Set(current.nodes.map((node) => node.id));
-      current.relations.forEach((relation) => {
-        expect(nodeIds.has(relation.from_id)).toBe(true);
-        expect(nodeIds.has(relation.to_id)).toBe(true);
-      });
-    }
-    expect(current.nodes.some((node) => node.id === "root-event")).toBe(true);
-    expect(current.nodes.some((node) => node.id === "entity-0")).toBe(false);
-    expect(current.nodes.some((node) => node.id === "entity-99")).toBe(true);
-    expect(current.relations.some((relation) => relation.to_id === "entity-99")).toBe(true);
+  it("releases expansion support before older timeline history", () => {
+    const budget = { nodes: 2, edges: 0 };
+    let current = admitUniverseBundle(
+      emptyUniverseWorkingSet(12),
+      {
+        ...eventBundle("timeline-old", "event-old"),
+        origin: "timeline",
+      },
+      budget,
+      1,
+    ).workingSet;
+    current = admitUniverseBundle(
+      current,
+      {
+        ...eventBundle("expansion-newer", "event-expanded"),
+        origin: "expansion",
+        anchor_key: "source-a:entity:anchor",
+        lineage_root_key: "source-a:event:timeline-root",
+        request_cursor: null,
+        next_cursor: null,
+      },
+      budget,
+      2,
+    ).workingSet;
+
+    const admitted = admitUniverseBundle(
+      current,
+      {
+        ...eventBundle("timeline-new", "event-new"),
+        origin: "timeline",
+      },
+      budget,
+      3,
+    );
+
+    expect(admitted.accepted).toBe(true);
+    expect(admitted.evictedBundleIds).toEqual(["expansion-newer"]);
+    expect(admitted.workingSet.bundle_order).toEqual([
+      "timeline-old",
+      "timeline-new",
+    ]);
+    expect(admitted.workingSet.bundles["timeline-old"].origin).toBe("timeline");
+    expectBundleInvariants(admitted.workingSet, budget);
   });
 
-  it("keeps every node in a fitting event bundle when older branches are evicted", () => {
-    let current = replaceUniverseWorkingSet({
-      epoch: 6,
-      query: "old",
+  it("protects a locked factual edge until its one-hop network is unpinned", () => {
+    const budget = { nodes: 4, edges: 1 };
+    const lockedBundle = eventBundle(
+      "locked-fact",
+      "locked-event",
+      "shared-entity",
+    );
+    const lockedRelationKey = universeRelationKey(lockedBundle.relations[0]);
+    let current = admitUniverseBundle(
+      emptyUniverseWorkingSet(12),
+      lockedBundle,
+      budget,
+      1,
+      {
+        pinnedRelationKeys: [lockedRelationKey, lockedRelationKey, "not-resident"],
+      },
+    ).workingSet;
+    expect(current.pinned_relation_keys).toEqual([lockedRelationKey]);
+    current = setUniversePinnedNetwork(current, [], []);
+
+    current = admitUniverseBundle(current, {
+      id: "event-owner",
+      epoch: 12,
       nodes: [{
-        id: "old-event-0",
+        id: "locked-event",
         kind: "event",
         source_id: "source-a",
-        label: "根事件",
+        label: "locked-event",
       }],
       relations: [],
-    }, { nodes: 5, edges: 5 });
-    for (let index = 1; index <= 4; index += 1) {
-      const oldPatch = patch(6, index);
-      oldPatch.anchor = { ...oldPatch.anchor, id: "old-event-0" };
-      oldPatch.relations = [{
+    }, budget, 2).workingSet;
+    current = admitUniverseBundle(current, {
+      id: "entity-owner",
+      epoch: 12,
+      nodes: [{
+        id: "shared-entity",
+        kind: "entity",
         source_id: "source-a",
-        from_id: "old-event-0",
-        to_id: `entity-${index}`,
-        kind: "mentions",
-        weight: 1,
-        description: "",
-      }];
-      current = mergeUniverseGraphPatch(current, oldPatch, { nodes: 5, edges: 5 });
-    }
-    const bundle = patch(6, 40);
-    bundle.anchor = {
-      ...bundle.anchor,
-      id: "old-event-0",
-      related_count: 2,
-    };
-    bundle.nodes.push({
-      ...bundle.nodes[0],
-      id: "entity-41",
-      label: "实体 41",
-    });
-    bundle.relations = [40, 41].map((index) => ({
-      source_id: "source-a",
-      from_id: "old-event-0",
-      to_id: `entity-${index}`,
-      kind: "mentions" as const,
-      weight: 1,
-      description: "",
-    }));
+        label: "shared-entity",
+      }],
+      relations: [],
+    }, budget, 3).workingSet;
 
-    const merged = mergeUniverseGraphPatch(current, bundle, { nodes: 5, edges: 5 });
-    expect(merged.nodes.some((node) => node.id === "entity-40")).toBe(true);
-    expect(merged.nodes.some((node) => node.id === "entity-41")).toBe(true);
-    expect(merged.relations.filter(
-      (relation) => relation.to_id === "entity-40" || relation.to_id === "entity-41",
-    )).toHaveLength(2);
+    const replacement = eventBundle("replacement", "new-event", "new-entity");
+    const transientlyBlocked = admitUniverseBundle(
+      current,
+      replacement,
+      budget,
+      4,
+      { protectedRelationKeys: [lockedRelationKey] },
+    );
+    expect(transientlyBlocked.accepted).toBe(false);
+    expect(transientlyBlocked.reason).toBe("protected_capacity");
+    expect(transientlyBlocked.workingSet).toBe(current);
+    expectBundleInvariants(current, budget);
+
+    const eventKey = universeNodeKey("event", "locked-event", "source-a");
+    const entityKey = universeNodeKey("entity", "shared-entity", "source-a");
+    current = setUniversePinnedNetwork(
+      current,
+      [eventKey, entityKey, eventKey, "not-resident"],
+      [lockedRelationKey, lockedRelationKey, "not-resident"],
+    );
+    expect(current.pinned_keys).toEqual([eventKey, entityKey]);
+    expect(current.pinned_relation_keys).toEqual([lockedRelationKey]);
+    expect(setUniversePinnedNetwork(
+      current,
+      [eventKey, entityKey, eventKey],
+      [lockedRelationKey, lockedRelationKey],
+    )).toBe(current);
+    current = setUniversePinnedKeys(current, [entityKey, entityKey]);
+    expect(current.pinned_keys).toEqual([entityKey]);
+    expect(current.pinned_relation_keys).toEqual([lockedRelationKey]);
+
+    const persistentlyBlocked = admitUniverseBundle(
+      current,
+      replacement,
+      budget,
+      5,
+    );
+    expect(persistentlyBlocked.accepted).toBe(false);
+    expect(persistentlyBlocked.reason).toBe("protected_capacity");
+    expect(persistentlyBlocked.workingSet).toBe(current);
+
+    current = setUniversePinnedNetwork(current, [], []);
+    const admitted = admitUniverseBundle(current, replacement, budget, 6);
+    expect(admitted.accepted).toBe(true);
+    expect(admitted.evictedBundleIds).toEqual(["locked-fact"]);
+    expect(admitted.workingSet.nodes.some((node) => node.id === "locked-event")).toBe(true);
+    expect(admitted.workingSet.nodes.some((node) => node.id === "shared-entity")).toBe(true);
+    expect(admitted.workingSet.relations.some((relation) =>
+      universeRelationKey(relation) === lockedRelationKey)).toBe(false);
+    expect(admitted.workingSet.pinned_keys).toEqual([]);
+    expect(admitted.workingSet.pinned_relation_keys).toEqual([]);
+    expectBundleInvariants(admitted.workingSet, budget);
   });
 
-  it("immediately trims to the mobile budget", () => {
-    const desktop = replaceUniverseWorkingSet(activation(3, "mobile", 30), {
-      nodes: 80,
-      edges: 80,
-    });
-    const mobile = trimUniverseWorkingSet(desktop, { nodes: 12, edges: 20 });
+  it("keeps an already-clear pin set referentially stable", () => {
+    const current = emptyUniverseWorkingSet(20);
+    expect(setUniversePinnedNetwork(current, [], [])).toBe(current);
+  });
 
-    expect(mobile.nodes).toHaveLength(12);
-    expect(mobile.relations.length).toBeLessThanOrEqual(20);
+  it("acknowledges exact idempotent retries and rejects changed payloads for the same id", () => {
+    const budget = { nodes: 2, edges: 1 };
+    const bundle = eventBundle("bundle-1", "event-1", "entity-1");
+    const first = admitUniverseBundle(emptyUniverseWorkingSet(12), bundle, budget, 1);
+    const retry = admitUniverseBundle(first.workingSet, bundle, budget, 2);
+    expect(retry.accepted).toBe(true);
+    expect(retry.committed).toBe(false);
+    expect(retry.workingSet).toBe(first.workingSet);
+
+    const changed = eventBundle("bundle-1", "event-1", "entity-1");
+    changed.nodes[0] = { ...changed.nodes[0], label: "changed payload" };
+    const collision = admitUniverseBundle(first.workingSet, changed, budget, 3);
+    expect(collision.accepted).toBe(false);
+    expect(collision.reason).toBe("duplicate_bundle");
+    expect(collision.workingSet).toBe(first.workingSet);
+  });
+
+  it("stops a page at the first rejected bundle", () => {
+    const budget = { nodes: 2, edges: 0 };
+    const batch = admitUniverseBundles(
+      emptyUniverseWorkingSet(12),
+      [
+        eventBundle("bundle-1", "event-1"),
+        {
+          id: "oversized",
+          epoch: 12,
+          source_id: "source-a",
+          nodes: ["a", "b", "c"].map((id) => ({
+            id,
+            kind: "entity" as const,
+            source_id: "source-a",
+            label: id,
+          })),
+          relations: [],
+        },
+        eventBundle("never-attempted", "event-3"),
+      ],
+      budget,
+      3,
+    );
+    expect(batch.acknowledgedBundleIds).toEqual(["bundle-1"]);
+    expect(batch.committedBundleIds).toEqual(["bundle-1"]);
+    expect(batch.rejectedBundleId).toBe("oversized");
+    expect(batch.reason).toBe("over_budget");
+    expect(batch.workingSet.bundle_order).toEqual(["bundle-1"]);
+  });
+
+  it("rejects a late bundle from an older epoch", () => {
+    const current = emptyUniverseWorkingSet(12);
+    const late = admitUniverseBundle(
+      current,
+      { ...eventBundle("late", "event-late"), epoch: 11 },
+      { nodes: 2, edges: 0 },
+    );
+    expect(late.accepted).toBe(false);
+    expect(late.reason).toBe("epoch_mismatch");
+    expect(late.workingSet).toBe(current);
+  });
+
+  it("preserves hard budgets, ownership, and relation endpoints over a long FIFO sequence", () => {
+    const budget = { nodes: 12, edges: 8 };
+    const run = () => {
+      let current = emptyUniverseWorkingSet(12);
+      for (let index = 0; index < 300; index += 1) {
+        const admitted = admitUniverseBundle(
+          current,
+          eventBundle(`bundle-${index}`, `event-${index}`, `shared-${index % 5}`),
+          budget,
+          index,
+        );
+        expect(admitted.accepted).toBe(true);
+        current = admitted.workingSet;
+        expectBundleInvariants(current, budget);
+      }
+      return current;
+    };
+
+    const first = run();
+    const second = run();
+    expect(first.node_order).toEqual(second.node_order);
+    expect(first.bundle_order).toEqual(second.bundle_order);
+    expect(first.node_owners).toEqual(second.node_owners);
+    expect(first.relations).toEqual(second.relations);
+  });
+
+  it("trims a bundle-aware set only at bundle boundaries", () => {
+    let current = emptyUniverseWorkingSet(12);
+    current = admitUniverseBundle(
+      current,
+      eventBundle("old", "old-event", "old-entity"),
+      { nodes: 4, edges: 2 },
+      1,
+    ).workingSet;
+    current = admitUniverseBundle(
+      current,
+      eventBundle("new", "new-event", "new-entity"),
+      { nodes: 4, edges: 2 },
+      2,
+    ).workingSet;
+
+    const trimmed = trimUniverseWorkingSet(current, { nodes: 3, edges: 1 });
+    expect(trimmed.bundle_order).toEqual(["new"]);
+    expect(trimmed.nodes.map((node) => node.id)).toEqual(["new-event", "new-entity"]);
+    expect(trimmed.relations).toHaveLength(1);
+    expectBundleInvariants(trimmed, { nodes: 3, edges: 1 });
   });
 });

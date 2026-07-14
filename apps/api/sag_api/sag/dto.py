@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -129,28 +129,40 @@ class UniverseExpansionInfo(BaseModel):
     anchor: dict[str, Any]
     neighbors: list[dict[str, Any]] = Field(default_factory=list)
     relations: list[dict[str, Any]] = Field(default_factory=list)
-    returned: int = 0
+    returned: int = Field(ge=0)
     has_more: bool = False
-    next_cursor: str | None = None
-    as_of: datetime | None = None
-
-
-class UniverseSeedInfo(BaseModel):
-    """A bounded set of recently active entities used to enter a source."""
-
-    nodes: list[dict[str, Any]] = Field(default_factory=list)
-    has_more: bool = False
-    next_cursor: str | None = None
+    next_cursor: str | None = Field(default=None, max_length=2048)
+    snapshot_id: str = Field(min_length=1, max_length=2048)
     as_of: datetime
+
+
+class UniverseTimelineBundleInfo(BaseModel):
+    """One event and its bounded first-screen factual neighborhood."""
+
+    bundle_id: str = Field(min_length=1)
+    event: dict[str, Any]
+    nodes: list[dict[str, Any]] = Field(default_factory=list)
+    relations: list[dict[str, Any]] = Field(default_factory=list)
+    neighbor_total: int = Field(default=0, ge=0)
+    neighbor_returned: int = Field(default=0, ge=0)
+    complete: bool = False
+    neighbor_next_cursor: str | None = Field(default=None, max_length=2048)
+    cursor_before: str | None = Field(default=None, max_length=2048)
+    cursor_after: str | None = Field(default=None, max_length=2048)
 
 
 class UniverseTimelineInfo(BaseModel):
     """A bounded event-time page plus a small factual entity neighborhood."""
 
-    nodes: list[dict[str, Any]] = Field(default_factory=list)
-    relations: list[dict[str, Any]] = Field(default_factory=list)
+    bundles: list[UniverseTimelineBundleInfo] = Field(default_factory=list)
+    snapshot_id: str = Field(min_length=1, max_length=2048)
+    direction: Literal["older", "newer"] = "older"
+    has_newer: bool = False
+    newer_cursor: str | None = Field(default=None, max_length=2048)
+    has_older: bool = False
+    older_cursor: str | None = Field(default=None, max_length=2048)
     has_more: bool = False
-    next_cursor: str | None = None
+    next_cursor: str | None = Field(default=None, max_length=2048)
     as_of: datetime
 
 
@@ -163,6 +175,7 @@ class ProcessOutcome(BaseModel):
     chunk_ids: list[str] = []
     event_ids: list[str] = []
     processed_chunk_ids: list[str] = []
+    eventless_chunk_ids: list[str] = []
     token_usage: int = 0
     paused: bool = False
 
@@ -174,6 +187,9 @@ class ProcessOutcome(BaseModel):
             event_count=int(getattr(extract, "event_count", 0) or 0),
             chunk_ids=list(getattr(ingest, "chunk_ids", []) or []),
             event_ids=list(getattr(extract, "event_ids", []) or []),
+            eventless_chunk_ids=list(
+                getattr(extract, "eventless_chunk_ids", []) or []
+            ),
         )
 
 
@@ -185,6 +201,7 @@ class ProcessCheckpoint(BaseModel):
     processed_chunk_ids: list[str] = []
     event_count: int = 0
     event_ids: list[str] = []
+    eventless_chunk_ids: list[str] = []
     token_usage: int = 0
 
     @classmethod

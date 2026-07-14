@@ -3,19 +3,25 @@
 import * as React from "react";
 import dynamic from "next/dynamic";
 import { useTranslations } from "next-intl";
+import { useTheme } from "next-themes";
 import { usePathname, useRouter } from "next/navigation";
-import { Cpu, Grip } from "lucide-react";
+import { Grip, Settings2 } from "lucide-react";
 import { motion } from "motion/react";
+import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
 import { clearToken, getToken } from "@/lib/auth";
 import {
   APP_INITIALIZATION_DEFAULTS,
   dismissQuickModelSetup,
-  persistWorkspaceInitialization,
-  readInitialWorkspace,
+  persistAppMode,
+  readInitialAppState,
+  rememberThemeBeforeExplore,
+  resolveThemePreference,
+  restoreThemeAfterExplore,
   shouldShowQuickModelSetup,
-  type WorkspacePanelMode,
+  type AppMode,
+  type ThemePreference,
 } from "@/lib/app-initialization";
 import { DEFAULT_AGENT_AVATAR, DEFAULT_AGENT_NAME } from "@/lib/branding";
 import type { ConversationTransport } from "@/lib/conversation-runtime";
@@ -42,6 +48,18 @@ import {
   dispatchUniverseActivation,
 } from "@/lib/universe-events";
 import { cn } from "@/lib/utils";
+import {
+  DEFAULT_WINDOW_MODE,
+  DEFAULT_WINDOW_SIZE,
+  clampWindowSize,
+  persistWindowMode,
+  persistWindowSize,
+  readWindowMode,
+  readWindowSize,
+  resolveWindowScalingEnabled,
+  type WindowMode,
+  type WindowSize,
+} from "@/lib/window-layout";
 import { AppSidebar } from "@/components/features/app-sidebar";
 import { ConversationProvider } from "@/components/features/chat/conversation-provider";
 import {
@@ -59,8 +77,7 @@ import { QuickModelSetupDialog } from "@/components/features/quick-model-setup-d
 import { SearchProvider } from "@/components/features/search/search-provider";
 import { SpaceBackdrop } from "@/components/features/space-backdrop";
 import { SiteHeader } from "@/components/features/site-header";
-import { ThemeToggle } from "@/components/features/theme-toggle";
-import { LanguageToggle } from "@/components/features/language-toggle";
+import { UniverseViewSettingsDrawer } from "@/components/features/universe-view-settings-drawer";
 import { Button } from "@/components/ui/button";
 import {
   ResizableHandle,
@@ -77,15 +94,15 @@ const KnowledgeUniverse = dynamic(
   { ssr: false },
 );
 
-type WindowMode = "full" | "window";
-export type { WorkspacePanelMode } from "@/lib/app-initialization";
-type WindowSize = { width: number; height: number };
+export type { AppMode } from "@/lib/app-initialization";
 
-const WINDOW_MODE_KEY = "sag:window";
-const WINDOW_SIZE_KEY = "sag:window-size";
-const DEFAULT_WINDOW_MODE: WindowMode = "window";
-const DEFAULT_WINDOW_SIZE: WindowSize = { width: 1360, height: 860 };
-const MIN_WINDOW_SIZE: WindowSize = { width: 900, height: 560 };
+const WINDOW_SCALING_ENABLED = resolveWindowScalingEnabled(
+  process.env.NEXT_PUBLIC_ENABLE_WINDOW_SCALING,
+);
+
+function currentViewportSize(): WindowSize {
+  return { width: window.innerWidth, height: window.innerHeight };
+}
 
 const CONVERSATION_TRANSPORT: ConversationTransport = {
   createThread: ({ agentId, title, signal }) => api.createThread(agentId, title, signal),
@@ -125,57 +142,6 @@ const CONVERSATION_TRANSPORT: ConversationTransport = {
     api.deleteMessage(agentId, threadId, messageId),
 };
 
-function readWindowMode(): WindowMode {
-  if (typeof window === "undefined") return DEFAULT_WINDOW_MODE;
-  try {
-    const saved = window.localStorage.getItem(WINDOW_MODE_KEY);
-    if (saved === "full" || saved === "window") return saved;
-    window.localStorage.setItem(WINDOW_MODE_KEY, DEFAULT_WINDOW_MODE);
-  } catch {
-    /* Use the default when browser storage is unavailable. */
-  }
-  return DEFAULT_WINDOW_MODE;
-}
-
-function persistWindowMode(mode: WindowMode) {
-  try {
-    window.localStorage.setItem(WINDOW_MODE_KEY, mode);
-  } catch {
-    /* The in-memory preference still applies for this session. */
-  }
-}
-
-function clampWindowSize(size: WindowSize): WindowSize {
-  if (typeof window === "undefined") return size;
-  const maxWidth = Math.max(360, window.innerWidth - 32);
-  const maxHeight = Math.max(420, window.innerHeight - 32);
-  const minWidth = Math.min(MIN_WINDOW_SIZE.width, maxWidth);
-  const minHeight = Math.min(MIN_WINDOW_SIZE.height, maxHeight);
-  return {
-    width: Math.min(Math.max(size.width, minWidth), maxWidth),
-    height: Math.min(Math.max(size.height, minHeight), maxHeight),
-  };
-}
-
-function readWindowSize(): WindowSize {
-  if (typeof window === "undefined") return DEFAULT_WINDOW_SIZE;
-  try {
-    const raw = window.localStorage.getItem(WINDOW_SIZE_KEY);
-    if (!raw) return clampWindowSize(DEFAULT_WINDOW_SIZE);
-    const parsed = JSON.parse(raw) as Partial<WindowSize>;
-    if (typeof parsed.width !== "number" || typeof parsed.height !== "number") {
-      return clampWindowSize(DEFAULT_WINDOW_SIZE);
-    }
-    return clampWindowSize({ width: parsed.width, height: parsed.height });
-  } catch {
-    return clampWindowSize(DEFAULT_WINDOW_SIZE);
-  }
-}
-
-function persistWindowSize(size: WindowSize) {
-  window.localStorage.setItem(WINDOW_SIZE_KEY, JSON.stringify(clampWindowSize(size)));
-}
-
 interface AppCtx {
   user: User | null;
   capabilities: Capabilities | null;
@@ -191,15 +157,14 @@ interface AppCtx {
   refreshThreads: () => Promise<void>;
   loadMoreThreads: () => Promise<void>;
   collapseThreads: () => void;
+  windowScalingEnabled: boolean;
   windowMode: WindowMode;
   toggleWindowMode: () => void;
-  panelMode: WorkspacePanelMode;
+  appMode: AppMode;
   workspaceSection: WorkspaceSection;
-  openMiniWorkspace: (section: WorkspaceSection) => void;
+  enterExploreMode: (section?: WorkspaceSection) => void;
+  exitExploreMode: () => void;
   openSettings: (tab?: SettingsTab, section?: string) => void;
-  expandWorkspace: () => void;
-  minimizeWorkspace: () => void;
-  hideWorkspace: () => void;
   logout: () => void;
   refreshCapabilities: () => Promise<void>;
   timezone: string;
@@ -219,15 +184,14 @@ const AppContext = React.createContext<AppCtx>({
   refreshThreads: async () => {},
   loadMoreThreads: async () => {},
   collapseThreads: () => {},
-  windowMode: DEFAULT_WINDOW_MODE,
+  windowScalingEnabled: WINDOW_SCALING_ENABLED,
+  windowMode: WINDOW_SCALING_ENABLED ? DEFAULT_WINDOW_MODE : "full",
   toggleWindowMode: () => {},
-  panelMode: APP_INITIALIZATION_DEFAULTS.workspacePanel,
+  appMode: APP_INITIALIZATION_DEFAULTS.appMode,
   workspaceSection: APP_INITIALIZATION_DEFAULTS.workspaceSection,
-  openMiniWorkspace: () => {},
+  enterExploreMode: () => {},
+  exitExploreMode: () => {},
   openSettings: () => {},
-  expandWorkspace: () => {},
-  minimizeWorkspace: () => {},
-  hideWorkspace: () => {},
   logout: () => {},
   refreshCapabilities: async () => {},
   timezone: DEFAULT_TIME_ZONE,
@@ -269,6 +233,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const t = useTranslations("AppShell");
   const router = useRouter();
   const pathname = usePathname();
+  const { theme, resolvedTheme, setTheme } = useTheme();
   const petAgent = React.useMemo(
     () =>
       new PetAgent({
@@ -286,16 +251,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [hasMoreThreads, setHasMoreThreads] = React.useState(false);
   const [threadsExpanded, setThreadsExpanded] = React.useState(false);
   const [loadingMoreThreads, setLoadingMoreThreads] = React.useState(false);
-  const [windowMode, setWindowMode] = React.useState<WindowMode>(DEFAULT_WINDOW_MODE);
-  const [panelMode, setPanelMode] = React.useState<WorkspacePanelMode>(
-    APP_INITIALIZATION_DEFAULTS.workspacePanel,
+  const [appMode, setAppMode] = React.useState<AppMode>(
+    APP_INITIALIZATION_DEFAULTS.appMode,
   );
+  const [windowMode, setWindowMode] = React.useState<WindowMode>(
+    WINDOW_SCALING_ENABLED ? DEFAULT_WINDOW_MODE : "full",
+  );
+  const [windowSize, setWindowSize] = React.useState<WindowSize>(
+    DEFAULT_WINDOW_SIZE,
+  );
+  const [isDesktop, setIsDesktop] = React.useState(true);
   const [workspaceSection, setWorkspaceSection] = React.useState<WorkspaceSection>(
     APP_INITIALIZATION_DEFAULTS.workspaceSection,
   );
-  const [windowSize, setWindowSize] = React.useState<WindowSize>(DEFAULT_WINDOW_SIZE);
   const [sidebarOpen, setSidebarOpen] = React.useState(true);
-  const [isDesktop, setIsDesktop] = React.useState(true);
   const [loading, setLoading] = React.useState(true);
   const [quickSetupOpen, setQuickSetupOpen] = React.useState(false);
   const [timezone, setTimezone] = React.useState(DEFAULT_TIME_ZONE);
@@ -304,101 +273,123 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const threadLimitRef = React.useRef(SIDEBAR_THREADS_PAGE_SIZE);
   const threadRequestIdRef = React.useRef(0);
   const loadingMoreThreadsRef = React.useRef(false);
+  const previousThemeModeRef = React.useRef<AppMode | null>(null);
+  const themeBeforeExploreRef = React.useRef<ThemePreference | null>(null);
+  const currentThemeRef = React.useRef<ThemePreference>(
+    resolveThemePreference(theme, resolvedTheme),
+  );
+  currentThemeRef.current = resolveThemePreference(theme, resolvedTheme);
 
+  // 首屏恢复模式、工作区，以及 Web 构建允许时的模拟窗口偏好。
   React.useEffect(() => {
-    const mq = window.matchMedia("(min-width: 768px)");
-    const update = () => setIsDesktop(mq.matches);
-    update();
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
+    const initial = readInitialAppState(window.localStorage);
+    setAppMode(initial.mode);
+    setWorkspaceSection(initial.section);
+    if (WINDOW_SCALING_ENABLED) {
+      setWindowMode(readWindowMode(window.localStorage));
+      setWindowSize(readWindowSize(window.localStorage, currentViewportSize()));
+    }
   }, []);
 
-  // 首屏：新用户进入星空 + mini 问答；已有用户沿用明确保存的工作台偏好。
   React.useEffect(() => {
-    const workspace = readInitialWorkspace(window.localStorage);
-    setWindowMode(readWindowMode());
-    setWindowSize(readWindowSize());
-    setPanelMode(/^\/chat\/[^/]+/.test(pathname) ? "normal" : workspace.panel);
-    setWorkspaceSection(workspace.section);
-  }, [pathname]);
+    if (!WINDOW_SCALING_ENABLED) {
+      setIsDesktop(false);
+      return;
+    }
+    const query = window.matchMedia("(min-width: 768px)");
+    const update = () => setIsDesktop(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+
+  React.useEffect(() => {
+    if (loading) return;
+    const previousMode = previousThemeModeRef.current;
+    previousThemeModeRef.current = appMode;
+
+    if (appMode === "explore") {
+      if (previousMode === "explore") return;
+      const beforeExplore = rememberThemeBeforeExplore(
+        window.localStorage,
+        currentThemeRef.current,
+      );
+      themeBeforeExploreRef.current = beforeExplore;
+      currentThemeRef.current = "dark";
+      setTheme("dark");
+      return;
+    }
+
+    if (previousMode !== "explore") return;
+    const beforeExplore = restoreThemeAfterExplore(window.localStorage)
+      ?? themeBeforeExploreRef.current;
+    themeBeforeExploreRef.current = null;
+    if (!beforeExplore) return;
+    currentThemeRef.current = beforeExplore;
+    setTheme(beforeExplore);
+  }, [appMode, loading, setTheme]);
+
+  const enterExploreMode = React.useCallback((section?: WorkspaceSection) => {
+    const nextSection = section
+      ?? workspaceSectionFromPathname(pathname)
+      ?? workspaceSection;
+    setWorkspaceSection(nextSection);
+    setAppMode("explore");
+    persistAppMode(window.localStorage, "explore", nextSection);
+    if (appMode !== "explore") {
+      toast(t("exploreEntered"), {
+        id: "explore-mode-entered",
+        description: t("exploreEnteredDescription"),
+        duration: 5000,
+      });
+    }
+  }, [appMode, pathname, t, workspaceSection]);
+
+  const exitExploreMode = React.useCallback(() => {
+    toast.dismiss("explore-mode-entered");
+    setAppMode("normal");
+    persistAppMode(window.localStorage, "normal");
+  }, []);
+
   const toggleWindowMode = React.useCallback(() => {
-    setWindowMode((m) => {
-      const next: WindowMode = m === "full" ? "window" : "full";
-      persistWindowMode(next);
+    if (!WINDOW_SCALING_ENABLED) return;
+    setWindowMode((current) => {
+      const next: WindowMode = current === "full" ? "window" : "full";
+      persistWindowMode(window.localStorage, next);
       return next;
     });
   }, []);
 
-  const openMiniWorkspace = React.useCallback((section: WorkspaceSection) => {
-    setWorkspaceSection(section);
-    setPanelMode("mini");
-    persistWorkspaceInitialization(window.localStorage, "mini", section);
-  }, []);
   const openSettings = React.useCallback((tab: SettingsTab = "account", section?: string) => {
-    setPanelMode("normal");
-    persistWorkspaceInitialization(window.localStorage, "normal");
+    setAppMode("normal");
+    persistAppMode(window.localStorage, "normal");
     router.push(settingsTabHref(tab, section));
   }, [router]);
-  const expandWorkspace = React.useCallback(() => {
-    setPanelMode("normal");
-    persistWorkspaceInitialization(window.localStorage, "normal");
-  }, []);
-  const minimizeWorkspace = React.useCallback(() => {
-    const nextSection = workspaceSectionFromPathname(pathname) ?? workspaceSection;
-    setWorkspaceSection(nextSection);
-    setPanelMode("mini");
-    persistWorkspaceInitialization(window.localStorage, "mini", nextSection);
-  }, [pathname, workspaceSection]);
-  const hideWorkspace = React.useCallback(() => {
-    setPanelMode("hidden");
-    persistWorkspaceInitialization(window.localStorage, "hidden");
-  }, []);
 
   React.useEffect(() => {
-    const revealDetail = () => {
-      if (panelMode === "hidden") {
-        setWorkspaceSection("search");
-        setPanelMode("mini");
-        persistWorkspaceInitialization(window.localStorage, "mini", "search");
-      }
-    };
-    const revealAsk = () => openMiniWorkspace("answer");
+    const revealDetail = () => enterExploreMode("search");
+    const revealAsk = () => enterExploreMode("answer");
     window.addEventListener(UNIVERSE_DETAIL_EVENT, revealDetail);
     window.addEventListener(UNIVERSE_ASK_EVENT, revealAsk);
     return () => {
       window.removeEventListener(UNIVERSE_DETAIL_EVENT, revealDetail);
       window.removeEventListener(UNIVERSE_ASK_EVENT, revealAsk);
     };
-  }, [openMiniWorkspace, panelMode]);
-
-  const windowed = windowMode === "window" && isDesktop;
+  }, [enterExploreMode]);
 
   React.useEffect(() => {
     sidebarOpenRef.current = sidebarOpen;
   }, [sidebarOpen]);
 
-  React.useEffect(() => {
-    const onDetailMaximized = (event: Event) => {
-      const maximized = Boolean((event as CustomEvent<boolean>).detail);
-      if (maximized) {
-        if (restoreSidebarOpenRef.current === null) {
-          restoreSidebarOpenRef.current = sidebarOpenRef.current;
-        }
-        setSidebarOpen(false);
-        return;
-      }
-      if (restoreSidebarOpenRef.current !== null) {
-        setSidebarOpen(restoreSidebarOpenRef.current);
-        restoreSidebarOpenRef.current = null;
-      }
-    };
-    window.addEventListener("sag:detail-maximized", onDetailMaximized);
-    return () => window.removeEventListener("sag:detail-maximized", onDetailMaximized);
-  }, []);
+  const windowed = WINDOW_SCALING_ENABLED
+    && isDesktop
+    && windowMode === "window";
 
   React.useEffect(() => {
     if (!windowed) return;
-    const onResize = () => setWindowSize((size) => clampWindowSize(size));
+    const onResize = () => {
+      setWindowSize((current) => clampWindowSize(current, currentViewportSize()));
+    };
     window.addEventListener("resize", onResize);
     onResize();
     return () => window.removeEventListener("resize", onResize);
@@ -418,17 +409,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       document.documentElement.style.userSelect = "none";
 
       const onMove = (moveEvent: PointerEvent) => {
-        nextSize = clampWindowSize({
-          width: startSize.width + moveEvent.clientX - startX,
-          height: startSize.height + moveEvent.clientY - startY,
-        });
+        nextSize = clampWindowSize(
+          {
+            width: startSize.width + moveEvent.clientX - startX,
+            height: startSize.height + moveEvent.clientY - startY,
+          },
+          currentViewportSize(),
+        );
         setWindowSize(nextSize);
       };
 
       const onUp = () => {
         document.documentElement.style.cursor = previousCursor;
         document.documentElement.style.userSelect = previousSelect;
-        persistWindowSize(nextSize);
+        persistWindowSize(window.localStorage, nextSize);
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
       };
@@ -438,6 +432,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     },
     [windowSize],
   );
+
+  React.useEffect(() => {
+    const onDetailMaximized = (event: Event) => {
+      const maximized = Boolean((event as CustomEvent<boolean>).detail);
+      if (maximized) {
+        if (restoreSidebarOpenRef.current === null) {
+          restoreSidebarOpenRef.current = sidebarOpenRef.current;
+        }
+        setSidebarOpen(false);
+        return;
+      }
+      if (restoreSidebarOpenRef.current !== null) {
+        setSidebarOpen(restoreSidebarOpenRef.current);
+        restoreSidebarOpenRef.current = null;
+      }
+    };
+    window.addEventListener("sag:detail-maximized", onDetailMaximized);
+    return () => window.removeEventListener("sag:detail-maximized", onDetailMaximized);
+  }, []);
 
   const refreshCapabilities = React.useCallback(async () => {
     try {
@@ -546,21 +559,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, [loadThreadLimit, router]);
 
-  // 快捷键只切换内容 section；mini 是同一工作台的紧凑形态。
+  // 快捷键直接进入探索模式，并打开对应的紧凑工作区。
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        openMiniWorkspace("search");
+        enterExploreMode("search");
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
         e.preventDefault();
-        openMiniWorkspace("answer");
+        enterExploreMode("answer");
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openMiniWorkspace]);
+  }, [enterExploreMode]);
 
   const logout = React.useCallback(() => {
     clearToken();
@@ -585,15 +598,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         refreshThreads,
         loadMoreThreads,
         collapseThreads,
+        windowScalingEnabled: WINDOW_SCALING_ENABLED,
         windowMode,
         toggleWindowMode,
-        panelMode,
+        appMode,
         workspaceSection,
-        openMiniWorkspace,
+        enterExploreMode,
+        exitExploreMode,
         openSettings,
-        expandWorkspace,
-        minimizeWorkspace,
-        hideWorkspace,
         logout,
         refreshCapabilities,
         timezone,
@@ -629,62 +641,67 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <DetailPanelProvider>
               <div
                 className={cn(
-                  "bg-space-field relative grid min-h-svh overflow-hidden",
-                  windowed && "place-items-center p-4 md:p-8",
+                  "bg-space-field relative grid h-svh min-h-0 overflow-hidden",
+                  windowed && "place-items-center p-4",
                 )}
               >
                 <SpaceBackdrop />
-                <KnowledgeUniverse
-                  interactive={panelMode !== "normal"}
-                  workspacePanel={panelMode}
-                  onOpenWorkspace={expandWorkspace}
-                />
-                {panelMode !== "normal" && (
+                <KnowledgeUniverse interactive={appMode === "explore"} />
+                {appMode === "explore" && (
                   <motion.div
                     initial={{ opacity: 0, scale: 0.92, y: -4 }}
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     transition={{ duration: 0.18 }}
-                    className="absolute right-4 top-4 z-30 flex items-center rounded-md border border-border/60 bg-background/70 shadow-soft backdrop-blur-md"
+                    className="fixed right-4 top-3 z-[45] flex items-center gap-2"
+                    data-explore-controls="true"
                   >
-                    {capabilities && !capabilities.llm_configured && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 gap-1.5 rounded-r-none border-r border-border/60 px-2.5 text-xs"
-                        onClick={() => openSettings("model")}
-                      >
-                        <Cpu className="size-3.5" />
-                        {t("configureModel")}
-                      </Button>
-                    )}
-                    <LanguageToggle />
-                    <ThemeToggle />
+                    <UniverseViewSettingsDrawer
+                      trigger={(
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="size-8 border-border/60 bg-background/80 shadow-soft backdrop-blur-md hover:border-cyan-300/35 hover:bg-cyan-300/10 hover:text-cyan-100"
+                          aria-label={t("graphSettings")}
+                          title={t("graphSettings")}
+                          data-universe-settings-trigger="true"
+                        >
+                          <Settings2 className="size-3.5" />
+                        </Button>
+                      )}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8 border-border/60 bg-background/80 px-3 text-xs font-medium shadow-soft backdrop-blur-md hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
+                      onClick={exitExploreMode}
+                      aria-label={t("exitExplore")}
+                      title={t("exitExplore")}
+                    >
+                      {t("exitExploreShort")}
+                    </Button>
                   </motion.div>
                 )}
                 <motion.div
                   initial={false}
                   animate={
-                    panelMode === "normal"
+                    appMode === "normal"
                       ? { opacity: 1, scale: 1, y: 0 }
                       : { opacity: 0, scale: 0.9, y: 24 }
                   }
                   transition={{ type: "spring", stiffness: 340, damping: 30 }}
                   style={
                     windowed
-                      ? {
-                          width: windowSize.width,
-                          height: windowSize.height,
-                        }
+                      ? { width: windowSize.width, height: windowSize.height }
                       : { width: "100%", height: "100svh" }
                   }
-                  aria-hidden={panelMode !== "normal"}
+                  aria-hidden={appMode !== "normal"}
                   className={cn(
                     "relative z-10",
-                    panelMode !== "normal" && "invisible pointer-events-none",
+                    appMode !== "normal" && "invisible pointer-events-none",
                     windowed
-                      ? // transform 使内部 fixed 的 Sidebar 以本窗体为 containing block（Mac 窗口形态）
-                        "max-h-[calc(100svh-2rem)] max-w-[calc(100vw-2rem)] transform-gpu overflow-hidden rounded-xl border bg-background shadow-lift"
+                      ? "max-h-[calc(100svh-2rem)] max-w-[calc(100vw-2rem)] transform-gpu overflow-hidden rounded-xl border bg-background shadow-lift"
                       : "min-h-svh",
                   )}
                 >

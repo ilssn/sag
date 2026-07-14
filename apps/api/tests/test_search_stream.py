@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
+from sag_api.core.config import Settings
 from sag_api.core.errors import UpstreamError
 from sag_api.generation import LLMClient
 from sag_api.sag import RetrievedSection, SearchOutcome, SourceGraphInfo
@@ -251,16 +252,14 @@ async def test_search_answer_stream_propagates_cancellation_and_closes_provider(
 
 
 @pytest.mark.asyncio
-async def test_llm_plain_text_stream_closes_upstream_on_cancellation():
+async def test_llm_plain_text_stream_closes_upstream_on_cancellation(monkeypatch):
     entered = asyncio.Event()
 
     class ProviderStream:
         closed = False
 
         async def __aiter__(self):
-            yield SimpleNamespace(
-                choices=[SimpleNamespace(delta=SimpleNamespace(content="部分"))]
-            )
+            yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="部分"))])
             entered.set()
             await asyncio.Event().wait()
 
@@ -269,20 +268,19 @@ async def test_llm_plain_text_stream_closes_upstream_on_cancellation():
 
     provider_stream = ProviderStream()
 
-    class Completions:
-        async def create(self, **_kwargs):
-            return provider_stream
+    async def fake_completion(**_kwargs):
+        return provider_stream
 
-    llm = object.__new__(LLMClient)
-    llm._settings = SimpleNamespace(  # noqa: SLF001
-        llm_configured=True,
-        llm_model="test-model",
-        llm_temperature=0,
-        llm_max_tokens=128,
-        llm_extra_body=None,
-    )
-    llm._client = SimpleNamespace(  # noqa: SLF001
-        chat=SimpleNamespace(completions=Completions())
+    monkeypatch.setattr("sag_api.generation.llm._litellm_completion", fake_completion)
+    llm = LLMClient(
+        Settings(
+            _env_file=None,
+            llm_api_key="test-key",
+            llm_model="test-model",
+            llm_temperature=0,
+            llm_max_tokens=128,
+            llm_extra_body=None,
+        )
     )
 
     async def consume() -> None:

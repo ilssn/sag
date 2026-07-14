@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import {
   ArrowLeft,
@@ -12,10 +12,9 @@ import {
   History,
   List,
   Loader2,
-  Maximize2,
   MessageSquarePlus,
   Search,
-  Settings,
+  SlidersHorizontal,
   X,
 } from "lucide-react";
 
@@ -37,6 +36,7 @@ import {
   UNIVERSE_ASK_EVENT,
   UNIVERSE_DETAIL_EVENT,
   UNIVERSE_PATCH_EVENT,
+  UNIVERSE_PATCH_RESET_EVENT,
   dispatchUniverseFocus,
   takePendingUniverseAsk,
   takePendingUniverseDetail,
@@ -49,6 +49,7 @@ import {
   type WorkspaceSection,
 } from "@/lib/workspace";
 import { useApp } from "@/components/features/app-shell";
+import { AgentSettingsCard } from "@/components/features/agent-settings-card";
 import type { AgentActivityMatch } from "@/components/features/chat/agent-activity-timeline";
 import {
   useConversationRuntime,
@@ -68,6 +69,8 @@ interface MiniPanelSize {
   width: number;
   height: number;
 }
+
+export type PetMiniView = "workspace" | "assistant-settings";
 
 interface WorkspaceUniverseNode {
   id: string;
@@ -265,11 +268,17 @@ export function PetMiniWorkspace({
   panelClassName,
   alignRight = false,
   panelAbove = true,
+  panelView,
+  onPanelViewChange,
+  onClose,
 }: {
   character: PetAgent;
   panelClassName?: string;
   alignRight?: boolean;
   panelAbove?: boolean;
+  panelView: PetMiniView;
+  onPanelViewChange: (view: PetMiniView) => void;
+  onClose: () => void;
 }) {
   const locale = useLocale();
   const t = useTranslations("PetMini");
@@ -278,17 +287,13 @@ export function PetMiniWorkspace({
     localKnowledge: t("detail.localKnowledge"),
     knowledgeNode: t("detail.knowledgeNode"),
   }), [t]);
-  const router = useRouter();
   const pathname = usePathname();
   const conversationRuntime = useConversationRuntime();
   const {
     agent,
     user,
     workspaceSection,
-    openMiniWorkspace,
-    openSettings,
-    expandWorkspace,
-    hideWorkspace,
+    enterExploreMode,
     threads,
     timezone,
   } = useApp();
@@ -370,6 +375,7 @@ export function PetMiniWorkspace({
 
   const openDetail = React.useCallback(
     (target: MiniDetailTarget, append = false) => {
+      onPanelViewChange("workspace");
       setAnswerHistoryOpen(false);
       setDetailTrail((current) => {
         if (!append) return [target];
@@ -378,7 +384,7 @@ export function PetMiniWorkspace({
         return [...current, target];
       });
     },
-    [],
+    [onPanelViewChange],
   );
 
   const openSearchEvent = React.useCallback(
@@ -527,20 +533,26 @@ export function PetMiniWorkspace({
           }
         : patchDetail);
     };
+    const onPatchReset = () => {
+      detailPatchRef.current.clear();
+    };
     window.addEventListener(UNIVERSE_DETAIL_EVENT, onDetail);
     window.addEventListener(UNIVERSE_PATCH_EVENT, onPatch);
+    window.addEventListener(UNIVERSE_PATCH_RESET_EVENT, onPatchReset);
     return () => {
       window.removeEventListener(UNIVERSE_DETAIL_EVENT, onDetail);
       window.removeEventListener(UNIVERSE_PATCH_EVENT, onPatch);
+      window.removeEventListener(UNIVERSE_PATCH_RESET_EVENT, onPatchReset);
     };
   }, [detailLabels, openDetail]);
 
   React.useEffect(() => {
     const openAsk = (target: UniverseAskTarget) => {
+      onPanelViewChange("workspace");
       setAnswerHistoryOpen(false);
       setDetailTrail([]);
       setAnswerDraft({ id: target.request_id, text: target.prompt });
-      openMiniWorkspace("answer");
+      enterExploreMode("answer");
     };
     const pending = takePendingUniverseAsk();
     if (pending) openAsk(pending);
@@ -551,7 +563,7 @@ export function PetMiniWorkspace({
     };
     window.addEventListener(UNIVERSE_ASK_EVENT, onAsk);
     return () => window.removeEventListener(UNIVERSE_ASK_EVENT, onAsk);
-  }, [openMiniWorkspace]);
+  }, [enterExploreMode, onPanelViewChange]);
 
   React.useEffect(() => {
     if (!detailTarget) {
@@ -748,29 +760,17 @@ export function PetMiniWorkspace({
   }, [detailTarget?.id, detailTarget?.kind, workspaceSection]);
 
   const changeSection = (section: WorkspaceSection) => {
+    onPanelViewChange("workspace");
     if (section === workspaceSection) return;
     setAnswerHistoryOpen(false);
-    openMiniWorkspace(section);
+    enterExploreMode(section);
   };
 
   const returnToSearchHome = () => {
+    onPanelViewChange("workspace");
     setAnswerHistoryOpen(false);
     setDetailTrail([]);
-    if (workspaceSection !== "search") openMiniWorkspace("search");
-  };
-
-  const expand = () => {
-    if (workspaceSection === "search") {
-      const query = searchWorkspace.contentView === "results"
-        ? searchWorkspace.lastQuery || searchWorkspace.query.trim()
-        : "";
-      router.push(query ? `/search?q=${encodeURIComponent(query)}&from=mini` : "/search");
-    } else if (workspaceSection === "answer") {
-      router.push(answerSnapshot?.threadId ? `/chat/${answerSnapshot.threadId}` : "/chat");
-    } else {
-      router.push("/knowledge");
-    }
-    expandWorkspace();
+    if (workspaceSection !== "search") enterExploreMode("search");
   };
 
   const newAnswer = () => {
@@ -840,7 +840,25 @@ export function PetMiniWorkspace({
           panelAbove && !alignRight && "pr-7",
         )}
       >
-        {detailTarget ? (
+        {panelView === "assistant-settings" ? (
+          <>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              onClick={() => onPanelViewChange("workspace")}
+              aria-label={t("controls.backToWorkspace")}
+              title={t("controls.backToWorkspace")}
+            >
+              <ArrowLeft className="size-3.5" />
+            </Button>
+            <SlidersHorizontal className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate text-xs font-medium">
+              {t("controls.assistantSettings")}
+            </span>
+          </>
+        ) : detailTarget ? (
           <>
             <Button
               type="button"
@@ -917,28 +935,21 @@ export function PetMiniWorkspace({
             </div>
           </>
         )}
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="size-7"
-          onClick={() => openSettings()}
-          aria-label={t("controls.settings")}
-          title={t("controls.settings")}
-        >
-          <Settings className="size-3.5" />
-        </Button>
-        {!detailTarget && (
+        {panelView !== "assistant-settings" && (
           <Button
             type="button"
             variant="ghost"
             size="icon"
             className="size-7"
-            onClick={expand}
-            aria-label={t("controls.expand")}
-            title={t("controls.expand")}
+            onClick={() => {
+              setAnswerHistoryOpen(false);
+              setDetailTrail([]);
+              onPanelViewChange("assistant-settings");
+            }}
+            aria-label={t("controls.assistantSettings")}
+            title={t("controls.assistantSettings")}
           >
-            <Maximize2 className="size-3.5" />
+            <SlidersHorizontal className="size-3.5" />
           </Button>
         )}
         <Button
@@ -946,7 +957,7 @@ export function PetMiniWorkspace({
           variant="ghost"
           size="icon"
           className="size-7"
-          onClick={hideWorkspace}
+          onClick={onClose}
           aria-label={t("controls.close")}
           title={t("controls.close")}
         >
@@ -957,9 +968,27 @@ export function PetMiniWorkspace({
       <div
         className={cn(
           "min-h-0 flex-1",
-          (detailTarget || workspaceSection !== "search") && "hidden",
+          panelView !== "assistant-settings" && "hidden",
         )}
-        aria-hidden={Boolean(detailTarget) || workspaceSection !== "search"}
+        aria-hidden={panelView !== "assistant-settings"}
+      >
+        <ScrollArea className="h-full">
+          <div className="p-3">
+            <AgentSettingsCard compact />
+          </div>
+        </ScrollArea>
+      </div>
+
+      <div
+        className={cn(
+          "min-h-0 flex-1",
+          (panelView === "assistant-settings"
+            || detailTarget
+            || workspaceSection !== "search") && "hidden",
+        )}
+        aria-hidden={panelView === "assistant-settings"
+          || Boolean(detailTarget)
+          || workspaceSection !== "search"}
       >
         <div className="relative flex h-full min-h-0 flex-col">
           <div className="flex h-11 shrink-0 items-center gap-1.5 border-b px-3">
@@ -1002,7 +1031,9 @@ export function PetMiniWorkspace({
           </div>
           <div className="min-h-0 flex-1">
             <SearchPanel
-              active={!detailTarget && workspaceSection === "search"}
+              active={panelView === "workspace"
+                && !detailTarget
+                && workspaceSection === "search"}
               showGraphView={false}
               showRecentActivity
               showContentSwitcher={false}
@@ -1021,9 +1052,13 @@ export function PetMiniWorkspace({
       <div
         className={cn(
           "min-h-0 flex-1",
-          (detailTarget || workspaceSection !== "answer") && "hidden",
+          (panelView === "assistant-settings"
+            || detailTarget
+            || workspaceSection !== "answer") && "hidden",
         )}
-        aria-hidden={Boolean(detailTarget) || workspaceSection !== "answer"}
+        aria-hidden={panelView === "assistant-settings"
+          || Boolean(detailTarget)
+          || workspaceSection !== "answer"}
       >
         <div className="relative flex h-full min-h-0 flex-col">
           <div className="flex h-11 shrink-0 items-center gap-1.5 border-b px-3">
@@ -1062,7 +1097,9 @@ export function PetMiniWorkspace({
               <ConversationPanel
                 key={answerSessionId}
                 sessionId={answerSessionId}
-                active={!detailTarget && workspaceSection === "answer"}
+                active={panelView === "workspace"
+                  && !detailTarget
+                  && workspaceSection === "answer"}
                 showPromptPreview={false}
                 avatarNode={(
                   <PetHeadAvatar
@@ -1097,20 +1134,26 @@ export function PetMiniWorkspace({
       <div
         className={cn(
           "min-h-0 flex-1",
-          (detailTarget || workspaceSection !== "knowledge") && "hidden",
+          (panelView === "assistant-settings"
+            || detailTarget
+            || workspaceSection !== "knowledge") && "hidden",
         )}
-        aria-hidden={Boolean(detailTarget) || workspaceSection !== "knowledge"}
+        aria-hidden={panelView === "assistant-settings"
+          || Boolean(detailTarget)
+          || workspaceSection !== "knowledge"}
       >
         <KnowledgeWorkspace
           variant="compact"
-          active={!detailTarget && workspaceSection === "knowledge"}
+          active={panelView === "workspace"
+            && !detailTarget
+            && workspaceSection === "knowledge"}
         />
       </div>
 
       <div
         className={cn(
           "min-h-0 flex-1",
-          !detailTarget && "hidden",
+          (panelView === "assistant-settings" || !detailTarget) && "hidden",
         )}
       >
         {detailTarget?.kind === "document" ? (

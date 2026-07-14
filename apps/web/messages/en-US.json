@@ -69,8 +69,9 @@
   },
   "SiteHeader": {
     "modelNotConfigured": "Model not configured",
-    "minimizeAria": "Collapse to mini workspace",
-    "minimize": "Collapse workspace",
+    "enterExploreAria": "Enter exploration mode",
+    "enterExplore": "Enter exploration mode",
+    "exploreMode": "Explore",
     "fullscreenAria": "Switch to full screen",
     "windowAria": "Switch to window",
     "fullscreen": "Full-screen view",
@@ -394,10 +395,22 @@
     "parserTitle": "Parser model",
     "parserLoading": "Loading file parser settings.",
     "keyConfigured": "Configured; leave blank to keep unchanged",
-    "generationDescription": "An OpenAI-compatible endpoint for answer generation and information extraction.",
+    "generationDescription": "Used for answer generation and information extraction, with OpenAI-compatible, Anthropic, and native Gemini protocols.",
     "connectionTitle": "Connection",
-    "connectionDescription": "Service endpoint and access key.",
-    "baseUrlDescription": "Enter an OpenAI-compatible API endpoint.",
+    "connectionDescription": "Choose a provider protocol, then configure its endpoint and access key.",
+    "provider": "Provider protocol",
+    "providerDescription": {
+      "openai": "Works with OpenAI and compatible gateways such as 302.AI or private deployments.",
+      "anthropic": "Uses the Anthropic Messages protocol with Claude streaming and tool calls.",
+      "gemini": "Uses Gemini GenerateContent with streaming and function calling."
+    },
+    "baseUrlDescription": {
+      "openai": "Enter the API root for an OpenAI-compatible Chat Completions endpoint.",
+      "anthropic": "Leave blank for Anthropic's official endpoint, or enter a custom proxy URL.",
+      "gemini": "Leave blank for Google Gemini's official endpoint, or enter a custom proxy URL."
+    },
+    "officialEndpoint": "Leave blank to use the official endpoint",
+    "providerChangedKeyDescription": "The provider changed. Enter its API key; leaving this blank keeps the previously saved key.",
     "generationParams": "Generation parameters",
     "generationParamsDescription": "Control the model, context, and request policy.",
     "model": "Model",
@@ -406,6 +419,7 @@
     "maxOutputTokens": "Maximum output tokens",
     "temperature": "Temperature · {value}",
     "temperatureDescription": "Lower values are more deterministic; higher values are more varied.",
+    "fixedTemperatureDescription": "This provider uses its required default sampling value for model compatibility.",
     "timeout": "Request timeout (ms)",
     "timeoutDescription": "Maximum wait time for a single model request.",
     "retries": "Retry attempts",
@@ -413,10 +427,12 @@
     "embeddingDescription": "Used for document embeddings and semantic retrieval.",
     "modelAndConnection": "Model and connection",
     "embeddingConnectionDescription": "Leave the endpoint or key blank to reuse the generation model settings.",
+    "embeddingNativeConnectionDescription": "Anthropic and Gemini do not share this embedding format. Configure a separate OpenAI-compatible embedding endpoint and key.",
     "dimensions": "Vector dimensions (optional)",
     "modelDefault": "Use model default",
     "optionalBaseUrl": "Base URL (optional)",
     "reuseGeneration": "Reuse generation model",
+    "separateEmbeddingKey": "Configure a separate embedding key",
     "optionalApiKey": "API Key (optional)",
     "parserDescription": "Configure parsing for PDF and other files. Falls back to MarkItDown when MinerU is unavailable or fails.",
     "parserEngine": "Parser engine",
@@ -447,8 +463,8 @@
     "avatar": "Avatar characters",
     "avatarDescription": "Supports @_@, AI, a single character, or emoji.",
     "name": "Assistant name",
-    "showPet": "Show desktop pet",
-    "showPetDescription": "On by default. Shows a draggable assistant entry on desktop and applies immediately.",
+    "petAlwaysOn": "Keep assistant visible",
+    "petAlwaysOnDescription": "Keep the assistant available in normal mode. When off, it appears only in exploration mode.",
     "greeting": "Greeting",
     "greetingDescription": "The first sentence shown in a new conversation.",
     "systemPrompt": "System prompt",
@@ -566,6 +582,11 @@
   "AppShell": {
     "loading": "Loading…",
     "configureModel": "Configure model",
+    "graphSettings": "Adjust graph display",
+    "exitExplore": "Exit exploration",
+    "exitExploreShort": "Exit",
+    "exploreEntered": "You have entered exploration mode",
+    "exploreEnteredDescription": "Select a galaxy to explore. Use the button in the upper-right corner to exit.",
     "resizeWindow": "Resize window"
   },
   "ChatPage": {
@@ -613,7 +634,7 @@
     "enabled": "On",
     "disabled": "Off",
     "web": "Web",
-    "webEnabledDescription": "On: configured web search tools may be used",
+    "webEnabledDescription": "On: use built-in 302.AI web search and configured external tools",
     "webDisabledDescription": "Off: use knowledge-base content only",
     "unconfiguredModel": "No model configured",
     "currentModel": "Current model: {model}",
@@ -666,6 +687,7 @@
     "query": "Query",
     "entity": "Entity",
     "scope": "Scope",
+    "internet": "Internet",
     "separator": ", ",
     "matches": "Matches",
     "passage": "Passage",
@@ -689,7 +711,9 @@
     "tools": {
       "searchContext": "Search knowledge",
       "getEntity": "Look up entity",
-      "getTime": "Check time"
+      "getTime": "Check time",
+      "webSearch": "Search the web",
+      "openWebPage": "Open webpage"
     }
   },
   "Search": {
@@ -786,6 +810,9 @@
     "sourceLoadFailed": "Unable to load source graph",
     "retry": "Retry",
     "refresh": "Refresh graph",
+    "limitAria": "Node limit per type",
+    "limitTitle": "Limit how many events and entities are shown for each type",
+    "limitOption": "{value} per type",
     "viewOriginal": "View original"
   },
   "DetailPanel": {
@@ -838,9 +865,9 @@
     "controls": {
       "back": "Back",
       "searchHome": "Return to search home",
-      "settings": "Open settings",
-      "expand": "Expand workspace",
-      "close": "Close",
+      "backToWorkspace": "Back to mini workspace",
+      "assistantSettings": "Assistant settings",
+      "close": "Close mini workspace",
       "resize": "Resize mini workspace"
     },
     "search": {
@@ -897,14 +924,11 @@
       "dance": "Dance"
     },
     "form": {
-      "title": "Form",
-      "aria": "Switch assistant form",
-      "simple": "Simple",
-      "full": "Full",
       "simpleAria": "{name} in simple form. Click to switch to full form{status}",
-      "fullAria": "{name} in full form{status}",
+      "fullAria": "{name} in full form. Click to switch to simple form{status}",
       "statusSuffix": ", {status}",
-      "switchToFull": "Switch to full form"
+      "switchToFull": "Switch to full form",
+      "switchToSimple": "Switch to simple form"
     },
     "facing": {
       "title": "Facing",
@@ -960,6 +984,8 @@
   },
   "UniverseScene": {
     "aria": "3D knowledge universe graph",
+    "keyboardInstructions": "Use the arrow keys to browse, Enter or Space to activate or lock, and Escape to clear focus. Drag to orbit and use the wheel for smooth zoom.",
+    "keyboardStatus": "{label}. Item {index, number} of {total, number}.",
     "exploreSource": "Explore source {label}",
     "sourceStats": "{events, plural, one {# event} other {# events}} · {entities, plural, one {# entity} other {# entities}}",
     "sourceStatsBuilding": "{events, plural, one {# event} other {# events}} · building entity statistics",
@@ -979,16 +1005,16 @@
     },
     "loadProgress": {
       "rowAria": "Loading progress for {label}",
-      "complete": "All content loaded",
-      "loading": "Emerging from the galaxy center",
-      "clickContinue": "Click a node to keep exploring",
-      "zoomContinue": "Zoom in to load earlier content",
-      "clickStart": "Click a node to start exploring",
-      "zoomStart": "Zoom into the galaxy to start exploring",
-      "title": "Content loading progress",
-      "events": "Events loaded",
-      "entities": "Entities connected",
-      "sourceComplete": "{source} is fully loaded: {events, plural, one {# event} other {# events}} and {entities, plural, one {# entity} other {# entities}}"
+      "complete": "The full time range has been explored; the current view is stable",
+      "loading": "Prefetching adjacent times",
+      "clickContinue": "Choose Explore more in the inspector",
+      "browseContinue": "Use the controls below to continue through time",
+      "clickStart": "Choose a source to start exploring",
+      "browseStart": "Choose a source, then use the controls below to start exploring",
+      "title": "3D time exploration",
+      "events": "Queried events / source total",
+      "entities": "Resident entities / source total",
+      "sourceComplete": "Finished exploring {source}’s timeline; queried {events, plural, one {# event} other {# events}} with {entities, plural, one {# entity} other {# entities}} currently resident"
     },
     "errors": {
       "unavailable": "The knowledge universe is temporarily unavailable",
@@ -996,18 +1022,25 @@
       "timelineLoadFailed": "Failed to load the knowledge timeline"
     },
     "expansion": {
-      "pageMore": "Showing {committed, number} / {total, number} {relation}. Click again to explore earlier content.",
+      "pageMore": "Showing {committed, number} / {total, number} {relation}. Choose Explore more to continue.",
       "complete": "All {total, number} {relation} are visible.",
+      "capacityReached": "The locked network reached the device safety capacity. Unlock the node before exploring further.",
       "eventEntitiesComplete": "All {count, plural, one {# entity linked to this event is} other {# entities linked to this event are}} visible.",
       "noEventEntities": "No related entities have been extracted for this event yet."
     },
     "timeline": {
-      "loading": "Revealing recent events and related entities along the timeline",
+      "loading": "Loading the adjacent page in time",
       "defaultTitle": "Knowledge timeline",
       "thisGalaxy": "this galaxy",
-      "startReached": "Reached the beginning of {source}’s timeline",
-      "loadedZoom": "{count, plural, one {# event is visible} other {# events are visible}}. Zoom in to see earlier content.",
-      "loadedClick": "{count, plural, one {# event is visible} other {# events are visible}}. Click a node to explore related content."
+      "windowReady": "Loaded {visible, plural, one {# time entry} other {# time entries}}; adjacent pages preload in the background",
+      "movedEarlier": "Moved into the next, earlier time range",
+      "movedLater": "Returned to the previous, more recent time range",
+      "explorationComplete": "Finished exploring the full timeline in {source}; it cannot advance further",
+      "unlockToContinue": "Unlock the current node before advancing through time",
+      "capacityPaused": "Queried {count, plural, one {# event} other {# events}}; the next complete time page exceeds the device safety capacity.",
+      "lockReleasedForCapacity": "The device display budget decreased, so the temporary lock was released while keeping the current time range intact.",
+      "snapshotReloading": "The graph changed, so the old timeline was safely cleared. Loading the latest snapshot automatically.",
+      "snapshotReset": "The graph is still changing and automatic reload could not stabilize. Choose the source again to retry."
     },
     "rebuild": {
       "queued": "The statistics refresh is queued in the background",
@@ -1018,8 +1051,18 @@
       "ready": "Statistics are ready to refresh"
     },
     "webgl": {
-      "title": "WebGL is unavailable on this device",
-      "description": "Statistics and search still work. Enable hardware acceleration to enter the 3D knowledge universe."
+      "title": "The 3D knowledge universe is unavailable",
+      "description": "This browser does not expose the WebGL2 capability required by Three.js. Enable hardware acceleration and use a current browser.",
+      "contextDisabledTitle": "3D graphics are disabled by the browser",
+      "contextDisabledDescription": "Chrome reports GL_VENDOR / GL_RENDERER as Disabled, which the page cannot override. Enable Use graphics acceleration when available in Chrome Settings → System, then fully relaunch Chrome.",
+      "contextCreationTitle": "The 3D graphics context is temporarily unavailable",
+      "contextCreationDescription": "The browser supports WebGL2 but could not allocate a graphics context this time, usually because of temporary GPU pressure or another busy page. Close GPU-heavy pages and retry; graph data will not reload.",
+      "moduleTitle": "The 3D scene module did not load",
+      "moduleDescription": "Browser graphics are available, but the scene code did not finish loading, usually because of a network interruption or version update. Retry directly.",
+      "sceneTitle": "The 3D scene did not start",
+      "sceneDescription": "A WebGL2 context is available, but graph scene initialization failed. Current data is retained; retry directly and use the console diagnostic for the initialization cause.",
+      "contextLostDescription": "The browser released the graphics context, usually because of temporary GPU pressure or a page transition. Current graph data is retained; retry to restore it.",
+      "retry": "Retry 3D scene"
     },
     "stats": {
       "source": "{events} events · {entities} entities",
@@ -1031,90 +1074,89 @@
     },
     "legend": { "entities": "Topic entities", "events": "Related events" },
     "searchLocked": {
-      "label": "Click to expand",
-      "description": "Scrolling never loads more data in search view. Click a node to expand it."
+      "label": "Explicit exploration",
+      "description": "The wheel only zooms the view. Lock a node, then choose Explore more in the inspector."
     },
     "inspector": {
-      "hover": "Hover",
+      "lockedNetwork": "Related network locked",
+      "blankToUnlock": "Click an empty area to unlock",
       "viewSource": "View original details",
       "ask": "Ask the astronaut",
       "clear": "Clear selection",
-      "entityFallback": "{category}. Continue exploring its related events.",
-      "eventFallback": "{category}. Related entities are shown with the event.",
       "expanding": "Expanding the next group of relationships",
       "remaining": "{count, plural, one {# relationship remains} other {# relationships remain}} to explore",
-      "clickExplore": "Click to explore related content",
+      "clickExplore": "Choose Explore more to view related content",
       "rangeStart": "Reached the beginning of the current time range",
       "allVisible": "All related content is visible",
       "none": "No relationships to explore",
       "exploreMore": "Explore more"
     },
     "controls": {
-      "openPanel": "Open full workspace",
       "currentResult": "Return to current result",
+      "normalMode": "Normal",
+      "previewMode": "Preview",
+      "normalModeHint": "View the current time range steadily · drag to orbit · wheel to zoom",
+      "previewModeHint": "Preview by temporal distance · use Previous and Next to move through time",
+      "cameraRestored": "Normal view restored. Drag to orbit and use the wheel to zoom.",
+      "previousTimePage": "Return to the previous time range",
+      "nextTimePage": "Explore the next time range",
+      "timePosition": "{time}",
+      "completedTimePosition": "{time} · Exploration complete",
+      "partialTime": "{time} (some times are not specified)",
+      "unknownTime": "Time not specified",
+      "explorationComplete": "Exploration complete",
       "overview": "Return to full universe",
       "reset": "Reset exploration and view",
       "refresh": "Refresh statistical contours"
     }
   },
   "GraphSettings": {
-    "content": {
-      "title": "Graph content",
-      "description": "Choose what stays visible first. Filters only change the view; they do not delete knowledge data."
+    "drawer": {
+      "title": "Graph display settings",
+      "description": "Adjust node cards, entity types, and the time window independently. Changes apply to the current graph immediately."
     },
-    "visible": {
-      "title": "Visible content",
-      "description": "Keep at least events or entities visible so the graph always has context.",
-      "event": { "label": "Events", "description": "Timelines, facts, and things that happened" },
-      "entity": { "label": "Entities", "description": "People, organizations, places, and concepts" }
-    },
-    "priority": {
-      "title": "Display priority",
-      "description": "When the node limit is reached, the preferred type enters the visible working set first.",
-      "aria": "Graph display priority",
-      "options": {
-        "balanced": { "label": "Balanced", "description": "Show events and entities in working-set order" },
-        "events": { "label": "Events first", "description": "Prioritize timelines and facts when space is limited" },
-        "entities": { "label": "Entities first", "description": "Prioritize people, organizations, and concepts when space is limited" }
+    "cards": {
+      "title": "Node cards",
+      "description": "These options control persistent cards only, not nodes or relationships. Hovering or clicking still reveals the focused node card.",
+      "event": {
+        "title": "Show event cards",
+        "description": "Show event summaries by default. Event stars remain available on hover and click when this is off.",
+        "aria": "Show event cards"
+      },
+      "entity": {
+        "title": "Show entity cards",
+        "description": "Show entity names by default. Entity glyphs remain available on hover and click when this is off.",
+        "aria": "Show entity cards"
       }
     },
     "entityTypes": {
       "title": "Entity types",
-      "description": "Show only the entity categories you care about. Newly discovered categories appear automatically.",
+      "description": "Choose which entity categories participate in the current view. Filtered entities and their event links hide together, event-to-event links remain, and at least one type stays selected.",
       "all": "All types",
       "none": "No categories",
       "emptyDescription": "Explore knowledge containing entities and available categories will appear here automatically."
     },
-    "performance": {
-      "title": "Performance and density",
-      "description": "A bounded working set and adaptive detail keep rendering costs stable during long exploration sessions."
+    "window": {
+      "title": "Exploration window",
+      "description": "Control visible time points separately from reusable cache capacity so long explorations stay bounded."
     },
-    "maxNodes": {
-      "title": "Window node limit",
-      "description": "When new nodes exceed the limit, the oldest nodes are removed first. The graph policy limit still takes precedence.",
-      "current": "Current limit",
-      "aria": "Window node limit",
+    "visibleEventBundles": {
+      "title": "Visible time window",
+      "description": "Cap visible time points. Each time point stays complete with its entities and enters or retires naturally at the edge.",
+      "current": "Configured upper limit",
+      "aria": "Visible time point count",
       "recommended": "Recommended: {count, number}"
     },
-    "density": {
-      "title": "Visual density",
-      "description": "Labels adapt to viewport area; relationships are trimmed by the current focus and budget.",
-      "labels": "Label density",
-      "edges": "Relationship density",
-      "labelOptions": { "low": "Low · cleaner", "balanced": "Balanced", "high": "High · more detail" },
-      "edgeOptions": { "focus": "Focus · key links", "context": "Context", "all": "All relationships" }
+    "cachedEventBundles": {
+      "title": "Timeline cache capacity",
+      "description": "This caps the memory used for earlier and later times. Adjacent times are prefetched as needed, and existing cache is reused first.",
+      "current": "Capacity on this device",
+      "aria": "Timeline cache capacity",
+      "runway": "Up to {count, number} time points reserved"
     },
-    "exploration": {
-      "title": "Exploration behavior",
-      "description": "Regular browsing can load progressively. Search and answer graphs stay locked so scrolling does not lose the target.",
+    "reset": {
       "savedLocally": "Changes apply to the current graph immediately and are saved in this browser.",
-      "reset": "Restore defaults",
-      "autoExpand": {
-        "title": "Load progressively while zooming",
-        "description": "Continue loading the timeline only at high detail during regular browsing. When off, exploration requires clicking a node.",
-        "aria": "Load progressively while zooming"
-      },
-      "searchLocked": "Graphs created by search or answers never request more data from the scroll wheel. Scrolling only zooms the current result; click “Explore more” to expand it."
+      "action": "Restore defaults"
     }
   },
   "OrbitalGraph": {

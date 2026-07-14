@@ -21,6 +21,9 @@ class SearchSource(Protocol):
     sag_source_config_id: str
 
 
+EventScoreMap = dict[tuple[str, str], float]
+
+
 _QUERY_NOISE = (
     "知识库",
     "资料库",
@@ -148,15 +151,9 @@ def rerank_sections(
             merged[key] = (section, index)
             continue
         previous_section, previous_index = previous
-        chosen = (
-            section
-            if len(section.content.strip()) > len(previous_section.content.strip())
-            else previous_section
-        )
+        chosen = section if len(section.content.strip()) > len(previous_section.content.strip()) else previous_section
         merged[key] = (
-            chosen.model_copy(
-                update={"score": max(float(previous_section.score), float(section.score))}
-            ),
+            chosen.model_copy(update={"score": max(float(previous_section.score), float(section.score))}),
             min(previous_index, index),
         )
 
@@ -168,14 +165,8 @@ def rerank_sections(
     top_raw = max(raw_scores, default=0.0)
     semantic_floor = max(0.35, top_raw * 0.68)
     denominator = max(1, len(candidates) - 1)
-    lexical_scores = {
-        key: _lexical_relevance(query, section)
-        for key, (section, _index) in candidates
-    }
-    has_lexical_signal = any(
-        key in exact_keys or score >= 0.2
-        for key, score in lexical_scores.items()
-    )
+    lexical_scores = {key: _lexical_relevance(query, section) for key, (section, _index) in candidates}
+    has_lexical_signal = any(key in exact_keys or score >= 0.2 for key, score in lexical_scores.items())
     ranked: list[tuple[float, float, int, RetrievedSection]] = []
 
     for position, (key, (section, original_index)) in enumerate(candidates):
@@ -187,10 +178,7 @@ def rerank_sections(
         rank_score = 1.0 - position / denominator
         combined = min(
             1.0,
-            raw * 0.5
-            + rank_score * 0.2
-            + lexical_score * 0.3
-            + (0.15 if exact else 0.0),
+            raw * 0.5 + rank_score * 0.2 + lexical_score * 0.3 + (0.15 if exact else 0.0),
         )
         if has_lexical_signal:
             relevant = exact or lexical_score >= 0.2
@@ -249,9 +237,7 @@ async def _lexical_sections(
             for index, row in enumerate(rows)
         ]
 
-    groups = await asyncio.gather(
-        *(one(source, term) for source in sources for term in terms)
-    )
+    groups = await asyncio.gather(*(one(source, term) for source in sources for term in terms))
     return [section for group in groups for section in group]
 
 
@@ -300,6 +286,50 @@ async def retrieve_relevant_sections(
     )
 
 
+async def recall_event_scores(
+    engine_manager: Any,
+    query: str,
+    sources_by_config: dict[str, SearchSource],
+    *,
+    limit: int | None = None,
+) -> EventScoreMap:
+    """Best-effort direct event recall shared by Search and the Agent.
+
+    Chunks remain the traceable evidence path.  Event recall supplies the
+    semantic result layer (title + summary) so a long document does not lose
+    its extracted events merely because the best matching chunks are located
+    elsewhere in the document.
+    """
+
+    search = getattr(engine_manager, "search_event_scores", None)
+    if not callable(search):
+        return {}
+    try:
+        result = await search(query, sources_by_config, limit=limit)
+    except asyncio.CancelledError:
+        raise
+    except Exception as error:  # noqa: BLE001
+        log.warning("事项向量召回失败，继续使用原文块结果：%s", error)
+        return {}
+    if not isinstance(result, dict):
+        return {}
+
+    scores: EventScoreMap = {}
+    for raw_key, raw_score in result.items():
+        if not isinstance(raw_key, tuple) or len(raw_key) != 2:
+            continue
+        source_config_id = str(raw_key[0] or "").strip()
+        event_id = str(raw_key[1] or "").strip()
+        if not source_config_id or not event_id:
+            continue
+        try:
+            score = float(raw_score)
+        except (TypeError, ValueError):
+            continue
+        scores[(source_config_id, event_id)] = max(0.0, min(1.0, score))
+    return scores
+
+
 def _best_excerpt(query: str, section: RetrievedSection, limit: int = 260) -> str:
     content = re.sub(r"\s+", " ", section.content).strip()
     if not content:
@@ -316,10 +346,7 @@ def _best_excerpt(query: str, section: RetrievedSection, limit: int = 260) -> st
 def fallback_search_answer(query: str, sections: list[RetrievedSection]) -> str:
     if not sections:
         return ""
-    lines = [
-        f"- {_best_excerpt(query, section)} [{index}]"
-        for index, section in enumerate(sections[:4], 1)
-    ]
+    lines = [f"- {_best_excerpt(query, section)} [{index}]" for index, section in enumerate(sections[:4], 1)]
     return "根据与问题直接相关的证据：\n" + "\n".join(lines)
 
 
@@ -366,10 +393,7 @@ def _search_answer_messages(
             },
             {
                 "role": "user",
-                "content": (
-                    f"问题：{query}\n\n已通过相关性重排的证据：\n"
-                    + "\n\n".join(evidence_blocks)
-                ),
+                "content": (f"问题：{query}\n\n已通过相关性重排的证据：\n" + "\n\n".join(evidence_blocks)),
             },
         ],
         len(evidence_blocks),

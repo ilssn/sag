@@ -10,11 +10,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 function SearchPageContent() {
   const params = useSearchParams();
   const router = useRouter();
-  const { panelMode } = useApp();
+  const { appMode } = useApp();
 
   return (
     <SearchPanel
-      active={panelMode === "normal"}
+      active={appMode === "normal"}
       initialQuery={params.get("q")?.trim() ?? ""}
       initialSourceId={params.get("source")}
       showCancel

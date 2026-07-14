@@ -69,6 +69,18 @@ describe("universe presentation state", () => {
     })).toBe("source-b");
   });
 
+  it("lets an explicit source switch replace the previous detail latch", () => {
+    expect(resolveUniverseDetailSource({
+      currentSourceId: "source-a",
+      currentRadiusPx: 240,
+      candidateSourceId: "source-a",
+      candidateRadiusPx: 240,
+      explicitSourceId: "source-b",
+      enterRadiusPx: 180,
+      exitRadiusPx: 72,
+    })).toBe("source-b");
+  });
+
   it("uses coarse deep-zoom milestones instead of individual wheel gestures", () => {
     expect(universeDeepLoadMilestone(359, 360, 24)).toBe(0);
     expect(universeDeepLoadMilestone(360, 360, 24)).toBe(1);
