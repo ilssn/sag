@@ -2,15 +2,16 @@
 
 import * as React from "react";
 
-import type { UniverseActivationOrigin, UniverseNodeKind } from "./types";
 import {
+  UNIVERSE_SCENE_BUDGET,
   universeNodeKey,
   type UniverseWorkingSet,
 } from "./universe-working-set";
+import { recommendedUniverseTimelineCacheLimit } from "./universe-timeline-prefetch";
 
-export const UNIVERSE_VIEW_PREFERENCES_VERSION = 1;
+export const UNIVERSE_VIEW_PREFERENCES_VERSION = 5;
 export const UNIVERSE_VIEW_PREFERENCES_STORAGE_KEY =
-  "sag:universe-view-preferences";
+  "sag:universe-view-preferences:v5";
 export const UNIVERSE_ENTITY_CATEGORIES_STORAGE_KEY =
   "sag:universe-entity-categories";
 
@@ -20,81 +21,53 @@ const UNIVERSE_ENTITY_CATEGORIES_CHANGE_EVENT =
   "sag:universe-entity-categories-change";
 const MAX_REMEMBERED_ENTITY_CATEGORIES = 64;
 
-export type UniverseViewPriority = "balanced" | "events" | "entities";
-export type UniverseLabelDensity = "low" | "balanced" | "high";
-export type UniverseEdgeDensity = "focus" | "context" | "all";
-
 export interface UniverseViewPreferences {
-  version: number;
-  maxNodes: number;
-  visibleKinds: UniverseNodeKind[];
-  /** `null` means every entity category is visible. */
+  version: typeof UNIVERSE_VIEW_PREFERENCES_VERSION;
+  visibleEventBundles: number;
+  cachedEventBundles: number;
+  showEventCards: boolean;
+  showEntityCards: boolean;
+  /** `null` means every discovered entity category is selected. */
   entityCategories: string[] | null;
-  priority: UniverseViewPriority;
-  labelDensity: UniverseLabelDensity;
-  edgeDensity: UniverseEdgeDensity;
-  browseAutoExpand: boolean;
 }
 
-/**
- * Limits shared by normalization, UI controls and rendering budget projection.
- * The user budget is intentionally a soft cap below the renderer's policy cap.
- */
+/** Limits shared by normalization, UI controls and the virtual bundle window. */
 export const UNIVERSE_VIEW_LIMITS = {
-  maxNodes: {
-    min: 40,
-    max: 600,
-    step: 20,
-    default: 240,
+  visibleEventBundles: {
+    min: 2,
+    max: 18,
+    step: 1,
+    default: 6,
   },
-  edgePerNode: {
-    focus: 1.25,
-    context: 2.5,
-    all: 4,
+  cachedEventBundles: {
+    min: 12,
+    max: 96,
+    step: 6,
+    default: 24,
   },
-  labels: {
-    low: { areaPerLabel: 140_000, max: 18 },
-    balanced: { areaPerLabel: 80_000, max: 32 },
-    high: { areaPerLabel: 48_000, max: 48 },
+  deviceBundleCaps: {
+    desktop: { visible: 18, cached: 96 },
+    mobile: { visible: 8, cached: 36 },
   },
-  labelEventShare: {
-    balanced: 0.42,
-    events: 0.7,
-    entities: 0.22,
+  cards: {
+    areaPerCard: 64_000,
+    max: 20,
+    eventShare: 0.42,
   },
-  timelineAutoLoadMinLevel: 2,
 } as const;
 
 export const DEFAULT_UNIVERSE_VIEW_PREFERENCES: Readonly<UniverseViewPreferences> =
   Object.freeze({
     version: UNIVERSE_VIEW_PREFERENCES_VERSION,
-    maxNodes: UNIVERSE_VIEW_LIMITS.maxNodes.default,
-    visibleKinds: Object.freeze(["event", "entity"]) as unknown as UniverseNodeKind[],
+    visibleEventBundles: UNIVERSE_VIEW_LIMITS.visibleEventBundles.default,
+    cachedEventBundles: UNIVERSE_VIEW_LIMITS.cachedEventBundles.default,
+    showEventCards: true,
+    showEntityCards: true,
     entityCategories: null,
-    priority: "balanced",
-    labelDensity: "balanced",
-    edgeDensity: "focus",
-    browseAutoExpand: true,
   });
-
-// Short aliases keep call sites readable while retaining descriptive exports.
-export const UNIVERSE_VIEW_DEFAULTS = DEFAULT_UNIVERSE_VIEW_PREFERENCES;
-export const UNIVERSE_VIEW_PREFERENCE_LIMITS = UNIVERSE_VIEW_LIMITS;
-
-const NODE_KINDS = ["event", "entity"] as const;
-const PRIORITIES = ["balanced", "events", "entities"] as const;
-const LABEL_DENSITIES = ["low", "balanced", "high"] as const;
-const EDGE_DENSITIES = ["focus", "context", "all"] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isOneOf<T extends string>(
-  value: unknown,
-  options: readonly T[],
-): value is T {
-  return typeof value === "string" && options.includes(value as T);
 }
 
 function finiteInteger(value: unknown, fallback: number) {
@@ -107,57 +80,121 @@ function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
+function roundUpToStep(value: number, step: number) {
+  return Math.ceil(value / step) * step;
+}
+
 function cloneDefaultPreferences(): UniverseViewPreferences {
   return {
     ...DEFAULT_UNIVERSE_VIEW_PREFERENCES,
-    visibleKinds: [...DEFAULT_UNIVERSE_VIEW_PREFERENCES.visibleKinds],
     entityCategories: null,
   };
 }
 
-/** Converts persisted or partially trusted data into the current schema. */
+function normalizeEntityCategories(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value
+    .filter((category): category is string => typeof category === "string")
+    .map((category) => category.trim())
+    .filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right, "zh-CN"))
+    .slice(0, MAX_REMEMBERED_ENTITY_CATEGORIES);
+}
+
+/** Visible time window + one history page + two prefetched forward pages. */
+export function minimumUniverseCacheBundles(visibleEventBundles: number) {
+  const visible = clamp(
+    finiteInteger(
+      visibleEventBundles,
+      UNIVERSE_VIEW_LIMITS.visibleEventBundles.default,
+    ),
+    UNIVERSE_VIEW_LIMITS.visibleEventBundles.min,
+    UNIVERSE_VIEW_LIMITS.visibleEventBundles.max,
+  );
+  return clamp(
+    roundUpToStep(
+      recommendedUniverseTimelineCacheLimit(
+        visible,
+        UNIVERSE_VIEW_LIMITS.cachedEventBundles.step,
+      ),
+      UNIVERSE_VIEW_LIMITS.cachedEventBundles.step,
+    ),
+    UNIVERSE_VIEW_LIMITS.cachedEventBundles.min,
+    UNIVERSE_VIEW_LIMITS.cachedEventBundles.max,
+  );
+}
+
+/** Converts persisted or partially trusted data into the strict current schema. */
 export function normalizeUniverseViewPreferences(
   value: unknown,
 ): UniverseViewPreferences {
-  const input = isRecord(value) ? value : {};
-  const visibleKindValues = Array.isArray(input.visibleKinds)
-    ? new Set(input.visibleKinds.filter((kind): kind is UniverseNodeKind =>
-      isOneOf(kind, NODE_KINDS)))
-    : new Set<UniverseNodeKind>();
-  const visibleKinds = NODE_KINDS.filter((kind) => visibleKindValues.has(kind));
-
-  let entityCategories: string[] | null = null;
-  if (Array.isArray(input.entityCategories)) {
-    entityCategories = [...new Set(input.entityCategories
-      .filter((category): category is string => typeof category === "string")
-      .map((category) => category.trim())
-      .filter(Boolean))];
-  }
+  const input = isRecord(value) && value.version === UNIVERSE_VIEW_PREFERENCES_VERSION
+    ? value
+    : {};
+  const visibleEventBundles = clamp(
+    finiteInteger(
+      input.visibleEventBundles,
+      UNIVERSE_VIEW_LIMITS.visibleEventBundles.default,
+    ),
+    UNIVERSE_VIEW_LIMITS.visibleEventBundles.min,
+    UNIVERSE_VIEW_LIMITS.visibleEventBundles.max,
+  );
+  const requestedCache = roundUpToStep(
+    finiteInteger(
+      input.cachedEventBundles,
+      UNIVERSE_VIEW_LIMITS.cachedEventBundles.default,
+    ),
+    UNIVERSE_VIEW_LIMITS.cachedEventBundles.step,
+  );
+  const cachedEventBundles = clamp(
+    Math.max(
+      requestedCache,
+      minimumUniverseCacheBundles(visibleEventBundles),
+    ),
+    UNIVERSE_VIEW_LIMITS.cachedEventBundles.min,
+    UNIVERSE_VIEW_LIMITS.cachedEventBundles.max,
+  );
+  const selectedEntityCategories = normalizeEntityCategories(input.entityCategories);
 
   return {
     version: UNIVERSE_VIEW_PREFERENCES_VERSION,
-    maxNodes: clamp(
-      finiteInteger(input.maxNodes, UNIVERSE_VIEW_LIMITS.maxNodes.default),
-      UNIVERSE_VIEW_LIMITS.maxNodes.min,
-      UNIVERSE_VIEW_LIMITS.maxNodes.max,
-    ),
-    visibleKinds: visibleKinds.length > 0
-      ? [...visibleKinds]
-      : [...DEFAULT_UNIVERSE_VIEW_PREFERENCES.visibleKinds],
-    entityCategories,
-    priority: isOneOf(input.priority, PRIORITIES)
-      ? input.priority
-      : DEFAULT_UNIVERSE_VIEW_PREFERENCES.priority,
-    labelDensity: isOneOf(input.labelDensity, LABEL_DENSITIES)
-      ? input.labelDensity
-      : DEFAULT_UNIVERSE_VIEW_PREFERENCES.labelDensity,
-    edgeDensity: isOneOf(input.edgeDensity, EDGE_DENSITIES)
-      ? input.edgeDensity
-      : DEFAULT_UNIVERSE_VIEW_PREFERENCES.edgeDensity,
-    browseAutoExpand: typeof input.browseAutoExpand === "boolean"
-      ? input.browseAutoExpand
-      : DEFAULT_UNIVERSE_VIEW_PREFERENCES.browseAutoExpand,
+    visibleEventBundles,
+    cachedEventBundles,
+    showEventCards: typeof input.showEventCards === "boolean"
+      ? input.showEventCards
+      : DEFAULT_UNIVERSE_VIEW_PREFERENCES.showEventCards,
+    showEntityCards: typeof input.showEntityCards === "boolean"
+      ? input.showEntityCards
+      : DEFAULT_UNIVERSE_VIEW_PREFERENCES.showEntityCards,
+    entityCategories: selectedEntityCategories.length > 0
+      ? selectedEntityCategories
+      : null,
   };
+}
+
+export interface UniverseBundleWindow {
+  visibleEventBundles: number;
+  cachedEventBundles: number;
+}
+
+/** Applies device caps while retaining a six-bundle prefetch runway. */
+export function effectiveUniverseBundleWindow(
+  preferences: UniverseViewPreferences,
+  isMobile: boolean,
+): UniverseBundleWindow {
+  const normalized = normalizeUniverseViewPreferences(preferences);
+  const caps = isMobile
+    ? UNIVERSE_VIEW_LIMITS.deviceBundleCaps.mobile
+    : UNIVERSE_VIEW_LIMITS.deviceBundleCaps.desktop;
+  const visibleEventBundles = Math.min(
+    normalized.visibleEventBundles,
+    caps.visible,
+  );
+  const cachedEventBundles = Math.max(
+    minimumUniverseCacheBundles(visibleEventBundles),
+    Math.min(normalized.cachedEventBundles, caps.cached),
+  );
+  return { visibleEventBundles, cachedEventBundles };
 }
 
 export interface UniverseSceneBudget {
@@ -165,65 +202,38 @@ export interface UniverseSceneBudget {
   edges: number;
 }
 
-/** Applies the user cap and edge-detail preference without exceeding policy. */
+/** Applies the renderer's hard safety budget independently from view settings. */
 export function effectiveUniverseBudget(
   policyBudget: UniverseSceneBudget,
-  userMaxNodes: number,
-  edgeDensity: UniverseEdgeDensity,
 ): UniverseSceneBudget {
-  const policyNodes = Math.max(0, finiteInteger(policyBudget.nodes, 0));
-  const policyEdges = Math.max(0, finiteInteger(policyBudget.edges, 0));
-  const requestedNodes = clamp(
-    finiteInteger(userMaxNodes, UNIVERSE_VIEW_LIMITS.maxNodes.default),
-    UNIVERSE_VIEW_LIMITS.maxNodes.min,
-    UNIVERSE_VIEW_LIMITS.maxNodes.max,
+  const policyNodes = Math.min(
+    UNIVERSE_SCENE_BUDGET.desktop.nodes,
+    Math.max(0, finiteInteger(policyBudget.nodes, 0)),
   );
-  const nodes = Math.min(policyNodes, requestedNodes);
-  const density = isOneOf(edgeDensity, EDGE_DENSITIES)
-    ? edgeDensity
-    : DEFAULT_UNIVERSE_VIEW_PREFERENCES.edgeDensity;
-  const desiredEdges = Math.ceil(nodes * UNIVERSE_VIEW_LIMITS.edgePerNode[density]);
+  const policyEdges = Math.min(
+    UNIVERSE_SCENE_BUDGET.desktop.edges,
+    Math.max(0, finiteInteger(policyBudget.edges, 0)),
+  );
   return {
-    nodes,
-    edges: Math.min(policyEdges, desiredEdges),
+    nodes: policyNodes,
+    edges: policyEdges,
   };
 }
 
-function priorityRank(kind: UniverseNodeKind, priority: UniverseViewPriority) {
-  if (priority === "events") return kind === "event" ? 0 : 1;
-  if (priority === "entities") return kind === "entity" ? 0 : 1;
-  return 0;
-}
-
 /**
- * Derives a renderable view without mutating the FIFO working set. Sorting is
- * stable, so each kind keeps its admission order when a priority is selected.
+ * Applies the explicit entity-category filter without ever removing events.
+ * Card visibility remains a scene-only concern and does not enter this path.
  */
 export function projectUniverseWorkingSet(
   current: UniverseWorkingSet,
-  preferences: UniverseViewPreferences,
+  entityCategories: string[] | null,
 ): UniverseWorkingSet {
-  const normalized = normalizeUniverseViewPreferences(preferences);
-  const visibleKinds = new Set(normalized.visibleKinds);
-  const visibleCategories = normalized.entityCategories === null
-    ? null
-    : new Set(normalized.entityCategories);
-
-  const nodes = current.nodes
-    .map((node, index) => ({ node, index }))
-    .filter(({ node }) => {
-      if (!visibleKinds.has(node.kind)) return false;
-      if (node.kind !== "entity" || visibleCategories === null) return true;
-      return visibleCategories.has((node.category ?? "").trim());
-    })
-    .sort((left, right) => {
-      const rank = priorityRank(left.node.kind, normalized.priority)
-        - priorityRank(right.node.kind, normalized.priority);
-      return rank || left.index - right.index;
-    })
-    .slice(0, normalized.maxNodes)
-    .map(({ node }) => node);
-
+  if (entityCategories === null) return current;
+  const selectedCategories = new Set(normalizeEntityCategories(entityCategories));
+  if (selectedCategories.size === 0) return current;
+  const nodes = current.nodes.filter((node) =>
+    node.kind === "event"
+    || selectedCategories.has((node.category ?? "").trim()));
   const keptKeys = new Set(nodes.map((node) =>
     universeNodeKey(node.kind, node.id, node.source_id)));
   const relations = current.relations.filter((relation) => {
@@ -231,76 +241,61 @@ export function projectUniverseWorkingSet(
     return keptKeys.has(universeNodeKey("event", relation.from_id, relation.source_id))
       && keptKeys.has(universeNodeKey(targetKind, relation.to_id, relation.source_id));
   });
-  const nodeOrder = nodes.map((node) =>
-    universeNodeKey(node.kind, node.id, node.source_id));
 
   return {
     ...current,
     nodes,
     relations,
     root_keys: current.root_keys.filter((key) => keptKeys.has(key)),
-    node_order: nodeOrder,
+    node_order: current.node_order.filter((key) => keptKeys.has(key)),
   };
 }
 
-export interface UniverseLabelBudget {
+export interface UniverseCardBudget {
   events: number;
   entities: number;
   total: number;
 }
 
-/** Calculates an adaptive label cap from viewport area and display intent. */
-export function universeLabelBudget(
+/** Calculates an adaptive on-canvas card cap without affecting graph content. */
+export function universeCardBudget(
   width: number,
   height: number,
-  density: UniverseLabelDensity,
-  priority: UniverseViewPriority,
-  visibleKinds: UniverseNodeKind[],
-): UniverseLabelBudget {
+  showEventCards: boolean,
+  showEntityCards: boolean,
+): UniverseCardBudget {
   const safeWidth = Number.isFinite(width) ? Math.max(0, width) : 0;
   const safeHeight = Number.isFinite(height) ? Math.max(0, height) : 0;
-  const kinds = new Set(visibleKinds.filter((kind) => isOneOf(kind, NODE_KINDS)));
-  if (safeWidth === 0 || safeHeight === 0 || kinds.size === 0) {
+  if (
+    safeWidth === 0
+    || safeHeight === 0
+    || (!showEventCards && !showEntityCards)
+  ) {
     return { events: 0, entities: 0, total: 0 };
   }
 
-  const safeDensity = isOneOf(density, LABEL_DENSITIES)
-    ? density
-    : DEFAULT_UNIVERSE_VIEW_PREFERENCES.labelDensity;
-  const safePriority = isOneOf(priority, PRIORITIES)
-    ? priority
-    : DEFAULT_UNIVERSE_VIEW_PREFERENCES.priority;
-  const limit = UNIVERSE_VIEW_LIMITS.labels[safeDensity];
   const total = Math.max(0, Math.min(
-    limit.max,
-    Math.floor((safeWidth * safeHeight) / limit.areaPerLabel),
+    UNIVERSE_VIEW_LIMITS.cards.max,
+    Math.floor(
+      (safeWidth * safeHeight) / UNIVERSE_VIEW_LIMITS.cards.areaPerCard,
+    ),
   ));
-
   if (total === 0) return { events: 0, entities: 0, total: 0 };
+  if (!showEntityCards) return { events: total, entities: 0, total };
+  if (!showEventCards) return { events: 0, entities: total, total };
 
-  if (!kinds.has("entity")) return { events: total, entities: 0, total };
-  if (!kinds.has("event")) return { events: 0, entities: total, total };
-
-  const eventShare = UNIVERSE_VIEW_LIMITS.labelEventShare[safePriority];
   const events = total === 1
-    ? (safePriority === "entities" ? 0 : 1)
-    : clamp(Math.round(total * eventShare), 1, total - 1);
+    ? 1
+    : clamp(
+        Math.round(total * UNIVERSE_VIEW_LIMITS.cards.eventShare),
+        1,
+        total - 1,
+      );
   return {
     events,
     entities: total - events,
     total,
   };
-}
-
-/** Search and assistant activations stay fixed; only browsing may follow LOD. */
-export function shouldAutoLoadUniverseTimeline(
-  origin: UniverseActivationOrigin,
-  level: 0 | 1 | 2 | 3,
-  browseAutoExpand: boolean,
-) {
-  return origin === "browse"
-    && browseAutoExpand
-    && level >= UNIVERSE_VIEW_LIMITS.timelineAutoLoadMinLevel;
 }
 
 type UniverseViewStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -425,17 +420,7 @@ export function useUniverseViewPreferences(): UseUniverseViewPreferencesResult {
   return { preferences, updatePreferences, resetPreferences };
 }
 
-function normalizeEntityCategories(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return [...new Set(value
-    .filter((category): category is string => typeof category === "string")
-    .map((category) => category.trim())
-    .filter(Boolean))]
-    .sort((left, right) => left.localeCompare(right, "zh-CN"))
-    .slice(0, MAX_REMEMBERED_ENTITY_CATEGORIES);
-}
-
-/** Keeps the settings page useful even while the background renderer is asleep. */
+/** Keeps discovered categories available while the graph renderer is asleep. */
 export function loadUniverseEntityCategories(
   storage: UniverseViewStorage | null = defaultStorage(),
 ): string[] {

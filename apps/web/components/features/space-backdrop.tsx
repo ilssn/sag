@@ -15,6 +15,7 @@ import {
   readUniverseView,
   type UniverseViewState,
 } from "@/lib/universe-events";
+import { ParticleGalaxy } from "@/components/features/particle-galaxy";
 
 const SpaceParticles = dynamic(
   () => import("@/components/features/space-particles").then((module) => module.SpaceParticles),
@@ -45,6 +46,12 @@ const SPARKLES = [
 export function SpaceBackdrop() {
   const reducedMotion = useReducedMotion();
   const initialViewRef = React.useRef(readUniverseView());
+  const ambientMotionPausedRef = React.useRef(
+    initialViewRef.current.mode === "detail" || initialViewRef.current.progress >= 0.18,
+  );
+  const [ambientMotionPaused, setAmbientMotionPaused] = React.useState(
+    ambientMotionPausedRef.current,
+  );
   const backdropRef = React.useRef<HTMLDivElement>(null);
   const cursorMeteorRef = React.useRef<HTMLSpanElement>(null);
   const viewProgress = useMotionValue(initialViewRef.current.progress);
@@ -55,15 +62,19 @@ export function SpaceBackdrop() {
     restDelta: 0.001,
   });
   const renderedProgress = reducedMotion ? viewProgress : springProgress;
-  const moonX = useTransform(renderedProgress, [0, 0.55, 1], ["0%", "22%", "68%"]);
-  const moonY = useTransform(renderedProgress, [0, 0.55, 1], ["0%", "-14%", "-52%"]);
-  const moonScale = useTransform(renderedProgress, [0, 0.55, 1], [1, 0.96, 0.82]);
-  const moonRotate = useTransform(renderedProgress, [0, 0.55, 1], [0, 2.5, 7]);
-  const moonOpacity = useTransform(renderedProgress, [0, 0.55, 1], [1, 0.58, 0.015]);
+  const galaxyX = useTransform(renderedProgress, [0, 0.55, 1], ["0%", "12%", "36%"]);
+  const galaxyY = useTransform(renderedProgress, [0, 0.55, 1], ["0%", "-8%", "-24%"]);
+  const galaxyScale = useTransform(renderedProgress, [0, 0.55, 1], [1, 0.98, 0.9]);
+  const galaxyOpacity = useTransform(renderedProgress, [0, 0.55, 1], [1, 0.72, 0.16]);
 
   React.useEffect(() => {
     const applyView = (view: UniverseViewState) => {
       viewProgress.set(view.progress);
+      const shouldPauseAmbient = view.mode === "detail" || view.progress >= 0.18;
+      if (shouldPauseAmbient !== ambientMotionPausedRef.current) {
+        ambientMotionPausedRef.current = shouldPauseAmbient;
+        setAmbientMotionPaused(shouldPauseAmbient);
+      }
       if (!backdropRef.current) return;
       backdropRef.current.dataset.universeView = view.mode;
       backdropRef.current.dataset.universeViewProgress = view.progress.toFixed(2);
@@ -85,26 +96,63 @@ export function SpaceBackdrop() {
     if (!field) return;
 
     let hideTimer: number | undefined;
+    let animationFrame: number | undefined;
     let hasPreviousPoint = false;
     let previousX = 0;
     let previousY = 0;
     let angle = -0.35;
+    let fieldBounds = field.getBoundingClientRect();
+    let pendingFrame: {
+      x: number;
+      y: number;
+      speed: number;
+      angle: number;
+    } | null = null;
+
+    const measureField = () => {
+      fieldBounds = field.getBoundingClientRect();
+    };
 
     const hideMeteor = () => {
-      meteor.dataset.active = "false";
+      if (meteor.dataset.active !== "false") meteor.dataset.active = "false";
       hasPreviousPoint = false;
+      pendingFrame = null;
+      if (animationFrame !== undefined) {
+        window.cancelAnimationFrame(animationFrame);
+        animationFrame = undefined;
+      }
       if (hideTimer) window.clearTimeout(hideTimer);
     };
 
+    const renderMeteor = () => {
+      animationFrame = undefined;
+      const frame = pendingFrame;
+      pendingFrame = null;
+      if (!frame) return;
+      meteor.style.transform = `translate3d(${frame.x}px, ${frame.y}px, 0) rotate(${frame.angle}rad)`;
+      meteor.style.setProperty(
+        "--cursor-meteor-tail",
+        `${Math.min(138, 46 + frame.speed * 3.4)}px`,
+      );
+      if (meteor.dataset.active !== "true") meteor.dataset.active = "true";
+      if (hideTimer) window.clearTimeout(hideTimer);
+      hideTimer = window.setTimeout(hideMeteor, 300);
+    };
+
     const handlePointerMove = (event: PointerEvent) => {
-      if (event.pointerType !== "mouse" || event.target !== field) {
+      const target = event.target;
+      const insideExploreUniverse =
+        target instanceof Element
+        && target.closest("[data-universe-mode='explore']") !== null;
+      const isMeteorSurface = target === field || insideExploreUniverse;
+
+      if (event.pointerType !== "mouse" || !isMeteorSurface) {
         hideMeteor();
         return;
       }
 
-      const bounds = field.getBoundingClientRect();
-      const x = event.clientX - bounds.left;
-      const y = event.clientY - bounds.top;
+      const x = event.clientX - fieldBounds.left;
+      const y = event.clientY - fieldBounds.top;
       const deltaX = hasPreviousPoint ? x - previousX : 0;
       const deltaY = hasPreviousPoint ? y - previousY : 0;
       const speed = Math.hypot(deltaX, deltaY);
@@ -115,22 +163,24 @@ export function SpaceBackdrop() {
       previousY = y;
       hasPreviousPoint = true;
 
-      meteor.style.setProperty("--cursor-meteor-x", `${x}px`);
-      meteor.style.setProperty("--cursor-meteor-y", `${y}px`);
-      meteor.style.setProperty("--cursor-meteor-angle", `${angle}rad`);
-      meteor.style.setProperty("--cursor-meteor-tail", `${Math.min(138, 46 + speed * 3.4)}px`);
-      meteor.dataset.active = "true";
-
-      if (hideTimer) window.clearTimeout(hideTimer);
-      hideTimer = window.setTimeout(hideMeteor, 300);
+      pendingFrame = { x, y, speed, angle };
+      if (animationFrame === undefined) {
+        animationFrame = window.requestAnimationFrame(renderMeteor);
+      }
     };
 
+    const resizeObserver = new ResizeObserver(measureField);
+    resizeObserver.observe(field);
+    window.addEventListener("resize", measureField, { passive: true });
     field.addEventListener("pointermove", handlePointerMove);
     field.addEventListener("pointerleave", hideMeteor);
 
     return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", measureField);
       field.removeEventListener("pointermove", handlePointerMove);
       field.removeEventListener("pointerleave", hideMeteor);
+      if (animationFrame !== undefined) window.cancelAnimationFrame(animationFrame);
       if (hideTimer) window.clearTimeout(hideTimer);
     };
   }, [reducedMotion]);
@@ -143,32 +193,20 @@ export function SpaceBackdrop() {
       data-universe-view-progress={initialViewRef.current.progress.toFixed(2)}
       aria-hidden
     >
-      <SpaceParticles reducedMotion={Boolean(reducedMotion)} />
+      <SpaceParticles reducedMotion={Boolean(reducedMotion) || ambientMotionPaused} />
       {!reducedMotion && (
         <span ref={cursorMeteorRef} className="sag-space-cursor-meteor" data-active="false" />
       )}
       <motion.span
-        className="sag-space-moon-orbit"
+        className="sag-space-galaxy-orbit"
         style={{
-          x: moonX,
-          y: moonY,
-          scale: moonScale,
-          rotate: moonRotate,
-          opacity: moonOpacity,
+          x: galaxyX,
+          y: galaxyY,
+          scale: galaxyScale,
+          opacity: galaxyOpacity,
         }}
       >
-        <span className="sag-space-moon">
-          <span className="sag-space-moon__crater sag-space-moon__crater--one" />
-          <span className="sag-space-moon__crater sag-space-moon__crater--two" />
-          <span className="sag-space-moon__crater sag-space-moon__crater--three" />
-          <span className="sag-space-moon__crater sag-space-moon__crater--four" />
-          <span className="sag-space-moon__crater sag-space-moon__crater--five" />
-          <span className="sag-space-moon__crater sag-space-moon__crater--six" />
-          <span className="sag-space-moon__crater sag-space-moon__crater--seven" />
-          <span className="sag-space-moon__crater sag-space-moon__crater--eight" />
-          <span className="sag-space-moon__crater sag-space-moon__crater--nine" />
-          <span className="sag-space-moon__crater sag-space-moon__crater--ten" />
-        </span>
+        <ParticleGalaxy reducedMotion={Boolean(reducedMotion) || ambientMotionPaused} />
       </motion.span>
       <span className="sag-space-dust" />
       <span className="sag-space-meteor sag-space-meteor--one" />

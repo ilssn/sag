@@ -1,11 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SearchResponse } from "./types";
 import {
   activationFromSearch,
+  dispatchUniversePatchReset,
+  dispatchUniverseSourceFocus,
   dispatchUniverseView,
   readUniverseView,
+  UNIVERSE_PATCH_RESET_EVENT,
+  UNIVERSE_SOURCE_FOCUS_EVENT,
 } from "./universe-events";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 function searchResponse(): SearchResponse {
   return {
@@ -92,5 +100,31 @@ describe("universe view state", () => {
       source_id: null,
       progress: 0,
     });
+  });
+
+  it("dispatches an explicit source focus when the compact workspace switches sources", () => {
+    const target = new EventTarget();
+    vi.stubGlobal("window", target);
+    let sourceId = "";
+    target.addEventListener(UNIVERSE_SOURCE_FOCUS_EVENT, (event) => {
+      sourceId = (event as CustomEvent<{ source_id: string }>).detail.source_id;
+    });
+
+    dispatchUniverseSourceFocus("source-b");
+
+    expect(sourceId).toBe("source-b");
+  });
+
+  it("invalidates snapshot-bound detail patches without changing graph state", () => {
+    const target = new EventTarget();
+    vi.stubGlobal("window", target);
+    let resets = 0;
+    target.addEventListener(UNIVERSE_PATCH_RESET_EVENT, () => {
+      resets += 1;
+    });
+
+    dispatchUniversePatchReset();
+
+    expect(resets).toBe(1);
   });
 });

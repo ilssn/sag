@@ -19,7 +19,7 @@ export default function ChatPage() {
   const { id } = useParams<{ id?: string | string[] }>();
   const pathname = usePathname();
   const router = useRouter();
-  const { agent, panelMode } = useApp();
+  const { agent, appMode } = useApp();
   const runtime = useConversationRuntime();
   const routeThreadId =
     (Array.isArray(id) ? id[0] : id) ?? pathname.match(/^\/chat\/([^/]+)/)?.[1] ?? null;
@@ -82,7 +82,7 @@ export default function ChatPage() {
       <ConversationPanel
         key={sessionId}
         sessionId={sessionId}
-        active={panelMode === "normal"}
+        active={appMode === "normal"}
         avatarNode={avatarNode}
         heroNode={heroNode}
         emptyTitle={agent.name}

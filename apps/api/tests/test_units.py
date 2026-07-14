@@ -1,7 +1,12 @@
 """快速单元测试：无需网络 / 引擎。"""
 
+from types import SimpleNamespace
+
+import pytest
+
 from sag_api.connectors import registry
 from sag_api.core.config import Settings, settings
+from sag_api.core.model_providers import get_model_provider, model_provider_catalog
 from sag_api.core.security import hash_password, verify_password
 from sag_api.enums import ConnectorKind
 from sag_api.generation.prompt import build_agent_messages, build_citations, build_messages
@@ -22,10 +27,19 @@ def test_connector_registry():
     assert any(c.meta.kind == ConnectorKind.FILE_UPLOAD for c in registry.all())
 
 
+def test_model_provider_registry_is_the_public_source_of_truth():
+    catalog = model_provider_catalog()
+    assert [provider["id"] for provider in catalog] == ["openai", "anthropic", "gemini"]
+    assert all("litellm_prefix" not in provider for provider in catalog)
+    assert get_model_provider("openai").route_model("qwen3.6-flash") == "openai/qwen3.6-flash"
+    assert get_model_provider("gemini").route_model("gemini/gemini-3.5-flash") == "gemini/gemini-3.5-flash"
+
+
 def test_build_engine_config_zero_infra():
     cfg = build_engine_config(settings)
     assert cfg.vector_provider == "lancedb"  # 默认零依赖向量后端
-    assert cfg.llm.model == settings.llm_model
+    assert cfg.llm.model == settings.routed_llm_model
+    assert cfg.llm.provider == "litellm"
     assert cfg.data_dir == settings.data_dir
 
 
@@ -58,29 +72,180 @@ def test_document_output_redacts_database_details():
     assert document.error == "解析服务暂时不可用"
 
 
-def test_llm_timeout_and_retries_reach_both_clients(monkeypatch):
+@pytest.mark.asyncio
+async def test_llm_timeout_and_retries_reach_unified_client(monkeypatch):
     from sag_api.generation import llm as generation_llm
 
     seen: dict = {}
 
-    class FakeAsyncOpenAI:
-        def __init__(self, **kwargs):
-            seen.update(kwargs)
+    async def fake_completion(**kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="pong"))])
 
-    monkeypatch.setattr(generation_llm, "AsyncOpenAI", FakeAsyncOpenAI)
+    monkeypatch.setattr(generation_llm, "_litellm_completion", fake_completion)
     configured = Settings(
         _env_file=None,
+        llm_api_key="provider-key",
         llm_timeout_ms=45_000,
         llm_max_retries=3,
     )
 
-    generation_llm.LLMClient(configured)
+    client = generation_llm.LLMClient(configured)
+    assert await client.complete([{"role": "user", "content": "ping"}]) == "pong"
+    assert seen["model"] == "openai/qwen3.6-flash"
     assert seen["timeout"] == 45
-    assert seen["max_retries"] == 3
+    assert seen["num_retries"] == 3
 
     engine = build_engine_config(configured)
+    assert engine.llm.provider == "litellm"
+    assert engine.llm.model == "openai/qwen3.6-flash"
     assert engine.llm.timeout == 45
     assert engine.llm.max_retries == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("provider", "model", "expected", "expected_temperature"),
+    [
+        ("openai", "qwen3.6-flash", "openai/qwen3.6-flash", 0.3),
+        ("anthropic", "claude-sonnet-5", "anthropic/claude-sonnet-5", 1.0),
+        ("gemini", "gemini/gemini-3.5-flash", "gemini/gemini-3.5-flash", 0.3),
+    ],
+)
+async def test_generation_providers_use_one_litellm_route(monkeypatch, provider, model, expected, expected_temperature):
+    from sag_api.generation import llm as generation_llm
+
+    seen: dict = {}
+
+    async def fake_completion(**kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="pong"))])
+
+    monkeypatch.setattr(generation_llm, "_litellm_completion", fake_completion)
+    configured = Settings(
+        _env_file=None,
+        llm_provider=provider,
+        llm_base_url=None,
+        llm_api_key="provider-key",
+        llm_model=model,
+        llm_timeout_ms=45_000,
+        llm_max_retries=3,
+    )
+
+    client = generation_llm.LLMClient(configured)
+    assert await client.complete([{"role": "user", "content": "ping"}]) == "pong"
+    assert seen["model"] == expected
+    assert seen["api_key"] == "provider-key"
+    assert seen["temperature"] == expected_temperature
+    assert seen["timeout"] == 45
+    assert seen["num_retries"] == 3
+    assert "api_base" not in seen
+
+
+@pytest.mark.asyncio
+async def test_native_provider_stream_keeps_text_usage_and_tool_calls(monkeypatch):
+    from sag_agent import AgentMessage, CancellationToken, ModelRequest
+    from sag_api.generation import llm as generation_llm
+
+    class ProviderStream:
+        closed = False
+
+        async def __aiter__(self):
+            yield SimpleNamespace(
+                usage={"prompt_tokens": 7, "completion_tokens": 3},
+                choices=[],
+            )
+            yield SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        finish_reason=None,
+                        delta=SimpleNamespace(content="先查询", tool_calls=[]),
+                    )
+                ]
+            )
+            yield SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        finish_reason="tool_calls",
+                        delta=SimpleNamespace(
+                            content=None,
+                            tool_calls=[
+                                SimpleNamespace(
+                                    index=0,
+                                    id="call-1",
+                                    function=SimpleNamespace(
+                                        name="search_context",
+                                        arguments={"query": "SAG"},
+                                    ),
+                                )
+                            ],
+                        ),
+                    )
+                ]
+            )
+
+        async def close(self):
+            self.closed = True
+
+    stream = ProviderStream()
+    seen: dict = {}
+
+    async def fake_completion(**kwargs):
+        seen.update(kwargs)
+        return stream
+
+    monkeypatch.setattr(generation_llm, "_litellm_completion", fake_completion)
+    client = generation_llm.LLMClient(
+        Settings(
+            _env_file=None,
+            llm_provider="gemini",
+            llm_base_url=None,
+            llm_api_key="gemini-key",
+            llm_model="gemini-3.5-flash",
+        )
+    )
+    request = ModelRequest(
+        messages=(AgentMessage(role="user", content="查询 SAG"),),
+        tools=(
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_context",
+                    "description": "search",
+                    "parameters": {"type": "object"},
+                },
+            },
+        ),
+        tool_choice="required",
+        turn=2,
+    )
+
+    chunks = [chunk async for chunk in client.stream_turn(request, CancellationToken())]
+    assert seen["model"] == "gemini/gemini-3.5-flash"
+    assert seen["tool_choice"] == "required"
+    assert chunks[0].usage is not None and chunks[0].usage.total_tokens == 10
+    assert chunks[1].text_delta == "先查询"
+    assert chunks[-1].finish_reason == "tool_calls"
+    assert chunks[-1].tool_calls[0].name == "search_context"
+    assert chunks[-1].tool_calls[0].arguments == {"query": "SAG"}
+    assert stream.closed is True
+
+
+def test_native_generation_key_is_not_reused_for_openai_embeddings():
+    configured = Settings(
+        _env_file=None,
+        llm_provider="anthropic",
+        llm_api_key="anthropic-secret",
+        llm_model="claude-sonnet-5",
+        embedding_api_key=None,
+    )
+
+    assert configured.effective_embedding_api_key is None
+    engine = build_engine_config(configured)
+    assert engine.llm.provider == "litellm"
+    assert engine.llm.model == "anthropic/claude-sonnet-5"
+    assert engine.llm.temperature == 1.0
+    assert engine.embedding.api_key == "not-configured"
 
 
 def test_retrieved_section_from_dict():

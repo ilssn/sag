@@ -17,6 +17,7 @@ from sag_api.core.config import Settings
 from sag_api.core.config import settings as _settings
 from sag_api.core.errors import ConfigurationError
 from sag_api.core.logging import get_logger
+from sag_api.core.model_providers import get_model_provider
 from sag_api.db.models import Setting
 from sag_api.enums import SEARCH_STRATEGIES, normalize_search_strategy
 
@@ -28,6 +29,7 @@ log = get_logger("settings")
 # 允许运行期覆盖的字段（值已由请求 schema 校验/转型）
 _FIELDS = frozenset(
     {
+        "llm_provider",
         "llm_base_url",
         "llm_api_key",
         "llm_model",
@@ -53,23 +55,24 @@ _FIELDS = frozenset(
     }
 )
 _SECRET_FIELDS = frozenset({"llm_api_key", "embedding_api_key", "mineru_api_key"})
-_NULLABLE_FIELDS = frozenset(
-    {"llm_base_url", "embedding_base_url", "embedding_dimensions", "mineru_base_url"}
-)
+_NULLABLE_FIELDS = frozenset({"llm_base_url", "embedding_base_url", "embedding_dimensions", "mineru_base_url"})
+
+_OPENAI_COMPATIBLE = get_model_provider("openai")
 
 QUICK_SETUP_302 = {
-    "llm_base_url": "https://api.302.ai/v1",
-    "llm_model": "qwen3.6-flash",
-    "llm_temperature": 0.3,
+    "llm_provider": _OPENAI_COMPATIBLE.id,
+    "llm_base_url": _OPENAI_COMPATIBLE.default_base_url,
+    "llm_model": _OPENAI_COMPATIBLE.default_model,
+    "llm_temperature": _OPENAI_COMPATIBLE.default_temperature,
     "llm_max_tokens": 2048,
-    "llm_context_window": 128_000,
+    "llm_context_window": _OPENAI_COMPATIBLE.default_context_window,
     "llm_timeout_ms": 60_000,
     "llm_max_retries": 2,
     "embedding_model": "Qwen/Qwen3-Embedding-4B",
-    "embedding_base_url": "https://api.302.ai/v1",
+    "embedding_base_url": "https://api.302ai.cn/v1",
     "embedding_dimensions": 1024,
     "document_parser": "auto",
-    "mineru_base_url": "https://api.302.ai",
+    "mineru_base_url": "https://api.302ai.cn",
     "mineru_version": "2.5",
     "document_extract_concurrency": 5,
     "document_chunk_max_tokens": 1_000,
@@ -79,16 +82,23 @@ QUICK_SETUP_302 = {
     "sag_language": "zh",
 }
 
+_LEGACY_302_BASE_URLS = {
+    "https://api.302.ai": "https://api.302ai.cn",
+    "https://api.302.ai/v1": "https://api.302ai.cn/v1",
+}
+
 
 async def _load_row(session: AsyncSession, key: str = _KEY) -> Setting | None:
-    return await session.scalar(
-        select(Setting).where(Setting.scope == _SCOPE, Setting.key == key)
-    )
+    return await session.scalar(select(Setting).where(Setting.scope == _SCOPE, Setting.key == key))
 
 
 def _normalize_overrides(overrides: dict) -> dict:
     """清理持久化配置，确保已下线或非法策略不会进入运行时。"""
     normalized = dict(overrides)
+    for field in ("llm_base_url", "embedding_base_url", "mineru_base_url"):
+        value = normalized.get(field)
+        if isinstance(value, str):
+            normalized[field] = _LEGACY_302_BASE_URLS.get(value.rstrip("/"), value)
     strategy = normalized.get("search_strategy")
     if strategy == "atomic":
         normalized["search_strategy"] = normalize_search_strategy(strategy)
@@ -109,9 +119,7 @@ async def model_setup_status(session: AsyncSession) -> dict[str, bool]:
     """判断是否需要首次模型配置，不受运行期 DB 覆盖后的 settings 单例干扰。"""
     row = await _load_row(session)
     environment_configured = Settings().llm_configured
-    database_configured = bool(
-        row and isinstance(row.value, dict) and row.value.get("llm_api_key")
-    )
+    database_configured = bool(row and isinstance(row.value, dict) and row.value.get("llm_api_key"))
     return {
         "required": not environment_configured and not database_configured,
         "environment_configured": environment_configured,
@@ -138,11 +146,7 @@ async def apply_startup_overrides(session_factory: async_sessionmaker) -> None:
             await session.commit()
         apply_overrides(_settings, overrides)
         preferences = await _load_row(session, _PREFERENCES_KEY)
-        preference_values = (
-            dict(preferences.value)
-            if preferences and isinstance(preferences.value, dict)
-            else {}
-        )
+        preference_values = dict(preferences.value) if preferences and isinstance(preferences.value, dict) else {}
         timezone = preference_values.get("timezone")
         if isinstance(timezone, str):
             # Stored values were validated on write. Settings assignment is kept
@@ -158,6 +162,7 @@ async def apply_startup_overrides(session_factory: async_sessionmaker) -> None:
 def effective_model_config() -> dict:
     """当前生效的模型配置（读 settings 单例；密钥脱敏为 *_set 布尔）。"""
     return {
+        "llm_provider": _settings.llm_provider,
         "llm_base_url": _settings.llm_base_url,
         "llm_model": _settings.llm_model,
         "llm_temperature": _settings.llm_temperature,
@@ -230,6 +235,8 @@ async def save_model_config(session: AsyncSession, patch: dict) -> dict:
             continue
         stored[key] = value
 
+    stored = _normalize_overrides(stored)
+
     if row is None:
         session.add(Setting(scope=_SCOPE, key=_KEY, value=stored))
     else:
@@ -264,12 +271,11 @@ async def save_302_mineru_setup(session: AsyncSession) -> dict:
         host = (parsed.hostname or "").lower()
         if host not in {"api.302.ai", "api.302ai.cn"} or not api_key:
             continue
-        root = f"https://{host}"
         return await save_model_config(
             session,
             {
                 "document_parser": "auto",
-                "mineru_base_url": root,
+                "mineru_base_url": "https://api.302ai.cn",
                 "mineru_api_key": api_key,
                 "mineru_version": "2.5",
             },

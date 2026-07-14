@@ -22,8 +22,10 @@ const MAX_FACE_PRESETS = 24;
 
 export function PetAppearanceSettings({
   agentFace = DEFAULT_AGENT_AVATAR,
+  compact = false,
 }: {
   agentFace?: string;
+  compact?: boolean;
 }) {
   const t = useTranslations("PetAppearance");
   const { preferences, update, reset } = usePetAppearancePreferences();
@@ -61,11 +63,24 @@ export function PetAppearanceSettings({
         title={t("title")}
         description={t("description")}
         footer={
-          <div className="flex items-center justify-between gap-3">
+          <div
+            className={cn(
+              "flex gap-3",
+              compact
+                ? "flex-col items-stretch"
+                : "items-center justify-between",
+            )}
+          >
             <p className="text-xs text-muted-foreground">
               {t("savedLocally")}
             </p>
-            <Button type="button" variant="outline" size="sm" onClick={reset}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className={cn(compact && "self-end")}
+              onClick={reset}
+            >
               <RotateCcw />
               {t("reset")}
             </Button>
@@ -76,7 +91,12 @@ export function PetAppearanceSettings({
           title={t("face.title")}
           description={t("face.description")}
         >
-          <div className="grid gap-4 sm:grid-cols-[5rem_minmax(0,1fr)] sm:items-start">
+          <div
+            className={cn(
+              "grid gap-4",
+              !compact && "sm:grid-cols-[5rem_minmax(0,1fr)] sm:items-start",
+            )}
+          >
             <div className="flex justify-center rounded-lg border bg-muted/30 py-3">
               <PetHeadAvatar face={displayFace} size="lg" />
             </div>
@@ -130,7 +150,7 @@ export function PetAppearanceSettings({
           description={t("presets.description")}
         >
           {preferences.facePresets.length > 0 ? (
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className={cn("grid gap-2", !compact && "sm:grid-cols-2")}>
               {preferences.facePresets.map((preset, index) => (
                 <div
                   key={preset}
@@ -185,7 +205,12 @@ export function PetAppearanceSettings({
           title={t("motion.title")}
           description={t("motion.description")}
         >
-          <div className="grid gap-x-8 gap-y-5 sm:grid-cols-2">
+          <div
+            className={cn(
+              "grid gap-x-8 gap-y-5",
+              !compact && "sm:grid-cols-2",
+            )}
+          >
             <PreferenceSlider
               label={t("motion.size")}
               value={`${Math.round(preferences.size * 100)}%`}
@@ -222,7 +247,7 @@ export function PetAppearanceSettings({
         <SettingsRow
           title={t("reduceMotion.title")}
           description={t("reduceMotion.description")}
-          layout="inline"
+          layout={compact ? "stacked" : "inline"}
         >
           <Switch
             checked={preferences.reduceMotion}

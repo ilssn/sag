@@ -10,9 +10,11 @@ import { clientErrorMessage } from "../i18n/client-errors";
 export const UNIVERSE_ACTIVATE_EVENT = "sag:universe-activate";
 export const UNIVERSE_RESET_EVENT = "sag:universe-reset";
 export const UNIVERSE_FOCUS_EVENT = "sag:universe-focus";
+export const UNIVERSE_SOURCE_FOCUS_EVENT = "sag:universe-source-focus";
 export const UNIVERSE_DETAIL_EVENT = "sag:universe-detail";
 export const UNIVERSE_ASK_EVENT = "sag:universe-ask";
 export const UNIVERSE_PATCH_EVENT = "sag:universe-patch";
+export const UNIVERSE_PATCH_RESET_EVENT = "sag:universe-patch-reset";
 export const UNIVERSE_VIEW_EVENT = "sag:universe-view";
 
 export interface UniverseViewState {
@@ -175,6 +177,15 @@ export function dispatchUniverseFocus(
   );
 }
 
+export function dispatchUniverseSourceFocus(sourceId: string) {
+  if (typeof window === "undefined" || !sourceId) return;
+  window.dispatchEvent(
+    new CustomEvent(UNIVERSE_SOURCE_FOCUS_EVENT, {
+      detail: { source_id: sourceId },
+    }),
+  );
+}
+
 export function dispatchUniverseDetail(
   kind: "event" | "entity",
   id: string,
@@ -210,6 +221,12 @@ export function dispatchUniversePatch(patch: UniverseGraphPatch) {
   window.dispatchEvent(
     new CustomEvent<UniverseGraphPatch>(UNIVERSE_PATCH_EVENT, { detail: patch }),
   );
+}
+
+/** Invalidates snapshot-bound detail fallbacks without changing graph epoch or camera. */
+export function dispatchUniversePatchReset() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(UNIVERSE_PATCH_RESET_EVENT));
 }
 
 export function takePendingUniverseDetail() {

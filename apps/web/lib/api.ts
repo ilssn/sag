@@ -13,6 +13,7 @@ import type {
   MessagePage,
   ModelConfig,
   ModelConfigPatch,
+  ModelProviderSpec,
   ModelSetupStatus,
   KnowledgeMcpDescriptor,
   Persona,
@@ -25,7 +26,6 @@ import type {
   TokenResponse,
   User,
   UniverseManifest,
-  UniverseActivationSeed,
   UniverseGraphPatch,
   UniverseTimelineSlice,
   UniverseNodeDetail,
@@ -374,6 +374,8 @@ export const api = {
 
   // 模型与检索配置
   getModelConfig: () => request<ModelConfig>("/api/v1/system/model-config"),
+  getModelProviders: () =>
+    request<ModelProviderSpec[]>("/api/v1/system/model-providers"),
   modelSetupStatus: () => request<ModelSetupStatus>("/api/v1/system/model-setup"),
   quickSetup302: (apiKey: string) =>
     request<{ config: ModelConfig; capabilities: Capabilities }>(
@@ -393,9 +395,10 @@ export const api = {
       "/api/v1/system/model-config/mineru/302",
       { method: "POST" },
     ),
-  testModelConfig: () =>
+  testModelConfig: (b?: ModelConfigPatch) =>
     request<{ ok: boolean; message: string }>("/api/v1/system/model-config/test", {
       method: "POST",
+      body: b ? JSON.stringify(b) : undefined,
     }),
 
   // 信源
@@ -539,7 +542,7 @@ export const api = {
     }),
   streamGlobalSearch,
 
-  // 知识宇宙：统计轮廓 + 有界激活
+  // 知识宇宙：统计轮廓 + 原子时间线与显式探索
   universeManifest: () => request<UniverseManifest>("/api/v1/universe/manifest"),
   universeNode: (kind: "event" | "entity", id: string, sourceId?: string | null) => {
     if (!sourceId) {
@@ -555,6 +558,7 @@ export const api = {
     node_id: string;
     limit?: number;
     cursor?: string | null;
+    snapshot_id?: string | null;
     after?: string | null;
     before?: string | null;
   }, signal?: AbortSignal) =>
@@ -563,25 +567,13 @@ export const api = {
       body: JSON.stringify(body),
       signal,
     }),
-  universeActivate: (body: {
-    epoch: number;
-    source_id: string;
-    category?: string | null;
-    limit?: number;
-    cursor?: string | null;
-    after?: string | null;
-    before?: string | null;
-  }, signal?: AbortSignal) =>
-    request<UniverseActivationSeed>("/api/v1/universe/activate", {
-      method: "POST",
-      body: JSON.stringify(body),
-      signal,
-    }),
   universeTimeline: (body: {
     epoch: number;
     source_id: string;
     limit?: number;
+    direction?: "older" | "newer";
     cursor?: string | null;
+    snapshot_id?: string | null;
   }, signal?: AbortSignal) =>
     request<UniverseTimelineSlice>("/api/v1/universe/timeline", {
       method: "POST",
@@ -605,8 +597,12 @@ export const api = {
 
   // 检索结果关联实体
   listEntities: (sid: string) => request<Entity[]>(`/api/v1/sources/${sid}/entities`),
-  getSourceGraph: (sid: string, signal?: AbortSignal) =>
-    request<SourceGraphResponse>(`/api/v1/sources/${sid}/graph`, { signal }),
+  getSourceGraph: (sid: string, limit = 1_000, signal?: AbortSignal) =>
+    request<SourceGraphResponse>(
+      `/api/v1/sources/${sid}/graph` +
+        `?document_limit=${limit}&event_limit=${limit}&entity_limit=${limit}`,
+      { signal },
+    ),
 
   // 近期动态（搜索页时间线）
   getActivity: () => request<ActivityItem[]>("/api/v1/activity"),

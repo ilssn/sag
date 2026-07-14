@@ -38,9 +38,9 @@ from sag_api.sag.dto import (
     SearchOutcome,
     SourceGraphInfo,
     UniverseExpansionInfo,
-    UniverseSeedInfo,
     UniverseSourceStatsInfo,
     UniverseTimeBucketInfo,
+    UniverseTimelineBundleInfo,
     UniverseTimelineInfo,
 )
 from sag_api.sag.errors import map_sag_errors
@@ -92,7 +92,7 @@ def _decode_universe_cursor(value: str, secret: str) -> dict[str, Any]:
         payload = json.loads(decoded.decode("utf-8"))
     except (ValueError, UnicodeDecodeError, json.JSONDecodeError, TypeError) as error:
         raise ValueError("invalid universe cursor") from error
-    if not isinstance(payload, dict) or payload.get("v") != 1:
+    if not isinstance(payload, dict) or payload.get("v") != 2:
         raise ValueError("invalid universe cursor")
     return payload
 
@@ -424,6 +424,28 @@ class EngineManager:
                     await self._evict_lru(keep=source_config_id)
         return slot
 
+    async def _ensure_read_runtime(
+        self,
+        sources_by_config: dict[str, Source | None],
+    ) -> None:
+        """Initialize shared storage once without requiring one engine per read scope.
+
+        Vector tables and the relational event graph are shared across source
+        partitions. Once any live slot has initialized that runtime, read-only
+        repository queries can filter by ``source_config_id`` directly. This avoids
+        blocking unrelated searches behind a long-running document extraction.
+        """
+
+        if any(not slot.closing for slot in self._slots.values()):
+            return
+        for source_config_id in sorted(sources_by_config):
+            if source_config_id.strip():
+                await self._slot(
+                    source_config_id,
+                    sources_by_config.get(source_config_id),
+                )
+                return
+
     async def _evict_lru(self, *, keep: str) -> None:
         """超过缓存上限时逐出最久未用、且当前空闲（未持锁）的引擎槽。
 
@@ -586,11 +608,15 @@ class EngineManager:
     ) -> SearchOutcome:
         """单次检索（带每源时限）。超时抛 asyncio.TimeoutError。"""
         timeout = max(1.0, self._settings.search_source_timeout)
-        with map_sag_errors():
-            async with self.use(source_config_id, source) as engine:
-                result = await asyncio.wait_for(
-                    engine.search(query, strategy=strategy, top_k=top_k), timeout
-                )
+
+        async def run() -> Any:
+            # The timeout must include waiting for the per-source lock. Otherwise
+            # concurrent searches can queue forever before the timed region starts.
+            with map_sag_errors():
+                async with self.use(source_config_id, source) as engine:
+                    return await engine.search(query, strategy=strategy, top_k=top_k)
+
+        result = await asyncio.wait_for(run(), timeout)
         return SearchOutcome.from_result(result)
 
     async def search(
@@ -648,6 +674,38 @@ class EngineManager:
         per_source_k = max(top_k, 4)
         requested_sources = len(targets)
         targets = targets[: self._settings.search_source_candidate_limit]
+
+        if strategy == "vector" and targets:
+            try:
+                return await self._search_chunk_vectors(
+                    targets,
+                    query,
+                    top_k=top_k,
+                    requested_sources=requested_sources,
+                )
+            except asyncio.CancelledError:
+                raise
+            except TimeoutError:
+                # The lexical branch in ``retrieve_relevant_sections`` is already
+                # running in parallel. Return control to it instead of paying a
+                # second timeout in the legacy per-source vector path.
+                log.warning("批量块向量召回超时，保留并行词法结果")
+                return SearchOutcome(
+                    query=query,
+                    sections=[],
+                    stats={
+                        "sources": len(targets),
+                        "sources_requested": requested_sources,
+                        "source_limit_applied": requested_sources > len(targets),
+                        "candidates": 0,
+                        "chunk_recall": "batch-vector-timeout",
+                    },
+                )
+            except Exception as error:  # noqa: BLE001
+                # Keep the established per-source engine path as a compatibility
+                # fallback for storage providers that cannot do a filtered batch kNN.
+                log.warning("批量块向量召回失败，回退逐信源检索：%s", error)
+
         semaphore = asyncio.Semaphore(self._settings.search_source_concurrency)
 
         async def _one(scid: str, source: Source | None):
@@ -694,6 +752,187 @@ class EngineManager:
             },
         )
 
+    async def _search_chunk_vectors(
+        self,
+        targets: list[tuple[str, Source | None]],
+        query: str,
+        *,
+        top_k: int,
+        requested_sources: int,
+    ) -> SearchOutcome:
+        """Recall chunks across all selected sources with one query embedding."""
+
+        sources_by_config = {source_config_id: source for source_config_id, source in targets}
+        source_config_ids = list(sources_by_config)
+        await self._ensure_read_runtime(sources_by_config)
+
+        from zleap.sag.core.storage.client import get_es_client
+        from zleap.sag.core.storage.repositories.source_chunk_repository import (
+            SourceChunkRepository,
+        )
+        from zleap.sag.modules.load.processor import DocumentProcessor
+
+        async def recall() -> list[dict[str, Any]]:
+            query_vector = await DocumentProcessor().generate_embedding(query)
+            repository = SourceChunkRepository(get_es_client())
+            return await repository.search_similar_by_content(
+                query_vector=query_vector,
+                k=top_k,
+                source_config_ids=source_config_ids,
+            )
+
+        hits = await asyncio.wait_for(
+            recall(),
+            timeout=max(1.0, self._settings.search_source_timeout),
+        )
+        allowed_sources = set(source_config_ids)
+        sections: dict[tuple[str, str], RetrievedSection] = {}
+        loose: list[RetrievedSection] = []
+        for hit in hits:
+            source_config_id = str(hit.get("source_config_id") or "").strip()
+            if source_config_id not in allowed_sources:
+                continue
+            try:
+                score = float(hit.get("_score") or hit.get("score") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(score):
+                continue
+            section = RetrievedSection(
+                chunk_id=str(hit.get("chunk_id") or "").strip() or None,
+                heading=str(hit.get("heading") or "").strip(),
+                content=str(hit.get("content") or "").strip(),
+                score=max(0.0, min(1.0, score)),
+                rank=int(hit.get("rank") or 0),
+                source_id=str(hit.get("source_id") or "").strip() or None,
+                source_config_id=source_config_id,
+            )
+            if not section.chunk_id:
+                loose.append(section)
+                continue
+            key = (source_config_id, section.chunk_id)
+            previous = sections.get(key)
+            if previous is None or section.score > previous.score:
+                sections[key] = section
+
+        merged = sorted(
+            [*sections.values(), *loose],
+            key=lambda section: (-section.score, section.source_config_id or "", section.chunk_id or ""),
+        )[:top_k]
+        return SearchOutcome(
+            query=query,
+            sections=merged,
+            stats={
+                "sources": len(targets),
+                "sources_requested": requested_sources,
+                "source_limit_applied": requested_sources > len(targets),
+                "candidates": len(sections) + len(loose),
+                "chunk_recall": "batch-vector",
+            },
+        )
+
+    async def search_event_scores(
+        self,
+        query: str,
+        sources_by_config: dict[str, Source | None],
+        *,
+        limit: int | None = None,
+    ) -> dict[tuple[str, str], float]:
+        """Recall extracted events directly from their title/content vectors.
+
+        Chunk retrieval remains the evidence path used by answers and citations. This
+        independent event path prevents long documents with sparse event-bearing
+        chunks from degrading into chunk-only search results.
+        """
+
+        query = query.strip()
+        source_config_ids = sorted(
+            source_config_id.strip()
+            for source_config_id in sources_by_config
+            if source_config_id.strip()
+        )
+        if not query or not source_config_ids:
+            return {}
+
+        bounded_limit = max(
+            1,
+            min(int(limit or self._settings.search_top_k), 50),
+        )
+        candidate_limit = min(200, max(bounded_limit * 4, 24))
+
+        await self._ensure_read_runtime(sources_by_config)
+
+        from zleap.sag.core.storage.client import get_es_client
+        from zleap.sag.core.storage.repositories.event_repository import (
+            EventVectorRepository,
+        )
+        from zleap.sag.modules.load.processor import DocumentProcessor
+
+        async def recall_vectors() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+            query_vector = await DocumentProcessor().generate_embedding(query)
+            repository = EventVectorRepository(get_es_client())
+            return await asyncio.gather(
+                repository.search_similar_by_title(
+                    query_vector=query_vector,
+                    k=candidate_limit,
+                    source_config_ids=source_config_ids,
+                ),
+                repository.search_similar_by_content(
+                    query_vector=query_vector,
+                    k=candidate_limit,
+                    source_config_ids=source_config_ids,
+                ),
+            )
+
+        title_hits, content_hits = await asyncio.wait_for(
+            recall_vectors(),
+            timeout=max(1.0, self._settings.search_source_timeout),
+        )
+
+        allowed_sources = set(source_config_ids)
+        scores: dict[tuple[str, str], float] = {}
+        channels: dict[tuple[str, str], int] = {}
+        for channel, weight, hits in (
+            (1, 1.0, title_hits),
+            (2, 0.95, content_hits),
+        ):
+            for hit in hits:
+                event_id = str(hit.get("event_id") or hit.get("id") or "").strip()
+                source_config_id = str(hit.get("source_config_id") or "").strip()
+                if not event_id or source_config_id not in allowed_sources:
+                    continue
+                try:
+                    score_value = hit.get("_score")
+                    if score_value is None:
+                        score_value = hit.get("score", 0.0)
+                    raw_score = float(score_value or 0.0)
+                except (TypeError, ValueError):
+                    continue
+                if not math.isfinite(raw_score):
+                    continue
+                key = (source_config_id, event_id)
+                score = max(0.0, min(1.0, raw_score)) * weight
+                scores[key] = max(scores.get(key, 0.0), score)
+                channels[key] = channels.get(key, 0) | channel
+
+        if not scores:
+            return {}
+
+        # Agreement between title and content vectors is a small confidence signal,
+        # while the raw cosine score remains the dominant ordering factor.
+        for key, channel_mask in channels.items():
+            if channel_mask == 3:
+                scores[key] = min(1.0, scores[key] + 0.03)
+
+        ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0]))
+        strongest = ranked[0][1]
+        relevance_floor = max(0.20, strongest * 0.55)
+        return {
+            key: round(score, 6)
+            for key, score in ranked[:bounded_limit]
+            if score >= relevance_floor
+        }
+
     async def graph_for_sections(
         self,
         sections: list[RetrievedSection],
@@ -702,11 +941,29 @@ class EngineManager:
         event_limit: int = 50,
         entity_limit: int = 48,
         edge_limit: int = 96,
+        event_scores: dict[tuple[str, str], float] | None = None,
     ) -> SourceGraphInfo:
-        """把命中分块映射回真实事件—实体关系，并保持检索相关度顺序。"""
+        """Build a graph from direct event hits plus events attached to evidence chunks."""
         bounded_event_limit = max(1, min(int(event_limit), 100))
         bounded_entity_limit = max(1, min(int(entity_limit), 100))
         bounded_edge_limit = max(1, min(int(edge_limit), 300))
+        direct_event_scores: dict[tuple[str, str], float] = {}
+        for (raw_source_config_id, raw_event_id), raw_score in (event_scores or {}).items():
+            source_config_id = raw_source_config_id.strip()
+            event_id = raw_event_id.strip()
+            if not source_config_id or not event_id:
+                continue
+            try:
+                score = float(raw_score)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(score):
+                direct_event_scores[(source_config_id, event_id)] = max(
+                    0.0, min(1.0, score)
+                )
+        direct_event_ids_by_config: dict[str, set[str]] = {}
+        for source_config_id, event_id in direct_event_scores:
+            direct_event_ids_by_config.setdefault(source_config_id, set()).add(event_id)
         chunk_scores: dict[tuple[str, str], float] = {}
         chunk_ids_by_config: dict[str, set[str]] = {}
         for section in sections:
@@ -718,14 +975,15 @@ class EngineManager:
             chunk_scores[key] = max(chunk_scores.get(key, 0.0), section.score)
             chunk_ids_by_config.setdefault(source_config_id, set()).add(chunk_id)
 
-        if not chunk_ids_by_config:
+        requested_config_ids = set(chunk_ids_by_config) | set(direct_event_ids_by_config)
+        if not requested_config_ids:
             return SourceGraphInfo()
 
-        await asyncio.gather(
-            *(
-                self._slot(source_config_id, sources_by_config.get(source_config_id))
-                for source_config_id in chunk_ids_by_config
-            )
+        await self._ensure_read_runtime(
+            {
+                source_config_id: sources_by_config.get(source_config_id)
+                for source_config_id in requested_config_ids
+            }
         )
 
         from sqlalchemy import and_, func, or_, select
@@ -739,7 +997,23 @@ class EngineManager:
             )
             for source_config_id, chunk_ids in chunk_ids_by_config.items()
         ]
-        candidate_limit = min(200, max(bounded_event_limit * 4, bounded_event_limit))
+        event_filters = [
+            and_(
+                SourceEvent.source_config_id == source_config_id,
+                SourceEvent.id.in_(event_ids),
+            )
+            for source_config_id, event_ids in direct_event_ids_by_config.items()
+        ]
+        candidate_filters = [*section_filters, *event_filters]
+        candidate_limit = min(
+            200,
+            max(
+                bounded_event_limit * 4,
+                bounded_event_limit,
+                len(direct_event_scores) * 2,
+                len(chunk_scores) * 8 + len(direct_event_scores),
+            ),
+        )
         per_chunk_limit = max(
             1,
             min(8, math.ceil(candidate_limit / max(1, len(chunk_scores)))),
@@ -763,18 +1037,25 @@ class EngineManager:
                 chunk_rank,
             )
             .where(
-                or_(*section_filters),
+                or_(*candidate_filters),
                 (SourceEvent.status.is_(None) | (SourceEvent.status != "DELETED")),
             )
             .subquery()
         )
+        direct_event_ids = {event_id for _source_config_id, event_id in direct_event_scores}
+        rank_condition = ranked_events.c.chunk_rank <= per_chunk_limit
+        if direct_event_ids:
+            rank_condition = or_(
+                rank_condition,
+                ranked_events.c.id.in_(direct_event_ids),
+            )
         sf = get_session_factory()
         async with sf() as session:
             event_rows = (
                 (
                     await session.execute(
                         select(ranked_events)
-                        .where(ranked_events.c.chunk_rank <= per_chunk_limit)
+                        .where(rank_condition)
                         .order_by(
                             ranked_events.c.chunk_rank.asc(),
                             ranked_events.c.rank.asc(),
@@ -792,6 +1073,22 @@ class EngineManager:
                 events_by_chunk.setdefault(key, []).append(row)
             for rows in events_by_chunk.values():
                 rows.sort(key=lambda row: (int(row["rank"] or 0), row["id"]))
+
+            direct_rows = sorted(
+                (
+                    row
+                    for row in event_rows
+                    if (row["source_config_id"], row["id"]) in direct_event_scores
+                ),
+                key=lambda row: (
+                    -direct_event_scores[(row["source_config_id"], row["id"])],
+                    int(row["rank"] or 0),
+                    row["id"],
+                ),
+            )
+            selected_direct_keys = {
+                (row["source_config_id"], row["id"]) for row in direct_rows
+            }
 
             # 每个高相关分块先贡献一个事件，再进入下一轮，避免单个长分块占满结果。
             ordered_chunk_keys = sorted(
@@ -815,7 +1112,15 @@ class EngineManager:
             # 重复上传或重叠分块会抽取出同名事件；同一信源只保留相关度最高的一条。
             seen_titles: set[tuple[str, str]] = set()
             event_rows = []
-            for row in balanced_rows:
+            for row in [
+                *direct_rows,
+                *(
+                    row
+                    for row in balanced_rows
+                    if (row["source_config_id"], row["id"])
+                    not in selected_direct_keys
+                ),
+            ]:
                 normalized_title = re.sub(r"\s+", "", str(row["title"] or "")).casefold()
                 title_key = (row["source_config_id"], normalized_title or row["id"])
                 if title_key in seen_titles:
@@ -836,9 +1141,12 @@ class EngineManager:
                     parent_id=row["parent_id"],
                     chunk_id=row["chunk_id"],
                     start_time=row["start_time"],
-                    score=chunk_scores.get(
-                        (row["source_config_id"], row["chunk_id"] or ""),
-                        0.0,
+                    score=direct_event_scores.get(
+                        (row["source_config_id"], row["id"]),
+                        chunk_scores.get(
+                            (row["source_config_id"], row["chunk_id"] or ""),
+                            0.0,
+                        ),
                     ),
                 )
                 for row in event_rows
@@ -865,7 +1173,7 @@ class EngineManager:
                     .join(Entity, Entity.id == EventEntity.entity_id)
                     .where(
                         EventEntity.event_id.in_(event_ids),
-                        Entity.source_config_id.in_(chunk_ids_by_config),
+                        Entity.source_config_id.in_(requested_config_ids),
                     )
                     .order_by(EventEntity.weight.desc(), EventEntity.created_time.asc())
                     .limit(association_limit)
@@ -962,16 +1270,17 @@ class EngineManager:
         source_ids: list[str],
         *,
         source: Source | None = None,
-        event_limit: int = 60,
-        entity_limit: int = 48,
+        event_limit: int = 1_000,
+        entity_limit: int = 1_000,
+        expected_event_count: int | None = None,
     ) -> SourceGraphInfo:
-        """读取一个有界、按文档均衡的事件—实体图谱切片。
+        """按展示预算读取一个按文档均衡的事件—实体图谱。
 
         图谱只读取本次展示文档对应的引擎 source_id。事件使用窗口排名轮询各文档，
-        避免单篇长文占满配额；关联边另设硬上限，防止高基数抽取拖垮响应与浏览器。
+        避免单篇长文占满配额；关联边覆盖优先并限制密度，避免高基数图谱拖垮浏览器。
         """
         await self._slot(source_config_id, source)
-        from sqlalchemy import func, select
+        from sqlalchemy import func, select, update
         from zleap.sag.db import get_session_factory
         from zleap.sag.db.models import Entity, EventEntity, SourceEvent
 
@@ -985,6 +1294,39 @@ class EngineManager:
             )
             if not source_ids:
                 return SourceGraphInfo(total_entities=total_entities)
+
+            event_scope = (
+                SourceEvent.source_config_id == source_config_id,
+                SourceEvent.source_id.in_(source_ids),
+            )
+            visible_event = SourceEvent.status.is_(None) | (SourceEvent.status != "DELETED")
+
+            # 旧版断点抽取逐块保存，上游却把每次保存都视为整篇替换，导致先前块被隐藏。
+            # 只有 Web 完成数能证明引擎中的全部事件属于本次抽取时才修复，避免恢复旧版本。
+            if expected_event_count and expected_event_count > 0:
+                total_event_count, visible_event_count = (
+                    await s.execute(
+                        select(
+                            func.count(SourceEvent.id),
+                            func.count(SourceEvent.id).filter(visible_event),
+                        ).where(*event_scope)
+                    )
+                ).one()
+                if (
+                    int(visible_event_count or 0) < expected_event_count
+                    and int(total_event_count or 0) == expected_event_count
+                ):
+                    repaired = await s.execute(
+                        update(SourceEvent)
+                        .where(*event_scope, SourceEvent.status == "DELETED")
+                        .values(status="COMPLETED")
+                    )
+                    await s.commit()
+                    log.warning(
+                        "已恢复分块抽取中被上游隐藏的事件 source_config_id=%s count=%d",
+                        source_config_id,
+                        int(repaired.rowcount or 0),
+                    )
 
             # 每个文档先取 rank 较小的事件，再在文档之间轮询，兼顾层级根节点与覆盖面。
             source_rank = (
@@ -1010,9 +1352,8 @@ class EngineManager:
                     source_rank,
                 )
                 .where(
-                    SourceEvent.source_config_id == source_config_id,
-                    SourceEvent.source_id.in_(source_ids),
-                    (SourceEvent.status.is_(None) | (SourceEvent.status != "DELETED")),
+                    *event_scope,
+                    visible_event,
                 )
                 .subquery()
             )
@@ -1046,7 +1387,8 @@ class EngineManager:
             if not event_ids:
                 return SourceGraphInfo(events=events, total_entities=total_entities)
 
-            association_limit = min(600, max(240, event_limit * 6, entity_limit * 8))
+            relation_limit = min(12_000, max(300, event_limit * 2, entity_limit * 2))
+            association_limit = min(24_000, relation_limit * 4)
             association_rows = (
                 await s.execute(
                     select(
@@ -1097,6 +1439,23 @@ class EngineManager:
         ]
         entities.sort(key=lambda entity: (-entity.heat, entity.name, entity.id))
 
+        eligible_rows = [
+            row for row in association_rows if row[1] in selected_entity_ids
+        ]
+        covering_rows = []
+        remaining_rows = []
+        covered_events: set[str] = set()
+        covered_entities: set[str] = set()
+        for row in eligible_rows:
+            event_id, entity_id = row[0], row[1]
+            if event_id not in covered_events or entity_id not in covered_entities:
+                covering_rows.append(row)
+                covered_events.add(event_id)
+                covered_entities.add(entity_id)
+            else:
+                remaining_rows.append(row)
+        selected_rows = [*covering_rows, *remaining_rows][:relation_limit]
+
         associations = [
             GraphAssociationInfo(
                 event_id=event_id,
@@ -1104,9 +1463,8 @@ class EngineManager:
                 weight=float(weight or 1.0),
                 description=str(description or "")[:240],
             )
-            for event_id, entity_id, weight, description, *_rest in association_rows
-            if entity_id in selected_entity_ids
-        ][:300]
+            for event_id, entity_id, weight, description, *_rest in selected_rows
+        ]
         return SourceGraphInfo(
             events=events,
             entities=entities,
@@ -1187,15 +1545,22 @@ class EngineManager:
                 ).scalar_one()
                 or 0
             )
+            unique_relation_rows = (
+                select(EventEntity.event_id, EventEntity.entity_id)
+                .join(SourceEvent, SourceEvent.id == EventEntity.event_id)
+                .join(Entity, Entity.id == EventEntity.entity_id)
+                .where(
+                    SourceEvent.source_config_id == source_config_id,
+                    Entity.source_config_id == source_config_id,
+                    active_event,
+                )
+                .distinct()
+                .subquery()
+            )
             relation_count = int(
                 (
                     await session.execute(
-                        select(func.count(EventEntity.id))
-                        .join(SourceEvent, SourceEvent.id == EventEntity.event_id)
-                        .where(
-                            SourceEvent.source_config_id == source_config_id,
-                            active_event,
-                        )
+                        select(func.count()).select_from(unique_relation_rows)
                     )
                 ).scalar_one()
                 or 0
@@ -1263,141 +1628,6 @@ class EngineManager:
             time_buckets=time_buckets,
         )
 
-    async def universe_partition_seed(
-        self,
-        source_config_id: str,
-        *,
-        source: Source | None = None,
-        category: str | None = None,
-        limit: int = 24,
-        cursor: str | None = None,
-        after: datetime | None = None,
-        before: datetime | None = None,
-    ) -> UniverseSeedInfo:
-        """Return recently active entities for one source using a stable time cursor."""
-        await self._slot(source_config_id, source)
-        from sqlalchemy import and_, func, or_, select
-        from zleap.sag.db import get_session_factory
-        from zleap.sag.db.models import Entity, EventEntity, SourceEvent
-
-        bounded_limit = max(1, min(int(limit), self._settings.universe_entity_page_max))
-        cursor_payload = (
-            _decode_universe_cursor(cursor, self._settings.secret_key) if cursor else None
-        )
-        category_key = category or ""
-        if cursor_payload and (
-            cursor_payload.get("scope") != _universe_cursor_scope(source_config_id)
-            or cursor_payload.get("kind") != "source-entity"
-            or cursor_payload.get("node") != category_key
-        ):
-            raise ValueError("universe cursor does not match its source entity page")
-        as_of = _cursor_datetime(cursor_payload, "as_of") if cursor_payload else datetime.now(UTC)
-        after_db = _database_time(after)
-        before_db = _database_time(before)
-        expected_after = after_db.isoformat() if after_db is not None else None
-        expected_before = before_db.isoformat() if before_db is not None else None
-        if cursor_payload and (
-            cursor_payload.get("after") != expected_after
-            or cursor_payload.get("before") != expected_before
-        ):
-            raise ValueError("universe cursor does not match its time range")
-        event_time = func.coalesce(SourceEvent.start_time, SourceEvent.created_time)
-        event_filters = [
-            SourceEvent.source_config_id == source_config_id,
-            (SourceEvent.status.is_(None) | (SourceEvent.status != "DELETED")),
-            event_time <= (before_db or _database_time(as_of)),
-        ]
-        if after_db is not None:
-            event_filters.append(event_time >= after_db)
-        if category:
-            event_filters.append(Entity.type == category)
-
-        activity_time = func.max(event_time).label("activity_time")
-        related_count = func.count(func.distinct(EventEntity.event_id)).label(
-            "related_count"
-        )
-        strongest_relation = func.max(EventEntity.weight).label("strongest_relation")
-        cursor_filter = None
-        if cursor_payload:
-            last_time = _database_time(_cursor_datetime(cursor_payload, "time"))
-            last_id = str(cursor_payload.get("id") or "")
-            if last_time is None or not last_id:
-                raise ValueError("invalid universe cursor")
-            cursor_filter = or_(
-                activity_time < last_time,
-                and_(activity_time == last_time, Entity.id < last_id),
-            )
-
-        sf = get_session_factory()
-        async with sf() as session:
-            stmt = (
-                select(
-                    Entity.id,
-                    Entity.name,
-                    Entity.type,
-                    Entity.description,
-                    activity_time,
-                    related_count,
-                    strongest_relation,
-                )
-                .select_from(Entity)
-                .join(EventEntity, EventEntity.entity_id == Entity.id)
-                .join(SourceEvent, SourceEvent.id == EventEntity.event_id)
-                .where(Entity.source_config_id == source_config_id, *event_filters)
-                .group_by(Entity.id, Entity.name, Entity.type, Entity.description)
-                .order_by(activity_time.desc(), Entity.id.desc())
-                .limit(bounded_limit + 1)
-            )
-            if cursor_filter is not None:
-                stmt = stmt.having(cursor_filter)
-            rows = (await session.execute(stmt)).all()
-        has_more = len(rows) > bounded_limit
-        page = rows[:bounded_limit]
-        next_cursor = None
-        if has_more and page:
-            next_cursor = _encode_universe_cursor(
-                {
-                    "v": 1,
-                    "scope": _universe_cursor_scope(source_config_id),
-                    "kind": "source-entity",
-                    "node": category_key,
-                    "as_of": _utc_time(as_of).isoformat(),
-                    "after": expected_after,
-                    "before": expected_before,
-                    "time": _utc_time(page[-1].activity_time).isoformat(),
-                    "id": page[-1].id,
-                },
-                self._settings.secret_key,
-            )
-        return UniverseSeedInfo(
-            nodes=[
-                {
-                    "id": row.id,
-                    "kind": "entity",
-                    "label": row.name or "未命名实体",
-                    "description": str(row.description or "")[:800],
-                    "category": row.type or "实体",
-                    "chunk_id": None,
-                    "start_time": _utc_time(row.activity_time),
-                    "importance": max(
-                        0.35,
-                        min(
-                            1.0,
-                            0.42
-                            + math.log1p(int(row.related_count or 0)) * 0.12
-                            + _weight(row.strongest_relation) * 0.04,
-                        ),
-                    ),
-                    "related_count": int(row.related_count or 0),
-                    "state": "active",
-                }
-                for row in page
-            ],
-            has_more=has_more,
-            next_cursor=next_cursor,
-            as_of=_utc_time(as_of),
-        )
-
     async def _universe_entity_event_counts(
         self,
         session: Any,
@@ -1427,6 +1657,7 @@ class EngineManager:
                         EventEntity.created_time <= as_of_db,
                         SourceEvent.source_config_id == source_config_id,
                         event_time <= as_of_db,
+                        SourceEvent.created_time <= as_of_db,
                         (
                             SourceEvent.status.is_(None)
                             | (SourceEvent.status != "DELETED")
@@ -1454,26 +1685,45 @@ class EngineManager:
         if not event_ids:
             return [], []
 
-        bounded_entities = max(8, min(int(entity_limit), 128))
-        ranked_relations = (
+        bounded_entities = max(4, min(int(entity_limit), 8))
+        # The API unit is one factual event/entity pair. Normalize at the query
+        # boundary so totals, ranking and returned relationships cannot diverge.
+        unique_relations = (
             select(
                 EventEntity.event_id.label("event_id"),
                 EventEntity.entity_id.label("entity_id"),
-                EventEntity.weight.label("weight"),
-                EventEntity.description.label("relation_description"),
-                func.count(EventEntity.id)
-                .over(partition_by=EventEntity.event_id)
-                .label("relation_total"),
-                func.row_number()
-                .over(
-                    partition_by=EventEntity.event_id,
-                    order_by=(EventEntity.weight.desc(), EventEntity.entity_id.asc()),
-                )
-                .label("relation_rank"),
+                func.max(EventEntity.weight).label("weight"),
+                func.max(EventEntity.description).label("relation_description"),
             )
+            .select_from(EventEntity)
+            .join(Entity, Entity.id == EventEntity.entity_id)
             .where(
                 EventEntity.event_id.in_(event_ids),
                 EventEntity.created_time <= as_of_db,
+                Entity.source_config_id == source_config_id,
+                Entity.created_time <= as_of_db,
+            )
+            .group_by(EventEntity.event_id, EventEntity.entity_id)
+            .subquery()
+        )
+        ranked_relations = (
+            select(
+                unique_relations.c.event_id,
+                unique_relations.c.entity_id,
+                unique_relations.c.weight,
+                unique_relations.c.relation_description,
+                func.count()
+                .over(partition_by=unique_relations.c.event_id)
+                .label("relation_total"),
+                func.row_number()
+                .over(
+                    partition_by=unique_relations.c.event_id,
+                    order_by=(
+                        unique_relations.c.weight.desc(),
+                        unique_relations.c.entity_id.asc(),
+                    ),
+                )
+                .label("relation_rank"),
             )
             .subquery()
         )
@@ -1558,8 +1808,7 @@ class EngineManager:
                     0.4,
                     min(
                         1.0,
-                        0.5
-                        + math.log1p(event_counts.get(str(event["id"]), 0)) * 0.08,
+                        0.5 + math.log1p(event_counts.get(str(event["id"]), 0)) * 0.08,
                     ),
                 ),
                 "related_count": event_counts.get(str(event["id"]), 0),
@@ -1573,47 +1822,108 @@ class EngineManager:
         self,
         source_config_id: str,
         *,
+        source_revision: str,
         source: Source | None = None,
-        limit: int = 8,
-        entity_limit: int = 96,
+        limit: int = 6,
+        entity_limit: int = 8,
+        direction: str = "older",
         cursor: str | None = None,
+        snapshot_id: str | None = None,
     ) -> UniverseTimelineInfo:
-        """Return recent event bundles in stable event-time order."""
+        """Return a bidirectional, snapshot-stable event-time page.
+
+        Results always use canonical newest-to-oldest order. ``direction`` only
+        selects which adjacent page to read from the supplied boundary cursor.
+        """
         await self._slot(source_config_id, source)
         from sqlalchemy import and_, func, or_, select
         from zleap.sag.db import get_session_factory
         from zleap.sag.db.models import SourceEvent
 
-        bounded_limit = max(1, min(int(limit), 24))
-        bounded_entities = max(8, min(int(entity_limit), 128))
+        bounded_limit = max(1, min(int(limit), 6))
+        bounded_entities = max(4, min(int(entity_limit), 8))
+        if direction not in {"older", "newer"}:
+            raise ValueError("invalid universe timeline direction")
+        if direction == "newer" and cursor is None:
+            raise ValueError("newer universe timeline reads require a cursor")
+        if not source_revision:
+            raise ValueError("universe source revision is required")
         cursor_payload = (
             _decode_universe_cursor(cursor, self._settings.secret_key) if cursor else None
         )
+        snapshot_payload = (
+            _decode_universe_cursor(snapshot_id, self._settings.secret_key)
+            if snapshot_id
+            else None
+        )
+        if cursor_payload and snapshot_payload is None:
+            raise ValueError("universe timeline cursor requires a snapshot")
         if cursor_payload and (
             cursor_payload.get("scope") != _universe_cursor_scope(source_config_id)
             or cursor_payload.get("kind") != "source-timeline"
         ):
             raise ValueError("universe cursor does not match its source timeline")
+        if snapshot_payload and (
+            snapshot_payload.get("scope") != _universe_cursor_scope(source_config_id)
+            or snapshot_payload.get("kind") != "source-read-snapshot"
+        ):
+            raise ValueError("universe snapshot does not match its source")
+        if cursor_payload and cursor_payload.get("revision") != source_revision:
+            raise ValueError("universe timeline revision changed")
+        if snapshot_payload and snapshot_payload.get("revision") != source_revision:
+            raise ValueError("universe timeline revision changed")
 
-        as_of = _cursor_datetime(cursor_payload, "as_of") if cursor_payload else datetime.now(UTC)
+        if cursor_payload:
+            as_of = _cursor_datetime(cursor_payload, "as_of")
+        elif snapshot_payload:
+            as_of = _cursor_datetime(snapshot_payload, "as_of")
+        else:
+            as_of = datetime.now(UTC)
+        if snapshot_payload and _cursor_datetime(snapshot_payload, "as_of") != as_of:
+            raise ValueError("universe cursor does not belong to this snapshot")
+        stable_snapshot_id = snapshot_id or _encode_universe_cursor(
+            {
+                "v": 2,
+                "scope": _universe_cursor_scope(source_config_id),
+                "kind": "source-read-snapshot",
+                "as_of": _utc_time(as_of).isoformat(),
+                "revision": source_revision,
+            },
+            self._settings.secret_key,
+        )
         as_of_db = _database_time(as_of)
         event_time = func.coalesce(SourceEvent.start_time, SourceEvent.created_time)
         filters = [
             SourceEvent.source_config_id == source_config_id,
             (SourceEvent.status.is_(None) | (SourceEvent.status != "DELETED")),
             event_time <= as_of_db,
+            SourceEvent.created_time <= as_of_db,
         ]
         if cursor_payload:
-            last_time = _database_time(_cursor_datetime(cursor_payload, "time"))
-            last_id = str(cursor_payload.get("id") or "")
-            if last_time is None or not last_id:
+            boundary_time = _database_time(_cursor_datetime(cursor_payload, "time"))
+            boundary_id = str(cursor_payload.get("id") or "")
+            if boundary_time is None or not boundary_id:
                 raise ValueError("invalid universe cursor")
-            filters.append(
-                or_(
-                    event_time < last_time,
-                    and_(event_time == last_time, SourceEvent.id < last_id),
+            if direction == "older":
+                filters.append(
+                    or_(
+                        event_time < boundary_time,
+                        and_(event_time == boundary_time, SourceEvent.id < boundary_id),
+                    )
                 )
-            )
+            else:
+                filters.append(
+                    or_(
+                        event_time > boundary_time,
+                        and_(event_time == boundary_time, SourceEvent.id > boundary_id),
+                    )
+                )
+
+        ordering = (
+            (event_time.desc(), SourceEvent.id.desc())
+            if direction == "older"
+            else (event_time.asc(), SourceEvent.id.asc())
+        )
 
         sf = get_session_factory()
         async with sf() as session:
@@ -1629,12 +1939,13 @@ class EngineManager:
                         event_time.label("event_time"),
                     )
                     .where(*filters)
-                    .order_by(event_time.desc(), SourceEvent.id.desc())
+                    .order_by(*ordering)
                     .limit(bounded_limit + 1)
                 )
             ).all()
-            has_more = len(event_rows) > bounded_limit
-            page = event_rows[:bounded_limit]
+            has_directional_more = len(event_rows) > bounded_limit
+            selected_rows = event_rows[:bounded_limit]
+            page = selected_rows if direction == "older" else list(reversed(selected_rows))
 
             bundle_nodes, bundle_relations = await self._universe_event_bundles(
                 session,
@@ -1655,24 +1966,98 @@ class EngineManager:
                 entity_limit=bounded_entities,
             )
 
-        next_cursor = None
-        if has_more and page:
-            next_cursor = _encode_universe_cursor(
+        nodes_by_key = {(str(node.get("kind") or ""), str(node.get("id") or "")): node for node in bundle_nodes}
+        relations_by_event: dict[str, list[dict[str, Any]]] = {}
+        for relation in bundle_relations:
+            relations_by_event.setdefault(str(relation.get("from_id") or ""), []).append(relation)
+
+        def boundary_cursor(row: Any) -> str:
+            return _encode_universe_cursor(
                 {
-                    "v": 1,
+                    "v": 2,
                     "scope": _universe_cursor_scope(source_config_id),
                     "kind": "source-timeline",
                     "as_of": _utc_time(as_of).isoformat(),
-                    "time": _utc_time(page[-1].event_time).isoformat(),
-                    "id": page[-1].id,
+                    "revision": source_revision,
+                    "time": _utc_time(row.event_time).isoformat(),
+                    "id": row.id,
                 },
                 self._settings.secret_key,
             )
 
+        has_newer = has_directional_more if direction == "newer" else cursor is not None
+        has_older = has_directional_more if direction == "older" else cursor is not None
+        bundles: list[UniverseTimelineBundleInfo] = []
+        for index, row in enumerate(page):
+            event_id = str(row.id)
+            event_node = nodes_by_key.get(("event", event_id))
+            if event_node is None:
+                continue
+            relations = relations_by_event.get(event_id, [])
+            seen_entity_ids: set[str] = set()
+            entity_nodes: list[dict[str, Any]] = []
+            for relation in relations:
+                entity_id = str(relation.get("to_id") or "")
+                if not entity_id or entity_id in seen_entity_ids:
+                    continue
+                entity_node = nodes_by_key.get(("entity", entity_id))
+                if entity_node is None:
+                    continue
+                seen_entity_ids.add(entity_id)
+                entity_nodes.append(entity_node)
+            row_cursor = boundary_cursor(row)
+            cursor_before = row_cursor if index > 0 or has_newer else None
+            cursor_after = row_cursor if index < len(page) - 1 or has_older else None
+            neighbor_total = max(0, int(event_node.get("related_count") or 0))
+            neighbor_complete = len(entity_nodes) == neighbor_total
+            neighbor_next_cursor = None
+            if not neighbor_complete and relations:
+                last_relation = relations[-1]
+                neighbor_next_cursor = _encode_universe_cursor(
+                    {
+                        "v": 2,
+                        "scope": _universe_cursor_scope(source_config_id),
+                        "kind": "source-expand",
+                        "node_kind": "event",
+                        "node": event_id,
+                        "as_of": _utc_time(as_of).isoformat(),
+                        "revision": source_revision,
+                        "weight": format(
+                            _weight(last_relation.get("weight")),
+                            ".17g",
+                        ),
+                        "id": str(last_relation.get("to_id") or ""),
+                    },
+                    self._settings.secret_key,
+                )
+            bundles.append(
+                UniverseTimelineBundleInfo(
+                    bundle_id=f"event:{event_id}",
+                    event=event_node,
+                    nodes=entity_nodes,
+                    relations=relations,
+                    neighbor_total=neighbor_total,
+                    neighbor_returned=len(entity_nodes),
+                    complete=neighbor_complete,
+                    neighbor_next_cursor=neighbor_next_cursor,
+                    cursor_before=cursor_before,
+                    cursor_after=cursor_after,
+                )
+            )
+
+        newer_cursor = bundles[0].cursor_before if bundles else cursor if direction == "older" else None
+        older_cursor = bundles[-1].cursor_after if bundles else cursor if direction == "newer" else None
+        next_cursor = older_cursor if direction == "older" else newer_cursor
+
         return UniverseTimelineInfo(
-            nodes=bundle_nodes,
-            relations=bundle_relations,
-            has_more=has_more,
+            bundles=bundles,
+            snapshot_id=stable_snapshot_id,
+            direction=direction,
+            has_newer=newer_cursor is not None,
+            newer_cursor=newer_cursor,
+            has_older=older_cursor is not None,
+            older_cursor=older_cursor,
+            has_more=next_cursor is not None,
             next_cursor=next_cursor,
             as_of=_utc_time(as_of),
         )
@@ -1683,9 +2068,11 @@ class EngineManager:
         node_kind: str,
         node_id: str,
         *,
+        source_revision: str,
         source: Source | None = None,
-        limit: int = 20,
+        limit: int = 4,
         cursor: str | None = None,
+        snapshot_id: str | None = None,
         after: datetime | None = None,
         before: datetime | None = None,
     ) -> UniverseExpansionInfo | None:
@@ -1695,25 +2082,58 @@ class EngineManager:
         from zleap.sag.db import get_session_factory
         from zleap.sag.db.models import Entity, EventEntity, SourceEvent
 
-        bounded_limit = max(1, min(int(limit), 128))
-        cursor_payload = (
-            _decode_universe_cursor(cursor, self._settings.secret_key) if cursor else None
-        )
+        hard_limit = 8 if node_kind == "event" else 4
+        bounded_limit = max(1, min(int(limit), hard_limit))
+        if not source_revision:
+            raise ValueError("universe source revision is required")
+        cursor_payload = _decode_universe_cursor(cursor, self._settings.secret_key) if cursor else None
+        snapshot_payload = _decode_universe_cursor(snapshot_id, self._settings.secret_key) if snapshot_id else None
+        if cursor_payload and snapshot_payload is None:
+            raise ValueError("universe expansion cursor requires a snapshot")
         if cursor_payload and (
             cursor_payload.get("scope") != _universe_cursor_scope(source_config_id)
-            or cursor_payload.get("kind") != node_kind
+            or cursor_payload.get("kind") != "source-expand"
+            or cursor_payload.get("node_kind") != node_kind
             or cursor_payload.get("node") != node_id
         ):
             raise ValueError("universe cursor does not match its anchor")
+        if snapshot_payload and (
+            snapshot_payload.get("scope") != _universe_cursor_scope(source_config_id)
+            or snapshot_payload.get("kind") != "source-read-snapshot"
+        ):
+            raise ValueError("universe snapshot does not match its source")
+        if cursor_payload and cursor_payload.get("revision") != source_revision:
+            raise ValueError("universe expansion revision changed")
+        if snapshot_payload and snapshot_payload.get("revision") != source_revision:
+            raise ValueError("universe expansion revision changed")
+
+        if snapshot_payload:
+            as_of = _cursor_datetime(snapshot_payload, "as_of")
+        elif cursor_payload:
+            as_of = _cursor_datetime(cursor_payload, "as_of")
+        else:
+            as_of = datetime.now(UTC)
+        if cursor_payload and _cursor_datetime(cursor_payload, "as_of") != as_of:
+            raise ValueError("universe cursor does not belong to this snapshot")
+        stable_snapshot_id = snapshot_id or _encode_universe_cursor(
+            {
+                "v": 2,
+                "scope": _universe_cursor_scope(source_config_id),
+                "kind": "source-read-snapshot",
+                "as_of": _utc_time(as_of).isoformat(),
+                "revision": source_revision,
+            },
+            self._settings.secret_key,
+        )
 
         sf = get_session_factory()
         async with sf() as session:
+            as_of_db = _database_time(as_of)
             if node_kind == "event":
-                if cursor_payload:
-                    as_of = _cursor_datetime(cursor_payload, "as_of")
-                else:
-                    as_of = datetime.now(UTC)
-                as_of_db = _database_time(as_of)
+                event_time = func.coalesce(
+                    SourceEvent.start_time,
+                    SourceEvent.created_time,
+                )
                 anchor = (
                     await session.execute(
                         select(
@@ -1727,28 +2147,41 @@ class EngineManager:
                             SourceEvent.id == node_id,
                             SourceEvent.source_config_id == source_config_id,
                             (SourceEvent.status.is_(None) | (SourceEvent.status != "DELETED")),
+                            event_time <= as_of_db,
+                            SourceEvent.created_time <= as_of_db,
                         )
                     )
                 ).one_or_none()
                 if anchor is None:
                     return None
+                unique_event_relations = (
+                    select(
+                        EventEntity.entity_id.label("entity_id"),
+                        func.max(EventEntity.weight).label("weight"),
+                        func.max(EventEntity.description).label("relation_description"),
+                    )
+                    .where(
+                        EventEntity.event_id == node_id,
+                        EventEntity.created_time <= as_of_db,
+                    )
+                    .group_by(EventEntity.entity_id)
+                    .subquery()
+                )
                 related_count = int(
                     (
                         await session.execute(
-                            select(func.count(EventEntity.id))
-                            .join(Entity, Entity.id == EventEntity.entity_id)
+                            select(func.count())
+                            .select_from(unique_event_relations)
+                            .join(Entity, Entity.id == unique_event_relations.c.entity_id)
                             .where(
-                                EventEntity.event_id == node_id,
                                 Entity.source_config_id == source_config_id,
+                                Entity.created_time <= as_of_db,
                             )
                         )
                     ).scalar_one()
                     or 0
                 )
-                filters = [
-                    EventEntity.event_id == node_id,
-                    EventEntity.created_time <= as_of_db,
-                ]
+                filters = []
                 if cursor_payload:
                     last_weight = _cursor_float(cursor_payload, "weight")
                     last_id = str(cursor_payload.get("id") or "")
@@ -1756,26 +2189,34 @@ class EngineManager:
                         raise ValueError("invalid universe cursor")
                     filters.append(
                         or_(
-                            EventEntity.weight < last_weight,
+                            unique_event_relations.c.weight < last_weight,
                             and_(
-                                EventEntity.weight == last_weight,
-                                EventEntity.entity_id > last_id,
+                                unique_event_relations.c.weight == last_weight,
+                                unique_event_relations.c.entity_id > last_id,
                             ),
                         )
                     )
                 rows = (
                     await session.execute(
                         select(
-                            EventEntity.entity_id,
-                            EventEntity.weight,
-                            EventEntity.description,
+                            unique_event_relations.c.entity_id,
+                            unique_event_relations.c.weight,
+                            unique_event_relations.c.relation_description,
                             Entity.name,
                             Entity.type,
                             Entity.description.label("entity_description"),
                         )
-                        .join(Entity, Entity.id == EventEntity.entity_id)
-                        .where(*filters, Entity.source_config_id == source_config_id)
-                        .order_by(EventEntity.weight.desc(), EventEntity.entity_id.asc())
+                        .select_from(unique_event_relations)
+                        .join(Entity, Entity.id == unique_event_relations.c.entity_id)
+                        .where(
+                            *filters,
+                            Entity.source_config_id == source_config_id,
+                            Entity.created_time <= as_of_db,
+                        )
+                        .order_by(
+                            unique_event_relations.c.weight.desc(),
+                            unique_event_relations.c.entity_id.asc(),
+                        )
                         .limit(bounded_limit + 1)
                     )
                 ).all()
@@ -1791,11 +2232,13 @@ class EngineManager:
                 if has_more and page:
                     next_cursor = _encode_universe_cursor(
                         {
-                            "v": 1,
+                            "v": 2,
                             "scope": _universe_cursor_scope(source_config_id),
-                            "kind": node_kind,
+                            "kind": "source-expand",
+                            "node_kind": node_kind,
                             "node": node_id,
                             "as_of": as_of.isoformat(),
+                            "revision": source_revision,
                             "weight": format(_weight(page[-1].weight), ".17g"),
                             "id": page[-1].entity_id,
                         },
@@ -1821,7 +2264,9 @@ class EngineManager:
                             "category": row.type or "实体",
                             "weight": _weight(row.weight),
                             "related_count": entity_counts.get(str(row.entity_id), 0),
-                            "relation_description": str(row.description or "")[:240],
+                            "relation_description": str(
+                                row.relation_description or ""
+                            )[:240],
                         }
                         for row in page
                     ],
@@ -1831,13 +2276,14 @@ class EngineManager:
                             "to_id": str(row.entity_id),
                             "kind": "mentions",
                             "weight": _weight(row.weight),
-                            "description": str(row.description or "")[:240],
+                            "description": str(row.relation_description or "")[:240],
                         }
                         for row in page
                     ],
                     returned=len(page),
                     has_more=has_more,
                     next_cursor=next_cursor,
+                    snapshot_id=stable_snapshot_id,
                     as_of=as_of,
                 )
 
@@ -1848,6 +2294,7 @@ class EngineManager:
                     select(Entity.id, Entity.name, Entity.type, Entity.description).where(
                         Entity.id == node_id,
                         Entity.source_config_id == source_config_id,
+                        Entity.created_time <= as_of_db,
                     )
                 )
             ).one_or_none()
@@ -1855,18 +2302,25 @@ class EngineManager:
                 return None
 
             event_time = func.coalesce(SourceEvent.start_time, SourceEvent.created_time)
-            if cursor_payload:
-                as_of = _cursor_datetime(cursor_payload, "as_of")
-            else:
-                as_of = datetime.now(UTC)
-            as_of_db = _database_time(as_of)
+            unique_entity_relations = (
+                select(
+                    EventEntity.event_id.label("event_id"),
+                    func.max(EventEntity.weight).label("weight"),
+                    func.max(EventEntity.description).label("relation_description"),
+                )
+                .where(
+                    EventEntity.entity_id == node_id,
+                    EventEntity.created_time <= as_of_db,
+                )
+                .group_by(EventEntity.event_id)
+                .subquery()
+            )
             effective_after = after
             base_filters = [
-                EventEntity.entity_id == node_id,
                 SourceEvent.source_config_id == source_config_id,
                 (SourceEvent.status.is_(None) | (SourceEvent.status != "DELETED")),
                 event_time <= as_of_db,
-                EventEntity.created_time <= as_of_db,
+                SourceEvent.created_time <= as_of_db,
             ]
             after_db = _database_time(effective_after)
             before_db = _database_time(before)
@@ -1884,8 +2338,12 @@ class EngineManager:
             related_count = int(
                 (
                     await session.execute(
-                        select(func.count(EventEntity.id))
-                        .join(SourceEvent, SourceEvent.id == EventEntity.event_id)
+                        select(func.count())
+                        .select_from(unique_entity_relations)
+                        .join(
+                            SourceEvent,
+                            SourceEvent.id == unique_entity_relations.c.event_id,
+                        )
                         .where(*base_filters)
                     )
                 ).scalar_one()
@@ -1904,21 +2362,21 @@ class EngineManager:
                         event_time < last_time_db,
                         and_(
                             event_time == last_time_db,
-                            EventEntity.weight < last_weight,
+                            unique_entity_relations.c.weight < last_weight,
                         ),
                         and_(
                             event_time == last_time_db,
-                            EventEntity.weight == last_weight,
-                            EventEntity.event_id < last_id,
+                            unique_entity_relations.c.weight == last_weight,
+                            unique_entity_relations.c.event_id < last_id,
                         ),
                     )
                 )
             rows = (
                 await session.execute(
                     select(
-                        EventEntity.event_id,
-                        EventEntity.weight,
-                        EventEntity.description,
+                        unique_entity_relations.c.event_id,
+                        unique_entity_relations.c.weight,
+                        unique_entity_relations.c.relation_description,
                         SourceEvent.title,
                         SourceEvent.summary,
                         SourceEvent.category,
@@ -1926,12 +2384,16 @@ class EngineManager:
                         SourceEvent.start_time,
                         event_time.label("event_time"),
                     )
-                    .join(SourceEvent, SourceEvent.id == EventEntity.event_id)
+                    .select_from(unique_entity_relations)
+                    .join(
+                        SourceEvent,
+                        SourceEvent.id == unique_entity_relations.c.event_id,
+                    )
                     .where(*filters)
                     .order_by(
                         event_time.desc(),
-                        EventEntity.weight.desc(),
-                        EventEntity.event_id.desc(),
+                        unique_entity_relations.c.weight.desc(),
+                        unique_entity_relations.c.event_id.desc(),
                     )
                     .limit(bounded_limit + 1)
                 )
@@ -1942,11 +2404,13 @@ class EngineManager:
             if has_more and page:
                 next_cursor = _encode_universe_cursor(
                     {
-                        "v": 1,
+                        "v": 2,
                         "scope": _universe_cursor_scope(source_config_id),
-                        "kind": node_kind,
+                        "kind": "source-expand",
+                        "node_kind": node_kind,
                         "node": node_id,
                         "as_of": as_of.isoformat(),
+                        "revision": source_revision,
                         "after": expected_after,
                         "before": expected_before,
                         "time": page[-1].event_time.isoformat(),
@@ -1973,6 +2437,24 @@ class EngineManager:
                 as_of_db=as_of_db,
                 entity_limit=self._settings.universe_event_entity_limit,
             )
+            direct_event_ids = {
+                str(relation.get("from_id") or "")
+                for relation in bundle_relations
+                if str(relation.get("to_id") or "") == node_id
+            }
+            for row in page:
+                event_id = str(row.event_id)
+                if event_id in direct_event_ids:
+                    continue
+                bundle_relations.append(
+                    {
+                        "from_id": event_id,
+                        "to_id": node_id,
+                        "kind": "mentions",
+                        "weight": _weight(row.weight),
+                        "description": str(row.relation_description or "")[:240],
+                    }
+                )
             return UniverseExpansionInfo(
                 anchor={
                     "id": anchor.id,
@@ -1991,6 +2473,7 @@ class EngineManager:
                 returned=len(page),
                 has_more=has_more,
                 next_cursor=next_cursor,
+                snapshot_id=stable_snapshot_id,
                 as_of=as_of,
             )
 
@@ -2124,7 +2607,7 @@ class EngineManager:
         limit: int = 20,
     ) -> list[dict]:
         """精确文本匹配（LIKE，大小写不敏感）：语义检索之外的确定性查找。"""
-        await self._slot(source_config_id, source)
+        await self._ensure_read_runtime({source_config_id: source})
         from sqlalchemy import select
         from zleap.sag.db import get_session_factory
         from zleap.sag.db.models import SourceChunk

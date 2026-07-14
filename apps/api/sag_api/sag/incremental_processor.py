@@ -23,6 +23,13 @@ CheckpointCallback = Callable[[ProcessCheckpoint], Awaitable[None]]
 PauseCheck = Callable[[], Awaitable[bool]]
 StageCallback = Callable[[str], Awaitable[None]]
 
+_KNOWLEDGE_EVENT_REQUIREMENTS = """
+对于书籍、报告、论文等非新闻文档，“事项”也包括可独立理解的观点、事实、定义、
+机制、因果关系、论证和结论，不要求必须包含日期、人物动作或新闻事件。
+只有目录、页眉页脚、广告、乱码、纯链接，或确实与文档主题无关的片段才可返回空结果；
+正文只要包含可复用的知识，就至少保留一个有效的顶级事项。
+""".strip()
+
 
 def _llm_chat_owner(client: Any) -> Any:
     """找到真正执行 chat 的最内层 zleap-sag 客户端。"""
@@ -111,6 +118,7 @@ class IncrementalDocumentProcessor:
             current.processed_chunk_ids = []
             current.event_count = 0
             current.event_ids = []
+            current.eventless_chunk_ids = []
             current.token_usage = 0
             await on_checkpoint(current.model_copy(deep=True))
 
@@ -127,6 +135,7 @@ class IncrementalDocumentProcessor:
                 should_pause=should_pause,
             )
 
+        await self._restore_checkpoint_events(current.event_ids)
         paused = len(current.processed_chunk_ids) < len(current.chunk_ids)
         if not paused:
             await self._normalize_event_ranks(current.chunk_ids)
@@ -137,6 +146,7 @@ class IncrementalDocumentProcessor:
             chunk_ids=list(current.chunk_ids),
             event_ids=list(current.event_ids),
             processed_chunk_ids=list(current.processed_chunk_ids),
+            eventless_chunk_ids=list(current.eventless_chunk_ids),
             token_usage=current.token_usage,
             paused=paused,
         )
@@ -170,7 +180,17 @@ class IncrementalDocumentProcessor:
                         current.processed_chunk_ids.append(chunk_id)
                         current.event_ids.extend(event_ids)
                         current.event_count += len(event_ids)
+                        if event_ids:
+                            if chunk_id in current.eventless_chunk_ids:
+                                current.eventless_chunk_ids.remove(chunk_id)
+                        elif chunk_id not in current.eventless_chunk_ids:
+                            current.eventless_chunk_ids.append(chunk_id)
                         current.token_usage += token_usage
+                        # zleap-sag replaces an article's visible event set on
+                        # every chunk save. Restore the complete checkpoint
+                        # before publishing its counters so `/graph` can read
+                        # every event the document detail has just announced.
+                        await self._restore_checkpoint_events(current.event_ids)
                         await on_checkpoint(current.model_copy(deep=True))
                 finally:
                     queue.task_done()
@@ -221,11 +241,39 @@ class IncrementalDocumentProcessor:
                     source_config_id=self._source_config_id,
                     chunk_ids=[chunk_id],
                     max_concurrency=1,
+                    custom_requirements=_KNOWLEDGE_EVENT_REQUIREMENTS,
                 )
             )
         finally:
             chat_owner.chat = original_chat
         return [event.id for event in events], token_usage
+
+    async def _restore_checkpoint_events(self, event_ids: list[str]) -> None:
+        """分块提交结束后，恢复当前断点已经产出的全部事件。
+
+        zleap-sag 每次保存都会替换整篇文章的事件；断点适配层逐块提交时，
+        后提交的块会把先前块的事件标为已删除，因此要按断点统一恢复。
+        """
+        if not event_ids:
+            return
+        from sqlalchemy import update
+        from zleap.sag.db import SourceEvent, get_session_factory
+
+        unique_ids = list(dict.fromkeys(event_ids))
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            for offset in range(0, len(unique_ids), 500):
+                batch = unique_ids[offset : offset + 500]
+                await session.execute(
+                    update(SourceEvent)
+                    .where(
+                        SourceEvent.source_config_id == self._source_config_id,
+                        SourceEvent.id.in_(batch),
+                        SourceEvent.status == "DELETED",
+                    )
+                    .values(status="COMPLETED")
+                )
+            await session.commit()
 
     async def _normalize_event_ranks(self, chunk_ids: list[str]) -> None:
         if not chunk_ids:

@@ -1,7 +1,9 @@
 """全局搜索只公开快速/精确两档，并始终保持信源 fan-out 边界。"""
 
 import asyncio
+import time
 import uuid
+from contextlib import asynccontextmanager
 
 import httpx
 import pytest
@@ -33,11 +35,23 @@ async def test_global_search_forwards_validated_strategy():
     class RecordingEngine:
         strategy: str | None = None
         top_k: int | None = None
+        event_top_k: int | None = None
+
+        def __init__(self):
+            self.started: set[str] = set()
+            self.parallel_gate = asyncio.Event()
+
+        async def _meet_parallel_gate(self, channel: str) -> None:
+            self.started.add(channel)
+            if len(self.started) == 2:
+                self.parallel_gate.set()
+            await asyncio.wait_for(self.parallel_gate.wait(), timeout=1)
 
         async def provision(self, *_args):
             return None
 
         async def search_many(self, targets, query, *, strategy=None, top_k=None):
+            await self._meet_parallel_gate("chunks")
             self.strategy = strategy
             self.top_k = top_k
             source_config_id = targets[0][0]
@@ -55,19 +69,28 @@ async def test_global_search_forwards_validated_strategy():
                 stats={"strategy": strategy},
             )
 
-        async def graph_for_sections(self, sections, sources_by_config, **_kwargs):
+        async def search_event_scores(self, query, sources_by_config, *, limit=None):
+            await self._meet_parallel_gate("events")
+            self.event_top_k = limit
+            source_config_id = next(iter(sources_by_config))
+            # The directly recalled event belongs to another chunk. This is the
+            # sparse-event case that chunk-only graph mapping used to lose.
+            return {(source_config_id, "event-1"): 0.94}
+
+        async def graph_for_sections(self, sections, sources_by_config, **kwargs):
             source_config_id = sections[0].source_config_id
+            assert kwargs["event_scores"] == {(source_config_id, "event-1"): 0.94}
             return SourceGraphInfo(
                 events=[
                     GraphEventInfo(
                         id="event-1",
                         source_config_id=source_config_id,
                         source_id="document-1",
-                        chunk_id="chunk-1",
+                        chunk_id="event-chunk-not-in-section-results",
                         title="外卖骑手收入变化",
                         summary="报告分析了工作时长、技能与收入之间的关系。",
                         category="劳动研究",
-                        score=0.82,
+                        score=0.94,
                     )
                 ],
                 entities=[
@@ -112,12 +135,18 @@ async def test_global_search_forwards_validated_strategy():
                 assert engine.strategy == "multi"
                 # 对外仍返回 7 条；内部有界扩大候选池，之后统一重排与过滤。
                 assert engine.top_k == 21
+                assert engine.event_top_k == 7
+                assert engine.started == {"chunks", "events"}
                 assert response.json()["stats"]["strategy"] == "multi"
                 result = response.json()
                 assert result["stats"]["requested_top_k"] == 7
                 assert result["stats"]["candidate_top_k"] == 21
+                assert result["stats"]["event_candidates"] == 1
+                assert result["stats"]["event_hits"] == 1
+                assert result["stats"]["event_recall"] == "vector+chunk"
                 assert "[1]" in result["summary"]
                 assert result["events"][0]["title"] == "外卖骑手收入变化"
+                assert result["events"][0]["chunk_id"] == "event-chunk-not-in-section-results"
                 assert result["events"][0]["summary"].startswith("报告分析")
                 assert result["events"][0]["source_id"] == source.json()["id"]
                 assert result["entities"][0]["name"] == "外卖骑手"
@@ -166,6 +195,7 @@ async def test_search_many_caps_candidates_and_concurrency(monkeypatch):
     outcome = await manager.search_many(
         [(f"source-{index}", None) for index in range(5)],
         "有界检索",
+        strategy="multi",
     )
 
     assert calls == ["source-0", "source-1"]
@@ -176,6 +206,122 @@ async def test_search_many_caps_candidates_and_concurrency(monkeypatch):
         "source_limit_applied": True,
         "candidates": 0,
     }
+
+
+@pytest.mark.asyncio
+async def test_vector_search_many_uses_one_cross_source_embedding(monkeypatch):
+    from zleap.sag.core.storage import client as storage_client
+    from zleap.sag.core.storage.repositories.source_chunk_repository import (
+        SourceChunkRepository,
+    )
+    from zleap.sag.modules.load.processor import DocumentProcessor
+
+    from sag_api.core.config import settings
+    from sag_api.sag.engine_manager import EngineManager
+
+    manager = EngineManager(settings)
+    embedding_queries: list[str] = []
+    repository_calls: list[tuple[int, list[str]]] = []
+
+    async def runtime_ready(_sources):
+        return None
+
+    async def generate_embedding(_processor, query):
+        embedding_queries.append(query)
+        return [0.1, 0.2]
+
+    async def search_chunks(
+        _repository,
+        *,
+        query_vector,
+        k,
+        source_config_ids,
+        **_kwargs,
+    ):
+        assert query_vector == [0.1, 0.2]
+        repository_calls.append((k, source_config_ids))
+        return [
+            {
+                "chunk_id": "chunk-2",
+                "source_id": "document-2",
+                "source_config_id": "source-2",
+                "heading": "跨源命中",
+                "content": "只生成一次查询向量。",
+                "rank": 3,
+                "_score": 0.88,
+            }
+        ]
+
+    monkeypatch.setattr(manager, "_ensure_read_runtime", runtime_ready)
+    monkeypatch.setattr(DocumentProcessor, "generate_embedding", generate_embedding)
+    monkeypatch.setattr(SourceChunkRepository, "search_similar_by_content", search_chunks)
+    monkeypatch.setattr(storage_client, "get_es_client", lambda: object())
+
+    outcome = await manager.search_many(
+        [("source-1", None), ("source-2", None)],
+        "跨源查询",
+        strategy="vector",
+        top_k=9,
+    )
+
+    assert embedding_queries == ["跨源查询"]
+    assert repository_calls == [(9, ["source-1", "source-2"])]
+    assert outcome.sections[0].chunk_id == "chunk-2"
+    assert outcome.stats["chunk_recall"] == "batch-vector"
+
+
+@pytest.mark.asyncio
+async def test_batch_vector_timeout_does_not_pay_legacy_timeout_again(monkeypatch):
+    from sag_api.core.config import settings
+    from sag_api.sag.engine_manager import EngineManager
+
+    manager = EngineManager(settings)
+
+    async def timed_out(*_args, **_kwargs):
+        raise TimeoutError
+
+    async def legacy_search(*_args, **_kwargs):  # pragma: no cover - regression guard
+        raise AssertionError("timed-out batch recall must not enter legacy fan-out")
+
+    monkeypatch.setattr(manager, "_search_chunk_vectors", timed_out)
+    monkeypatch.setattr(manager, "search", legacy_search)
+
+    outcome = await manager.search_many(
+        [("source-1", None)],
+        "超时仍返回",
+        strategy="vector",
+        top_k=8,
+    )
+
+    assert outcome.sections == []
+    assert outcome.stats["chunk_recall"] == "batch-vector-timeout"
+
+
+@pytest.mark.asyncio
+async def test_single_source_timeout_includes_lock_queue(monkeypatch):
+    from sag_api.core.config import settings
+    from sag_api.sag.engine_manager import EngineManager
+
+    monkeypatch.setattr(settings, "search_source_timeout", 1.0)
+    manager = EngineManager(settings)
+
+    @asynccontextmanager
+    async def blocked_use(*_args, **_kwargs):
+        await asyncio.Event().wait()
+        yield  # pragma: no cover - timeout must happen before acquisition
+
+    monkeypatch.setattr(manager, "use", blocked_use)
+    started = time.monotonic()
+    with pytest.raises(TimeoutError):
+        await manager._search_raw(
+            "source-queued",
+            "排队超时",
+            source=None,
+            strategy="vector",
+            top_k=5,
+        )
+
+    assert time.monotonic() - started < 1.5
 
 
 @pytest.mark.asyncio

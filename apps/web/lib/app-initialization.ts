@@ -3,27 +3,36 @@ import {
   type WorkspaceSection,
 } from "./workspace";
 
-export type WorkspacePanelMode = "hidden" | "mini" | "normal";
+export type AppMode = "normal" | "explore";
+export type PetPresence = "explore-only" | "always";
+export type ThemePreference = "light" | "dark" | "system";
 
 export const APP_INITIALIZATION_DEFAULTS = Object.freeze({
-  workspacePanel: "mini" as WorkspacePanelMode,
+  appMode: "normal" as AppMode,
   workspaceSection: "answer" as WorkspaceSection,
-  petEnabled: true,
+  petPresence: "always" as PetPresence,
   petCollapsed: true,
 });
 
 export const APP_INITIALIZATION_STORAGE_KEYS = Object.freeze({
-  workspacePanel: "sag:workspace-panel",
+  appMode: "sag:app-mode",
   workspaceSection: "sag:workspace-section",
+  petPresence: "sag:pet-presence",
+  legacyWorkspacePanel: "sag:workspace-panel",
   legacyWorkspaceMini: "sag:workspace-mini-mode",
-  petEnabled: "sag:pet",
+  legacyPetEnabled: "sag:pet",
   petCollapsed: "sag:pet-collapsed",
   quickModelSetupDismissed: "sag:onboarding:model-setup-dismissed:v1",
+  themeBeforeExplore: "sag:theme-before-workspace-collapse",
 });
 
 export interface InitializationStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
+}
+
+export interface RemovableInitializationStorage extends InitializationStorage {
+  removeItem(key: string): void;
 }
 
 function safelyRead(storage: InitializationStorage | null | undefined, key: string) {
@@ -46,57 +55,124 @@ function safelyWrite(
   }
 }
 
-export function readInitialWorkspace(
+function safelyRemove(
+  storage: RemovableInitializationStorage | null | undefined,
+  key: string,
+) {
+  try {
+    storage?.removeItem(key);
+  } catch {
+    /* The in-memory restore state remains available for this session. */
+  }
+}
+
+function isThemePreference(value: string | null | undefined): value is ThemePreference {
+  return value === "light" || value === "dark" || value === "system";
+}
+
+export function resolveThemePreference(
+  theme: string | undefined,
+  resolvedTheme: string | undefined,
+): ThemePreference {
+  if (isThemePreference(theme)) return theme;
+  if (resolvedTheme === "dark" || resolvedTheme === "light") return resolvedTheme;
+  return "system";
+}
+
+export function rememberThemeBeforeExplore(
   storage: InitializationStorage | null | undefined,
-): { panel: WorkspacePanelMode; section: WorkspaceSection } {
-  const savedPanel = safelyRead(
+  theme: ThemePreference,
+) {
+  const saved = safelyRead(
     storage,
-    APP_INITIALIZATION_STORAGE_KEYS.workspacePanel,
+    APP_INITIALIZATION_STORAGE_KEYS.themeBeforeExplore,
   );
-  const panel = savedPanel === "hidden" || savedPanel === "mini" || savedPanel === "normal"
-    ? savedPanel
-    : APP_INITIALIZATION_DEFAULTS.workspacePanel;
+  if (isThemePreference(saved)) return saved;
+  safelyWrite(storage, APP_INITIALIZATION_STORAGE_KEYS.themeBeforeExplore, theme);
+  return theme;
+}
+
+export function restoreThemeAfterExplore(
+  storage: RemovableInitializationStorage | null | undefined,
+) {
+  const saved = safelyRead(
+    storage,
+    APP_INITIALIZATION_STORAGE_KEYS.themeBeforeExplore,
+  );
+  safelyRemove(storage, APP_INITIALIZATION_STORAGE_KEYS.themeBeforeExplore);
+  return isThemePreference(saved) ? saved : null;
+}
+
+export function readInitialAppState(
+  storage: InitializationStorage | null | undefined,
+): { mode: AppMode; section: WorkspaceSection } {
+  const savedMode = safelyRead(storage, APP_INITIALIZATION_STORAGE_KEYS.appMode);
+  let mode: AppMode;
+  if (savedMode === "normal" || savedMode === "explore") {
+    mode = savedMode;
+  } else {
+    const legacyPanel = safelyRead(
+      storage,
+      APP_INITIALIZATION_STORAGE_KEYS.legacyWorkspacePanel,
+    );
+    mode = legacyPanel === "mini" ? "explore" : APP_INITIALIZATION_DEFAULTS.appMode;
+    safelyWrite(storage, APP_INITIALIZATION_STORAGE_KEYS.appMode, mode);
+  }
 
   const savedSection = safelyRead(
     storage,
     APP_INITIALIZATION_STORAGE_KEYS.workspaceSection,
   );
-  if (isWorkspaceSection(savedSection)) return { panel, section: savedSection };
+  if (isWorkspaceSection(savedSection)) return { mode, section: savedSection };
 
   const legacySection = safelyRead(
     storage,
     APP_INITIALIZATION_STORAGE_KEYS.legacyWorkspaceMini,
   );
   return {
-    panel,
+    mode,
     section: legacySection === "search" || legacySection === "answer"
       ? legacySection
       : APP_INITIALIZATION_DEFAULTS.workspaceSection,
   };
 }
 
-export function persistWorkspaceInitialization(
+export function persistAppMode(
   storage: InitializationStorage | null | undefined,
-  panel: WorkspacePanelMode,
+  mode: AppMode,
   section?: WorkspaceSection,
 ) {
-  safelyWrite(storage, APP_INITIALIZATION_STORAGE_KEYS.workspacePanel, panel);
+  safelyWrite(storage, APP_INITIALIZATION_STORAGE_KEYS.appMode, mode);
   if (section) {
     safelyWrite(storage, APP_INITIALIZATION_STORAGE_KEYS.workspaceSection, section);
   }
 }
 
-export function readInitialPetEnabled(
+export function readInitialPetPresence(
   storage: InitializationStorage | null | undefined,
-) {
-  return safelyRead(storage, APP_INITIALIZATION_STORAGE_KEYS.petEnabled) !== "off";
+): PetPresence {
+  const saved = safelyRead(storage, APP_INITIALIZATION_STORAGE_KEYS.petPresence);
+  if (saved === "always" || saved === "explore-only") return saved;
+  const legacyEnabled = safelyRead(
+    storage,
+    APP_INITIALIZATION_STORAGE_KEYS.legacyPetEnabled,
+  );
+  const presence = legacyEnabled === "off"
+    ? "explore-only"
+    : APP_INITIALIZATION_DEFAULTS.petPresence;
+  safelyWrite(storage, APP_INITIALIZATION_STORAGE_KEYS.petPresence, presence);
+  return presence;
 }
 
-export function persistPetEnabled(
+export function persistPetPresence(
   storage: InitializationStorage | null | undefined,
-  enabled: boolean,
+  presence: PetPresence,
 ) {
-  safelyWrite(storage, APP_INITIALIZATION_STORAGE_KEYS.petEnabled, enabled ? "on" : "off");
+  safelyWrite(storage, APP_INITIALIZATION_STORAGE_KEYS.petPresence, presence);
+}
+
+export function shouldShowPet(mode: AppMode, presence: PetPresence) {
+  return mode === "explore" || presence === "always";
 }
 
 export function readInitialPetCollapsed(

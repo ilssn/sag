@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field, field_validator
 
+from sag_api.core.model_providers import ModelProviderId
 from sag_api.enums import SearchStrategy
 
 
@@ -40,6 +41,7 @@ class ModelConfigUpdate(BaseModel):
     密钥字段留空表示「保持原值」（不清空）；base_url / dimensions 留空表示清除。
     """
 
+    llm_provider: ModelProviderId | None = None
     llm_base_url: str | None = Field(default=None, max_length=500)
     llm_api_key: str | None = Field(default=None, max_length=500)
     llm_model: str | None = Field(default=None, min_length=1, max_length=200)
@@ -92,4 +94,11 @@ class ModelConfigUpdate(BaseModel):
     def reject_null_llm_resilience_fields(cls, value: int | None) -> int:
         if value is None:
             raise ValueError("模型超时与重试次数不能为 null")
+        return value
+
+    @field_validator("llm_provider")
+    @classmethod
+    def reject_null_llm_provider(cls, value: str | None) -> str:
+        if value is None:
+            raise ValueError("模型接入方式不能为 null")
         return value

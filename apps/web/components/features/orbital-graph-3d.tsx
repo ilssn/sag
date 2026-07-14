@@ -540,7 +540,7 @@ export function OrbitalEventEntityGraph({
 
   const slice = React.useMemo(() => sliceEventEntityGraph(graph), [graph]);
   const layout = React.useMemo(() => buildOrbitalLayout(slice), [slice]);
-  const empty = slice.relations.length === 0;
+  const empty = slice.events.length === 0 && slice.entities.length === 0;
 
   React.useEffect(() => {
     selectionRef.current = null;

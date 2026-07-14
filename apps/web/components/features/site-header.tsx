@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { usePathname } from "next/navigation";
-import { Expand, Minimize2, Shrink, TriangleAlert } from "lucide-react";
+import { TriangleAlert } from "lucide-react";
 
 import { PRODUCT_NAME } from "@/lib/branding";
 import {
@@ -12,6 +12,7 @@ import {
 import { useApp } from "@/components/features/app-shell";
 import { LanguageToggle } from "@/components/features/language-toggle";
 import { ThemeToggle } from "@/components/features/theme-toggle";
+import { WindowModeToggle } from "@/components/features/window-mode-toggle";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -23,7 +24,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 function sectionLabel(
   pathname: string,
@@ -39,15 +39,19 @@ export function SiteHeader() {
   const t = useTranslations("SiteHeader");
   const nav = useTranslations("Navigation");
   const pathname = usePathname();
-  const { capabilities, windowMode, toggleWindowMode, minimizeWorkspace } = useApp();
+  const {
+    capabilities,
+    enterExploreMode,
+    toggleWindowMode,
+    windowMode,
+    windowScalingEnabled,
+  } = useApp();
   const label = sectionLabel(pathname, {
     search: nav("search"),
     answer: nav("answer"),
     knowledge: nav("knowledge"),
     settings: nav("settings"),
   });
-  const windowed = windowMode === "window";
-
   return (
     <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <SidebarTrigger className="-ml-1" />
@@ -77,38 +81,24 @@ export function SiteHeader() {
           </Link>
         )}
 
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8 px-2.5 text-xs"
+          onClick={() => enterExploreMode()}
+          aria-label={t("enterExploreAria")}
+          title={t("enterExplore")}
+        >
+          {t("exploreMode")}
+        </Button>
         <LanguageToggle />
         <ThemeToggle />
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="hidden size-8 md:inline-flex"
-              onClick={minimizeWorkspace}
-              aria-label={t("minimizeAria")}
-            >
-              <Minimize2 />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{t("minimize")}</TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="hidden size-8 md:inline-flex"
-              onClick={toggleWindowMode}
-              aria-label={windowed ? t("fullscreenAria") : t("windowAria")}
-            >
-              {windowed ? <Expand /> : <Shrink />}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            {windowed ? t("fullscreen") : t("window")}
-          </TooltipContent>
-        </Tooltip>
+        <WindowModeToggle
+          enabled={windowScalingEnabled}
+          mode={windowMode}
+          onToggle={toggleWindowMode}
+        />
       </div>
     </header>
   );
