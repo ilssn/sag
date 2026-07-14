@@ -69,8 +69,9 @@
   },
   "SiteHeader": {
     "modelNotConfigured": "未配置模型",
-    "minimizeAria": "收起为迷你工作台",
-    "minimize": "收起工作台",
+    "enterExploreAria": "进入探索模式",
+    "enterExplore": "进入探索模式",
+    "exploreMode": "探索",
     "fullscreenAria": "切换为满屏",
     "windowAria": "切换为窗口",
     "fullscreen": "满屏显示",
@@ -447,8 +448,8 @@
     "avatar": "头像字符",
     "avatarDescription": "支持 @_@、AI、单字或 emoji。",
     "name": "助手名称",
-    "showPet": "显示桌面宠物",
-    "showPetDescription": "默认开启；在桌面端显示可拖动的助手入口，设置立即生效。",
+    "petAlwaysOn": "助手常驻",
+    "petAlwaysOnDescription": "开启后，助手在正常模式中仍然显示；关闭后，只在探索模式中出现。",
     "greeting": "开场白",
     "greetingDescription": "新对话开始时的第一句话。",
     "systemPrompt": "系统提示",
@@ -566,7 +567,11 @@
   "AppShell": {
     "loading": "载入中…",
     "configureModel": "配置模型",
+    "graphSettings": "调整图谱显示",
     "exitExplore": "退出探索模式",
+    "exitExploreShort": "退出",
+    "exploreEntered": "你已经进入探索模式",
+    "exploreEnteredDescription": "点击星系进入探索，点右上角可退出。",
     "resizeWindow": "调整窗口大小"
   },
   "ChatPage": {
@@ -845,9 +850,9 @@
     "controls": {
       "back": "返回",
       "searchHome": "返回搜索首页",
-      "settings": "打开设置",
-      "expand": "放大工作台",
-      "close": "关闭",
+      "backToWorkspace": "返回迷你工作台",
+      "assistantSettings": "助手设置",
+      "close": "关闭迷你面板",
       "resize": "调整迷你面板大小"
     },
     "search": {
@@ -904,14 +909,11 @@
       "dance": "跳舞"
     },
     "form": {
-      "title": "形态切换",
-      "aria": "形态切换",
-      "simple": "简单",
-      "full": "完整",
       "simpleAria": "{name} 简单形态，点击切换为完整{status}",
-      "fullAria": "{name} 完整形态{status}",
+      "fullAria": "{name} 完整形态，点击切换为简单{status}",
       "statusSuffix": "，{status}",
-      "switchToFull": "切换为完整形态"
+      "switchToFull": "切换为完整形态",
+      "switchToSimple": "切换为简单形态"
     },
     "facing": {
       "title": "朝向",
@@ -967,6 +969,8 @@
   },
   "UniverseScene": {
     "aria": "知识宇宙 3D 图谱",
+    "keyboardInstructions": "按方向键浏览图谱，按回车或空格打开或锁定当前项，按 Escape 清除焦点。",
+    "keyboardStatus": "{label} 第 {index, number} 个，共 {total, number} 个。",
     "exploreSource": "探索信息源 {label}",
     "sourceStats": "{events, number} 事件 · {entities, number} 实体",
     "sourceStatsBuilding": "{events, number} 事件 · 实体统计中",
@@ -986,16 +990,16 @@
     },
     "loadProgress": {
       "rowAria": "{label}加载进度",
-      "complete": "全部内容已加载",
-      "loading": "正在从星系中心显现",
-      "clickContinue": "点击节点继续探索",
-      "zoomContinue": "继续拉近，加载更早内容",
-      "clickStart": "点击节点开始探索",
-      "zoomStart": "拉近星系，开始探索",
-      "title": "内容加载进度",
-      "events": "已加载事件",
-      "entities": "已连接实体",
-      "sourceComplete": "{source} 已全部加载：{events, number} 个事件、{entities, number} 个实体"
+      "complete": "全部事件包已探索完成，时间窗保持稳定",
+      "loading": "正在预取下一页事件包",
+      "clickContinue": "在详情中选择“探索更多”",
+      "scrollContinue": "继续向内滚动，推进事件包",
+      "clickStart": "选择信息源开始探索",
+      "scrollStart": "进入星系后向内滚动，开始探索",
+      "title": "3D 事件包时间窗",
+      "events": "已查询事件 / 来源总量",
+      "entities": "当前缓存实体 / 来源总量",
+      "sourceComplete": "已完成 {source} 的全部时间轴探索；共查询 {events, number} 个事件，当前缓存 {entities, number} 个实体"
     },
     "errors": {
       "unavailable": "知识宇宙暂时无法抵达",
@@ -1003,18 +1007,24 @@
       "timelineLoadFailed": "知识时间轴加载失败"
     },
     "expansion": {
-      "pageMore": "已展示 {committed, number} / {total, number} 个{relation}，再次点击继续向更早内容探索",
+      "pageMore": "已展示 {committed, number} / {total, number} 个{relation}，选择“探索更多”继续",
       "complete": "已展示全部 {total, number} 个{relation}",
+      "capacityReached": "当前锁定网络已达到设备安全容量；解锁节点后再探索",
       "eventEntitiesComplete": "事件关联的 {count, number} 个实体已全部呈现",
       "noEventEntities": "这个事件暂未抽取到关联实体"
     },
     "timeline": {
-      "loading": "正在沿时间轴显现最近事件与关联实体",
+      "loading": "正在装入下一页事件包与对应实体",
       "defaultTitle": "知识时间轴",
       "thisGalaxy": "这个星系",
-      "startReached": "已抵达 {source} 的时间轴起点",
-      "loadedZoom": "已显现 {count, number} 个事件，继续拉近可查看更早内容",
-      "loadedClick": "已显现 {count, number} 个事件，点击节点可继续探索关联"
+      "windowReady": "已载入 {visible, number} 个事件包；后台缓存会按设置自动补充",
+      "windowAdvanced": "已探索到第 {current, number} 个事件包",
+      "explorationComplete": "已完成 {source} 的全部事件探索，不能再向内推进",
+      "unlockToContinue": "请先解除当前节点锁定，再推进时间窗",
+      "capacityPaused": "已查询 {count, number} 个事件；设备安全容量不足以完整接收下一事件包",
+      "lockReleasedForCapacity": "设备显示预算已降低，临时锁定已释放，当前事件包保持完整",
+      "snapshotReloading": "图谱数据已更新，旧时间轴已安全清除；正在自动载入最新快照",
+      "snapshotReset": "图谱仍在持续更新，自动重载未能稳定完成；请重新选择信息源后再试"
     },
     "rebuild": {
       "queued": "统计刷新已进入后台队列",
@@ -1025,8 +1035,8 @@
       "ready": "统计准备刷新"
     },
     "webgl": {
-      "title": "当前设备无法启用 WebGL",
-      "description": "统计和搜索仍可正常使用；启用硬件加速后可进入 3D 知识宇宙。"
+      "title": "3D 知识宇宙暂不可用",
+      "description": "统计和搜索仍可正常使用；可刷新页面重试，或确认浏览器已启用硬件加速。"
     },
     "stats": {
       "source": "{events} 事件 · {entities} 实体",
@@ -1038,8 +1048,8 @@
     },
     "legend": { "entities": "主题实体", "events": "关联事件" },
     "searchLocked": {
-      "label": "仅点击拓展",
-      "description": "搜索视图不会随滚轮加载更多数据，只能点击节点拓展"
+      "label": "显式探索",
+      "description": "搜索视图不会随滚轮加载数据；锁定节点后，可在详情中选择“探索更多”"
     },
     "inspector": {
       "hover": "悬停",
@@ -1050,7 +1060,7 @@
       "eventFallback": "{category}，关联实体已随事件一同呈现。",
       "expanding": "正在拓展下一批关联",
       "remaining": "还有 {count, number} 个关联可探索",
-      "clickExplore": "点击探索关联内容",
+      "clickExplore": "选择“探索更多”查看关联内容",
       "rangeStart": "已到达当前时间范围的起点",
       "allVisible": "关联内容已全部呈现",
       "none": "暂无可探索的关联",
@@ -1058,69 +1068,62 @@
     },
     "controls": {
       "currentResult": "回到当前结果",
+      "previousEventBundle": "返回上一个事件包",
+      "nextEventBundle": "进入下一个事件包",
+      "bundlePosition": "已探索 {current, number} · 缓存 {cached, number}",
+      "explorationComplete": "探索完成",
       "overview": "回到完整宇宙",
       "reset": "重置探索并归位",
       "refresh": "刷新统计轮廓"
     }
   },
   "GraphSettings": {
-    "content": {
-      "title": "图谱内容",
-      "description": "决定画面中优先保留什么；筛选只改变展示，不删除知识数据。"
+    "drawer": {
+      "title": "图谱显示设置",
+      "description": "分别调整节点卡片、实体类型与事件包窗口，设置会立即作用于当前图谱。"
     },
-    "visible": {
-      "title": "显示内容",
-      "description": "事件和实体至少保留一类，避免出现没有上下文的空画面。",
-      "event": { "label": "事件", "description": "时间线、事实与发生的事情" },
-      "entity": { "label": "实体", "description": "人物、组织、地点与概念" }
-    },
-    "priority": {
-      "title": "展示优先级",
-      "description": "达到窗口节点上限时，优先类型会先进入可见工作集。",
-      "aria": "图谱展示优先级",
-      "options": {
-        "balanced": { "label": "均衡展示", "description": "事件和实体按工作集顺序展示" },
-        "events": { "label": "事件优先", "description": "节点紧张时优先保留时间与事实" },
-        "entities": { "label": "实体优先", "description": "节点紧张时优先保留人物、组织与概念" }
+    "cards": {
+      "title": "节点卡片",
+      "description": "这里只控制常驻卡片，不改变节点或关系线；悬停、点击仍会显示当前节点卡片。",
+      "event": {
+        "title": "显示事件卡片",
+        "description": "默认显示事件摘要；关闭后仍保留事件星，悬停或点击时仍可查看。",
+        "aria": "显示事件卡片"
+      },
+      "entity": {
+        "title": "显示实体卡片",
+        "description": "默认显示实体名称；关闭后仍保留实体图元，悬停或点击时仍可查看。",
+        "aria": "显示实体卡片"
       }
     },
     "entityTypes": {
       "title": "实体类型",
-      "description": "只看关心的实体分类；新发现的分类会自动出现在这里。",
+      "description": "筛选参与当前画面的实体类别；被筛掉的实体及其事项连线一起隐藏，事项与事项关系保留，且至少保留一种实体类型。",
       "all": "全部类型",
       "none": "暂无分类",
       "emptyDescription": "探索含实体的知识后，可用分类会自动同步到这里。"
     },
-    "performance": {
-      "title": "性能与密度",
-      "description": "用有界工作集和自适应细节控制渲染成本，避免探索越久越卡。"
+    "window": {
+      "title": "探索窗口",
+      "description": "分别控制画面中的事件包与可复用缓存容量，长时间探索仍保持有界。"
     },
-    "maxNodes": {
-      "title": "窗口节点上限",
-      "description": "新增节点超过上限后按先进先出移除旧节点；图谱策略上限仍会优先生效。",
-      "current": "当前上限",
-      "aria": "窗口节点上限",
+    "visibleEventBundles": {
+      "title": "可见事件包窗口",
+      "description": "控制同时进入 3D 可视窗口的完整事件包数量；滚动时仍按单个事件包平滑推进。",
+      "current": "本设备实际可见",
+      "aria": "可见事件包数量",
       "recommended": "推荐 {count, number}"
     },
-    "density": {
-      "title": "视觉密度",
-      "description": "标签根据视口面积自适应，关系线根据当前焦点和预算裁剪。",
-      "labels": "标签密度",
-      "edges": "关系密度",
-      "labelOptions": { "low": "低 · 更清爽", "balanced": "均衡", "high": "高 · 更多信息" },
-      "edgeOptions": { "focus": "焦点 · 关键关系", "context": "上下文", "all": "全部关系" }
+    "cachedEventBundles": {
+      "title": "事件包缓存容量",
+      "description": "这是内存容量上限，不会主动填满；仅在翻页和低水位预取需要时加载，并优先复用已有事件包。",
+      "current": "本设备容量上限",
+      "aria": "事件包缓存容量",
+      "runway": "最多预留 {count, number} 包"
     },
-    "exploration": {
-      "title": "探索行为",
-      "description": "普通浏览可按需渐进加载；搜索和问答结果始终锁定，防止滚动偏离目标。",
+    "reset": {
       "savedLocally": "设置会立即同步到当前图谱，并保存在本浏览器。",
-      "reset": "恢复默认",
-      "autoExpand": {
-        "title": "随缩放渐进加载",
-        "description": "仅在普通浏览达到高细节级别时继续加载时间线。关闭后只能点击节点探索。",
-        "aria": "随缩放渐进加载"
-      },
-      "searchLocked": "搜索或问答生成的图谱不会因滚轮继续请求数据。滚轮只缩放当前结果，点击节点“探索更多”才会扩展。"
+      "action": "恢复默认"
     }
   },
   "OrbitalGraph": {

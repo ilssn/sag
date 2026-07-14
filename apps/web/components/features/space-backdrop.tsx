@@ -97,7 +97,13 @@ export function SpaceBackdrop() {
     };
 
     const handlePointerMove = (event: PointerEvent) => {
-      if (event.pointerType !== "mouse" || event.target !== field) {
+      const target = event.target;
+      const insideExploreUniverse =
+        target instanceof Element
+        && target.closest("[data-universe-mode='explore']") !== null;
+      const isMeteorSurface = target === field || insideExploreUniverse;
+
+      if (event.pointerType !== "mouse" || !isMeteorSurface) {
         hideMeteor();
         return;
       }

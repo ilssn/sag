@@ -566,7 +566,7 @@ function SearchSummaryCard({
   onCitationClick: (citation: Citation) => void;
 }) {
   const t = useTranslations("Search");
-  const [expanded, setExpanded] = React.useState(streaming);
+  const [expanded, setExpanded] = React.useState(true);
   const [canExpand, setCanExpand] = React.useState(false);
   const [expandedScrollable, setExpandedScrollable] = React.useState(false);
   const [following, setFollowing] = React.useState(true);
@@ -606,9 +606,9 @@ function SearchSummaryCard({
       updateFollowing(true);
     } else if (!streaming && wasStreamingRef.current) {
       // Streaming reserves a stable viewport to avoid page jitter. Once the
-      // final answer arrives, release that height immediately: short answers
-      // become content-sized and long answers return to the compact preview.
-      setExpanded(false);
+      // final answer arrives, release that temporary height while preserving
+      // the user's expanded state. Answers only collapse through an explicit
+      // user action, so completed output remains immediately readable.
       setStreamLayoutLocked(false);
       updateFollowing(true);
     }
@@ -624,7 +624,7 @@ function SearchSummaryCard({
 
     const update = () => {
       const expandedLimit = compact
-        ? Math.min(160, Math.max(120, window.innerHeight * 0.3))
+        ? Math.min(288, Math.max(176, window.innerHeight * 0.42))
         : Math.min(280, Math.max(176, window.innerHeight * 0.32));
       const contentHeight = content.scrollHeight;
       const nextCanExpand = contentHeight > collapsedLimit + 1;
@@ -657,7 +657,7 @@ function SearchSummaryCard({
     : !expanded
       ? `${collapsedLimit}px`
       : compact
-        ? "clamp(7.5rem, 30dvh, 10rem)"
+        ? "clamp(11rem, 42dvh, 18rem)"
         : "clamp(11rem, 32dvh, 17.5rem)";
 
   return (

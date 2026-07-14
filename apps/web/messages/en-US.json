@@ -69,8 +69,9 @@
   },
   "SiteHeader": {
     "modelNotConfigured": "Model not configured",
-    "minimizeAria": "Collapse to mini workspace",
-    "minimize": "Collapse workspace",
+    "enterExploreAria": "Enter exploration mode",
+    "enterExplore": "Enter exploration mode",
+    "exploreMode": "Explore",
     "fullscreenAria": "Switch to full screen",
     "windowAria": "Switch to window",
     "fullscreen": "Full-screen view",
@@ -447,8 +448,8 @@
     "avatar": "Avatar characters",
     "avatarDescription": "Supports @_@, AI, a single character, or emoji.",
     "name": "Assistant name",
-    "showPet": "Show desktop pet",
-    "showPetDescription": "On by default. Shows a draggable assistant entry on desktop and applies immediately.",
+    "petAlwaysOn": "Keep assistant visible",
+    "petAlwaysOnDescription": "Keep the assistant available in normal mode. When off, it appears only in exploration mode.",
     "greeting": "Greeting",
     "greetingDescription": "The first sentence shown in a new conversation.",
     "systemPrompt": "System prompt",
@@ -566,7 +567,11 @@
   "AppShell": {
     "loading": "Loading…",
     "configureModel": "Configure model",
+    "graphSettings": "Adjust graph display",
     "exitExplore": "Exit exploration",
+    "exitExploreShort": "Exit",
+    "exploreEntered": "You have entered exploration mode",
+    "exploreEnteredDescription": "Select a galaxy to explore. Use the button in the upper-right corner to exit.",
     "resizeWindow": "Resize window"
   },
   "ChatPage": {
@@ -845,9 +850,9 @@
     "controls": {
       "back": "Back",
       "searchHome": "Return to search home",
-      "settings": "Open settings",
-      "expand": "Expand workspace",
-      "close": "Close",
+      "backToWorkspace": "Back to mini workspace",
+      "assistantSettings": "Assistant settings",
+      "close": "Close mini workspace",
       "resize": "Resize mini workspace"
     },
     "search": {
@@ -904,14 +909,11 @@
       "dance": "Dance"
     },
     "form": {
-      "title": "Form",
-      "aria": "Switch assistant form",
-      "simple": "Simple",
-      "full": "Full",
       "simpleAria": "{name} in simple form. Click to switch to full form{status}",
-      "fullAria": "{name} in full form{status}",
+      "fullAria": "{name} in full form. Click to switch to simple form{status}",
       "statusSuffix": ", {status}",
-      "switchToFull": "Switch to full form"
+      "switchToFull": "Switch to full form",
+      "switchToSimple": "Switch to simple form"
     },
     "facing": {
       "title": "Facing",
@@ -967,6 +969,8 @@
   },
   "UniverseScene": {
     "aria": "3D knowledge universe graph",
+    "keyboardInstructions": "Use the arrow keys to browse the graph, Enter or Space to activate or lock the current item, and Escape to clear focus.",
+    "keyboardStatus": "{label}. Item {index, number} of {total, number}.",
     "exploreSource": "Explore source {label}",
     "sourceStats": "{events, plural, one {# event} other {# events}} · {entities, plural, one {# entity} other {# entities}}",
     "sourceStatsBuilding": "{events, plural, one {# event} other {# events}} · building entity statistics",
@@ -986,16 +990,16 @@
     },
     "loadProgress": {
       "rowAria": "Loading progress for {label}",
-      "complete": "All content loaded",
-      "loading": "Emerging from the galaxy center",
-      "clickContinue": "Click a node to keep exploring",
-      "zoomContinue": "Zoom in to load earlier content",
-      "clickStart": "Click a node to start exploring",
-      "zoomStart": "Zoom into the galaxy to start exploring",
-      "title": "Content loading progress",
-      "events": "Events loaded",
-      "entities": "Entities connected",
-      "sourceComplete": "{source} is fully loaded: {events, plural, one {# event} other {# events}} and {entities, plural, one {# entity} other {# entities}}"
+      "complete": "All event bundles have been explored; the window is stable",
+      "loading": "Prefetching the next page of event bundles",
+      "clickContinue": "Choose Explore more in the inspector",
+      "scrollContinue": "Scroll inward to advance the event bundles",
+      "clickStart": "Choose a source to start exploring",
+      "scrollStart": "Enter a galaxy and scroll inward to start exploring",
+      "title": "3D event-bundle window",
+      "events": "Queried events / source total",
+      "entities": "Resident entities / source total",
+      "sourceComplete": "Finished exploring {source}’s timeline; queried {events, plural, one {# event} other {# events}} with {entities, plural, one {# entity} other {# entities}} currently resident"
     },
     "errors": {
       "unavailable": "The knowledge universe is temporarily unavailable",
@@ -1003,18 +1007,24 @@
       "timelineLoadFailed": "Failed to load the knowledge timeline"
     },
     "expansion": {
-      "pageMore": "Showing {committed, number} / {total, number} {relation}. Click again to explore earlier content.",
+      "pageMore": "Showing {committed, number} / {total, number} {relation}. Choose Explore more to continue.",
       "complete": "All {total, number} {relation} are visible.",
+      "capacityReached": "The locked network reached the device safety capacity. Unlock the node before exploring further.",
       "eventEntitiesComplete": "All {count, plural, one {# entity linked to this event is} other {# entities linked to this event are}} visible.",
       "noEventEntities": "No related entities have been extracted for this event yet."
     },
     "timeline": {
-      "loading": "Revealing recent events and related entities along the timeline",
+      "loading": "Loading the next page of event bundles and their entities",
       "defaultTitle": "Knowledge timeline",
       "thisGalaxy": "this galaxy",
-      "startReached": "Reached the beginning of {source}’s timeline",
-      "loadedZoom": "{count, plural, one {# event is visible} other {# events are visible}}. Zoom in to see earlier content.",
-      "loadedClick": "{count, plural, one {# event is visible} other {# events are visible}}. Click a node to explore related content."
+      "windowReady": "Loaded {visible, plural, one {# event bundle} other {# event bundles}}; the bounded cache fills automatically",
+      "windowAdvanced": "Explored through event bundle {current, number}",
+      "explorationComplete": "Finished every event in {source}; the timeline cannot advance further",
+      "unlockToContinue": "Unlock the current node before advancing the timeline window",
+      "capacityPaused": "Queried {count, plural, one {# event} other {# events}}; the next complete bundle exceeds the device safety capacity.",
+      "lockReleasedForCapacity": "The device display budget decreased, so the temporary lock was released while keeping every event bundle intact.",
+      "snapshotReloading": "The graph changed, so the old timeline was safely cleared. Loading the latest snapshot automatically.",
+      "snapshotReset": "The graph is still changing and automatic reload could not stabilize. Choose the source again to retry."
     },
     "rebuild": {
       "queued": "The statistics refresh is queued in the background",
@@ -1025,8 +1035,8 @@
       "ready": "Statistics are ready to refresh"
     },
     "webgl": {
-      "title": "WebGL is unavailable on this device",
-      "description": "Statistics and search still work. Enable hardware acceleration to enter the 3D knowledge universe."
+      "title": "The 3D knowledge universe is unavailable",
+      "description": "Statistics and search still work. Refresh to retry, or make sure hardware acceleration is enabled."
     },
     "stats": {
       "source": "{events} events · {entities} entities",
@@ -1038,8 +1048,8 @@
     },
     "legend": { "entities": "Topic entities", "events": "Related events" },
     "searchLocked": {
-      "label": "Click to expand",
-      "description": "Scrolling never loads more data in search view. Click a node to expand it."
+      "label": "Explicit exploration",
+      "description": "Scrolling never loads data in search view. Lock a node, then choose Explore more in the inspector."
     },
     "inspector": {
       "hover": "Hover",
@@ -1050,7 +1060,7 @@
       "eventFallback": "{category}. Related entities are shown with the event.",
       "expanding": "Expanding the next group of relationships",
       "remaining": "{count, plural, one {# relationship remains} other {# relationships remain}} to explore",
-      "clickExplore": "Click to explore related content",
+      "clickExplore": "Choose Explore more to view related content",
       "rangeStart": "Reached the beginning of the current time range",
       "allVisible": "All related content is visible",
       "none": "No relationships to explore",
@@ -1058,69 +1068,62 @@
     },
     "controls": {
       "currentResult": "Return to current result",
+      "previousEventBundle": "Return to the previous event bundle",
+      "nextEventBundle": "Enter the next event bundle",
+      "bundlePosition": "Explored {current, number} · cached {cached, number}",
+      "explorationComplete": "Exploration complete",
       "overview": "Return to full universe",
       "reset": "Reset exploration and view",
       "refresh": "Refresh statistical contours"
     }
   },
   "GraphSettings": {
-    "content": {
-      "title": "Graph content",
-      "description": "Choose what stays visible first. Filters only change the view; they do not delete knowledge data."
+    "drawer": {
+      "title": "Graph display settings",
+      "description": "Adjust node cards, entity types, and the event-bundle window independently. Changes apply to the current graph immediately."
     },
-    "visible": {
-      "title": "Visible content",
-      "description": "Keep at least events or entities visible so the graph always has context.",
-      "event": { "label": "Events", "description": "Timelines, facts, and things that happened" },
-      "entity": { "label": "Entities", "description": "People, organizations, places, and concepts" }
-    },
-    "priority": {
-      "title": "Display priority",
-      "description": "When the node limit is reached, the preferred type enters the visible working set first.",
-      "aria": "Graph display priority",
-      "options": {
-        "balanced": { "label": "Balanced", "description": "Show events and entities in working-set order" },
-        "events": { "label": "Events first", "description": "Prioritize timelines and facts when space is limited" },
-        "entities": { "label": "Entities first", "description": "Prioritize people, organizations, and concepts when space is limited" }
+    "cards": {
+      "title": "Node cards",
+      "description": "These options control persistent cards only, not nodes or relationships. Hovering or clicking still reveals the focused node card.",
+      "event": {
+        "title": "Show event cards",
+        "description": "Show event summaries by default. Event stars remain available on hover and click when this is off.",
+        "aria": "Show event cards"
+      },
+      "entity": {
+        "title": "Show entity cards",
+        "description": "Show entity names by default. Entity glyphs remain available on hover and click when this is off.",
+        "aria": "Show entity cards"
       }
     },
     "entityTypes": {
       "title": "Entity types",
-      "description": "Show only the entity categories you care about. Newly discovered categories appear automatically.",
+      "description": "Choose which entity categories participate in the current view. Filtered entities and their event links hide together, event-to-event links remain, and at least one type stays selected.",
       "all": "All types",
       "none": "No categories",
       "emptyDescription": "Explore knowledge containing entities and available categories will appear here automatically."
     },
-    "performance": {
-      "title": "Performance and density",
-      "description": "A bounded working set and adaptive detail keep rendering costs stable during long exploration sessions."
+    "window": {
+      "title": "Exploration window",
+      "description": "Control the event bundles on screen separately from reusable cache capacity so long explorations stay bounded."
     },
-    "maxNodes": {
-      "title": "Window node limit",
-      "description": "When new nodes exceed the limit, the oldest nodes are removed first. The graph policy limit still takes precedence.",
-      "current": "Current limit",
-      "aria": "Window node limit",
+    "visibleEventBundles": {
+      "title": "Visible event-bundle window",
+      "description": "Control how many complete event bundles enter the 3D window together; scrolling still advances one bundle at a time.",
+      "current": "Effective on this device",
+      "aria": "Visible event bundle count",
       "recommended": "Recommended: {count, number}"
     },
-    "density": {
-      "title": "Visual density",
-      "description": "Labels adapt to viewport area; relationships are trimmed by the current focus and budget.",
-      "labels": "Label density",
-      "edges": "Relationship density",
-      "labelOptions": { "low": "Low · cleaner", "balanced": "Balanced", "high": "High · more detail" },
-      "edgeOptions": { "focus": "Focus · key links", "context": "Context", "all": "All relationships" }
+    "cachedEventBundles": {
+      "title": "Event-bundle cache capacity",
+      "description": "This is a memory capacity limit, not a fill target. Bundles load only for paging or low-water prefetch, and existing bundles are reused first.",
+      "current": "Capacity on this device",
+      "aria": "Event bundle cache capacity",
+      "runway": "Up to {count, number} ahead"
     },
-    "exploration": {
-      "title": "Exploration behavior",
-      "description": "Regular browsing can load progressively. Search and answer graphs stay locked so scrolling does not lose the target.",
+    "reset": {
       "savedLocally": "Changes apply to the current graph immediately and are saved in this browser.",
-      "reset": "Restore defaults",
-      "autoExpand": {
-        "title": "Load progressively while zooming",
-        "description": "Continue loading the timeline only at high detail during regular browsing. When off, exploration requires clicking a node.",
-        "aria": "Load progressively while zooming"
-      },
-      "searchLocked": "Graphs created by search or answers never request more data from the scroll wheel. Scrolling only zooms the current result; click “Explore more” to expand it."
+      "action": "Restore defaults"
     }
   },
   "OrbitalGraph": {

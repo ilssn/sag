@@ -29,6 +29,7 @@ import {
   APP_INITIALIZATION_DEFAULTS,
   persistPetCollapsed,
   readInitialPetCollapsed,
+  shouldShowPet,
 } from "@/lib/app-initialization";
 import type { ConversationSessionSnapshot } from "@/lib/conversation-runtime";
 import {
@@ -40,17 +41,30 @@ import {
   resolvePetFace,
   usePetAppearancePreferences,
 } from "@/lib/pet-appearance-preferences";
-import { usePetEnabled } from "@/lib/pet-preferences";
+import {
+  clampPetPosition,
+  resolveExplorePetPosition,
+} from "@/lib/pet-placement";
+import { usePetPresence } from "@/lib/pet-preferences";
+import {
+  UNIVERSE_ASK_EVENT,
+  UNIVERSE_DETAIL_EVENT,
+} from "@/lib/universe-events";
 import { cn } from "@/lib/utils";
+import type { WorkspaceSection } from "@/lib/workspace";
 import { useApp } from "@/components/features/app-shell";
 import {
   useOptionalConversationIndex,
   useOptionalConversationSession,
 } from "@/components/features/chat/conversation-provider";
-import { PetMiniWorkspace } from "@/components/features/pet-mini-workspace";
+import {
+  PetMiniWorkspace,
+  type PetMiniView,
+} from "@/components/features/pet-mini-workspace";
 import { petFaceStyle } from "@/components/features/pet-head-avatar";
 
 type PetVisualMode = PetAgentActivity | "jumping" | "flying" | "roaming" | "dancing";
+type PetFormTransition = "idle" | "bursting" | "falling" | "launching";
 
 interface PetActivity {
   streaming: boolean;
@@ -63,6 +77,25 @@ interface PetActivity {
 
 const IDLE_EXPRESSIONS = ["^_^", "-_-", "o_o", "._.", "u_u"] as const;
 const PET_VIEWPORT_MARGIN = 24;
+const PET_BUBBLE_POP_DURATION = 240;
+const PET_BUBBLE_FALL_DURATION = 460;
+const PET_BUBBLE_LAUNCH_DURATION = 1_250;
+const PET_BUBBLE_DROP_DISTANCE = 28;
+
+function visiblePlacementAvoidRects() {
+  return [...document.querySelectorAll<HTMLElement>("[data-universe-controls]")]
+    .filter((element) => element.offsetParent !== null)
+    .map((element) => {
+      const bounds = element.getBoundingClientRect();
+      return {
+        x: bounds.left,
+        y: bounds.top,
+        width: bounds.width,
+        height: bounds.height,
+      };
+    });
+}
+
 const MODE_EXPRESSIONS: Partial<Record<PetVisualMode, string>> = {
   thinking: "◔_◔",
   searching: "o_o",
@@ -157,7 +190,9 @@ interface PetRoamPath {
 }
 
 export function PetWithPreference(props: Omit<PetProps, "visible">) {
-  const [visible] = usePetEnabled();
+  const { appMode } = useApp();
+  const [presence] = usePetPresence();
+  const visible = shouldShowPet(appMode, presence);
   return <Pet {...props} visible={visible} />;
 }
 
@@ -218,11 +253,9 @@ export function Pet({
   const {
     agent,
     threads,
-    panelMode,
+    appMode,
     workspaceSection,
-    openMiniWorkspace,
-    openSettings,
-    hideWorkspace,
+    enterExploreMode,
   } = useApp();
   const router = useRouter();
   const pathname = usePathname();
@@ -242,9 +275,11 @@ export function Pet({
   const [alignRight, setAlignRight] = React.useState(false);
   const [panelAbove, setPanelAbove] = React.useState(true);
   const [open, setOpen] = React.useState(false);
+  const [miniView, setMiniView] = React.useState<PetMiniView>("workspace");
   const [collapsed, setCollapsed] = React.useState<boolean>(
     APP_INITIALIZATION_DEFAULTS.petCollapsed,
   );
+  const [formTransition, setFormTransition] = React.useState<PetFormTransition>("idle");
   const [revealing, setRevealing] = React.useState(false);
   const [curious, setCurious] = React.useState(false);
   const [petOverlay, setPetOverlay] = React.useState<"none" | "actions">("none");
@@ -258,9 +293,11 @@ export function Pet({
     lastX: number;
     facing: PetAgentFacing;
     moved: boolean;
+    startedOnForm: boolean;
   } | null>(null);
   const lastPosRef = React.useRef<{ x: number; y: number } | null>(null);
-  const suppressClickRef = React.useRef(false);
+  const freePositionRef = React.useRef<{ x: number; y: number } | null>(null);
+  const explorePositionedRef = React.useRef(false);
   const expandActionTimerRef = React.useRef<number | null>(null);
   const commandCloseTimerRef = React.useRef<number | null>(null);
   const wasStreamingRef = React.useRef(activity.streaming);
@@ -324,44 +361,103 @@ export function Pet({
   }, [ambient, character]);
 
   React.useEffect(() => {
-    setOpen(panelMode === "mini");
-    if (panelMode === "mini") {
+    setOpen(appMode === "explore");
+    if (appMode === "explore") {
       setPetOverlay("none");
       return;
     }
-    if (panelMode !== "normal") return;
 
-    // Expanding the mini workspace removes a hovered child without always
+    // Exiting exploration removes a hovered child without always
     // producing pointerleave on the pet shell. Clear that latched state so
     // commands return to their hover/focus-only presentation.
     setCurious(false);
     setPetOverlay("none");
+    setMiniView("workspace");
     if (commandCloseTimerRef.current !== null) {
       window.clearTimeout(commandCloseTimerRef.current);
       commandCloseTimerRef.current = null;
     }
-  }, [panelMode]);
+  }, [appMode]);
+
+  React.useEffect(() => {
+    if (appMode !== "explore") return;
+    const reopenWorkspace = () => {
+      setMiniView("workspace");
+      setOpen(true);
+    };
+    window.addEventListener(UNIVERSE_DETAIL_EVENT, reopenWorkspace);
+    window.addEventListener(UNIVERSE_ASK_EVENT, reopenWorkspace);
+    return () => {
+      window.removeEventListener(UNIVERSE_DETAIL_EVENT, reopenWorkspace);
+      window.removeEventListener(UNIVERSE_ASK_EVENT, reopenWorkspace);
+    };
+  }, [appMode]);
+
+  React.useEffect(() => {
+    if (collapsed && petOverlay === "actions") setPetOverlay("none");
+  }, [collapsed, petOverlay]);
 
   React.useEffect(() => {
     lastPosRef.current = characterState.position;
   }, [characterState.position]);
 
   React.useEffect(() => {
+    if (ambient) return;
+    const frame = window.requestAnimationFrame(() => {
+      if (appMode === "explore") {
+        if (explorePositionedRef.current) return;
+        const visual = visualRef.current;
+        if (!visual) return;
+        const rect = visual.getBoundingClientRect();
+        freePositionRef.current = lastPosRef.current ?? { x: rect.left, y: rect.top };
+        const next = resolveExplorePetPosition({
+          viewport: { width: window.innerWidth, height: window.innerHeight },
+          pet: { width: rect.width, height: rect.height },
+          avoidRects: visiblePlacementAvoidRects(),
+          margin: PET_VIEWPORT_MARGIN,
+        });
+        explorePositionedRef.current = true;
+        lastPosRef.current = next;
+        character.moveTo(next);
+        setAlignRight(true);
+        setPanelAbove(true);
+        return;
+      }
+
+      if (!explorePositionedRef.current) return;
+      explorePositionedRef.current = false;
+      const restore = freePositionRef.current;
+      freePositionRef.current = null;
+      if (!restore) return;
+      const width = visualRef.current?.offsetWidth ?? 94;
+      const height = visualRef.current?.offsetHeight ?? 118;
+      const next = clampPetPosition(
+        restore,
+        { width: window.innerWidth, height: window.innerHeight },
+        { width, height },
+        PET_VIEWPORT_MARGIN,
+      );
+      lastPosRef.current = next;
+      character.moveTo(next);
+      setAlignRight(next.x + width / 2 > window.innerWidth / 2);
+      setPanelAbove(next.y + height / 2 > window.innerHeight / 2);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [ambient, appMode, character, visible]);
+
+  React.useEffect(() => {
     const keepVisible = () => {
+      if (appMode === "explore" && !explorePositionedRef.current) return;
       const current = lastPosRef.current;
       if (!current) return;
       const width = visualRef.current?.offsetWidth ?? 94;
       const height = visualRef.current?.offsetHeight ?? 118;
-      const next = {
-        x: Math.min(
-          Math.max(PET_VIEWPORT_MARGIN, current.x),
-          Math.max(PET_VIEWPORT_MARGIN, window.innerWidth - width - PET_VIEWPORT_MARGIN),
-        ),
-        y: Math.min(
-          Math.max(PET_VIEWPORT_MARGIN, current.y),
-          Math.max(PET_VIEWPORT_MARGIN, window.innerHeight - height - PET_VIEWPORT_MARGIN),
-        ),
-      };
+      const next = clampPetPosition(
+        current,
+        { width: window.innerWidth, height: window.innerHeight },
+        { width, height },
+        PET_VIEWPORT_MARGIN,
+      );
       lastPosRef.current = next;
       character.moveTo(next);
       setAlignRight(next.x + width / 2 > window.innerWidth / 2);
@@ -370,14 +466,14 @@ export function Pet({
     keepVisible();
     window.addEventListener("resize", keepVisible);
     return () => window.removeEventListener("resize", keepVisible);
-  }, [character, collapsed]);
+  }, [appMode, character, collapsed]);
 
   const activeThread = activity.threadId
     ? threads.find((thread) => thread.id === activity.threadId) ?? null
     : null;
   const answerVisible =
-    (panelMode === "normal" && (pathname === "/chat" || pathname.startsWith("/chat/")))
-    || (panelMode === "mini" && workspaceSection === "answer");
+    (appMode === "normal" && (pathname === "/chat" || pathname.startsWith("/chat/")))
+    || (appMode === "explore" && workspaceSection === "answer");
   const canAct = !motionReduced && !activity.streaming && characterState.motion === "idle";
 
   const triggerWave = React.useCallback(() => {
@@ -431,6 +527,11 @@ export function Pet({
     const timer = window.setTimeout(() => setRevealing(false), 560);
     return () => window.clearTimeout(timer);
   }, [revealing]);
+
+  React.useEffect(() => {
+    if (formTransition !== "launching" || characterState.motion === "fly") return;
+    setFormTransition("idle");
+  }, [characterState.motion, formTransition]);
 
   React.useEffect(
     () => () => {
@@ -673,14 +774,24 @@ export function Pet({
     window.localStorage.setItem("sag:pet-pos", JSON.stringify(next));
   }
 
-  function openAppearanceSettings() {
+  function openMiniWorkspace(section: WorkspaceSection) {
     setCurious(false);
     setPetOverlay("none");
-    openSettings("agent", "appearance");
+    setMiniView("workspace");
+    setOpen(true);
+    enterExploreMode(section);
+  }
+
+  function openAssistantSettings() {
+    setCurious(false);
+    setPetOverlay("none");
+    setMiniView("assistant-settings");
+    setOpen(true);
+    enterExploreMode(workspaceSection);
   }
 
   function switchToSimpleForm() {
-    if (ambient || characterState.motion !== "idle") return;
+    if (ambient) return;
     setPetOverlay("none");
     setCurious(false);
     setRevealing(false);
@@ -688,32 +799,57 @@ export function Pet({
       window.clearTimeout(expandActionTimerRef.current);
       expandActionTimerRef.current = null;
     }
+    setFormTransition("idle");
     setCollapsed(true);
     persistPetCollapsed(window.localStorage, true);
   }
 
   function expandFromHead() {
-    if (!collapsed) return;
-    setCollapsed(false);
+    if (!collapsed || formTransition !== "idle") return;
+    setPetOverlay("none");
     setCurious(false);
-    setRevealing(true);
-    persistPetCollapsed(window.localStorage, false);
 
-    const snapshot = character.getSnapshot();
-    if (snapshot.activity !== "idle" || snapshot.motion !== "idle") return;
-    character.emote("^o^", 2_400);
-    if (motionReduced) return;
+    const revealFullForm = () => {
+      setCollapsed(false);
+      setRevealing(true);
+      persistPetCollapsed(window.localStorage, false);
+    };
 
+    if (motionReduced) {
+      revealFullForm();
+      return;
+    }
+
+    setFormTransition("bursting");
     expandActionTimerRef.current = window.setTimeout(() => {
-      expandActionTimerRef.current = null;
-      const current = character.getSnapshot();
-      if (current.activity !== "idle" || current.motion !== "idle") return;
-      const roll = Math.random();
-      if (roll < 0.4) triggerWave();
-      else if (roll < 0.68) triggerDance();
-      else if (roll < 0.88) triggerFlight();
-      else triggerRoam();
-    }, 260);
+      setFormTransition("falling");
+
+      expandActionTimerRef.current = window.setTimeout(() => {
+        expandActionTimerRef.current = null;
+        revealFullForm();
+        character.emote("^o^", PET_BUBBLE_LAUNCH_DURATION);
+        const current = character.getSnapshot();
+        if (current.activity !== "idle" || current.motion !== "idle") {
+          setFormTransition("idle");
+          return;
+        }
+
+        setFormTransition("launching");
+        character.fly({
+          height: PET_BUBBLE_DROP_DISTANCE,
+          duration: PET_BUBBLE_LAUNCH_DURATION,
+        });
+      }, PET_BUBBLE_FALL_DURATION);
+    }, PET_BUBBLE_POP_DURATION);
+  }
+
+  function togglePetForm() {
+    if (ambient) {
+      triggerWave();
+      return;
+    }
+    if (collapsed) expandFromHead();
+    else switchToSimpleForm();
   }
 
   function onPointerDown(event: React.PointerEvent) {
@@ -722,7 +858,6 @@ export function Pet({
     const visual = visualRef.current;
     const el = elRef.current;
     if (!visual || !el) return;
-    suppressClickRef.current = false;
     const rect = visual.getBoundingClientRect();
     dragRef.current = {
       dx: event.clientX - rect.left,
@@ -732,6 +867,9 @@ export function Pet({
       lastX: event.clientX,
       facing: characterState.facing,
       moved: false,
+      startedOnForm:
+        event.target instanceof Element
+        && event.target.closest("[data-pet-form-toggle='true']") !== null,
     };
     el.setPointerCapture(event.pointerId);
   }
@@ -742,9 +880,8 @@ export function Pet({
       showCommands();
       return;
     }
-    if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 4) return;
+    if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 8) return;
     drag.moved = true;
-    suppressClickRef.current = true;
     const horizontalDelta = event.clientX - drag.lastX;
     if (Math.abs(horizontalDelta) >= 8) {
       drag.facing = horizontalDelta < 0 ? "left" : "right";
@@ -773,12 +910,18 @@ export function Pet({
     const drag = dragRef.current;
     dragRef.current = null;
     if (drag?.moved && lastPosRef.current) {
-      window.localStorage.setItem("sag:pet-pos", JSON.stringify(lastPosRef.current));
+      if (appMode === "normal") {
+        window.localStorage.setItem("sag:pet-pos", JSON.stringify(lastPosRef.current));
+      }
       window.localStorage.setItem("sag:pet-facing", drag.facing);
-      window.setTimeout(() => {
-        suppressClickRef.current = false;
-      }, 0);
     }
+    if (drag?.startedOnForm && !drag.moved) {
+      togglePetForm();
+    }
+  }
+
+  function onPointerCancel() {
+    dragRef.current = null;
   }
 
   const style: React.CSSProperties = characterState.position
@@ -802,6 +945,12 @@ export function Pet({
   } as React.CSSProperties;
   const visualAnimate = motionReduced
     ? undefined
+    : formTransition === "falling"
+      ? {
+          x: [0, 0.2, 0.7, 0],
+          y: [0, 3, 13, PET_BUBBLE_DROP_DISTANCE],
+          rotate: [0, 0.2, 0.9, 0],
+        }
     : collapsed
       ? {
           x: [0, 0.8 * appearance.floatStrength, 0],
@@ -809,7 +958,20 @@ export function Pet({
           rotate: [0, 0.65 * appearance.floatStrength, 0],
         }
     : characterState.motion === "fly"
-      ? {
+      ? formTransition === "launching"
+        ? {
+            x: [0, 0.8, -0.7, 0.45, -0.2, 0],
+            y: [
+              PET_BUBBLE_DROP_DISTANCE,
+              PET_BUBBLE_DROP_DISTANCE + 2,
+              21,
+              7,
+              -3,
+              0,
+            ],
+            rotate: [0, 0.8, -1.4, 0.8, -0.25, 0],
+          }
+        : {
           x: [0, 1.8, -1.2, 0.8, -0.5, 0.3, -0.2, 0],
           y: [
             0,
@@ -856,10 +1018,22 @@ export function Pet({
           : { x: [0, 0.45, 0], y: [0, -1, 0], rotate: [0, 0, 0] };
   const visualTransition = motionReduced
     ? undefined
+    : formTransition === "falling"
+      ? {
+          duration: PET_BUBBLE_FALL_DURATION / 1_000,
+          times: [0, 0.22, 0.58, 1],
+          ease: "easeIn" as const,
+        }
     : collapsed
       ? { duration: 4.6, repeat: Infinity, ease: "easeInOut" as const }
     : characterState.motion === "fly"
-      ? {
+      ? formTransition === "launching"
+        ? {
+          duration: PET_BUBBLE_LAUNCH_DURATION / 1_000,
+            times: [0, 0.08, 0.3, 0.58, 0.84, 1],
+            ease: "easeOut" as const,
+          }
+        : {
           duration: 6.8,
           times: [0, 0.04, 0.18, 0.28, 0.42, 0.6, 0.82, 1],
           ease: "easeInOut" as const,
@@ -897,12 +1071,12 @@ export function Pet({
       )}
       data-facing={characterState.facing}
       data-collapsed={collapsed ? "true" : "false"}
-      data-pet-workspace={panelMode}
+      data-pet-mode={appMode}
       style={style}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerCancel={onPointerUp}
+      onPointerCancel={onPointerCancel}
       onPointerEnter={showCommands}
       onPointerLeave={scheduleCommandClose}
     >
@@ -956,12 +1130,15 @@ export function Pet({
         )}
 
 
-        {!ambient && panelMode === "mini" && (
+        {!ambient && appMode === "explore" && open && (
           <PetMiniWorkspace
             character={character}
             panelClassName={cn(panelVertical, panelSide)}
             alignRight={alignRight}
             panelAbove={panelAbove}
+            panelView={miniView}
+            onPanelViewChange={setMiniView}
+            onClose={() => setOpen(false)}
           />
         )}
 
@@ -1012,41 +1189,6 @@ export function Pet({
                   {label}
                 </button>
               ))}
-            </div>
-            <div className="flex items-center gap-2 border-t px-2.5 py-2">
-              <span className="mr-auto text-[11px] text-muted-foreground">{t("form.title")}</span>
-              <div className="inline-flex rounded-md bg-muted p-0.5" role="group" aria-label={t("form.aria")}>
-                <button
-                  type="button"
-                  aria-pressed={collapsed}
-                  disabled={!collapsed && characterState.motion !== "idle"}
-                  onClick={() => {
-                    if (collapsed) return;
-                    switchToSimpleForm();
-                  }}
-                  className={cn(
-                    "h-6 rounded px-2 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-35",
-                    collapsed && "bg-background text-foreground shadow-sm",
-                  )}
-                >
-                  {t("form.simple")}
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={!collapsed}
-                  onClick={() => {
-                    if (!collapsed) return;
-                    setPetOverlay("none");
-                    expandFromHead();
-                  }}
-                  className={cn(
-                    "h-6 rounded px-2 text-[11px] text-muted-foreground transition-colors hover:text-foreground",
-                    !collapsed && "bg-background text-foreground shadow-sm",
-                  )}
-                >
-                  {t("form.full")}
-                </button>
-              </div>
             </div>
             <div className="flex items-center gap-1.5 border-t px-2.5 py-2">
               <span className="mr-auto text-[11px] text-muted-foreground">{t("facing.title")}</span>
@@ -1101,9 +1243,9 @@ export function Pet({
           <div
             className="sag-pet__actions sag-pet__actions--commands sag-pet__actions--collapsed"
             data-align={alignRight ? "right" : "left"}
-            data-visible={panelMode === "normal" ? "false" : curious ? "true" : "false"}
+            data-visible={appMode === "normal" ? "false" : curious ? "true" : "false"}
             data-pet-toolbar="true"
-            data-visibility-policy={panelMode === "normal" ? "hover-focus" : "contextual"}
+            data-visibility-policy={appMode === "normal" ? "hover-focus" : "contextual"}
             role="toolbar"
             aria-label={t("toolbar.aria")}
             onPointerEnter={showCommands}
@@ -1142,16 +1284,9 @@ export function Pet({
             <PetActionButton
               slot="appearance"
               label={t("toolbar.settings")}
-              onClick={openAppearanceSettings}
+              onClick={openAssistantSettings}
             >
               <SlidersHorizontal />
-            </PetActionButton>
-            <PetActionButton
-              slot="actions"
-              label={t("toolbar.actions")}
-              onClick={() => setPetOverlay("actions")}
-            >
-              <WandSparkles />
             </PetActionButton>
           </div>
         )}
@@ -1163,9 +1298,9 @@ export function Pet({
               !ambient && "sag-pet__actions--commands",
             )}
             data-align={alignRight ? "right" : "left"}
-            data-visible={panelMode === "normal" ? "false" : curious ? "true" : "false"}
+            data-visible={appMode === "normal" ? "false" : curious ? "true" : "false"}
             data-pet-toolbar="true"
-            data-visibility-policy={panelMode === "normal" ? "hover-focus" : "contextual"}
+            data-visibility-policy={appMode === "normal" ? "hover-focus" : "contextual"}
             role="toolbar"
             aria-label={t("toolbar.aria")}
             onPointerEnter={showCommands}
@@ -1213,7 +1348,7 @@ export function Pet({
                 <PetActionButton
                   slot="appearance"
                   label={t("toolbar.settings")}
-                  onClick={openAppearanceSettings}
+                  onClick={openAssistantSettings}
                 >
                   <SlidersHorizontal />
                 </PetActionButton>
@@ -1233,20 +1368,15 @@ export function Pet({
           <div
             role="button"
             tabIndex={0}
+            data-pet-form-toggle="true"
             data-mode={visualMode}
             data-facing={characterState.facing}
             data-curious={curious && visualMode === "idle" ? "true" : "false"}
-            onClick={() => {
-              if (suppressClickRef.current) {
-                suppressClickRef.current = false;
-                return;
-              }
-              expandFromHead();
-            }}
+            data-form-transition={formTransition}
             onKeyDown={(event) => {
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
-                expandFromHead();
+                togglePetForm();
               }
             }}
             aria-label={t("form.simpleAria", {
@@ -1257,6 +1387,14 @@ export function Pet({
             style={characterStyle}
             className="sag-pet-collapsed relative cursor-grab outline-none active:cursor-grabbing"
           >
+            <span className="sag-pet__bubble" aria-hidden />
+            <span className="sag-pet__bubble-fragments" aria-hidden>
+              <i />
+              <i />
+              <i />
+              <i />
+              <i />
+            </span>
             <div className="sag-pet__helmet" aria-hidden>
               <span className="sag-pet__antenna" />
               <div className="sag-pet__visor">
@@ -1295,41 +1433,24 @@ export function Pet({
           <div
             role="button"
             tabIndex={0}
+            data-pet-form-toggle="true"
             data-mode={visualMode}
             data-wave={characterState.motion === "wave" ? "true" : "false"}
             data-facing={characterState.facing}
             data-curious={curious && !open && visualMode === "idle" ? "true" : "false"}
             data-revealing={revealing ? "true" : "false"}
-            onClick={() => {
-              if (suppressClickRef.current) {
-                suppressClickRef.current = false;
-                return;
-              }
-              setCurious(false);
-              if (ambient) {
-                triggerWave();
-                return;
-              }
-              if (panelMode === "mini") hideWorkspace();
-              else openMiniWorkspace(workspaceSection);
-            }}
             onKeyDown={(event) => {
               if (event.key === "Enter" || event.key === " ") {
                 event.preventDefault();
                 setCurious(false);
-                if (ambient) {
-                  triggerWave();
-                  return;
-                }
-                if (panelMode === "mini") hideWorkspace();
-                else openMiniWorkspace(workspaceSection);
+                togglePetForm();
               }
             }}
             aria-label={t("form.fullAria", {
               name: characterState.identity.name,
               status: statusText ? t("form.statusSuffix", { status: statusText }) : "",
             })}
-            title={characterState.identity.name}
+            title={t("form.switchToSimple")}
             style={characterStyle}
             className="sag-pet-astronaut relative h-full w-full cursor-grab outline-none active:cursor-grabbing"
           >

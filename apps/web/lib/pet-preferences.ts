@@ -5,42 +5,46 @@ import * as React from "react";
 import {
   APP_INITIALIZATION_DEFAULTS,
   APP_INITIALIZATION_STORAGE_KEYS,
-  persistPetEnabled,
-  readInitialPetEnabled,
+  persistPetPresence,
+  readInitialPetPresence,
+  type PetPresence,
 } from "@/lib/app-initialization";
 
-const PET_TOGGLE_EVENT = "sag:pet-toggle";
+const PET_PRESENCE_EVENT = "sag:pet-presence-change";
 
-function getPetEnabled() {
-  if (typeof window === "undefined") return APP_INITIALIZATION_DEFAULTS.petEnabled;
-  return readInitialPetEnabled(window.localStorage);
+function getPetPresence() {
+  if (typeof window === "undefined") return APP_INITIALIZATION_DEFAULTS.petPresence;
+  return readInitialPetPresence(window.localStorage);
 }
 
-function subscribePetEnabled(listener: () => void) {
+function subscribePetPresence(listener: () => void) {
   const onStorage = (event: StorageEvent) => {
-    if (event.key === APP_INITIALIZATION_STORAGE_KEYS.petEnabled) listener();
+    if (
+      event.key === APP_INITIALIZATION_STORAGE_KEYS.petPresence
+      || event.key === APP_INITIALIZATION_STORAGE_KEYS.legacyPetEnabled
+    ) listener();
   };
-  window.addEventListener(PET_TOGGLE_EVENT, listener);
+  window.addEventListener(PET_PRESENCE_EVENT, listener);
   window.addEventListener("storage", onStorage);
   return () => {
-    window.removeEventListener(PET_TOGGLE_EVENT, listener);
+    window.removeEventListener(PET_PRESENCE_EVENT, listener);
     window.removeEventListener("storage", onStorage);
   };
 }
 
-export function setPetEnabled(enabled: boolean) {
+export function setPetPresence(presence: PetPresence) {
   if (typeof window === "undefined") return;
-  persistPetEnabled(window.localStorage, enabled);
-  window.dispatchEvent(new Event(PET_TOGGLE_EVENT));
+  persistPetPresence(window.localStorage, presence);
+  window.dispatchEvent(new Event(PET_PRESENCE_EVENT));
 }
 
-/** 新用户默认开启；只有用户明确关闭后才隐藏。 */
-export function usePetEnabled(): [boolean, (enabled: boolean) => void] {
-  const enabled = React.useSyncExternalStore(
-    subscribePetEnabled,
-    getPetEnabled,
-    () => APP_INITIALIZATION_DEFAULTS.petEnabled,
+/** 常驻时在正常模式保留；探索模式始终显示宠物。 */
+export function usePetPresence(): [PetPresence, (presence: PetPresence) => void] {
+  const presence = React.useSyncExternalStore(
+    subscribePetPresence,
+    getPetPresence,
+    () => APP_INITIALIZATION_DEFAULTS.petPresence,
   );
-  const setEnabled = React.useCallback((value: boolean) => setPetEnabled(value), []);
-  return [enabled, setEnabled];
+  const updatePresence = React.useCallback((value: PetPresence) => setPetPresence(value), []);
+  return [presence, updatePresence];
 }
