@@ -77,14 +77,6 @@ import {
   type UniverseTimelineDeque,
 } from "@/lib/universe-timeline-deque";
 import {
-  commitUniverseDisplayIntent,
-  createUniverseDisplayModeState,
-  planUniverseDisplayTimelineIntent,
-  setUniverseDisplayMode,
-  type UniverseDisplayIntentPlan,
-  type UniverseDisplayModeState,
-} from "@/lib/universe-display-mode";
-import {
   projectUniverseTemporalAxis,
   universeTemporalRankProgress,
 } from "@/lib/universe-temporal-axis";
@@ -722,10 +714,6 @@ export function KnowledgeUniverse({
   const [working, setWorking] = React.useState<UniverseWorkingSet>(emptyUniverseWorkingSet());
   const [timelineWindow, setTimelineWindow] =
     React.useState<UniverseTimelineWindowState | null>(null);
-  const [displayModeState, setDisplayModeState] =
-    React.useState<UniverseDisplayModeState>(() => createUniverseDisplayModeState());
-  const displayModeRef = React.useRef(displayModeState);
-  displayModeRef.current = displayModeState;
   const [activePartition, setActivePartition] = React.useState<string | null>(null);
   const [viewportSourceId, setViewportSourceId] = React.useState<string | null>(null);
   const [selectedKey, setSelectedKeyState] = React.useState<string | null>(null);
@@ -758,28 +746,6 @@ export function KnowledgeUniverse({
   const setSelectedKey = React.useCallback((key: string | null) => {
     setSelectedKeyState(key);
   }, []);
-
-  const updateDisplayMode = React.useCallback((
-    update: (current: UniverseDisplayModeState) => UniverseDisplayModeState,
-  ) => {
-    setDisplayModeState((current) => {
-      const next = update(current);
-      displayModeRef.current = next;
-      return next;
-    });
-  }, []);
-
-  const restoreStablePresentation = React.useCallback(() => {
-    if (displayModeRef.current.mode === "stable") return;
-    setMoreHint(t("controls.cameraRestored"));
-    updateDisplayMode((current) => current.mode === "stable"
-      ? current
-      : setUniverseDisplayMode(
-          current,
-          "stable",
-          sourceSessionRef.current?.timeline.window.revision ?? 0,
-        ));
-  }, [t, updateDisplayMode]);
 
   const setLockedKey = React.useCallback((key: string | null) => {
     lockedKeyRef.current = key;
@@ -1227,7 +1193,6 @@ export function KnowledgeUniverse({
       timelineJourneyCommitRef.current = null;
       sourceSessionRef.current = null;
       setTimelineWindow(null);
-      updateDisplayMode(() => createUniverseDisplayModeState());
       expansionSnapshotsRef.current.clear();
       completedSourcesRef.current.clear();
       refreshLoadProgress();
@@ -1267,7 +1232,6 @@ export function KnowledgeUniverse({
       refreshLoadProgress,
       setLockedKey,
       setSelectedKey,
-      updateDisplayMode,
     ],
   );
 
@@ -1313,7 +1277,6 @@ export function KnowledgeUniverse({
       bundleWindow.cachedEventBundles,
     );
     sourceSessionRef.current = refreshedSession;
-    updateDisplayMode(() => createUniverseDisplayModeState());
     commitWorkingSet(refreshedSession.working);
     setTimelineWindow(refreshedSession.timeline.window);
     refreshLoadProgress();
@@ -1355,7 +1318,7 @@ export function KnowledgeUniverse({
         }
       });
     }, 0);
-  }, [bundleWindow, clearTimelineSettle, commitWorkingSet, refreshLoadProgress, setLockedKey, setSelectedKey, sourceById, t, updateDisplayMode]);
+  }, [bundleWindow, clearTimelineSettle, commitWorkingSet, refreshLoadProgress, setLockedKey, setSelectedKey, sourceById, t]);
 
   React.useEffect(() => {
     const onActivate = (event: Event) => {
@@ -1665,8 +1628,6 @@ export function KnowledgeUniverse({
           [
             "timeline",
             browseSessionSourceId ?? activePartition ?? "none",
-            displayModeState.mode,
-            String(displayModeState.revision),
             visibleTimelineBundleIds.join("|"),
             projectedEventIdentity.join("|"),
           ].join(":"),
@@ -1711,7 +1672,9 @@ export function KnowledgeUniverse({
       const expansionExhausted = expandedAnchorsRef.current.has(key)
         && !cursorsRef.current.has(key);
       const offset = timelinePlacement
-        ? displayModeState.mode === "journey" && temporalProjection
+        // An expansion-discovered event is placed but off the time axis: only
+        // visible timeline packages carry a temporal projection.
+        ? temporalProjection
           ? {
               x: temporalProjection.normalizedOffset.x * radius * 1.8,
               y: temporalProjection.normalizedOffset.y * radius * 1.8,
@@ -1885,7 +1848,6 @@ export function KnowledgeUniverse({
     sourceById,
     t,
     bundleWindow.visibleEventBundles,
-    displayModeState,
     projectedEntityCategories,
     timelineBundleEntityLimit,
     timelineProjectionBudget,
@@ -2746,7 +2708,6 @@ export function KnowledgeUniverse({
         bundleWindow.cachedEventBundles,
       );
       sourceSessionRef.current = session;
-      updateDisplayMode(() => createUniverseDisplayModeState());
       completedSourcesRef.current.clear();
 
       commitWorkingSet(session.working);
@@ -2769,7 +2730,6 @@ export function KnowledgeUniverse({
       setLockedKey,
       setSelectedKey,
       sourceById,
-      updateDisplayMode,
     ],
   );
 
@@ -2833,12 +2793,6 @@ export function KnowledgeUniverse({
       const requestDirection: UniverseTimelineDirection =
         direction === "next" ? "older" : "newer";
       session.timeline.preferredDirection = requestDirection;
-      const displayPlan: UniverseDisplayIntentPlan =
-        planUniverseDisplayTimelineIntent(
-          displayModeRef.current,
-          direction,
-          session.timeline.window.revision,
-        );
 
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const current = session.timeline.window;
@@ -2898,8 +2852,6 @@ export function KnowledgeUniverse({
         return "blocked";
       }
 
-      updateDisplayMode((state) =>
-        commitUniverseDisplayIntent(state, displayPlan, "shifted"));
       timelineJourneyCommitRef.current = {
         session,
         revision: next.revision,
@@ -2927,7 +2879,6 @@ export function KnowledgeUniverse({
       scheduleTimelineSettle,
       sourceById,
       t,
-      updateDisplayMode,
     ],
   );
 
@@ -2999,7 +2950,6 @@ export function KnowledgeUniverse({
     const networkExhausted = !hasOlder;
     return {
       enabled,
-      mode: displayModeState.mode,
       phase: timelineWindow?.phase ?? "idle",
       hasNext: enabled
         && (activeIndex < cacheLength - 1 || hasOlder),
@@ -3009,7 +2959,6 @@ export function KnowledgeUniverse({
     };
   }, [
     browseSessionSourceId,
-    displayModeState.mode,
     interactive,
     timelineWindow,
   ]);
@@ -3139,19 +3088,12 @@ export function KnowledgeUniverse({
 
   const resetUniversePresentation = React.useCallback(() => {
     graphRef.current?.resetOverview();
-    updateDisplayMode((current) => current.mode === "stable"
-      ? current
-      : setUniverseDisplayMode(
-          current,
-          "stable",
-          sourceSessionRef.current?.timeline.window.revision ?? 0,
-        ));
     viewportSourceRef.current = null;
     setViewportSourceId(null);
     setActivePartition(null);
     setLockedKey(null);
     setSelectedKey(null);
-  }, [setLockedKey, setSelectedKey, updateDisplayMode]);
+  }, [setLockedKey, setSelectedKey]);
 
   const returnToUniverseHome = React.useCallback(() => {
     // The galaxy overview is a navigation boundary, not a camera shortcut.
@@ -3322,7 +3264,6 @@ export function KnowledgeUniverse({
       data-universe-projection-node-budget={timelineProjectionBudget.nodes}
       data-universe-resident-node-budget={residentBudget.nodes}
       data-universe-timeline-phase={timelineJourney.phase}
-      data-universe-display-mode={displayModeState.mode}
       data-universe-visible-bundle-limit={bundleWindow.visibleEventBundles}
       data-universe-transition-headroom={timelineWindowPlan.transitionHeadroomPackages}
       data-universe-visible-bundles={timelineWindow?.visibleBundleIds.length ?? 0}
@@ -3346,7 +3287,6 @@ export function KnowledgeUniverse({
             onHover={handleSceneHover}
             onTimelineIntent={handleTimelineIntent}
             onTimelineSettled={handleTimelineSettled}
-            onCameraInteraction={restoreStablePresentation}
             onViewChange={handleSceneViewChange}
             onSourceLod={handleSourceLod}
             onSelectionClear={clearSelection}
@@ -3713,24 +3653,6 @@ export function KnowledgeUniverse({
             >
               <ChevronLeft className="size-3.5" />
             </IconControl>
-            <span
-              className={cn(
-                "rounded-full px-2 py-1 text-[9px] font-medium",
-                displayModeState.mode === "journey"
-                  ? "bg-amber-400/12 text-amber-200"
-                  : "bg-muted/55 text-muted-foreground",
-              )}
-              title={t(displayModeState.mode === "journey"
-                ? "controls.journeyModeHint"
-                : "controls.stableModeHint")}
-              data-universe-display-mode-indicator={displayModeState.mode === "journey"
-                ? "journey"
-                : "stable"}
-            >
-              {t(displayModeState.mode === "journey"
-                ? "controls.journeyMode"
-                : "controls.stableMode")}
-            </span>
             <span className="min-w-32 px-2 text-center text-[10px] tabular-nums text-muted-foreground">
               {t(timelineJourney.phase === "complete"
                 ? "controls.completedTimePosition"

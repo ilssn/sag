@@ -110,8 +110,6 @@ export interface UniverseSceneView {
 
 export interface UniverseTimelineJourney {
   enabled: boolean;
-  /** Stable inspection keeps an even layout; journey applies temporal depth. */
-  mode: "stable" | "journey";
   phase: "idle" | "loading" | "transitioning" | "complete";
   hasNext: boolean;
   hasPrevious: boolean;
@@ -169,8 +167,6 @@ interface UniverseSceneProps {
     direction: UniverseTimelineDirection,
   ) => Promise<UniverseTimelineIntentResult> | UniverseTimelineIntentResult;
   onTimelineSettled: (revision: number) => void;
-  /** A real pointer orbit/pan restores the stable presentation. */
-  onCameraInteraction: () => void;
   onUnavailable?: (reason: UniverseSceneUnavailableReason) => void;
 }
 
@@ -285,7 +281,6 @@ interface SceneCallbacks {
     direction: UniverseTimelineDirection,
   ) => Promise<UniverseTimelineIntentResult> | UniverseTimelineIntentResult;
   onTimelineSettled: (revision: number) => void;
-  onCameraInteraction: () => void;
   onUnavailable: (reason: UniverseSceneUnavailableReason) => void;
 }
 
@@ -782,7 +777,6 @@ class UniverseForceSceneEngine {
     onSelectionClear: () => undefined,
     onTimelineIntent: () => "blocked",
     onTimelineSettled: () => undefined,
-    onCameraInteraction: () => undefined,
     onUnavailable: () => undefined,
   };
   private unavailableNotified = false;
@@ -810,11 +804,6 @@ class UniverseForceSceneEngine {
   private pointerX = 0;
   private pointerY = 0;
   private pointerActive = false;
-  private cameraGestureActive = false;
-  private cameraGestureChanged = false;
-  private cameraGestureKind: "pointer" | "wheel" | null = null;
-  private cameraGesturePosition = new THREE.Vector3();
-  private cameraGestureTarget = new THREE.Vector3();
   private timelineWheelState: UniverseTimelineWheelState =
     createUniverseTimelineWheelState();
   private forwardedTimelineWheelEvents = new WeakSet<Event>();
@@ -870,7 +859,6 @@ class UniverseForceSceneEngine {
   private lodArmed = false;
   private timelineJourney: UniverseTimelineJourney = {
     enabled: false,
-    mode: "stable",
     phase: "idle",
     hasNext: false,
     hasPrevious: false,
@@ -1024,7 +1012,6 @@ class UniverseForceSceneEngine {
     this.controls.maxDistance = UNIVERSE_CAMERA_MAX_DISTANCE;
     this.controls.addEventListener("start", this.handleControlsStart);
     this.controls.addEventListener("change", this.handleControlsChange);
-    this.controls.addEventListener("end", this.handleControlsEnd);
 
     const charge = this.graph.d3Force("charge") as {
       strength?: (value: number | ((node: ForceNode) => number)) => unknown;
@@ -1114,7 +1101,6 @@ class UniverseForceSceneEngine {
     this.host.dataset.universeReducedMotion = String(options.reducedMotion);
     this.host.dataset.universeEventCards = String(options.viewPreferences.showEventCards);
     this.host.dataset.universeEntityCards = String(options.viewPreferences.showEntityCards);
-    this.host.dataset.universeJourneyMode = options.timelineJourney.mode;
     this.syncTimelineDiagnostics();
     this.controls.enabled = options.interactive;
     this.controls.enableZoom = options.interactive;
@@ -2125,7 +2111,6 @@ class UniverseForceSceneEngine {
     this.pendingLod = null;
     this.lodArmed = false;
     this.pointerActive = false;
-    this.cameraGestureKind = null;
     this.resetTimelineWheel();
     this.hoveredId = null;
     this.hoveredFromLabel = false;
@@ -2158,7 +2143,6 @@ class UniverseForceSceneEngine {
     if (this.sleepTimer !== null) window.clearTimeout(this.sleepTimer);
     this.controls.removeEventListener("start", this.handleControlsStart);
     this.controls.removeEventListener("change", this.handleControlsChange);
-    this.controls.removeEventListener("end", this.handleControlsEnd);
     this.resizeObserver.disconnect();
     this.host.removeEventListener("pointermove", this.handlePointerMove);
     this.host.removeEventListener("pointerdown", this.handlePointerDown, true);
@@ -4924,7 +4908,8 @@ class UniverseForceSceneEngine {
   private drainTimelineWheelIntent() {
     const plan = drainUniverseTimelineWheel(this.timelineWheelState, {
       busy: this.timelineIsBusy(),
-      mode: this.timelineJourney.mode,
+      // Vestigial: the planner's mode only tags intent.action, which nothing reads.
+      mode: "journey",
     });
     this.timelineWheelState = plan.state;
     this.syncTimelineWheelDiagnostics(plan.outcome);
@@ -4974,10 +4959,6 @@ class UniverseForceSceneEngine {
       this.syncTimelineWheelDiagnostics("ignored-ui");
       return;
     }
-    // The native OrbitControls zoom remains active. This marker prevents that
-    // camera change from being misclassified as a pointer drag that exits the
-    // temporal journey.
-    this.cameraGestureKind = "wheel";
     if (surface === "label") this.forwardTimelineWheelToCanvas(event);
     if (!this.timelineJourney.enabled) {
       this.resetTimelineWheel();
@@ -4990,7 +4971,8 @@ class UniverseForceSceneEngine {
       ctrlKey: event.ctrlKey,
       metaKey: event.metaKey,
       busy: this.timelineIsBusy(),
-      mode: this.timelineJourney.mode,
+      // Vestigial: the planner's mode only tags intent.action, which nothing reads.
+      mode: "journey",
     });
     this.timelineWheelState = plan.state;
     this.syncTimelineWheelDiagnostics(plan.outcome);
@@ -4999,7 +4981,6 @@ class UniverseForceSceneEngine {
 
   private handlePointerDown = () => {
     if (this.paused || !this.interactive) return;
-    this.cameraGestureKind = "pointer";
     // A deliberate drag owns the camera immediately and cancels trackpad
     // momentum queued for a later time page.
     this.resetTimelineWheel();
@@ -5007,11 +4988,6 @@ class UniverseForceSceneEngine {
 
   private handleControlsStart = () => {
     if (this.paused || !this.interactive) return;
-    const camera = this.graph.camera();
-    this.cameraGestureActive = true;
-    this.cameraGestureChanged = false;
-    this.cameraGesturePosition.copy(camera.position);
-    this.cameraGestureTarget.copy(this.controls.target ?? new THREE.Vector3());
     this.wakeRendering(1_400);
     this.armNebulaAnimation(1_400);
     this.lodArmed = true;
@@ -5020,34 +4996,12 @@ class UniverseForceSceneEngine {
 
   private handleControlsChange = () => {
     if (this.paused) return;
-    this.lastControlsChangeAt = performance.now();
-    if (this.cameraGestureActive && !this.cameraGestureChanged) {
-      const camera = this.graph.camera();
-      const positionChanged = camera.position.distanceToSquared(
-        this.cameraGesturePosition,
-      ) > 1e-8;
-      const targetChanged = (this.controls.target ?? this.cameraGestureTarget)
-        .distanceToSquared(this.cameraGestureTarget) > 1e-8;
-      if (positionChanged || targetChanged) {
-        this.cameraGestureChanged = true;
-        // Wheel is a combined camera-zoom + time-navigation gesture. Only a
-        // real pointer orbit/pan returns the graph to its stable inspection
-        // layout. A plain click has no camera delta and stays selection-only.
-        if (this.cameraGestureKind === "pointer") {
-          this.callbacks.onCameraInteraction();
-        }
-      }
-    }
     const now = performance.now();
+    this.lastControlsChangeAt = now;
     this.updateVisualLayout(now);
     this.updateNodeMorphScales(now);
     this.updateLabels(now);
     this.evaluateLod(now);
-  };
-
-  private handleControlsEnd = () => {
-    this.cameraGestureActive = false;
-    this.cameraGestureKind = null;
   };
 
   private handlePointerMove = (event: PointerEvent) => {
@@ -5350,7 +5304,6 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
       onSelectionClear,
       onTimelineIntent,
       onTimelineSettled,
-      onCameraInteraction,
       onUnavailable,
     },
     forwardedRef,
@@ -5401,7 +5354,6 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
       onSelectionClear,
       onTimelineIntent,
       onTimelineSettled,
-      onCameraInteraction,
       onUnavailable,
       text,
     });
@@ -5422,7 +5374,6 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
       onSelectionClear,
       onTimelineIntent,
       onTimelineSettled,
-      onCameraInteraction,
       onUnavailable,
       text,
     };
@@ -5476,7 +5427,6 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
             onSelectionClear: current.onSelectionClear,
             onTimelineIntent: current.onTimelineIntent,
             onTimelineSettled: current.onTimelineSettled,
-            onCameraInteraction: current.onCameraInteraction,
             onUnavailable: notifyUnavailable,
           });
           engine.setOptions({
@@ -5528,14 +5478,12 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
         onSelectionClear,
         onTimelineIntent,
         onTimelineSettled,
-        onCameraInteraction,
         onUnavailable: notifyUnavailable,
       });
     }, [
       notifyUnavailable,
       onHover,
       onNodeClick,
-      onCameraInteraction,
       onSelectionClear,
       onSourceLod,
       onTimelineIntent,

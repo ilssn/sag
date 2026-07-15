@@ -67,7 +67,7 @@ describe("universe scene production invariants", () => {
     expect(labelLayout).toContain("hostRect,");
   });
 
-  it("keeps native wheel zoom while thresholded wheel and pointer gestures own distinct modes", () => {
+  it("keeps native wheel zoom while the thresholded wheel owns time paging", () => {
     const cameraStart = sourceBetween(
       "private handleControlsStart = () =>",
       "private handleControlsChange = () =>",
@@ -97,7 +97,6 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("windowRevision?: number");
     expect(source).toContain('this.controls.addEventListener("start", this.handleControlsStart)');
     expect(source).toContain('this.controls.addEventListener("change", this.handleControlsChange)');
-    expect(source).toContain('this.controls.addEventListener("end", this.handleControlsEnd)');
     expect(source).toContain('this.host.addEventListener("wheel", this.handleTimelineWheel, {');
     expect(source).toContain("capture: true,");
     expect(source).toContain("passive: true,");
@@ -111,28 +110,25 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("this.controls.maxDistance = UNIVERSE_CAMERA_MAX_DISTANCE");
     expect(source).toContain("this.controls.zoomToCursor = true");
     expect(source).toContain("this.controls.enableZoom = options.interactive");
-    expect(wheel).toContain('this.cameraGestureKind = "wheel"');
     expect(wheel).toContain("const surface = this.timelineWheelSurface(event.target)");
     expect(wheel).toContain('this.syncTimelineWheelDiagnostics("ignored-ui")');
     expect(wheel).toContain('if (surface === "label") this.forwardTimelineWheelToCanvas(event)');
     expect(wheel).toContain("planUniverseTimelineWheel(");
     expect(wheel).toContain("if (plan.intent) this.runTimelineWheelIntent(");
     expect(wheel).not.toContain("event.preventDefault()");
-    expect(wheel).not.toContain("this.callbacks.onCameraInteraction()");
     expect(wheelRouting).toContain("TIMELINE_WHEEL_LABEL_SELECTOR");
     expect(wheelRouting).toContain("this.labelLayer.contains(label)");
     expect(wheelRouting).toContain('const forwarded = new WheelEvent("wheel"');
     expect(wheelRouting).toContain("this.forwardedTimelineWheelEvents.add(forwarded)");
     expect(wheelRouting).toContain("this.rendererCanvas.dispatchEvent(forwarded)");
-    expect(pointer).toContain('this.cameraGestureKind = "pointer"');
     expect(pointer).toContain("this.resetTimelineWheel()");
-    expect(cameraStart).toContain("this.cameraGesturePosition.copy(camera.position)");
     expect(cameraStart).toContain("this.lodArmed = true");
-    expect(cameraStart).not.toContain("this.callbacks.onCameraInteraction()");
-    expect(cameraChange).toContain("positionChanged || targetChanged");
-    expect(cameraChange).toContain('this.cameraGestureKind === "pointer"');
-    expect(cameraChange).toContain("this.callbacks.onCameraInteraction()");
     expect(cameraChange).not.toContain("moveTimeline(");
+    // Classifying a camera gesture as pointer-vs-wheel only ever fed the stable/
+    // journey switch. With depth as the layout there is nothing to switch back to,
+    // and no gesture may reach into the scene to rearrange it.
+    expect(source).not.toContain("cameraGesture");
+    expect(source).not.toContain("onCameraInteraction");
     expect(intent).toContain("await this.callbacks.onTimelineIntent(direction)");
     expect(intent).not.toContain("animateTimelineExit");
     expect(source).not.toContain("private animateTimelineExit(");
@@ -781,7 +777,7 @@ describe("universe scene production invariants", () => {
 
     expect(source).toContain("const CAMERA_DAMPING_QUIET_MS = 120");
     expect(source).toContain("const CAMERA_DAMPING_RECHECK_MS = 240");
-    expect(cameraChange).toContain("this.lastControlsChangeAt = performance.now()");
+    expect(cameraChange).toContain("this.lastControlsChangeAt = now");
     expect(wake).toContain(
       "performance.now() - this.lastControlsChangeAt < CAMERA_DAMPING_QUIET_MS",
     );

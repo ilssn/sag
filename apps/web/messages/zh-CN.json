@@ -1109,11 +1109,6 @@
     },
     "controls": {
       "currentResult": "回到当前结果",
-      "stableMode": "预览",
-      "journeyMode": "探索",
-      "stableModeHint": "等比查看当前时间范围 · 拖动旋转 · 滚轮进入探索",
-      "journeyModeHint": "按时间近大远小 · 滚轮缩放并按页推进或回退",
-      "cameraRestored": "已回到预览；当前节点已重新汇聚，可拖动查看",
       "previousTimePage": "回到上一段时间",
       "nextTimePage": "探索下一段时间",
       "timePosition": "{time}",

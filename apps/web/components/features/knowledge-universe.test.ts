@@ -35,13 +35,18 @@ describe("knowledge universe production interaction policy", () => {
     expect(source).toContain("const ENTITY_EXPANSION_EVENT_LIMIT = 4");
   });
 
-  it("keeps stable layout flat and gives journey a temporal depth projection", () => {
+  it("puts every timeline event on the temporal axis, with no mode to opt out of", () => {
     expect(source).toContain("timelineEventPlacementByKey");
     expect(source).toContain("projectUniverseTemporalAxis(");
-    expect(source).toContain('displayModeState.mode === "journey"');
     expect(source).toContain(
       "temporalProjection.normalizedOffset.z * TEMPORAL_AXIS_DEPTH",
     );
+    // Depth is the layout, not a presentation mode that can be toggled off or
+    // snapped back to a flat plane.
+    expect(source).not.toContain("displayModeState");
+    expect(source).not.toContain("universe-display-mode");
+    // Expansion-discovered events are placed but carry no temporal projection,
+    // so the deterministic spiral stays as their fallback.
     expect(source).toContain("stableRootEventOffset(");
     expect(source).toContain("presentationScale:");
     expect(source).toContain("presentationCardScale:");
@@ -364,8 +369,6 @@ describe("knowledge universe production interaction policy", () => {
     expect(intent).toContain("advanceUniverseTimelineWindow(\n        current,\n        direction,\n        pageStride");
     expect(intent).toContain("const completeTerminalPage = localRunway > 0 && !edgeAvailable");
     expect(intent).toContain("localRunway < pageStride && !completeTerminalPage");
-    expect(intent).toContain("planUniverseDisplayTimelineIntent(");
-    expect(intent).toContain('commitUniverseDisplayIntent(state, displayPlan, "shifted")');
     expect(intent.indexOf("timelineJourneyCommitRef.current ="))
       .toBeLessThan(intent.indexOf("commitTimelineWindow(session, next)"));
   });
@@ -683,14 +686,15 @@ describe("knowledge universe production interaction policy", () => {
     expect(source).toContain("committedCount < totalCount");
   });
 
-  it("keeps time buttons aligned with the wheel journey while pointer gestures restore stable view", () => {
+  it("keeps time buttons aligned with the wheel journey", () => {
     expect(source).toContain("timelineJourney={timelineJourney}");
     expect(source).toContain("onTimelineIntent={handleTimelineIntent}");
     expect(source).toContain('graphRef.current?.moveTimeline("previous")');
     expect(source).toContain('graphRef.current?.moveTimeline("next")');
     expect(source).toContain('data-universe-timeline-controls="true"');
-    expect(source).toContain("onCameraInteraction={restoreStablePresentation}");
-    expect(source).toContain("data-universe-display-mode={displayModeState.mode}");
+    // No camera gesture may reach back and rearrange the layout: the axis is not
+    // a presentation the camera can restore.
+    expect(source).not.toContain("onCameraInteraction");
   });
 
   it("keeps the time-page controls mounted while page availability changes", () => {

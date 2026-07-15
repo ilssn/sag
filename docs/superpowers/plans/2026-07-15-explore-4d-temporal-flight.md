@@ -101,13 +101,21 @@
 
 关键：归一化的**定义域必须是整个信息源的时间跨度**（`partition.time_buckets` 的首尾即 `[min_time, max_time]`，manifest 已下发），而不是当前可见窗口。这正是「稳定」的含义。
 
-- [ ] **Step 2: 摆位改造，时间刻度与源半径解耦**
+- [x] **Step 2: 摆位改造，时间刻度与源半径解耦**
 
 `knowledge-universe.tsx:1690-1717` 目前：`z = center.z + normalizedOffset.z * radius`——时间刻度被源的视觉半径绑架，每源刻度不同。
 
 拆掉这个耦合：Z 的尺度由一个独立的、跨源一致的「时间轴长度」常量给出；`radius` 只继续管 x/y 的横向铺开。横向角度目前是 `stableUnit(bundleId)` 哈希（`universe-display-mode.ts:473`），**保留**——它提供的确定性视觉分离在新模型下依然需要，只是不再承担时间语义。
 
-- [ ] **Step 3: 删除双模状态机**
+**待评估（阶段 1 实施中发现）：扩展发现的事件不在时间轴上**
+
+`timelineEventPlacementByKey` 有两个填充来源——可见 timeline bundles，以及 `origin === "expansion"` 的 bundle（「探索更多」发现的事件）。但 `temporalProjectionByBundleId` 只由可见 timeline bundles 构建，因此扩展事件有 `timelinePlacement` 却无 `temporalProjection`，落在 `stableRootEventOffset` 的黄金角螺旋上而不是时间轴上。
+
+这是**既有行为**（原实现在 journey 模式下同样如此），本次未改变，也未恶化。但结果是一个场景里并存两套摆位系统：timeline 事件在时间轴上，扩展事件在螺旋上。扩展事件同样有 `start_time`，理应也落在轴上。
+
+需要决定：是把时间投影扩展到 expansion bundles（视觉一致，但要处理「轴上某处突然长出一簇事件」的观感），还是保持现状（扩展是「离题探索」，不属于主时间线）。留到阶段 2 相机飞行成型后再判断——那时才看得出扩展事件散落在轴外是否碍事。
+
+- [x] **Step 3: 删除双模状态机**
 
 `stable` 模式的存在理由是「景深是临时预览、会 snap 回平铺」。Z 永久是时间后，这个理由消失：时间相近的事件天然落在相近的 Z 上，同期事件自动就是平的；`stable` 真正在做的是「把跨越数年的事件强行拍到一个面上」，而那正是本次改造要消灭的东西。
 
@@ -118,13 +126,25 @@
 
 同时解掉 `onCameraInteraction` → `restoreStablePresentation`（`knowledge-universe.tsx:766-776,3326`）这条链——没有模式可恢复了。
 
-- [ ] **Step 4: 消除命名漂移**
+- [x] **Step 4: 消除命名漂移**
 
 现状是三套词汇指同两个状态：代码 `stable`/`journey`、文档「正常/预览」（`docs/architecture/knowledge-universe.md:33-34,204`）、UI 实际显示「预览/探索」（`messages/zh-CN.json:1112-1113`，注意 **UI 的「预览」对应代码的 `stable`**）。双模删除后这些词汇全部作废，清理 i18n 键与文档表述。
 
-- [ ] **Step 5: 验证阶段 1**
+- [x] **Step 5: 验证阶段 1（门禁部分）**
 
-`npx tsc --noEmit && npx vitest run` 全绿。**视觉验证**：启动应用，进入探索模式，进入一个信息源，确认事件按真实时间戳分布在 Z 上、时间相近的事件深度相近、翻页时同一事件的 Z 不再跳变。此时相机行为应与改造前一致（本阶段不动相机）。
+四道门禁全绿：`tsc` 0 · `vitest` 349/37 · `eslint` 0 · `next build` 0 · `i18n:check` 1019 键对齐。净删 919 行。
+
+覆盖迁移核对：`universe-display-mode.test.ts` 原有 12 个测试（5 个状态机 + 7 个投影）。仍然有效的四条已迁入 `universe-temporal-axis.test.ts`——rank/时间戳归一化、near/far 单调性、确定性车道、策略钳制。消失的八条断言的是双模切换、stable 平铺、以及生产从未跑过的混合插值，其行为本身已不存在。无静默覆盖丢失。
+
+`cameraGesture*` 机制提前删除（原排在阶段 2 Step 3）：它是 `onCameraInteraction` 的唯一支撑，双模一删即证明性死亡，留到阶段 2 等于留一坨死代码。阶段 2 也确认不需要它——该分类之所以存在是因为滚轮语义暧昧（缩放 + 时间），而阶段 2 把滚轮整个从 OrbitControls 手里拿走后暧昧本身消失。`handleControlsEnd` 随之变空，连同其监听一并移除。
+
+- [ ] **Step 6: 视觉验证阶段 1（待用户执行）**
+
+**门禁绿 ≠ 摆位对。** 需要跑起来确认：事件按真实时间戳分布在 Z 上、时间相近的事件深度相近、翻页时同一事件的 Z 不再跳变、时间聚集的事件不再叠成一点。
+
+**预期的中间态倒退**：本阶段把摆位换成了绝对时间轴，但相机还不会飞（阶段 2）。翻到旧事件时它们会待在远处又小又暗，相机不跟过去——这是分阶段的必然代价，阶段 1 不是可发布状态。
+
+**待调参**：`TEMPORAL_AXIS_DEPTH = 640`（世界单位）、`nearLateralSpread = 0.18`、`lateralJitter = 0.45` 均是无法凭空推算的视觉量，需实际观测后定。
 
 ---
 
@@ -159,7 +179,7 @@
 
 作废的：120px 阈值、单槽方向队列、`busy` 排队、`drainUniverseTimelineWheel`——连续飞行下这些概念都不成立。
 
-- [ ] **Step 3: 重做 `cameraGestureKind`**
+- [x] **Step 3: 重做 `cameraGestureKind`** —— 已在阶段 1 完成
 
 `:809` 的这个全局单值字段存在的理由是「滚轮=缩放+时间导航的组合手势，不能让它把 journey 打回 stable」。双模删除（阶段 1）+ 滚轮语义唯一化（Step 1）之后，这个字段的存在理由消失，连同它的已知缺陷一起删除：一次真实拖拽的 `start` 与首次 `change` 之间若插入一次杂散 wheel tick，`"pointer"` 会被覆盖成 `"wheel"`，让本该触发的回调被吞掉（`:4956` vs `:4978`）。
 

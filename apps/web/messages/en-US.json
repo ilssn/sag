@@ -1109,11 +1109,6 @@
     },
     "controls": {
       "currentResult": "Return to current result",
-      "stableMode": "Preview",
-      "journeyMode": "Explore",
-      "stableModeHint": "Inspect the current range at equal scale · drag to orbit · wheel to explore",
-      "journeyModeHint": "Near times appear larger · wheel to zoom and page forward or back",
-      "cameraRestored": "Preview restored. Current nodes have regrouped for drag inspection.",
       "previousTimePage": "Return to the previous time range",
       "nextTimePage": "Explore the next time range",
       "timePosition": "{time}",
