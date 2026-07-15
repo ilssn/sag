@@ -59,8 +59,8 @@ describe("universe scene production invariants", () => {
     expect(pixelRatio).toContain("const areaCap = Math.sqrt(renderPixelBudget / cssPixelArea)");
     expect(pixelRatio).toContain("Math.min(window.devicePixelRatio || 1, qualityCap, areaCap)");
     expect(pixelRatio).toContain("this.host.dataset.universeRenderPixels");
-    expect(cameraChange).toContain("this.updateLabels(performance.now())");
-    expect(cameraChange).not.toContain("this.updateLabels(performance.now(), true)");
+    expect(cameraChange).toContain("this.updateLabels(now)");
+    expect(cameraChange).not.toContain("this.updateLabels(now, true)");
     expect(cameraChange).not.toContain("this.armNebulaAnimation(");
     expect(labelLayout.match(/this\.host\.getBoundingClientRect\(\)/g)).toHaveLength(1);
     expect(labelLayout).toContain("this.miniPanelRect(hostRect)");
@@ -494,7 +494,7 @@ describe("universe scene production invariants", () => {
       "private nodeProjectionScale(node: ForceNode)",
     );
     const morphScale = sourceBetween(
-      "private updateNodeMorphScales()",
+      "private updateNodeMorphScales(",
       "private updateSourceAuraOpacities()",
     );
     const labels = sourceBetween(
@@ -744,6 +744,50 @@ describe("universe scene production invariants", () => {
     expect(source).toContain(
       "Math.abs(nextTarget - nextMix) > DETAIL_MORPH_SETTLE_EPSILON",
     );
+  });
+
+  it("throttles projection morph scales on the camera path without stalling motion", () => {
+    const morphScale = sourceBetween(
+      "private updateNodeMorphScales(",
+      "private updateSourceAuraOpacities()",
+    );
+    const cameraChange = sourceBetween(
+      "private handleControlsChange = () =>",
+      "private handlePointerMove = (event: PointerEvent)",
+    );
+    const objectVisual = sourceBetween(
+      "private setObjectOpacity(node: ForceNode",
+      "private nodeProjectionScale(node: ForceNode)",
+    );
+
+    expect(morphScale).toContain("if (!force && elapsed < 24) return");
+    expect(morphScale).toContain("this.lastNodeMorphAt = now");
+    expect(cameraChange).toContain("this.updateNodeMorphScales(now)");
+    expect(cameraChange).not.toContain("this.updateNodeMorphScales(now, true)");
+    // The throttle is only safe because a node mid-timelineMotion still gets the
+    // same scale formula applied every frame through setObjectOpacity.
+    expect(objectVisual).toContain("this.nodeMorphScale(node)");
+  });
+
+  it("waits for camera damping to fall quiet before sleeping the renderer", () => {
+    const wake = sourceBetween(
+      "private wakeRendering(settleMs = 1800)",
+      "private loop = (now: number)",
+    );
+    const cameraChange = sourceBetween(
+      "private handleControlsChange = () =>",
+      "private handlePointerMove = (event: PointerEvent)",
+    );
+
+    expect(source).toContain("const CAMERA_DAMPING_QUIET_MS = 120");
+    expect(source).toContain("const CAMERA_DAMPING_RECHECK_MS = 240");
+    expect(cameraChange).toContain("this.lastControlsChangeAt = performance.now()");
+    expect(wake).toContain(
+      "performance.now() - this.lastControlsChangeAt < CAMERA_DAMPING_QUIET_MS",
+    );
+    expect(wake).toContain("this.wakeRendering(CAMERA_DAMPING_RECHECK_MS)");
+    // Reduced motion disables damping outright, so there is no tail to wait for.
+    expect(wake).toContain("!this.reducedMotion");
   });
 
   it("reports import, initialization, and WebGL context failures once", () => {

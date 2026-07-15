@@ -334,6 +334,12 @@ const MAX_RENDER_PIXELS_DESKTOP = 2_400_000;
 const MAX_RENDER_PIXELS_MOBILE = 1_100_000;
 const UNIVERSE_CAMERA_MIN_DISTANCE = 24;
 const UNIVERSE_CAMERA_MAX_DISTANCE = 50_000;
+// OrbitControls dispatches change on every damped frame and falls silent once the
+// delta drops below its epsilon. Damping decays per frame while the sleep timer
+// counts wall-clock, so a low frame rate stretches convergence past any fixed
+// settle window — go quiet for this long instead of betting on a constant.
+const CAMERA_DAMPING_QUIET_MS = 120;
+const CAMERA_DAMPING_RECHECK_MS = 240;
 const TIMELINE_EXIT_MIN_MS = 460;
 const TIMELINE_EXIT_VARIANCE_MS = 90;
 const TIMELINE_ENTRY_MS = 560;
@@ -843,6 +849,8 @@ class UniverseForceSceneEngine {
   private lastLabelAt = 0;
   private lastLodAt = 0;
   private lastVisualLodAt = 0;
+  private lastNodeMorphAt = 0;
+  private lastControlsChangeAt = 0;
   private latchedDetailSourceId: string | null = null;
   private visualSourceId: string | null = null;
   private visualDetailMix = 0;
@@ -1887,7 +1895,7 @@ class UniverseForceSceneEngine {
     this.host.dataset.universeDetailTarget = "0.00";
     this.host.dataset.universeResetState = "overview";
     this.frameOverview(0, true);
-    this.updateNodeMorphScales();
+    this.updateNodeMorphScales(performance.now(), true);
     this.updateSourceAuraOpacities();
     this.updateNebulaMotionState();
     this.rebuildLabels();
@@ -3108,7 +3116,16 @@ class UniverseForceSceneEngine {
     return 1;
   }
 
-  private updateNodeMorphScales() {
+  // Projection scale tracks camera distance, so a dolly dirties every node, and
+  // OrbitControls emits change synchronously without rAF coalescing. Throttling to
+  // the visual-refresh cadence is safe for animating nodes: setObjectOpacity
+  // applies the same formula every frame while a timelineMotion is in flight.
+  private updateNodeMorphScales(now = performance.now(), force = false) {
+    const elapsed = this.lastNodeMorphAt > 0
+      ? Math.max(1, now - this.lastNodeMorphAt)
+      : 32;
+    if (!force && elapsed < 24) return;
+    this.lastNodeMorphAt = now;
     this.nodes.forEach((node) => {
       if (!node.object) return;
       const entryOpacity = (node.entryOpacity ?? 1) * (node.timelineOpacity ?? 1);
@@ -4702,7 +4719,7 @@ class UniverseForceSceneEngine {
     this.host.dataset.universeDetailLatched = this.latchedDetailSourceId ?? "";
     this.host.dataset.universeDetailMix = nextMix.toFixed(2);
     this.host.dataset.universeDetailTarget = nextTarget.toFixed(2);
-    this.updateNodeMorphScales();
+    this.updateNodeMorphScales(now, true);
     this.updateSourceAuraOpacities();
     this.updateNebulaAlphas();
     this.updateNebulaMotionState();
@@ -4845,6 +4862,13 @@ class UniverseForceSceneEngine {
         || performance.now() < this.loopKeepAliveUntil
       ) {
         if (!this.paused) this.wakeRendering(500);
+        return;
+      }
+      if (
+        !this.reducedMotion
+        && performance.now() - this.lastControlsChangeAt < CAMERA_DAMPING_QUIET_MS
+      ) {
+        this.wakeRendering(CAMERA_DAMPING_RECHECK_MS);
         return;
       }
       this.graph.pauseAnimation();
@@ -4996,6 +5020,7 @@ class UniverseForceSceneEngine {
 
   private handleControlsChange = () => {
     if (this.paused) return;
+    this.lastControlsChangeAt = performance.now();
     if (this.cameraGestureActive && !this.cameraGestureChanged) {
       const camera = this.graph.camera();
       const positionChanged = camera.position.distanceToSquared(
@@ -5013,10 +5038,11 @@ class UniverseForceSceneEngine {
         }
       }
     }
-    this.updateVisualLayout(performance.now());
-    this.updateNodeMorphScales();
-    this.updateLabels(performance.now());
-    this.evaluateLod(performance.now());
+    const now = performance.now();
+    this.updateVisualLayout(now);
+    this.updateNodeMorphScales(now);
+    this.updateLabels(now);
+    this.evaluateLod(now);
   };
 
   private handleControlsEnd = () => {
