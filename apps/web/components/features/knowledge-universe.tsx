@@ -16,6 +16,7 @@ import {
   LockKeyhole,
   LocateFixed,
   MessageCircleQuestion,
+  Orbit,
   RefreshCw,
   RotateCcw,
   Sparkles,
@@ -150,6 +151,14 @@ interface SourceTimelinePageState {
 
 type SourceTimelineLoadCause = "source-entry" | "prefetch" | "journey";
 type SourceTimelineLoadResult = "blocked" | "loaded";
+
+interface SourceTimelineRequest {
+  sourceId: string;
+  cause: SourceTimelineLoadCause;
+  direction: UniverseTimelineDirection;
+  controller: AbortController;
+  promise: Promise<SourceTimelineLoadResult>;
+}
 
 interface SourceBrowseSession {
   sourceId: string;
@@ -665,9 +674,7 @@ export function KnowledgeUniverse({
   const autoRebuildAttemptedRef = React.useRef(false);
   const observedManifestRef = React.useRef(false);
   const manifestVersionRef = React.useRef<string | null>(null);
-  const timelineAbortRef = React.useRef<AbortController | null>(null);
-  const timelineLoadCauseRef = React.useRef<SourceTimelineLoadCause | null>(null);
-  const timelineRequestRef = React.useRef<Promise<SourceTimelineLoadResult> | null>(null);
+  const timelineRequestRef = React.useRef<SourceTimelineRequest | null>(null);
   const timelinePageLoaderRef = React.useRef<((
     sourceId: string,
     cause: SourceTimelineLoadCause,
@@ -756,14 +763,14 @@ export function KnowledgeUniverse({
     });
   }, []);
 
-  const restoreNormalPresentation = React.useCallback(() => {
-    if (displayModeRef.current.mode === "normal") return;
+  const restoreStablePresentation = React.useCallback(() => {
+    if (displayModeRef.current.mode === "stable") return;
     setMoreHint(t("controls.cameraRestored"));
-    updateDisplayMode((current) => current.mode === "normal"
+    updateDisplayMode((current) => current.mode === "stable"
       ? current
       : setUniverseDisplayMode(
           current,
-          "normal",
+          "stable",
           sourceSessionRef.current?.timeline.window.revision ?? 0,
         ));
   }, [t, updateDisplayMode]);
@@ -809,7 +816,9 @@ export function KnowledgeUniverse({
         || session.timeline.window.revision !== next.revision
       ) return;
       commitTimelineWindow(session, settleUniverseTimelineWindow(next));
-    }, reducedMotion ? 0 : 520);
+    // Scene completion is authoritative. This timer is only a renderer-failure
+    // fallback so controls never remain disabled if WebGL disappears mid-page.
+    }, reducedMotion ? 0 : 1_600);
   }, [commitTimelineWindow, reducedMotion]);
 
   const clearTimelineSettle = React.useCallback(() => {
@@ -818,6 +827,22 @@ export function KnowledgeUniverse({
       timelineSettleTimerRef.current = null;
     }
   }, []);
+
+  const settleTimelineBeforeSuspend = React.useCallback(() => {
+    const session = sourceSessionRef.current;
+    if (session) {
+      // The session object is the timeline authority. Commit its settled
+      // window through the shared writer so the ref and React state resume
+      // from the exact same revision after this view becomes interactive.
+      commitTimelineWindow(
+        session,
+        settleUniverseTimelineWindow(session.timeline.window),
+      );
+    }
+    // A journey marker is meaningful for one scene delivery only. Once the
+    // scene is suspended there is no remaining transition that may consume it.
+    timelineJourneyCommitRef.current = null;
+  }, [commitTimelineWindow]);
 
   const mobile = dimensions.width < 768;
   const configuredBundleWindow = React.useMemo(
@@ -864,10 +889,10 @@ export function KnowledgeUniverse({
       1,
       Math.min(configuredBundleWindow.visibleEventBundles, packageCapacity || 1),
     );
-    const requiredTransitionPackages = (visible: number) => Math.max(
-      1,
-      Math.min(ENTITY_EXPANSION_EVENT_LIMIT, Math.max(0, visible - 1)),
-    );
+    // A visual page can replace the whole visible window in one gesture. Keep
+    // enough scene headroom for that complete outgoing page so event/entity
+    // networks fade as atomic groups instead of being dropped node by node.
+    const requiredTransitionPackages = (visible: number) => Math.max(1, visible);
     while (
       visibleEventBundles > 1
       && visibleEventBundles + requiredTransitionPackages(visibleEventBundles)
@@ -1185,9 +1210,7 @@ export function KnowledgeUniverse({
       expandAbortRef.current?.abort();
       expandAbortRef.current = null;
       expandingAnchorRef.current = null;
-      timelineAbortRef.current?.abort();
-      timelineAbortRef.current = null;
-      timelineLoadCauseRef.current = null;
+      timelineRequestRef.current?.controller.abort();
       timelineRequestRef.current = null;
       if (snapshotReloadTimerRef.current !== null) {
         window.clearTimeout(snapshotReloadTimerRef.current);
@@ -1195,6 +1218,7 @@ export function KnowledgeUniverse({
       }
       snapshotReloadAttemptsRef.current.clear();
       clearTimelineSettle();
+      timelineJourneyCommitRef.current = null;
       sourceSessionRef.current = null;
       setTimelineWindow(null);
       updateDisplayMode(() => createUniverseDisplayModeState());
@@ -1216,6 +1240,8 @@ export function KnowledgeUniverse({
       setLockedKey(null);
       setSelectedKey(null);
       setSourceHits([]);
+      viewportSourceRef.current = null;
+      setViewportSourceId(null);
       setActivePartition(null);
       setExpandingKey(null);
       setMoreHint("");
@@ -1260,9 +1286,7 @@ export function KnowledgeUniverse({
     expandAbortRef.current?.abort();
     expandAbortRef.current = null;
     expandingAnchorRef.current = null;
-    timelineAbortRef.current?.abort();
-    timelineAbortRef.current = null;
-    timelineLoadCauseRef.current = null;
+    timelineRequestRef.current?.controller.abort();
     timelineRequestRef.current = null;
     clearTimelineSettle();
     expansionCacheRef.current.clear();
@@ -1336,8 +1360,7 @@ export function KnowledgeUniverse({
       expandAbortRef.current?.abort();
       expandAbortRef.current = null;
       expandingAnchorRef.current = null;
-      timelineAbortRef.current?.abort();
-      timelineLoadCauseRef.current = null;
+      timelineRequestRef.current?.controller.abort();
       timelineRequestRef.current = null;
       if (snapshotReloadTimerRef.current !== null) {
         window.clearTimeout(snapshotReloadTimerRef.current);
@@ -1484,6 +1507,18 @@ export function KnowledgeUniverse({
           timelineBundleEntityLimit,
         )
       : categoryProjectedWorking;
+    const relatedProgressByKey = new Map<string, Set<string>>();
+    working.relations.forEach((relation) => {
+      const eventKey = universeNodeKey("event", relation.from_id, relation.source_id);
+      const eventProgress = relatedProgressByKey.get(eventKey) ?? new Set<string>();
+      eventProgress.add(`${relation.kind}:${relation.to_id}`);
+      relatedProgressByKey.set(eventKey, eventProgress);
+      if (relation.kind !== "mentions") return;
+      const entityKey = universeNodeKey("entity", relation.to_id, relation.source_id);
+      const entityProgress = relatedProgressByKey.get(entityKey) ?? new Set<string>();
+      entityProgress.add(relation.from_id);
+      relatedProgressByKey.set(entityKey, entityProgress);
+    });
     const relationsByEvent = new Map<string, UniverseWorkingSet["relations"]>();
     const relationsByEntity = new Map<string, UniverseWorkingSet["relations"]>();
     const relationSourceByEvent = new Map<string, string>();
@@ -1529,7 +1564,7 @@ export function KnowledgeUniverse({
         })),
         {
           mode: displayModeState.mode,
-          direction: displayModeState.preview?.direction,
+          direction: displayModeState.journey?.direction,
         },
       ).map((projection) => [projection.bundleId, projection]),
     );
@@ -1646,8 +1681,14 @@ export function KnowledgeUniverse({
       const temporalProjection = temporalBundleId
         ? temporalProjectionByBundleId.get(temporalBundleId)
         : undefined;
+      const relatedProgress = relatedProgressByKey.get(key)?.size ?? 0;
+      const relatedTotal = node.related_count === undefined
+        ? null
+        : Math.max(relatedProgress, node.related_count);
+      const expansionExhausted = expandedAnchorsRef.current.has(key)
+        && !cursorsRef.current.has(key);
       const offset = timelinePlacement
-        ? displayModeState.mode === "preview" && temporalProjection
+        ? displayModeState.mode === "journey" && temporalProjection
           ? {
               x: temporalProjection.normalizedOffset.x * radius * 1.8,
               y: temporalProjection.normalizedOffset.y * radius * 1.8,
@@ -1689,6 +1730,9 @@ export function KnowledgeUniverse({
         relationCount: 0,
         relatedCount: node.related_count ?? 0,
         relatedCountKnown: node.related_count !== undefined,
+        relatedProgress,
+        canExploreMore: !expansionExhausted
+          && (relatedTotal === null || relatedProgress < relatedTotal),
         importance: node.importance ?? 0.5,
         statsReady: true,
         state: node.state ?? "active",
@@ -1698,6 +1742,7 @@ export function KnowledgeUniverse({
           : temporalProjection?.nodeScale,
         presentationCardScale: temporalProjection?.cardScale,
         presentationOpacity: temporalProjection?.opacity,
+        timelineBundleId: temporalBundleId,
         ...position,
       });
       exactByRaw.set(key, key);
@@ -2217,7 +2262,27 @@ export function KnowledgeUniverse({
     ): Promise<SourceTimelineLoadResult> => {
       if (!manifest || !interactiveRef.current) return Promise.resolve("blocked");
       const inFlight = timelineRequestRef.current;
-      if (inFlight) return inFlight;
+      if (inFlight) {
+        if (inFlight.sourceId === sourceId && inFlight.direction === direction) {
+          return inFlight.promise;
+        }
+        if (cause !== "journey" && cause !== "source-entry") {
+          return Promise.resolve("blocked");
+        }
+        // A direct journey outranks background work in the opposite direction.
+        // Wait for the abort cleanup before recomputing cursors and runway; this
+        // prevents an older prefetch finally-block from clearing a newer load.
+        inFlight.controller.abort();
+        const retry = () => timelinePageLoaderRef.current?.(
+          sourceId,
+          cause,
+          direction,
+        ) ?? Promise.resolve<SourceTimelineLoadResult>("blocked");
+        return inFlight.promise.then(
+          retry,
+          retry,
+        );
+      }
 
       const session = sourceSessionRef.current;
       if (!session || session.sourceId !== sourceId) {
@@ -2261,9 +2326,6 @@ export function KnowledgeUniverse({
         setMoreHint(t("timeline.loading"));
       }
       refreshLoadProgress();
-      timelineAbortRef.current?.abort();
-      timelineAbortRef.current = controller;
-      timelineLoadCauseRef.current = cause;
 
       let loadResult: SourceTimelineLoadResult = "blocked";
       const request = (async (): Promise<SourceTimelineLoadResult> => {
@@ -2480,15 +2542,18 @@ export function KnowledgeUniverse({
             commitTimelineWindow(session, settleUniverseTimelineWindow(state.window));
           }
           refreshLoadProgress();
-          if (timelineAbortRef.current === controller) {
-            timelineAbortRef.current = null;
-            timelineLoadCauseRef.current = null;
-          }
         }
       })();
-      timelineRequestRef.current = request;
+      const requestState: SourceTimelineRequest = {
+        sourceId,
+        cause,
+        direction,
+        controller,
+        promise: request,
+      };
+      timelineRequestRef.current = requestState;
       void request.finally(() => {
-        if (timelineRequestRef.current === request) timelineRequestRef.current = null;
+        if (timelineRequestRef.current === requestState) timelineRequestRef.current = null;
       });
       return request;
     },
@@ -2636,9 +2701,7 @@ export function KnowledgeUniverse({
       expandedAnchorsRef.current.clear();
       const previousSession = sourceSessionRef.current;
       if (previousSession) previousSession.timeline.loading = false;
-      timelineAbortRef.current?.abort();
-      timelineAbortRef.current = null;
-      timelineLoadCauseRef.current = null;
+      timelineRequestRef.current?.controller.abort();
       timelineRequestRef.current = null;
       if (snapshotReloadTimerRef.current !== null) {
         window.clearTimeout(snapshotReloadTimerRef.current);
@@ -2646,6 +2709,7 @@ export function KnowledgeUniverse({
       }
       snapshotReloadAttemptsRef.current.clear();
       clearTimelineSettle();
+      timelineJourneyCommitRef.current = null;
       setExpandingKey(null);
       graphRef.current?.unlockNode();
       setLockedKey(null);
@@ -2912,6 +2976,7 @@ export function KnowledgeUniverse({
     const networkExhausted = !hasOlder;
     return {
       enabled,
+      mode: displayModeState.mode,
       phase: timelineWindow?.phase ?? "idle",
       hasNext: enabled
         && (activeIndex < cacheLength - 1 || hasOlder),
@@ -2921,6 +2986,7 @@ export function KnowledgeUniverse({
     };
   }, [
     browseSessionSourceId,
+    displayModeState.mode,
     interactive,
     timelineWindow,
   ]);
@@ -2934,6 +3000,20 @@ export function KnowledgeUniverse({
     && browseSessionSourceId
     && timelineWindow,
   );
+
+  const handleTimelineSettled = React.useCallback((revision: number) => {
+    const session = sourceSessionRef.current;
+    if (
+      !session
+      || session.timeline.window.revision !== revision
+      || session.timeline.window.phase !== "transitioning"
+    ) return;
+    clearTimelineSettle();
+    commitTimelineWindow(
+      session,
+      settleUniverseTimelineWindow(session.timeline.window),
+    );
+  }, [clearTimelineSettle, commitTimelineWindow]);
 
   const visibleTimelineRange = React.useMemo(() => {
     const session = sourceSessionRef.current;
@@ -3000,8 +3080,8 @@ export function KnowledgeUniverse({
       // A node click is a presentation-only action. Explicit expansion remains
       // available from the inspector, while locking cancels any in-flight
       // automatic timeline request before it can mutate the working set.
-      if (timelineLoadCauseRef.current !== "source-entry") {
-        timelineAbortRef.current?.abort();
+      if (timelineRequestRef.current?.cause !== "source-entry") {
+        timelineRequestRef.current?.controller.abort();
       }
       setLockedKey(nextLockedId);
       setSelectedKey(nextLockedId);
@@ -3036,12 +3116,25 @@ export function KnowledgeUniverse({
 
   const resetUniversePresentation = React.useCallback(() => {
     graphRef.current?.resetOverview();
+    updateDisplayMode((current) => current.mode === "stable"
+      ? current
+      : setUniverseDisplayMode(
+          current,
+          "stable",
+          sourceSessionRef.current?.timeline.window.revision ?? 0,
+        ));
     viewportSourceRef.current = null;
     setViewportSourceId(null);
     setActivePartition(null);
     setLockedKey(null);
     setSelectedKey(null);
-  }, [setLockedKey, setSelectedKey]);
+  }, [setLockedKey, setSelectedKey, updateDisplayMode]);
+
+  const returnToUniverseHome = React.useCallback(() => {
+    // The galaxy overview is a navigation boundary, not a camera shortcut.
+    // Leave the current source session and reveal the complete knowledge universe.
+    resetScene(epochRef.current + 1);
+  }, [resetScene]);
 
   React.useEffect(() => {
     const visibleNodeIds = new Set(graphData.nodes.map((node) => node.id));
@@ -3067,18 +3160,28 @@ export function KnowledgeUniverse({
 
   React.useEffect(() => {
     if (interactive) return;
+    // Settle the authoritative window before cancelling its scene/timer. If
+    // suspension happens mid-animation, re-entry must expose an idle pager
+    // instead of inheriting a transition that can no longer complete.
+    settleTimelineBeforeSuspend();
+    clearTimelineSettle();
     resetUniversePresentation();
     graphRef.current?.pause();
     expandAbortRef.current?.abort();
-    timelineAbortRef.current?.abort();
+    timelineRequestRef.current?.controller.abort();
     if (snapshotReloadTimerRef.current !== null) {
       window.clearTimeout(snapshotReloadTimerRef.current);
       snapshotReloadTimerRef.current = null;
     }
     rebuildAbortRef.current?.abort();
     clearCameraSchedule();
-    clearTimelineSettle();
-  }, [clearCameraSchedule, clearTimelineSettle, interactive, resetUniversePresentation]);
+  }, [
+    clearCameraSchedule,
+    clearTimelineSettle,
+    interactive,
+    resetUniversePresentation,
+    settleTimelineBeforeSuspend,
+  ]);
 
   React.useEffect(() => {
     if (!viewportLoadProgress) return;
@@ -3115,7 +3218,7 @@ export function KnowledgeUniverse({
       expansionCacheRef.current.clear();
       expansionInflightRef.current.clear();
       rebuildAbortRef.current?.abort();
-      timelineAbortRef.current?.abort();
+      timelineRequestRef.current?.controller.abort();
       if (snapshotReloadTimerRef.current !== null) {
         window.clearTimeout(snapshotReloadTimerRef.current);
         snapshotReloadTimerRef.current = null;
@@ -3219,7 +3322,8 @@ export function KnowledgeUniverse({
             onNodeClick={handleNodeClick}
             onHover={handleSceneHover}
             onTimelineIntent={handleTimelineIntent}
-            onCameraInteraction={restoreNormalPresentation}
+            onTimelineSettled={handleTimelineSettled}
+            onCameraInteraction={restoreStablePresentation}
             onViewChange={handleSceneViewChange}
             onSourceLod={handleSourceLod}
             onSelectionClear={clearSelection}
@@ -3272,10 +3376,27 @@ export function KnowledgeUniverse({
       ) : null}
 
       <div className="pointer-events-none absolute left-3 top-3 z-20 flex max-w-[calc(100vw-1.5rem)] flex-col items-start gap-2 sm:left-5 sm:top-5">
-        <div
-          data-universe-summary="true"
-          className="flex max-w-[calc(100vw-4.75rem)] items-center gap-2 overflow-hidden rounded-md border border-border/60 bg-background/62 px-2.5 py-2 text-[11px] text-muted-foreground shadow-soft backdrop-blur-md sm:gap-3 sm:px-3"
-        >
+        <div className="flex max-w-full items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="group pointer-events-auto size-9 shrink-0 border-cyan-300/15 bg-background/72 text-muted-foreground shadow-soft backdrop-blur-md hover:border-cyan-200/35 hover:bg-cyan-500/[0.08] hover:text-foreground"
+            data-universe-home-control="true"
+            aria-label={t("controls.home")}
+            title={t("controls.homeHint")}
+            onClick={returnToUniverseHome}
+            disabled={!browseSessionSourceId && !working.nodes.length}
+          >
+            <span className="relative grid size-4 place-items-center" aria-hidden="true">
+              <Orbit className="size-4 text-cyan-300/85 transition-colors group-hover:text-cyan-200" />
+              <span className="absolute size-1 rounded-full bg-amber-200 shadow-[0_0_7px_rgb(253_230_138_/_0.9)]" />
+            </span>
+          </Button>
+          <div
+            data-universe-summary="true"
+            className="flex max-w-[calc(100vw-7.25rem)] items-center gap-2 overflow-hidden rounded-md border border-border/60 bg-background/62 px-2.5 py-2 text-[11px] text-muted-foreground shadow-soft backdrop-blur-md sm:gap-3 sm:px-3"
+          >
           <AnimatePresence initial={false} mode="wait">
             {viewportSource ? (
               <motion.div
@@ -3395,6 +3516,7 @@ export function KnowledgeUniverse({
               <span className="hidden sm:inline">{t("searchLocked.label")}</span>
             </span>
           )}
+          </div>
         </div>
 
         <AnimatePresence initial={false}>
@@ -3571,18 +3693,20 @@ export function KnowledgeUniverse({
             <span
               className={cn(
                 "rounded-full px-2 py-1 text-[9px] font-medium",
-                displayModeState.mode === "preview"
+                displayModeState.mode === "journey"
                   ? "bg-amber-400/12 text-amber-200"
                   : "bg-muted/55 text-muted-foreground",
               )}
-              title={t(displayModeState.mode === "preview"
-                ? "controls.previewModeHint"
-                : "controls.normalModeHint")}
-              data-universe-display-mode-indicator={displayModeState.mode}
+              title={t(displayModeState.mode === "journey"
+                ? "controls.journeyModeHint"
+                : "controls.stableModeHint")}
+              data-universe-display-mode-indicator={displayModeState.mode === "journey"
+                ? "journey"
+                : "stable"}
             >
-              {t(displayModeState.mode === "preview"
-                ? "controls.previewMode"
-                : "controls.normalMode")}
+              {t(displayModeState.mode === "journey"
+                ? "controls.journeyMode"
+                : "controls.stableMode")}
             </span>
             <span className="min-w-32 px-2 text-center text-[10px] tabular-nums text-muted-foreground">
               {t(timelineJourney.phase === "complete"

@@ -6,6 +6,11 @@ import pytest
 
 from sag_api.connectors import registry
 from sag_api.core.config import Settings, settings
+from sag_api.core.litellm_policy import (
+    apply_litellm_completion_policy,
+    install_litellm_policy,
+    uninstall_litellm_policy,
+)
 from sag_api.core.model_providers import get_model_provider, model_provider_catalog
 from sag_api.core.security import hash_password, verify_password
 from sag_api.enums import ConnectorKind
@@ -39,8 +44,94 @@ def test_build_engine_config_zero_infra():
     cfg = build_engine_config(settings)
     assert cfg.vector_provider == "lancedb"  # 默认零依赖向量后端
     assert cfg.llm.model == settings.routed_llm_model
+    assert cfg.llm.max_tokens == settings.llm_max_tokens
     assert cfg.llm.provider == "litellm"
     assert cfg.data_dir == settings.data_dir
+
+
+@pytest.mark.parametrize(
+    ("provider", "model", "expected_model"),
+    [
+        ("openai", "qwen3.6-flash", "openai/qwen3.6-flash"),
+        ("anthropic", "claude-sonnet-5", "anthropic/claude-sonnet-5"),
+        ("gemini", "gemini-3.5-flash", "gemini/gemini-3.5-flash"),
+    ],
+)
+def test_extraction_engine_uses_one_litellm_transport(provider, model, expected_model):
+    configured = Settings(
+        _env_file=None,
+        llm_provider=provider,
+        llm_base_url=None,
+        llm_api_key="provider-key",
+        llm_model=model,
+    )
+
+    engine = build_engine_config(configured)
+
+    assert engine.llm.provider == "litellm"
+    assert engine.llm.model == expected_model
+
+
+@pytest.mark.parametrize(
+    ("extra_body", "expected_reasoning", "expect_extra_body"),
+    [
+        (None, "none", False),
+        ({"enable_thinking": False}, "none", True),
+        ({"chat_template_kwargs": {"enable_thinking": False}}, "none", True),
+        ({"enable_thinking": True}, None, True),
+    ],
+)
+def test_litellm_policy_maps_qwen_thinking_option(extra_body, expected_reasoning, expect_extra_body):
+    configured = Settings(
+        _env_file=None,
+        llm_provider="openai",
+        llm_api_key="provider-key",
+        llm_extra_body=extra_body,
+    )
+    request = apply_litellm_completion_policy(
+        configured,
+        {"model": configured.routed_llm_model, "messages": []},
+    )
+
+    assert request.get("reasoning_effort") == expected_reasoning
+    assert ("extra_body" in request) is expect_extra_body
+    assert ("reasoning_effort" in request.get("allowed_openai_params", [])) is (expected_reasoning is not None)
+
+
+def test_litellm_policy_preserves_explicit_reasoning_and_allowed_params():
+    configured = Settings(_env_file=None, llm_api_key="provider-key")
+
+    request = apply_litellm_completion_policy(
+        configured,
+        {
+            "model": "openai/qwen3.6-flash",
+            "messages": [],
+            "reasoning_effort": "low",
+            "allowed_openai_params": ["seed"],
+        },
+    )
+
+    assert request["reasoning_effort"] == "low"
+    assert request["allowed_openai_params"] == ["seed", "reasoning_effort"]
+
+
+@pytest.mark.asyncio
+async def test_installed_litellm_policy_covers_dependency_owned_calls():
+    import litellm
+
+    configured = Settings(_env_file=None, llm_api_key="provider-key")
+    previous_callbacks = list(litellm.callbacks)
+    callback = install_litellm_policy(configured)
+    try:
+        request = await callback.async_pre_call_deployment_hook(
+            {"model": "openai/qwen3.6-flash", "messages": []},
+            SimpleNamespace(value="acompletion"),
+        )
+        assert request["reasoning_effort"] == "none"
+        assert callback in litellm.callbacks
+    finally:
+        uninstall_litellm_policy(callback)
+    assert litellm.callbacks == previous_callbacks
 
 
 def test_document_output_redacts_database_details():
@@ -95,6 +186,9 @@ async def test_llm_timeout_and_retries_reach_unified_client(monkeypatch):
     assert seen["model"] == "openai/qwen3.6-flash"
     assert seen["timeout"] == 45
     assert seen["num_retries"] == 3
+    assert seen["reasoning_effort"] == "none"
+    assert "reasoning_effort" in seen["allowed_openai_params"]
+    assert "extra_body" not in seen
 
     engine = build_engine_config(configured)
     assert engine.llm.provider == "litellm"

@@ -3157,12 +3157,51 @@
     -webkit-line-clamp: 2;
   }
 
+  .sag-universe-node-label__explore {
+    position: absolute;
+    right: 4px;
+    bottom: calc(100% + 6px);
+    display: inline-flex;
+    min-height: 20px;
+    align-items: center;
+    border: 1px solid rgb(244 201 95 / 0.34);
+    border-radius: 999px;
+    background: hsl(var(--background) / 0.88);
+    box-shadow:
+      0 6px 18px rgb(0 0 0 / 0.13),
+      0 0 14px rgb(244 201 95 / 0.08);
+    color: rgb(253 224 133 / 0.96);
+    font-size: 9px;
+    font-weight: 560;
+    line-height: 1;
+    padding: 0 8px;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+
+  .sag-universe-node-label[data-kind="entity"]
+    .sag-universe-node-label__explore {
+    border-color: rgb(116 215 232 / 0.36);
+    box-shadow:
+      0 6px 18px rgb(0 0 0 / 0.13),
+      0 0 14px rgb(116 215 232 / 0.09);
+    color: rgb(165 243 252 / 0.96);
+  }
+
+  .sag-universe-node-label__explore[hidden] {
+    display: none;
+  }
+
   .sag-universe-node-label[data-expanded="true"] p {
     -webkit-line-clamp: 3;
   }
 
   [data-universe-reduced-motion="true"]
-    :is(.sag-universe-node-label__eyebrow, .sag-universe-node-label p) {
+    :is(
+      .sag-universe-node-label__eyebrow,
+      .sag-universe-node-label p,
+      .sag-universe-node-label__explore
+    ) {
     transition: none;
   }
 

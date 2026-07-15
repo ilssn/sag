@@ -2,6 +2,12 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
+import {
+  advanceUniverseTimelineWindow,
+  settleUniverseTimelineWindow,
+  type UniverseTimelineWindowState,
+} from "../../lib/universe-timeline-window";
+
 const source = readFileSync(
   new URL("./knowledge-universe.tsx", import.meta.url),
   "utf8",
@@ -29,10 +35,10 @@ describe("knowledge universe production interaction policy", () => {
     expect(source).toContain("const ENTITY_EXPANSION_EVENT_LIMIT = 4");
   });
 
-  it("keeps normal layout flat and gives preview a temporal depth projection", () => {
+  it("keeps stable layout flat and gives journey a temporal depth projection", () => {
     expect(source).toContain("timelineEventPlacementByKey");
     expect(source).toContain("projectUniverseTemporalBatch(");
-    expect(source).toContain('displayModeState.mode === "preview"');
+    expect(source).toContain('displayModeState.mode === "journey"');
     expect(source).toContain("temporalProjection.normalizedOffset.z * radius");
     expect(source).toContain("stableRootEventOffset(");
     expect(source).toContain("presentationScale:");
@@ -80,6 +86,54 @@ describe("knowledge universe production interaction policy", () => {
     expect(source).not.toContain("hoveredConcreteNode");
   });
 
+  it("derives hover exploration progress without loading and reserves actions for click lock", () => {
+    const graphProjection = sourceBetween(
+      "const graphData = React.useMemo",
+      "const selectedNode = React.useMemo",
+    );
+    const handler = sourceBetween(
+      "const handleNodeClick = React.useCallback(",
+      "const clearSelection = React.useCallback(",
+    );
+    const inspector = sourceBetween(
+      "{interactive && inspectorNode && viewportSource && (",
+      "{(loading || webglAvailable === null) && (",
+    );
+
+    expect(graphProjection).toContain("relatedProgressByKey");
+    expect(graphProjection).toContain("relatedProgress,");
+    expect(graphProjection).toContain("canExploreMore:");
+    expect(handler).toContain("graphRef.current?.lockNode(nextLockedId)");
+    expect(handler).not.toMatch(/expandNode\(|requestExpansion\(|loadSourceTimelinePage\(|api\./);
+    expect(source).toContain("const inspectorNode = selectedConcreteNode;");
+    expect(inspector).toContain("dispatchUniverseDetail(");
+    expect(inspector).toContain("dispatchUniverseAsk(inspectorNode)");
+    expect(inspector).toContain("onClick={() => void expandNode(inspectorNode)}");
+  });
+
+  it("provides a themed left-top return to the galaxy overview", () => {
+    const summary = sourceBetween(
+      '<div className="pointer-events-none absolute left-3 top-3',
+      "{(moreHint || error) && (",
+    );
+    const home = sourceBetween(
+      "const returnToUniverseHome = React.useCallback(",
+      "React.useEffect(() => {\n    const visibleNodeIds",
+    );
+
+    expect(summary).toContain('data-universe-home-control="true"');
+    expect(summary).toContain('aria-label={t("controls.home")}');
+    expect(summary).toContain('title={t("controls.homeHint")}');
+    expect(summary).toContain("<Orbit");
+    expect(summary).toContain("bg-amber-200");
+    expect(summary).not.toContain("<House");
+    expect(summary).toContain("onClick={returnToUniverseHome}");
+    expect(summary).toContain("pointer-events-auto");
+    expect(home).toContain("resetScene(epochRef.current + 1)");
+    expect(source).toContain("viewportSourceRef.current = null");
+    expect(source).toContain("setViewportSourceId(null)");
+  });
+
   it("blocks timeline paging while a node is locked", () => {
     const intent = sourceBetween(
       "const handleTimelineIntent = React.useCallback(",
@@ -92,7 +146,7 @@ describe("knowledge universe production interaction policy", () => {
     expect(intent).toContain("if (lockedKeyRef.current)");
     expect(intent).toContain('t("timeline.unlockToContinue")');
     expect(loader).toContain('lockedKeyRef.current && cause !== "source-entry"');
-    expect(source).toContain("timelineAbortRef.current?.abort()");
+    expect(source).toContain("timelineRequestRef.current?.controller.abort()");
   });
 
   it("keeps expansion behind the explicit inspector action", () => {
@@ -331,6 +385,68 @@ describe("knowledge universe production interaction policy", () => {
       .toBeLessThan(intent.indexOf("commitTimelineWindow(session, next)"));
   });
 
+  it("settles an in-flight page before suspension so re-entry resumes from a reusable window", () => {
+    const commitWriter = sourceBetween(
+      "const commitTimelineWindow = React.useCallback(",
+      "const scheduleTimelineSettle = React.useCallback(",
+    );
+    const settleBeforeSuspend = sourceBetween(
+      "const settleTimelineBeforeSuspend = React.useCallback(",
+      "const mobile = dimensions.width < 768;",
+    );
+    const suspendEffect = sourceBetween(
+      "React.useEffect(() => {\n    if (interactive) return;",
+      "React.useEffect(() => {\n    if (!viewportLoadProgress) return;",
+    );
+    const journey = sourceBetween(
+      "const timelineJourney = React.useMemo<UniverseTimelineJourney>",
+      "const timelineControlsVisible = Boolean(",
+    );
+
+    // The shared commit writer updates the authoritative source session and
+    // the React window state with the same settled value.
+    expect(commitWriter).toContain("session.timeline.window = next");
+    expect(commitWriter).toContain("setTimelineWindow(next)");
+    expect(settleBeforeSuspend).toContain("const session = sourceSessionRef.current");
+    expect(settleBeforeSuspend).toContain(
+      "settleUniverseTimelineWindow(session.timeline.window)",
+    );
+    expect(settleBeforeSuspend).toContain("commitTimelineWindow(");
+    expect(settleBeforeSuspend).toContain("timelineJourneyCommitRef.current = null");
+
+    const settleIndex = suspendEffect.indexOf("settleTimelineBeforeSuspend()");
+    const clearTimerIndex = suspendEffect.indexOf("clearTimelineSettle()");
+    const pauseIndex = suspendEffect.indexOf("graphRef.current?.pause()");
+    expect(settleIndex).toBeGreaterThanOrEqual(0);
+    expect(clearTimerIndex).toBeGreaterThan(settleIndex);
+    expect(pauseIndex).toBeGreaterThan(clearTimerIndex);
+
+    // Re-entry derives its phase from the synchronized React window, so a
+    // non-terminal transitioning page resumes as idle and can page again.
+    expect(journey).toContain('phase: timelineWindow?.phase ?? "idle"');
+
+    const transitioning: UniverseTimelineWindowState = {
+      cacheBundleIds: ["event-1", "event-2", "event-3"],
+      activeIndex: 1,
+      visibleBundleIds: ["event-2"],
+      visitedCount: 2,
+      queriedCount: 3,
+      networkExhausted: false,
+      phase: "transitioning",
+      revision: 4,
+      visibleLimit: 1,
+      cacheLimit: 4,
+      cacheStartOffset: 0,
+      rewindStartOffset: 0,
+    };
+    const resumed = settleUniverseTimelineWindow(transitioning);
+    expect(resumed.phase).toBe("idle");
+    expect(advanceUniverseTimelineWindow(resumed, "next", 1)).toMatchObject({
+      activeIndex: 2,
+      phase: "transitioning",
+    });
+  });
+
   it("projects visible and prioritized support bundles through the scene budget", () => {
     expect(source).toContain("timelineProjectionBundleIds(");
     expect(source).toContain("projectUniverseBundleWindowWithinBudget(");
@@ -552,13 +668,13 @@ describe("knowledge universe production interaction policy", () => {
     expect(source).toContain("committedCount < totalCount");
   });
 
-  it("uses explicit time buttons and reserves camera gestures for normal view", () => {
+  it("keeps time buttons aligned with the wheel journey while pointer gestures restore stable view", () => {
     expect(source).toContain("timelineJourney={timelineJourney}");
     expect(source).toContain("onTimelineIntent={handleTimelineIntent}");
     expect(source).toContain('graphRef.current?.moveTimeline("previous")');
     expect(source).toContain('graphRef.current?.moveTimeline("next")');
     expect(source).toContain('data-universe-timeline-controls="true"');
-    expect(source).toContain("onCameraInteraction={restoreNormalPresentation}");
+    expect(source).toContain("onCameraInteraction={restoreStablePresentation}");
     expect(source).toContain("data-universe-display-mode={displayModeState.mode}");
   });
 

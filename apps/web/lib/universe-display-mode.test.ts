@@ -27,15 +27,15 @@ function accepted(
   };
 }
 
-describe("universe normal/preview state machine", () => {
-  it("enters preview directly on the first accepted time-navigation step", () => {
+describe("universe stable/journey state machine", () => {
+  it("enters journey directly on the first accepted time-navigation step", () => {
     const initial = createUniverseDisplayModeState();
     const result = accepted(initial, "next", 12);
 
-    expect(result.plan.action).toBe("enter-preview");
+    expect(result.plan.action).toBe("enter-journey");
     expect(result.state).toEqual({
-      mode: "preview",
-      preview: {
+      mode: "journey",
+      journey: {
         originWindowRevision: 12,
         direction: "next",
         depth: 1,
@@ -44,30 +44,35 @@ describe("universe normal/preview state machine", () => {
     });
   });
 
-  it("rewinds to the session origin and settles into normal mode", () => {
+  it("rewinds to the session origin without leaving journey", () => {
     let state = createUniverseDisplayModeState();
     state = accepted(state, "next", 5).state;
     state = accepted(state, "next", 6).state;
     const firstRewind = accepted(state, "previous", 7);
 
-    expect(firstRewind.plan.action).toBe("rewind-preview");
-    expect(firstRewind.state.preview?.depth).toBe(1);
+    expect(firstRewind.plan.action).toBe("rewind-journey");
+    expect(firstRewind.state.journey?.depth).toBe(1);
 
     const origin = accepted(firstRewind.state, "previous", 8);
-    expect(origin.plan.action).toBe("return-normal");
-    expect(origin.state.mode).toBe("normal");
-    expect(origin.state.preview).toBeNull();
+    expect(origin.plan.action).toBe("rewind-journey");
+    expect(origin.state.mode).toBe("journey");
+    expect(origin.state.journey).toMatchObject({
+      originWindowRevision: 5,
+      direction: null,
+      depth: 0,
+    });
   });
 
-  it("starts a fresh reverse preview after crossing normal", () => {
+  it("starts a fresh reverse journey after crossing the journey origin", () => {
     let state = accepted(createUniverseDisplayModeState(), "next", 1).state;
     state = accepted(state, "previous", 2).state;
-    expect(state.mode).toBe("normal");
+    expect(state.mode).toBe("journey");
+    expect(state.journey).toMatchObject({ direction: null, depth: 0 });
 
     const reverse = accepted(state, "previous", 3);
-    expect(reverse.plan.action).toBe("enter-preview");
-    expect(reverse.state.preview).toMatchObject({
-      originWindowRevision: 3,
+    expect(reverse.plan.action).toBe("enter-journey");
+    expect(reverse.state.journey).toMatchObject({
+      originWindowRevision: 1,
       direction: "previous",
       depth: 1,
     });
@@ -81,7 +86,7 @@ describe("universe normal/preview state machine", () => {
       expect(commitUniverseDisplayIntent(state, plan, outcome)).toBe(state);
     }
 
-    const manuallyChanged = setUniverseDisplayMode(state, "preview", 4);
+    const manuallyChanged = setUniverseDisplayMode(state, "journey", 4);
     expect(commitUniverseDisplayIntent(
       manuallyChanged,
       plan,
@@ -90,17 +95,17 @@ describe("universe normal/preview state machine", () => {
   });
 
   it("supports an explicit presentation switch without moving the window", () => {
-    const normal = createUniverseDisplayModeState();
-    const preview = setUniverseDisplayMode(normal, "preview", 27);
+    const stable = createUniverseDisplayModeState();
+    const journey = setUniverseDisplayMode(stable, "journey", 27);
 
-    expect(preview.preview).toEqual({
+    expect(journey.journey).toEqual({
       originWindowRevision: 27,
       direction: null,
       depth: 0,
     });
-    expect(setUniverseDisplayMode(preview, "normal", 27)).toMatchObject({
-      mode: "normal",
-      preview: null,
+    expect(setUniverseDisplayMode(journey, "stable", 27)).toMatchObject({
+      mode: "stable",
+      journey: null,
       revision: 2,
     });
   });
@@ -120,12 +125,12 @@ describe("universe temporal presentation", () => {
     expect(universeTemporalTimestampProgress(800, 800, 800, 0.75)).toBe(0.75);
   });
 
-  it("keeps normal mode flat, equally scaled, opaque, and stably connected", () => {
+  it("keeps stable mode flat, equally scaled, opaque, and stably connected", () => {
     const projections = projectUniverseTemporalBatch([
       { bundleId: "near", ageProgress: 0 },
       { bundleId: "middle", ageProgress: 0.5 },
       { bundleId: "far", ageProgress: 1 },
-    ], { mode: "normal" });
+    ], { mode: "stable" });
 
     projections.forEach((projection) => {
       expect(projection.normalizedOffset).toEqual({ x: 0, y: 0, z: 0 });
@@ -142,7 +147,7 @@ describe("universe temporal presentation", () => {
       { bundleId: "near", ageProgress: 0 },
       { bundleId: "middle", ageProgress: 0.5 },
       { bundleId: "far", ageProgress: 1 },
-    ], { mode: "preview", direction: "next" });
+    ], { mode: "journey", direction: "next" });
 
     expect(near.nodeScale).toBeGreaterThan(middle.nodeScale);
     expect(middle.nodeScale).toBeGreaterThan(far.nodeScale);
@@ -162,15 +167,15 @@ describe("universe temporal presentation", () => {
       { bundleId: "c", previousAgeProgress: 0.4, ageProgress: 0 },
     ];
     const start = projectUniverseTemporalBatch(input, {
-      mode: "preview",
+      mode: "journey",
       transitionProgress: 0,
     });
     const middle = projectUniverseTemporalBatch(input, {
-      mode: "preview",
+      mode: "journey",
       transitionProgress: 0.5,
     });
     const end = projectUniverseTemporalBatch(input, {
-      mode: "preview",
+      mode: "journey",
       transitionProgress: 1,
     });
 
@@ -183,21 +188,21 @@ describe("universe temporal presentation", () => {
     expect(end).toHaveLength(3);
   });
 
-  it("smoothly blends between stable normal layout and temporal preview", () => {
+  it("smoothly blends between the stable layout and temporal journey", () => {
     const input = [{ bundleId: "far", ageProgress: 1 }];
     const start = projectUniverseTemporalBatch(input, {
-      previousMode: "normal",
-      mode: "preview",
+      previousMode: "stable",
+      mode: "journey",
       transitionProgress: 0,
     })[0];
     const middle = projectUniverseTemporalBatch(input, {
-      previousMode: "normal",
-      mode: "preview",
+      previousMode: "stable",
+      mode: "journey",
       transitionProgress: 0.5,
     })[0];
     const end = projectUniverseTemporalBatch(input, {
-      previousMode: "normal",
-      mode: "preview",
+      previousMode: "stable",
+      mode: "journey",
       transitionProgress: 1,
     })[0];
 
@@ -210,18 +215,18 @@ describe("universe temporal presentation", () => {
     expect(middle.normalizedOffset.z).toBe(-0.5);
   });
 
-  it("uses a deterministic package lane and mirrors it for reverse preview", () => {
+  it("uses a deterministic package lane and mirrors it for reverse journey", () => {
     const input = [{ bundleId: "event-package", ageProgress: 0.8 }];
     const forward = projectUniverseTemporalBatch(input, {
-      mode: "preview",
+      mode: "journey",
       direction: "next",
     })[0];
     const repeated = projectUniverseTemporalBatch(input, {
-      mode: "preview",
+      mode: "journey",
       direction: "next",
     })[0];
     const reverse = projectUniverseTemporalBatch(input, {
-      mode: "preview",
+      mode: "journey",
       direction: "previous",
     })[0];
 
@@ -233,8 +238,8 @@ describe("universe temporal presentation", () => {
 
   it("normalizes custom policy while preserving near/far visual invariants", () => {
     const policy = resolveUniverseDisplayVisualPolicy({
-      normal: { opacity: 4, linkOpacity: -1 },
-      preview: {
+      stable: { opacity: 4, linkOpacity: -1 },
+      journey: {
         nearNodeScale: 0.8,
         farNodeScale: 2,
         nearOpacity: 0.7,
@@ -244,10 +249,10 @@ describe("universe temporal presentation", () => {
       },
     });
 
-    expect(policy.normal.opacity).toBe(1);
-    expect(policy.normal.linkOpacity).toBe(0);
-    expect(policy.preview.farNodeScale).toBe(0.8);
-    expect(policy.preview.farOpacity).toBe(0.7);
-    expect(policy.preview.farLateralSpread).toBe(0.5);
+    expect(policy.stable.opacity).toBe(1);
+    expect(policy.stable.linkOpacity).toBe(0);
+    expect(policy.journey.farNodeScale).toBe(0.8);
+    expect(policy.journey.farOpacity).toBe(0.7);
+    expect(policy.journey.farLateralSpread).toBe(0.5);
   });
 });

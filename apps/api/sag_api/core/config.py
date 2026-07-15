@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     document_extract_concurrency: int = Field(default=5, ge=1, le=50)  # 单文档 chunk 抽取并发
     document_chunk_max_tokens: int = Field(default=1_000, ge=100, le=100_000)
     document_chunk_mode: Literal["standard", "heading_strict"] = "standard"
+    # 上传文档已有独立的知识型过滤要求；默认关闭上游基于标题/摘要的严格过滤，
+    # 避免无摘要或标题缺失的书籍正文被误判为噪音。
+    document_strict_filtering: bool = False
     job_max_attempts: int = 3  # 可重试失败的最大尝试次数（含首次）
     engine_cache_size: int = 16  # 引擎槽 LRU 上限（超限逐出最久未用）
     engine_warmup_count: int = 4  # 启动时预热最近使用的信源引擎数
@@ -101,12 +104,12 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None
     llm_model: str = _DEFAULT_LLM_PROVIDER.default_model
     llm_temperature: float = _DEFAULT_LLM_PROVIDER.default_temperature
-    llm_max_tokens: int = 2048
+    llm_max_tokens: int = 20_000
     llm_context_window: int = _DEFAULT_LLM_PROVIDER.default_context_window
     llm_timeout_ms: int = Field(default=60_000, ge=1_000, le=600_000)
     llm_max_retries: int = Field(default=2, ge=0, le=10)
     # 透传给 chat/completions 的额外请求体（JSON），如 {"enable_thinking": false}；
-    # 未配置时对 qwen 系模型自动关闭思考（思考模式会让决策/首 token 慢 10 倍以上）
+    # 未配置时对 qwen 系模型通过 LiteLLM reasoning_effort=none 统一关闭思考。
     llm_extra_body: dict | None = None
 
     # ── Embedding（OpenAI-compatible；仅 OpenAI provider 可复用生成配置）───────

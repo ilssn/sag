@@ -1,31 +1,30 @@
-export type UniverseDisplayMode = "normal" | "preview";
-export type UniversePreviewDirection = "next" | "previous";
+export type UniverseDisplayMode = "stable" | "journey";
+export type UniverseJourneyDirection = "next" | "previous";
 
-export interface UniversePreviewSession {
-  /** Window revision at which this preview journey began. */
+export interface UniverseJourneySession {
+  /** Window revision at which this timeline journey began. */
   originWindowRevision: number;
   /** Direction away from the session origin; null until the first accepted step. */
-  direction: UniversePreviewDirection | null;
+  direction: UniverseJourneyDirection | null;
   /** Number of accepted timeline steps away from the session origin. */
   depth: number;
 }
 
 export interface UniverseDisplayModeState {
   mode: UniverseDisplayMode;
-  preview: UniversePreviewSession | null;
+  journey: UniverseJourneySession | null;
   /** Invalidates stale asynchronous wheel plans without coupling to scene state. */
   revision: number;
 }
 
 export type UniverseDisplayIntentAction =
-  | "enter-preview"
-  | "advance-preview"
-  | "rewind-preview"
-  | "return-normal";
+  | "enter-journey"
+  | "advance-journey"
+  | "rewind-journey";
 
 export interface UniverseDisplayIntentPlan {
   action: UniverseDisplayIntentAction;
-  timelineDirection: UniversePreviewDirection;
+  timelineDirection: UniverseJourneyDirection;
   sourceRevision: number;
   nextState: UniverseDisplayModeState;
 }
@@ -36,7 +35,7 @@ export type UniverseDisplayIntentOutcome =
   | "complete"
   | "cancelled";
 
-export interface UniverseNormalVisualPolicy {
+export interface UniverseStableVisualPolicy {
   nodeScale: number;
   eventStarScale: number;
   cardScale: number;
@@ -44,7 +43,7 @@ export interface UniverseNormalVisualPolicy {
   linkOpacity: number;
 }
 
-export interface UniversePreviewVisualPolicy {
+export interface UniverseJourneyVisualPolicy {
   nearNodeScale: number;
   farNodeScale: number;
   nearEventStarScale: number;
@@ -66,13 +65,13 @@ export interface UniversePreviewVisualPolicy {
 }
 
 export interface UniverseDisplayVisualPolicy {
-  normal: UniverseNormalVisualPolicy;
-  preview: UniversePreviewVisualPolicy;
+  stable: UniverseStableVisualPolicy;
+  journey: UniverseJourneyVisualPolicy;
 }
 
 export type UniverseDisplayVisualPolicyInput = {
-  normal?: Partial<UniverseNormalVisualPolicy>;
-  preview?: Partial<UniversePreviewVisualPolicy>;
+  stable?: Partial<UniverseStableVisualPolicy>;
+  journey?: Partial<UniverseJourneyVisualPolicy>;
 };
 
 export interface UniverseTemporalBundleInput {
@@ -86,7 +85,7 @@ export interface UniverseTemporalBundleInput {
 export interface UniverseTemporalBatchOptions {
   mode: UniverseDisplayMode;
   previousMode?: UniverseDisplayMode;
-  direction?: UniversePreviewDirection | null;
+  direction?: UniverseJourneyDirection | null;
   /** Shared 0..1 progress. Every package is interpolated in the same frame. */
   transitionProgress?: number;
 }
@@ -105,14 +104,14 @@ export interface UniverseTemporalBundleProjection {
 }
 
 export const DEFAULT_UNIVERSE_DISPLAY_VISUAL_POLICY: UniverseDisplayVisualPolicy = {
-  normal: {
+  stable: {
     nodeScale: 1,
     eventStarScale: 1,
     cardScale: 1,
     opacity: 1,
     linkOpacity: 0.62,
   },
-  preview: {
+  journey: {
     nearNodeScale: 1.08,
     farNodeScale: 0.38,
     nearEventStarScale: 1.18,
@@ -166,29 +165,29 @@ function canonicalNumber(value: number) {
 }
 
 function oppositeDirection(
-  left: UniversePreviewDirection,
-  right: UniversePreviewDirection,
+  left: UniverseJourneyDirection,
+  right: UniverseJourneyDirection,
 ) {
   return left !== right;
 }
 
-function normalState(revision: number): UniverseDisplayModeState {
-  return { mode: "normal", preview: null, revision };
+function stableState(revision: number): UniverseDisplayModeState {
+  return { mode: "stable", journey: null, revision };
 }
 
-function previewState(
+function journeyState(
   revision: number,
-  preview: UniversePreviewSession,
+  journey: UniverseJourneySession,
 ): UniverseDisplayModeState {
-  return { mode: "preview", preview, revision };
+  return { mode: "journey", journey, revision };
 }
 
 export function createUniverseDisplayModeState(
-  mode: UniverseDisplayMode = "normal",
+  mode: UniverseDisplayMode = "stable",
   windowRevision = 0,
 ): UniverseDisplayModeState {
-  if (mode === "normal") return normalState(0);
-  return previewState(0, {
+  if (mode === "stable") return stableState(0);
+  return journeyState(0, {
     originWindowRevision: integer(windowRevision),
     direction: null,
     depth: 0,
@@ -196,8 +195,8 @@ export function createUniverseDisplayModeState(
 }
 
 /**
- * Explicit Normal/Preview switch. Switching to preview establishes a new
- * origin without moving data; switching to normal only changes presentation.
+ * Explicit Stable/Journey switch. Switching to journey establishes a new
+ * origin without moving data; switching to stable only changes presentation.
  */
 export function setUniverseDisplayMode(
   state: UniverseDisplayModeState,
@@ -205,8 +204,8 @@ export function setUniverseDisplayMode(
   windowRevision: number,
 ): UniverseDisplayModeState {
   if (state.mode === mode) return state;
-  if (mode === "normal") return normalState(state.revision + 1);
-  return previewState(state.revision + 1, {
+  if (mode === "stable") return stableState(state.revision + 1);
+  return journeyState(state.revision + 1, {
     originWindowRevision: integer(windowRevision),
     direction: null,
     depth: 0,
@@ -216,25 +215,26 @@ export function setUniverseDisplayMode(
 /**
  * Plans one explicit button-driven timeline step. Callers commit the candidate only after
  * the virtual window actually shifts, so a cache/network boundary cannot put
- * the UI into a preview state that its data did not reach.
+ * the UI into a journey state that its data did not reach.
  *
- * Rewinding the last step returns to Normal. A subsequent timeline action in
- * the same direction starts a fresh Preview journey in that direction.
+ * Rewinding the last step returns to the journey origin while staying in
+ * Journey. Camera dragging is the only implicit way back to Stable, so wheel
+ * direction changes never produce a presentation-mode surprise.
  */
 export function planUniverseDisplayTimelineIntent(
   state: UniverseDisplayModeState,
-  direction: UniversePreviewDirection,
+  direction: UniverseJourneyDirection,
   windowRevision: number,
 ): UniverseDisplayIntentPlan {
   const sourceRevision = state.revision;
   const nextRevision = sourceRevision + 1;
 
-  if (state.mode === "normal" || !state.preview) {
+  if (state.mode === "stable" || !state.journey) {
     return {
-      action: "enter-preview",
+      action: "enter-journey",
       timelineDirection: direction,
       sourceRevision,
-      nextState: previewState(nextRevision, {
+      nextState: journeyState(nextRevision, {
         originWindowRevision: integer(windowRevision),
         direction,
         depth: 1,
@@ -242,13 +242,13 @@ export function planUniverseDisplayTimelineIntent(
     };
   }
 
-  const session = state.preview;
+  const session = state.journey;
   if (session.direction === null || session.depth === 0) {
     return {
-      action: "enter-preview",
+      action: "enter-journey",
       timelineDirection: direction,
       sourceRevision,
-      nextState: previewState(nextRevision, {
+      nextState: journeyState(nextRevision, {
         ...session,
         direction,
         depth: 1,
@@ -258,10 +258,10 @@ export function planUniverseDisplayTimelineIntent(
 
   if (!oppositeDirection(session.direction, direction)) {
     return {
-      action: "advance-preview",
+      action: "advance-journey",
       timelineDirection: direction,
       sourceRevision,
-      nextState: previewState(nextRevision, {
+      nextState: journeyState(nextRevision, {
         ...session,
         depth: session.depth + 1,
       }),
@@ -270,10 +270,10 @@ export function planUniverseDisplayTimelineIntent(
 
   if (session.depth > 1) {
     return {
-      action: "rewind-preview",
+      action: "rewind-journey",
       timelineDirection: direction,
       sourceRevision,
-      nextState: previewState(nextRevision, {
+      nextState: journeyState(nextRevision, {
         ...session,
         depth: session.depth - 1,
       }),
@@ -281,10 +281,14 @@ export function planUniverseDisplayTimelineIntent(
   }
 
   return {
-    action: "return-normal",
+    action: "rewind-journey",
     timelineDirection: direction,
     sourceRevision,
-    nextState: normalState(nextRevision),
+    nextState: journeyState(nextRevision, {
+      ...session,
+      direction: null,
+      depth: 0,
+    }),
   };
 }
 
@@ -331,94 +335,94 @@ export function universeTemporalTimestampProgress(
 export function resolveUniverseDisplayVisualPolicy(
   input: UniverseDisplayVisualPolicyInput = {},
 ): UniverseDisplayVisualPolicy {
-  const normalDefaults = DEFAULT_UNIVERSE_DISPLAY_VISUAL_POLICY.normal;
-  const previewDefaults = DEFAULT_UNIVERSE_DISPLAY_VISUAL_POLICY.preview;
-  const normalInput = input.normal ?? {};
-  const previewInput = input.preview ?? {};
+  const stableDefaults = DEFAULT_UNIVERSE_DISPLAY_VISUAL_POLICY.stable;
+  const journeyDefaults = DEFAULT_UNIVERSE_DISPLAY_VISUAL_POLICY.journey;
+  const stableInput = input.stable ?? {};
+  const journeyInput = input.journey ?? {};
 
-  const normal: UniverseNormalVisualPolicy = {
-    nodeScale: positive(normalInput.nodeScale, normalDefaults.nodeScale),
+  const stable: UniverseStableVisualPolicy = {
+    nodeScale: positive(stableInput.nodeScale, stableDefaults.nodeScale),
     eventStarScale: positive(
-      normalInput.eventStarScale,
-      normalDefaults.eventStarScale,
+      stableInput.eventStarScale,
+      stableDefaults.eventStarScale,
     ),
-    cardScale: positive(normalInput.cardScale, normalDefaults.cardScale),
-    opacity: opacity(normalInput.opacity, normalDefaults.opacity),
-    linkOpacity: opacity(normalInput.linkOpacity, normalDefaults.linkOpacity),
+    cardScale: positive(stableInput.cardScale, stableDefaults.cardScale),
+    opacity: opacity(stableInput.opacity, stableDefaults.opacity),
+    linkOpacity: opacity(stableInput.linkOpacity, stableDefaults.linkOpacity),
   };
 
   const nearNodeScale = positive(
-    previewInput.nearNodeScale,
-    previewDefaults.nearNodeScale,
+    journeyInput.nearNodeScale,
+    journeyDefaults.nearNodeScale,
   );
   const nearEventStarScale = positive(
-    previewInput.nearEventStarScale,
-    previewDefaults.nearEventStarScale,
+    journeyInput.nearEventStarScale,
+    journeyDefaults.nearEventStarScale,
   );
   const nearCardScale = positive(
-    previewInput.nearCardScale,
-    previewDefaults.nearCardScale,
+    journeyInput.nearCardScale,
+    journeyDefaults.nearCardScale,
   );
   const nearOpacity = opacity(
-    previewInput.nearOpacity,
-    previewDefaults.nearOpacity,
+    journeyInput.nearOpacity,
+    journeyDefaults.nearOpacity,
   );
   const nearLinkOpacity = opacity(
-    previewInput.nearLinkOpacity,
-    previewDefaults.nearLinkOpacity,
+    journeyInput.nearLinkOpacity,
+    journeyDefaults.nearLinkOpacity,
   );
   const nearLateralSpread = nonNegative(
-    previewInput.nearLateralSpread,
-    previewDefaults.nearLateralSpread,
+    journeyInput.nearLateralSpread,
+    journeyDefaults.nearLateralSpread,
   );
 
   return {
-    normal,
-    preview: {
+    stable,
+    journey: {
       nearNodeScale,
       farNodeScale: Math.min(
         nearNodeScale,
-        positive(previewInput.farNodeScale, previewDefaults.farNodeScale),
+        positive(journeyInput.farNodeScale, journeyDefaults.farNodeScale),
       ),
       nearEventStarScale,
       farEventStarScale: Math.min(
         nearEventStarScale,
         positive(
-          previewInput.farEventStarScale,
-          previewDefaults.farEventStarScale,
+          journeyInput.farEventStarScale,
+          journeyDefaults.farEventStarScale,
         ),
       ),
       nearCardScale,
       farCardScale: Math.min(
         nearCardScale,
-        positive(previewInput.farCardScale, previewDefaults.farCardScale),
+        positive(journeyInput.farCardScale, journeyDefaults.farCardScale),
       ),
       nearOpacity,
       farOpacity: Math.min(
         nearOpacity,
-        opacity(previewInput.farOpacity, previewDefaults.farOpacity),
+        opacity(journeyInput.farOpacity, journeyDefaults.farOpacity),
       ),
       nearLinkOpacity,
       farLinkOpacity: Math.min(
         nearLinkOpacity,
-        opacity(previewInput.farLinkOpacity, previewDefaults.farLinkOpacity),
+        opacity(journeyInput.farLinkOpacity, journeyDefaults.farLinkOpacity),
       ),
-      depthSpan: nonNegative(previewInput.depthSpan, previewDefaults.depthSpan),
+      depthSpan: nonNegative(journeyInput.depthSpan, journeyDefaults.depthSpan),
       nearLateralSpread,
       farLateralSpread: Math.max(
         nearLateralSpread,
         nonNegative(
-          previewInput.farLateralSpread,
-          previewDefaults.farLateralSpread,
+          journeyInput.farLateralSpread,
+          journeyDefaults.farLateralSpread,
         ),
       ),
       verticalAspect: nonNegative(
-        previewInput.verticalAspect,
-        previewDefaults.verticalAspect,
+        journeyInput.verticalAspect,
+        journeyDefaults.verticalAspect,
       ),
       ageExponent: positive(
-        previewInput.ageExponent,
-        previewDefaults.ageExponent,
+        journeyInput.ageExponent,
+        journeyDefaults.ageExponent,
       ),
     },
   };
@@ -446,8 +450,8 @@ export function projectUniverseTemporalBatch(
   const policy = resolveUniverseDisplayVisualPolicy(policyInput);
   const progress = smoothstep(options.transitionProgress ?? 1);
   const fromMode = options.previousMode ?? options.mode;
-  const fromModeProgress = fromMode === "preview" ? 1 : 0;
-  const toModeProgress = options.mode === "preview" ? 1 : 0;
+  const fromModeProgress = fromMode === "journey" ? 1 : 0;
+  const toModeProgress = options.mode === "journey" ? 1 : 0;
   const modeProgress = lerp(fromModeProgress, toModeProgress, progress);
   const mirror = options.direction === "previous" ? -1 : 1;
 
@@ -455,41 +459,46 @@ export function projectUniverseTemporalBatch(
     const targetAge = clamp01(bundle.ageProgress);
     const previousAge = clamp01(bundle.previousAgeProgress ?? targetAge);
     const ageProgress = lerp(previousAge, targetAge, progress);
-    const curvedAge = Math.pow(ageProgress, policy.preview.ageExponent);
-    const spread = lerp(
-      policy.preview.nearLateralSpread,
-      policy.preview.farLateralSpread,
-      curvedAge,
-    );
+    const curvedAge = Math.pow(ageProgress, policy.journey.ageExponent);
+    // Rank zero is the camera-centre arrival slot. A non-zero minimum spread
+    // leaves a permanent visual hole precisely where the next time page should
+    // emerge; all older ranks fan outward continuously from this origin.
+    const spread = curvedAge <= Number.EPSILON
+      ? 0
+      : lerp(
+          policy.journey.nearLateralSpread,
+          policy.journey.farLateralSpread,
+          curvedAge,
+        );
     const angle = stableUnit(bundle.bundleId) * Math.PI * 2 * mirror;
-    const previewOffset = {
+    const journeyOffset = {
       x: Math.cos(angle) * spread,
-      y: Math.sin(angle) * spread * policy.preview.verticalAspect,
-      z: -policy.preview.depthSpan * curvedAge,
+      y: Math.sin(angle) * spread * policy.journey.verticalAspect,
+      z: -policy.journey.depthSpan * curvedAge,
     };
-    const previewNodeScale = lerp(
-      policy.preview.nearNodeScale,
-      policy.preview.farNodeScale,
+    const journeyNodeScale = lerp(
+      policy.journey.nearNodeScale,
+      policy.journey.farNodeScale,
       curvedAge,
     );
-    const previewEventStarScale = lerp(
-      policy.preview.nearEventStarScale,
-      policy.preview.farEventStarScale,
+    const journeyEventStarScale = lerp(
+      policy.journey.nearEventStarScale,
+      policy.journey.farEventStarScale,
       curvedAge,
     );
-    const previewCardScale = lerp(
-      policy.preview.nearCardScale,
-      policy.preview.farCardScale,
+    const journeyCardScale = lerp(
+      policy.journey.nearCardScale,
+      policy.journey.farCardScale,
       curvedAge,
     );
-    const previewOpacity = lerp(
-      policy.preview.nearOpacity,
-      policy.preview.farOpacity,
+    const journeyOpacity = lerp(
+      policy.journey.nearOpacity,
+      policy.journey.farOpacity,
       curvedAge,
     );
-    const previewLinkOpacity = lerp(
-      policy.preview.nearLinkOpacity,
-      policy.preview.farLinkOpacity,
+    const journeyLinkOpacity = lerp(
+      policy.journey.nearLinkOpacity,
+      policy.journey.farLinkOpacity,
       curvedAge,
     );
 
@@ -498,21 +507,21 @@ export function projectUniverseTemporalBatch(
       ageProgress,
       modeProgress,
       normalizedOffset: {
-        x: canonicalNumber(previewOffset.x * modeProgress),
-        y: canonicalNumber(previewOffset.y * modeProgress),
-        z: canonicalNumber(previewOffset.z * modeProgress),
+        x: canonicalNumber(journeyOffset.x * modeProgress),
+        y: canonicalNumber(journeyOffset.y * modeProgress),
+        z: canonicalNumber(journeyOffset.z * modeProgress),
       },
-      nodeScale: lerp(policy.normal.nodeScale, previewNodeScale, modeProgress),
+      nodeScale: lerp(policy.stable.nodeScale, journeyNodeScale, modeProgress),
       eventStarScale: lerp(
-        policy.normal.eventStarScale,
-        previewEventStarScale,
+        policy.stable.eventStarScale,
+        journeyEventStarScale,
         modeProgress,
       ),
-      cardScale: lerp(policy.normal.cardScale, previewCardScale, modeProgress),
-      opacity: lerp(policy.normal.opacity, previewOpacity, modeProgress),
+      cardScale: lerp(policy.stable.cardScale, journeyCardScale, modeProgress),
+      opacity: lerp(policy.stable.opacity, journeyOpacity, modeProgress),
       linkOpacity: lerp(
-        policy.normal.linkOpacity,
-        previewLinkOpacity,
+        policy.stable.linkOpacity,
+        journeyLinkOpacity,
         modeProgress,
       ),
     };

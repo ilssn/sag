@@ -163,9 +163,7 @@ class _EngineLifecycleGate:
     @asynccontextmanager
     async def read(self):
         async with self._condition:
-            await self._condition.wait_for(
-                lambda: not self._writer and self._waiting_writers == 0
-            )
+            await self._condition.wait_for(lambda: not self._writer and self._waiting_writers == 0)
             self._readers += 1
         try:
             yield
@@ -181,9 +179,7 @@ class _EngineLifecycleGate:
         async with self._condition:
             self._waiting_writers += 1
             try:
-                await self._condition.wait_for(
-                    lambda: not self._writer and self._readers == 0
-                )
+                await self._condition.wait_for(lambda: not self._writer and self._readers == 0)
                 self._writer = True
                 acquired = True
             finally:
@@ -257,8 +253,7 @@ class EngineManager:
                         table = preparer.format_table(columns[0].table)
                         column_names = ", ".join(quote(column.name) for column in columns)
                         sync_connection.exec_driver_sql(
-                            f"CREATE INDEX IF NOT EXISTS {quote(name)} "
-                            f"ON {table} ({column_names})"
+                            f"CREATE INDEX IF NOT EXISTS {quote(name)} ON {table} ({column_names})"
                         )
 
                     table = quote(SourceEvent.__table__.name)
@@ -280,19 +275,13 @@ class EngineManager:
                     )
                     for name, columns in expression_indexes:
                         sync_connection.exec_driver_sql(
-                            f"CREATE INDEX IF NOT EXISTS {quote(name)} "
-                            f"ON {table} ({columns})"
+                            f"CREATE INDEX IF NOT EXISTS {quote(name)} ON {table} ({columns})"
                         )
                 else:
                     tables = {SourceEvent.__table__, EventEntity.__table__}
                     for name, *columns in specs:
                         index = next(
-                            (
-                                candidate
-                                for table in tables
-                                for candidate in table.indexes
-                                if candidate.name == name
-                            ),
+                            (candidate for table in tables for candidate in table.indexes if candidate.name == name),
                             None,
                         )
                         if index is None:
@@ -358,9 +347,7 @@ class EngineManager:
         from zleap.sag.db import SourceConfig, get_session_factory
 
         name = str(getattr(source, "name", "") or f"sag-{source_config_id[-8:]}")[:100]
-        description = str(
-            getattr(source, "description", "") or "created by sag EngineManager"
-        )[:255]
+        description = str(getattr(source, "description", "") or "created by sag EngineManager")[:255]
         try:
             session_factory = get_session_factory()
             async with session_factory() as session:
@@ -570,6 +557,7 @@ class EngineManager:
         on_checkpoint: CheckpointCallback | None = None,
         should_pause: PauseCheck | None = None,
         max_concurrency: int | None = None,
+        document_title: str | None = None,
     ) -> ProcessOutcome:
         """独立处理一篇文档；同源文档可并行，chunk 完成即保存断点。"""
 
@@ -584,10 +572,11 @@ class EngineManager:
                 processor = IncrementalDocumentProcessor(
                     engine,
                     source_config_id,
-                    max_concurrency=max_concurrency
-                    or self._settings.document_extract_concurrency,
+                    max_concurrency=max_concurrency or self._settings.document_extract_concurrency,
                     chunk_max_tokens=self._settings.document_chunk_max_tokens,
                     chunk_mode=self._settings.document_chunk_mode,
+                    document_title=document_title,
+                    enable_strict_filtering=self._settings.document_strict_filtering,
                 )
                 return await processor.process(
                     path,
@@ -636,9 +625,7 @@ class EngineManager:
         strategy = self._effective_search_strategy(strategy)
         top_k = top_k or self._settings.search_top_k
         try:
-            outcome = await self._search_raw(
-                source_config_id, query, source=source, strategy=strategy, top_k=top_k
-            )
+            outcome = await self._search_raw(source_config_id, query, source=source, strategy=strategy, top_k=top_k)
             if outcome.sections or strategy == "vector" or not self._settings.search_fallback_vector:
                 return outcome
             log.info("精确检索空结果，回退快速检索 source_config_id=%s", source_config_id)
@@ -647,18 +634,20 @@ class EngineManager:
                 raise
             log.warning(
                 "检索超时(%.0fs) 回退 vector source_config_id=%s strategy=%s",
-                self._settings.search_source_timeout, source_config_id, strategy,
+                self._settings.search_source_timeout,
+                source_config_id,
+                strategy,
             )
         except Exception as e:  # noqa: BLE001
             if strategy == "vector" or not self._settings.search_fallback_vector:
                 raise
             log.warning(
                 "检索失败回退 vector source_config_id=%s strategy=%s err=%s",
-                source_config_id, strategy, getattr(e, "message", None) or e,
+                source_config_id,
+                strategy,
+                getattr(e, "message", None) or e,
             )
-        return await self._search_raw(
-            source_config_id, query, source=source, strategy="vector", top_k=top_k
-        )
+        return await self._search_raw(source_config_id, query, source=source, strategy="vector", top_k=top_k)
 
     async def search_many(
         self,
@@ -711,14 +700,10 @@ class EngineManager:
         async def _one(scid: str, source: Source | None):
             async with semaphore:
                 try:
-                    outcome = await self.search(
-                        scid, query, source=source, strategy=strategy, top_k=per_source_k
-                    )
+                    outcome = await self.search(scid, query, source=source, strategy=strategy, top_k=per_source_k)
                     return scid, outcome
                 except Exception as e:  # noqa: BLE001
-                    log.warning(
-                        "fan-out 检索失败 %s：%s", scid, getattr(e, "message", None) or e
-                    )
+                    log.warning("fan-out 检索失败 %s：%s", scid, getattr(e, "message", None) or e)
                     return None
 
         results = await asyncio.gather(*(_one(scid, src) for scid, src in targets))
@@ -847,9 +832,7 @@ class EngineManager:
 
         query = query.strip()
         source_config_ids = sorted(
-            source_config_id.strip()
-            for source_config_id in sources_by_config
-            if source_config_id.strip()
+            source_config_id.strip() for source_config_id in sources_by_config if source_config_id.strip()
         )
         if not query or not source_config_ids:
             return {}
@@ -927,11 +910,7 @@ class EngineManager:
         ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0]))
         strongest = ranked[0][1]
         relevance_floor = max(0.20, strongest * 0.55)
-        return {
-            key: round(score, 6)
-            for key, score in ranked[:bounded_limit]
-            if score >= relevance_floor
-        }
+        return {key: round(score, 6) for key, score in ranked[:bounded_limit] if score >= relevance_floor}
 
     async def graph_for_sections(
         self,
@@ -958,9 +937,7 @@ class EngineManager:
             except (TypeError, ValueError):
                 continue
             if math.isfinite(score):
-                direct_event_scores[(source_config_id, event_id)] = max(
-                    0.0, min(1.0, score)
-                )
+                direct_event_scores[(source_config_id, event_id)] = max(0.0, min(1.0, score))
         direct_event_ids_by_config: dict[str, set[str]] = {}
         for source_config_id, event_id in direct_event_scores:
             direct_event_ids_by_config.setdefault(source_config_id, set()).add(event_id)
@@ -980,10 +957,7 @@ class EngineManager:
             return SourceGraphInfo()
 
         await self._ensure_read_runtime(
-            {
-                source_config_id: sources_by_config.get(source_config_id)
-                for source_config_id in requested_config_ids
-            }
+            {source_config_id: sources_by_config.get(source_config_id) for source_config_id in requested_config_ids}
         )
 
         from sqlalchemy import and_, func, or_, select
@@ -1018,10 +992,14 @@ class EngineManager:
             1,
             min(8, math.ceil(candidate_limit / max(1, len(chunk_scores)))),
         )
-        chunk_rank = func.row_number().over(
-            partition_by=(SourceEvent.source_config_id, SourceEvent.chunk_id),
-            order_by=(SourceEvent.rank.asc(), SourceEvent.id.asc()),
-        ).label("chunk_rank")
+        chunk_rank = (
+            func.row_number()
+            .over(
+                partition_by=(SourceEvent.source_config_id, SourceEvent.chunk_id),
+                order_by=(SourceEvent.rank.asc(), SourceEvent.id.asc()),
+            )
+            .label("chunk_rank")
+        )
         ranked_events = (
             select(
                 SourceEvent.id.label("id"),
@@ -1075,20 +1053,14 @@ class EngineManager:
                 rows.sort(key=lambda row: (int(row["rank"] or 0), row["id"]))
 
             direct_rows = sorted(
-                (
-                    row
-                    for row in event_rows
-                    if (row["source_config_id"], row["id"]) in direct_event_scores
-                ),
+                (row for row in event_rows if (row["source_config_id"], row["id"]) in direct_event_scores),
                 key=lambda row: (
                     -direct_event_scores[(row["source_config_id"], row["id"])],
                     int(row["rank"] or 0),
                     row["id"],
                 ),
             )
-            selected_direct_keys = {
-                (row["source_config_id"], row["id"]) for row in direct_rows
-            }
+            selected_direct_keys = {(row["source_config_id"], row["id"]) for row in direct_rows}
 
             # 每个高相关分块先贡献一个事件，再进入下一轮，避免单个长分块占满结果。
             ordered_chunk_keys = sorted(
@@ -1114,12 +1086,7 @@ class EngineManager:
             event_rows = []
             for row in [
                 *direct_rows,
-                *(
-                    row
-                    for row in balanced_rows
-                    if (row["source_config_id"], row["id"])
-                    not in selected_direct_keys
-                ),
+                *(row for row in balanced_rows if (row["source_config_id"], row["id"]) not in selected_direct_keys),
             ]:
                 normalized_title = re.sub(r"\s+", "", str(row["title"] or "")).casefold()
                 title_key = (row["source_config_id"], normalized_title or row["id"])
@@ -1286,14 +1253,8 @@ class EngineManager:
 
         sf = get_session_factory()
         async with sf() as s:
-            total_entities = int(
-                (
-                    await s.execute(select(func.count(Entity.id)).where(Entity.source_config_id == source_config_id))
-                ).scalar_one()
-                or 0
-            )
             if not source_ids:
-                return SourceGraphInfo(total_entities=total_entities)
+                return SourceGraphInfo()
 
             event_scope = (
                 SourceEvent.source_config_id == source_config_id,
@@ -1327,6 +1288,19 @@ class EngineManager:
                         source_config_id,
                         int(repaired.rowcount or 0),
                     )
+
+            # 实体总量必须与当前文档范围一致；否则单文档筛选会把整个信源的
+            # 实体数当成分母，错误显示为“已截断”。
+            total_entities = int(
+                (
+                    await s.execute(
+                        select(func.count(func.distinct(EventEntity.entity_id)))
+                        .join(SourceEvent, SourceEvent.id == EventEntity.event_id)
+                        .where(*event_scope, visible_event)
+                    )
+                ).scalar_one()
+                or 0
+            )
 
             # 每个文档先取 rank 较小的事件，再在文档之间轮询，兼顾层级根节点与覆盖面。
             source_rank = (
@@ -1439,9 +1413,7 @@ class EngineManager:
         ]
         entities.sort(key=lambda entity: (-entity.heat, entity.name, entity.id))
 
-        eligible_rows = [
-            row for row in association_rows if row[1] in selected_entity_ids
-        ]
+        eligible_rows = [row for row in association_rows if row[1] in selected_entity_ids]
         covering_rows = []
         remaining_rows = []
         covered_events: set[str] = set()
@@ -1518,9 +1490,7 @@ class EngineManager:
         buckets = max(1, min(int(bucket_count), 24))
         categories = max(0, min(int(category_limit), 16))
         event_time = func.coalesce(SourceEvent.start_time, SourceEvent.created_time)
-        active_event = (
-            SourceEvent.status.is_(None) | (SourceEvent.status != "DELETED")
-        )
+        active_event = SourceEvent.status.is_(None) | (SourceEvent.status != "DELETED")
         sf = get_session_factory()
         async with sf() as session:
             event_count, min_time, max_time = (
@@ -1538,9 +1508,7 @@ class EngineManager:
             entity_count = int(
                 (
                     await session.execute(
-                        select(func.count(Entity.id)).where(
-                            Entity.source_config_id == source_config_id
-                        )
+                        select(func.count(Entity.id)).where(Entity.source_config_id == source_config_id)
                     )
                 ).scalar_one()
                 or 0
@@ -1558,12 +1526,7 @@ class EngineManager:
                 .subquery()
             )
             relation_count = int(
-                (
-                    await session.execute(
-                        select(func.count()).select_from(unique_relation_rows)
-                    )
-                ).scalar_one()
-                or 0
+                (await session.execute(select(func.count()).select_from(unique_relation_rows))).scalar_one() or 0
             )
             category_rows = []
             if categories:
@@ -1600,9 +1563,7 @@ class EngineManager:
                         upper = boundaries[index + 1]
                         condition = event_time >= lower
                         condition &= event_time <= upper if index == buckets - 1 else event_time < upper
-                        count_columns.append(
-                            func.sum(case((condition, 1), else_=0)).label(f"bucket_{index}")
-                        )
+                        count_columns.append(func.sum(case((condition, 1), else_=0)).label(f"bucket_{index}"))
                     bucket_values = (
                         await session.execute(
                             select(*count_columns).where(
@@ -1658,10 +1619,7 @@ class EngineManager:
                         SourceEvent.source_config_id == source_config_id,
                         event_time <= as_of_db,
                         SourceEvent.created_time <= as_of_db,
-                        (
-                            SourceEvent.status.is_(None)
-                            | (SourceEvent.status != "DELETED")
-                        ),
+                        (SourceEvent.status.is_(None) | (SourceEvent.status != "DELETED")),
                     )
                     .group_by(EventEntity.entity_id)
                 )
@@ -1706,27 +1664,22 @@ class EngineManager:
             .group_by(EventEntity.event_id, EventEntity.entity_id)
             .subquery()
         )
-        ranked_relations = (
-            select(
-                unique_relations.c.event_id,
-                unique_relations.c.entity_id,
-                unique_relations.c.weight,
-                unique_relations.c.relation_description,
-                func.count()
-                .over(partition_by=unique_relations.c.event_id)
-                .label("relation_total"),
-                func.row_number()
-                .over(
-                    partition_by=unique_relations.c.event_id,
-                    order_by=(
-                        unique_relations.c.weight.desc(),
-                        unique_relations.c.entity_id.asc(),
-                    ),
-                )
-                .label("relation_rank"),
+        ranked_relations = select(
+            unique_relations.c.event_id,
+            unique_relations.c.entity_id,
+            unique_relations.c.weight,
+            unique_relations.c.relation_description,
+            func.count().over(partition_by=unique_relations.c.event_id).label("relation_total"),
+            func.row_number()
+            .over(
+                partition_by=unique_relations.c.event_id,
+                order_by=(
+                    unique_relations.c.weight.desc(),
+                    unique_relations.c.entity_id.asc(),
+                ),
             )
-            .subquery()
-        )
+            .label("relation_rank"),
+        ).subquery()
         relation_rows = (
             await session.execute(
                 select(
@@ -1848,14 +1801,8 @@ class EngineManager:
             raise ValueError("newer universe timeline reads require a cursor")
         if not source_revision:
             raise ValueError("universe source revision is required")
-        cursor_payload = (
-            _decode_universe_cursor(cursor, self._settings.secret_key) if cursor else None
-        )
-        snapshot_payload = (
-            _decode_universe_cursor(snapshot_id, self._settings.secret_key)
-            if snapshot_id
-            else None
-        )
+        cursor_payload = _decode_universe_cursor(cursor, self._settings.secret_key) if cursor else None
+        snapshot_payload = _decode_universe_cursor(snapshot_id, self._settings.secret_key) if snapshot_id else None
         if cursor_payload and snapshot_payload is None:
             raise ValueError("universe timeline cursor requires a snapshot")
         if cursor_payload and (
@@ -2264,9 +2211,7 @@ class EngineManager:
                             "category": row.type or "实体",
                             "weight": _weight(row.weight),
                             "related_count": entity_counts.get(str(row.entity_id), 0),
-                            "relation_description": str(
-                                row.relation_description or ""
-                            )[:240],
+                            "relation_description": str(row.relation_description or "")[:240],
                         }
                         for row in page
                     ],
@@ -2327,8 +2272,7 @@ class EngineManager:
             expected_after = after_db.isoformat() if after_db is not None else None
             expected_before = before_db.isoformat() if before_db is not None else None
             if cursor_payload and (
-                cursor_payload.get("after") != expected_after
-                or cursor_payload.get("before") != expected_before
+                cursor_payload.get("after") != expected_after or cursor_payload.get("before") != expected_before
             ):
                 raise ValueError("universe cursor does not match its time range")
             if after_db is not None:
@@ -2465,9 +2409,7 @@ class EngineManager:
                     "related_count": related_count,
                 },
                 neighbors=[
-                    node
-                    for node in bundle_nodes
-                    if not (node.get("kind") == "entity" and node.get("id") == node_id)
+                    node for node in bundle_nodes if not (node.get("kind") == "entity" and node.get("id") == node_id)
                 ],
                 relations=bundle_relations,
                 returned=len(page),
@@ -2570,10 +2512,7 @@ class EngineManager:
         sf = get_session_factory()
         async with sf() as s:
             rows = (await s.execute(stmt)).all()
-        return [
-            {"chunk_id": cid, "heading": (h or "").strip(), "rank": int(r or 0)}
-            for cid, h, r in rows
-        ]
+        return [{"chunk_id": cid, "heading": (h or "").strip(), "rank": int(r or 0)} for cid, h, r in rows]
 
     async def get_document_markdown(
         self,

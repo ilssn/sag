@@ -67,7 +67,7 @@ describe("universe scene production invariants", () => {
     expect(labelLayout).toContain("hostRect,");
   });
 
-  it("keeps wheel and drag camera-native while time navigation stays explicit", () => {
+  it("keeps native wheel zoom while thresholded wheel and pointer gestures own distinct modes", () => {
     const cameraStart = sourceBetween(
       "private handleControlsStart = () =>",
       "private handleControlsChange = () =>",
@@ -75,6 +75,18 @@ describe("universe scene production invariants", () => {
     const cameraChange = sourceBetween(
       "private handleControlsChange = () =>",
       "private handlePointerMove = (event: PointerEvent)",
+    );
+    const wheel = sourceBetween(
+      "private handleTimelineWheel = (event: WheelEvent) =>",
+      "private handlePointerDown = () =>",
+    );
+    const wheelRouting = sourceBetween(
+      "private timelineWheelSurface(target: EventTarget | null)",
+      "private handleTimelineWheel = (event: WheelEvent) =>",
+    );
+    const pointer = sourceBetween(
+      "private handlePointerDown = () =>",
+      "private handleControlsStart = () =>",
     );
     const intent = sourceBetween(
       "async moveTimeline(",
@@ -86,16 +98,39 @@ describe("universe scene production invariants", () => {
     expect(source).toContain('this.controls.addEventListener("start", this.handleControlsStart)');
     expect(source).toContain('this.controls.addEventListener("change", this.handleControlsChange)');
     expect(source).toContain('this.controls.addEventListener("end", this.handleControlsEnd)');
-    expect(source).not.toContain('this.host.addEventListener("wheel"');
+    expect(source).toContain('this.host.addEventListener("wheel", this.handleTimelineWheel, {');
+    expect(source).toContain("capture: true,");
+    expect(source).toContain("passive: true,");
+    expect(source).toContain('this.host.removeEventListener("wheel", this.handleTimelineWheel, true)');
+    expect(source).toContain('from "@/lib/universe-timeline-wheel"');
+    expect(source).toContain("planUniverseTimelineWheel(this.timelineWheelState");
+    expect(source).toContain("drainUniverseTimelineWheel(this.timelineWheelState");
     expect(source).not.toContain("timelineDepthGateReached");
     expect(source).not.toContain("timelineWheelAccumulator");
     expect(source).toContain("this.controls.minDistance = UNIVERSE_CAMERA_MIN_DISTANCE");
     expect(source).toContain("this.controls.maxDistance = UNIVERSE_CAMERA_MAX_DISTANCE");
     expect(source).toContain("this.controls.zoomToCursor = true");
+    expect(source).toContain("this.controls.enableZoom = options.interactive");
+    expect(wheel).toContain('this.cameraGestureKind = "wheel"');
+    expect(wheel).toContain("const surface = this.timelineWheelSurface(event.target)");
+    expect(wheel).toContain('this.syncTimelineWheelDiagnostics("ignored-ui")');
+    expect(wheel).toContain('if (surface === "label") this.forwardTimelineWheelToCanvas(event)');
+    expect(wheel).toContain("planUniverseTimelineWheel(");
+    expect(wheel).toContain("if (plan.intent) this.runTimelineWheelIntent(");
+    expect(wheel).not.toContain("event.preventDefault()");
+    expect(wheel).not.toContain("this.callbacks.onCameraInteraction()");
+    expect(wheelRouting).toContain("TIMELINE_WHEEL_LABEL_SELECTOR");
+    expect(wheelRouting).toContain("this.labelLayer.contains(label)");
+    expect(wheelRouting).toContain('const forwarded = new WheelEvent("wheel"');
+    expect(wheelRouting).toContain("this.forwardedTimelineWheelEvents.add(forwarded)");
+    expect(wheelRouting).toContain("this.rendererCanvas.dispatchEvent(forwarded)");
+    expect(pointer).toContain('this.cameraGestureKind = "pointer"');
+    expect(pointer).toContain("this.resetTimelineWheel()");
     expect(cameraStart).toContain("this.cameraGesturePosition.copy(camera.position)");
     expect(cameraStart).toContain("this.lodArmed = true");
     expect(cameraStart).not.toContain("this.callbacks.onCameraInteraction()");
     expect(cameraChange).toContain("positionChanged || targetChanged");
+    expect(cameraChange).toContain('this.cameraGestureKind === "pointer"');
     expect(cameraChange).toContain("this.callbacks.onCameraInteraction()");
     expect(cameraChange).not.toContain("moveTimeline(");
     expect(intent).toContain("await this.callbacks.onTimelineIntent(direction)");
@@ -134,17 +169,21 @@ describe("universe scene production invariants", () => {
     expect(source).toContain('kind: "enter" | "shift" | "exit"');
     expect(source).toContain("planUniverseSceneDelta(");
     expect(source).toContain("private pruneRetiringTimelineElements()");
-    expect(source).toContain("this.timelineExitSide(node, source)");
+    expect(source).toContain("this.timelineExitSide(node)");
     expect(source).toContain("TIMELINE_EXIT_MIN_MS");
     expect(source).toContain("TIMELINE_ENTRY_MS");
     expect(dataCommit).toContain("const animateTimelineWindow = windowChanged");
     expect(dataCommit).toContain("nextWindowRevision !== this.dataWindowRevision");
-    expect(dataCommit).toContain("timelineMotionFor(sceneNode, desired, currentSource)");
+    expect(dataCommit).toContain("const timelineMotionFor = (");
+    expect(dataCommit).toContain("const timelineMotion = timelineMotionFor(");
     expect(dataCommit).toContain("previousVisual");
     expect(dataCommit).toContain("existing.timelineRetiring = false");
     expect(dataCommit).toContain("node.timelineRetiring = true");
     expect(dataCommit).toContain('windowDirection === "previous"');
-    expect(dataCommit).toContain("previousEntryDirection.normalize()");
+    expect(dataCommit).toContain("const timelineTransitionOrigin =");
+    expect(dataCommit).toContain(
+      "const from = existingPosition?.clone() ?? timelineTransitionOrigin.clone()",
+    );
     expect(dataCommit).toContain("collapseTarget");
     expect(dataCommit).toContain("if (topologyChanged) {");
     expect(dataCommit).toContain('this.timelineMotionPhase = "entering"');
@@ -360,6 +399,37 @@ describe("universe scene production invariants", () => {
     expect(options).not.toContain("graphData(");
   });
 
+  it("shows related exploration progress directly on the hovered event or entity card", () => {
+    const labels = sourceBetween(
+      "private rebuildLabels()",
+      "private sortLabelsForLayout()",
+    );
+    const labelInteraction = sourceBetween(
+      "private bindLabelInteraction(",
+      "private updateLabels(now: number",
+    );
+
+    // The scene receives already-derived resident progress. Hover must remain
+    // presentation-only instead of reaching into React refs or starting I/O.
+    expect(source).toContain("relatedProgress?: number");
+    expect(source).toContain("canExploreMore?: boolean");
+    expect(source).toContain("continueExploring:");
+    expect(labels).toContain("sag-universe-node-label__explore");
+    expect(labels).toContain("data-universe-node-explore-hint");
+    expect(labels).toContain('const exploreHint = document.createElement("span")');
+    expect(labels).toContain("node.sceneNode.relatedProgress");
+    expect(labels).toContain("node.sceneNode.relatedCount");
+    expect(labels).toContain("node.sceneNode.canExploreMore");
+    expect(labels).toContain("const hintVisible = node.id === focusId");
+    expect(labels).toContain("&& !this.lockedId");
+    expect(labels).toContain("exploreHint.hidden = !hintVisible");
+    expect(labels).toContain("relatedProgress >= relatedTotal");
+    expect(labels).toContain("this.text.explorationProgress(");
+    expect(labelInteraction).toContain("this.handleNodeHover(node, true)");
+    expect(labelInteraction).toContain("this.callbacks.onNodeClick(node.sceneNode)");
+    expect(labelInteraction).not.toMatch(/expandNode|requestExpansion|onTimelineIntent|fetch\(|api\./);
+  });
+
   it("dismisses a locked network atomically on blank canvas without reloading or moving it", () => {
     const backgroundClick = sourceBetween(
       ".onBackgroundClick(() => {",
@@ -445,10 +515,10 @@ describe("universe scene production invariants", () => {
     expect(source).toMatch(/function presentationOpacity[\s\S]*?: 1;/);
 
     expect(objectVisual).toContain(
-      "const dataScale = presentationScale(node.sceneNode.presentationScale)",
+      "const dataScale = currentNodePresentationScale(node)",
     );
     expect(objectVisual).toContain(
-      "const dataOpacity = presentationOpacity(node.sceneNode.presentationOpacity)",
+      "const dataOpacity = currentNodePresentationOpacity(node)",
     );
     expect(objectVisual).toContain("* dataScale");
     expect(objectVisual).toContain("* detailFactor * dataOpacity");
@@ -456,7 +526,7 @@ describe("universe scene production invariants", () => {
 
     expect(labels).toContain("* dataOpacity");
     expect(labels).toContain(
-      "presentationScale(node.sceneNode.presentationCardScale)",
+      "currentNodePresentationCardScale(node)",
     );
     expect(labels).toContain("scaledEventStarRadius");
     expect(linkStyle).toContain(
@@ -498,6 +568,14 @@ describe("universe scene production invariants", () => {
     const detach = sourceBetween(
       "private detachSharedNodeResources(node: ForceNode)",
       "private makeClusterForce(): ClusterForce",
+    );
+    const highlightFlow = sourceBetween(
+      "private clearHighlightFlowSprites()",
+      "private renderOnce()",
+    );
+    const renderLoop = sourceBetween(
+      "private loop = (now: number) =>",
+      "private syncTimelineWheelDiagnostics(",
     );
 
     expect(dataCommit).toContain("existing.visible = true");
@@ -547,15 +625,51 @@ describe("universe scene production invariants", () => {
     expect(highlight).toContain("if (anchorId && !transientHover)");
     expect(highlight).toContain("this.syncHighlightFlowSprites()");
     expect(source).toContain("HIGHLIGHT_FLOW_FRAME_MS");
-    expect(source).toContain("private updateHighlightFlowSprites(now: number)");
+    expect(source).toContain("private updateHighlightFlowSprites(now: number, animate: boolean)");
+    expect(highlightFlow).toContain("&& Boolean(this.transientHoverFocusId())");
+    expect(highlightFlow).toContain('this.host.dataset.universeHighlightFlowMotion = "animated"');
+    expect(highlightFlow).toContain("this.highlightFlowTimer = window.setTimeout(");
+    expect(highlightFlow).toContain("this.stopHighlightFlowAnimation()");
+    expect(renderLoop).not.toContain("updateHighlightFlowSprites");
+    expect(renderLoop).not.toContain("highlightFlowing");
   });
 
-  it("retires source proxies once concrete event stars enter detail", () => {
+  it("retires the source core while keeping a luminous near-field nebula", () => {
+    const nebulaMaterial = sourceBetween(
+      "function makeNebulaMaterial(darkTheme: boolean)",
+      "class UniverseForceSceneEngine",
+    );
+    const nebulaAlpha = sourceBetween(
+      "private updateNebulaAlphas(force = false)",
+      "private nebulaMotionStrength()",
+    );
     expect(source).toContain("sprite.userData.sourceCore = true");
     expect(source).toContain("private sourceMarkerDetailFactor(");
     expect(source).toContain("return Math.max(0, 1 - detail)");
+    expect(source).toContain("const NEBULA_DETAIL_ALPHA = 0.9");
+    expect(source).toContain("const NEBULA_DETAIL_DUST_POINT_SIZE_CSS = 18");
+    expect(source).toContain("uDetail: { value: 0 }");
+    expect(source).toContain("uDetailAlpha: { value: NEBULA_DETAIL_ALPHA }");
+    expect(source).toContain("attribute float aGlow");
+    expect(source).toContain("attribute float aSourceIndex");
+    expect(source).toContain('geometry.setAttribute("aGlow"');
+    expect(source).toContain('geometry.setAttribute("aSourceIndex"');
+    expect(source).toContain("material.uniforms.uDetail.value = this.visualDetailMix");
+    expect(source).toContain("material.uniforms.uDetailSource.value");
+    expect(nebulaMaterial).toContain("float sourceMatch =");
+    expect(nebulaMaterial).toContain("float detailBloom = mix(1.0, 1.28, vDetail)");
+    expect(nebulaMaterial).toContain("float haze = radial * mix(0.55, 0.95, radial)");
+    expect(nebulaMaterial).toContain("if (vGlow > 0.001)");
+    expect(nebulaMaterial).toContain("gl_PointSize = min(");
+    expect(nebulaMaterial).not.toContain("float diffuseGlow = pow(");
+    expect(nebulaAlpha).not.toContain("detailMixBucket");
+    expect(nebulaAlpha).not.toContain(
+      "particle.sourceId === this.visualSourceId",
+    );
+    expect(source).toContain("THREE.DynamicDrawUsage");
+    expect(source).toContain('this.host.dataset.universeNebulaAlphaMode = "gpu-detail"');
+    expect(source).toContain("this.host.dataset.universeNebulaPointSizeCap");
     expect(source).toContain("this.host.dataset.universeNebulaDetailFactor");
-    expect(source).toContain("if (particle.sourceId === this.visualSourceId)");
     expect(source).toContain("this.updateNebulaAlphas();");
   });
 
