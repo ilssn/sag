@@ -48,7 +48,13 @@ import { EmptyState } from "@/components/features/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 // 图谱视图较重，按需加载。
 const SearchGraph = dynamic(() => import("@/components/features/search-graph"), {
@@ -1023,6 +1029,20 @@ export function SearchPanel({
         : search.result
           ? t("selectedEvidence", { count: search.result.sections.length })
           : "";
+  const currentSortLabel =
+    resultSort === "relevance" ? t("sortRelevance") : t("sortTime");
+  const nextSortLabel =
+    resultSort === "relevance" ? t("sortTime") : t("sortRelevance");
+  const sortToggleHint = t("sortToggleHint", {
+    current: currentSortLabel,
+    next: nextSortLabel,
+  });
+  const currentViewLabel = activeView === "list" ? t("listView") : t("graphView");
+  const nextViewLabel = activeView === "list" ? t("graphView") : t("listView");
+  const viewToggleHint = t("viewToggleHint", {
+    current: currentViewLabel,
+    next: nextViewLabel,
+  });
 
   return (
     <div
@@ -1254,38 +1274,44 @@ export function SearchPanel({
               {!compact && <span className="text-xs text-muted-foreground">
                 {resultStatus}
               </span>}
-              <ToggleGroup
-                type="single"
-                variant="outline"
-                size="sm"
-                value={resultSort}
-                onValueChange={(value) => value && setResultSort(value as SearchResultSort)}
-                aria-label={t("sortAria")}
-              >
-                <ToggleGroupItem value="relevance" className="px-2.5">
-                  {t("sortRelevance")}
-                </ToggleGroupItem>
-                <ToggleGroupItem value="time" className="px-2.5">
-                  {t("sortTime")}
-                </ToggleGroupItem>
-              </ToggleGroup>
-              {showGraphView && (
-                <ToggleGroup
-                  type="single"
-                  variant="outline"
-                  size="sm"
-                  value={view}
-                  onValueChange={(v) => v && setView(v as typeof view)}
-                  aria-label={t("resultViewAria")}
-                >
-                  <ToggleGroupItem value="list" aria-label={t("listView")}>
-                    <List />
-                  </ToggleGroupItem>
-                  <ToggleGroupItem value="graph" aria-label={t("graphView")}>
-                    <Waypoints />
-                  </ToggleGroupItem>
-                </ToggleGroup>
-              )}
+              <div className="flex items-center gap-1">
+                {activeView === "list" && search.result.events.length > 0 && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Toggle
+                        variant="outline"
+                        size="sm"
+                        pressed={resultSort === "time"}
+                        onPressedChange={(pressed) =>
+                          setResultSort(pressed ? "time" : "relevance")
+                        }
+                        aria-label={sortToggleHint}
+                      >
+                        {resultSort === "time" ? <Clock /> : <Sparkles />}
+                      </Toggle>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">{sortToggleHint}</TooltipContent>
+                  </Tooltip>
+                )}
+                {showGraphView && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Toggle
+                        variant="outline"
+                        size="sm"
+                        pressed={activeView === "graph"}
+                        onPressedChange={(pressed) =>
+                          setView(pressed ? "graph" : "list")
+                        }
+                        aria-label={viewToggleHint}
+                      >
+                        {activeView === "graph" ? <Waypoints /> : <List />}
+                      </Toggle>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">{viewToggleHint}</TooltipContent>
+                  </Tooltip>
+                )}
+              </div>
             </div>
           </div>
           {(search.summaryStreaming || search.result.summary) && (
@@ -1331,7 +1357,7 @@ export function SearchPanel({
           {activeView === "graph" && search.result.events.length > 0 ? (
             <div className="min-h-0 flex-1">
               <SearchGraph
-                events={sortSearchEvents(search.result.events, resultSort)}
+                events={search.result.events}
                 entities={search.result.entities}
                 relations={search.result.relations}
                 onOpenEvent={
