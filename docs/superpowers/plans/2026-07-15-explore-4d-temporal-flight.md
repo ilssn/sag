@@ -83,7 +83,17 @@
 - 消费：`UniverseTimelineEventOut.start_time`（后端已下发，`schemas/universe.py:94,179`）
 - 产出：每个事件一个由时间戳决定的、在源内稳定的世界坐标 Z
 
-- [ ] **Step 1: 年龄改由真实时间戳决定**
+**已知限制（阶段 1 实施中发现，暂受「后端零改动」约束）**
+
+后端用 `coalesce(SourceEvent.start_time, SourceEvent.created_time)` 计算 `time_buckets` 的边界（`engine_manager.py:1492,1496-1506`，对全源聚合、无分页，故边界确实是源内稳定的），但前端拿不到 `created_time`——`UniversePatchNode`（`lib/types.ts:524-533`）只有 `start_time`，API 不下发 `created_time`。
+
+因此当一个源里**部分**事件 `start_time` 为空时，后端边界会被这些事件的入库时间撑开，而前端只认 `start_time`，结果是有真实时间的事件被挤向轴的一端。有 `start_time` 的事件仍然稳定；没有的退回 rank（与原实现对所有事件的做法一致，不构成倒退）。
+
+根治需要后端下发 `created_time` 或一个 start_time-only 的范围，会打破「后端零改动」约束——待真实数据验证后再决定是否提出。
+
+（已排除的无效修法：用「首个/末个非空桶」收紧边界。`min_time` 必落在 0 号桶、`max_time` 必落在末桶，两者恒非空，该操作是 no-op。）
+
+- [x] **Step 1: 年龄改由真实时间戳决定**
 
 `knowledge-universe.tsx:1556-1569` 目前用 `universeTemporalRankProgress(可见窗口内的排名)` 算 `ageProgress`——同一个事件的深度由它「此刻恰好排第几」决定，翻出窗口语义就消失。
 

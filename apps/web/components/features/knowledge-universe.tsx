@@ -80,12 +80,14 @@ import {
   commitUniverseDisplayIntent,
   createUniverseDisplayModeState,
   planUniverseDisplayTimelineIntent,
-  projectUniverseTemporalBatch,
   setUniverseDisplayMode,
-  universeTemporalRankProgress,
   type UniverseDisplayIntentPlan,
   type UniverseDisplayModeState,
 } from "@/lib/universe-display-mode";
+import {
+  projectUniverseTemporalAxis,
+  universeTemporalRankProgress,
+} from "@/lib/universe-temporal-axis";
 import { planUniverseTimelinePrefetch } from "@/lib/universe-timeline-prefetch";
 import { detectUniverseWebGLCapability } from "@/lib/universe-webgl-capability";
 import {
@@ -192,6 +194,10 @@ const PARTITION_RENDER_LIMIT = { desktop: 160, mobile: 64 } as const;
 const EVENT_ENTITY_PROJECTION_LIMIT = 8;
 const ENTITY_EXPANSION_EVENT_LIMIT = 4;
 const EMPTY_TIMELINE_BUNDLE_IDS: string[] = [];
+// World length of a source's time axis, from its newest event to its oldest.
+// Deliberately independent of the source's visual radius: tying the two together
+// gives every source a different scale for the same span of time.
+const TEMPORAL_AXIS_DEPTH = 640;
 
 function emptySourceTimelinePageState(
   visibleEventBundles: number,
@@ -1553,29 +1559,46 @@ export function KnowledgeUniverse({
     }>();
     const timelineBrowseActive = Boolean(browseSessionSourceId);
     const projectedBundleIds = new Set(projectedWorking.bundle_order);
+    const temporalBundleByEventKey = new Map<string, string>();
+    const temporalTimestampByBundleId = new Map<string, number>();
+    visibleTimelineBundleIds.forEach((bundleId) => {
+      working.bundles[bundleId]?.node_keys.forEach((key) => {
+        const workingNode = workingNodeByKey.get(key);
+        if (workingNode?.kind !== "event") return;
+        temporalBundleByEventKey.set(key, bundleId);
+        if (temporalTimestampByBundleId.has(bundleId)) return;
+        const startedAt = workingNode.start_time
+          ? Date.parse(workingNode.start_time)
+          : Number.NaN;
+        if (Number.isFinite(startedAt)) {
+          temporalTimestampByBundleId.set(bundleId, startedAt);
+        }
+      });
+    });
+    // Bounds come from the source's own histogram, never from the visible window:
+    // an event's depth may not move because the cache did. Buckets run oldest
+    // first, while the axis runs newest (near) to oldest (far).
+    const browseTimeBuckets = browseSessionSourceId
+      ? sourceById.get(browseSessionSourceId)?.time_buckets ?? []
+      : [];
+    const temporalAxisBounds = {
+      nearTimestamp: Date.parse(browseTimeBuckets.at(-1)?.end ?? ""),
+      farTimestamp: Date.parse(browseTimeBuckets[0]?.start ?? ""),
+    };
     const temporalProjectionByBundleId = new Map(
-      projectUniverseTemporalBatch(
+      projectUniverseTemporalAxis(
         visibleTimelineBundleIds.map((bundleId, index) => ({
           bundleId,
-          ageProgress: universeTemporalRankProgress(
+          timestamp: temporalTimestampByBundleId.get(bundleId),
+          // Rank only stands in for an event that carries no usable time.
+          rankProgress: universeTemporalRankProgress(
             visibleTimelineBundleIds.length - index - 1,
             visibleTimelineBundleIds.length,
           ),
         })),
-        {
-          mode: displayModeState.mode,
-          direction: displayModeState.journey?.direction,
-        },
+        temporalAxisBounds,
       ).map((projection) => [projection.bundleId, projection]),
     );
-    const temporalBundleByEventKey = new Map<string, string>();
-    visibleTimelineBundleIds.forEach((bundleId) => {
-      working.bundles[bundleId]?.node_keys.forEach((key) => {
-        if (workingNodeByKey.get(key)?.kind === "event") {
-          temporalBundleByEventKey.set(key, bundleId);
-        }
-      });
-    });
     const temporalBundleByEntityKey = new Map<string, string>();
     projectedWorking.relations.forEach((relation) => {
       if (relation.kind !== "mentions") return;
@@ -1692,7 +1715,7 @@ export function KnowledgeUniverse({
           ? {
               x: temporalProjection.normalizedOffset.x * radius * 1.8,
               y: temporalProjection.normalizedOffset.y * radius * 1.8,
-              z: temporalProjection.normalizedOffset.z * radius,
+              z: temporalProjection.normalizedOffset.z * TEMPORAL_AXIS_DEPTH,
             }
           : stableRootEventOffset(
               sourceId,

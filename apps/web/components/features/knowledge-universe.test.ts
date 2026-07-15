@@ -37,13 +37,28 @@ describe("knowledge universe production interaction policy", () => {
 
   it("keeps stable layout flat and gives journey a temporal depth projection", () => {
     expect(source).toContain("timelineEventPlacementByKey");
-    expect(source).toContain("projectUniverseTemporalBatch(");
+    expect(source).toContain("projectUniverseTemporalAxis(");
     expect(source).toContain('displayModeState.mode === "journey"');
-    expect(source).toContain("temporalProjection.normalizedOffset.z * radius");
+    expect(source).toContain(
+      "temporalProjection.normalizedOffset.z * TEMPORAL_AXIS_DEPTH",
+    );
     expect(source).toContain("stableRootEventOffset(");
     expect(source).toContain("presentationScale:");
     expect(source).toContain("presentationCardScale:");
     expect(source).toContain("presentationOpacity:");
+  });
+
+  it("derives temporal depth from the source's own span, not the cached window", () => {
+    // Bounds taken from the visible window would move an event's depth whenever
+    // paging changed what surrounds it — the axis would stop being an axis.
+    expect(source).toContain("sourceById.get(browseSessionSourceId)?.time_buckets");
+    expect(source).toContain("nearTimestamp: Date.parse(browseTimeBuckets.at(-1)?.end");
+    expect(source).toContain("farTimestamp: Date.parse(browseTimeBuckets[0]?.start");
+    expect(source).toContain("timestamp: temporalTimestampByBundleId.get(bundleId)");
+    // Rank survives only as the fallback for an event with no usable time.
+    expect(source).toContain("rankProgress: universeTemporalRankProgress(");
+    // Time scale must not ride on the source's visual radius.
+    expect(source).toContain("const TEMPORAL_AXIS_DEPTH =");
   });
 
   it("keeps concrete-node clicks presentation-only", () => {
