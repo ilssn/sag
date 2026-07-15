@@ -85,6 +85,7 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 const KnowledgeUniverse = dynamic(
   () =>
@@ -729,7 +730,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   )}
                 </motion.div>
               </div>
-              <PetWithPreference character={petAgent} syncIdentity />
+              <TooltipProvider delayDuration={300}>
+                <PetWithPreference character={petAgent} syncIdentity />
+              </TooltipProvider>
             </DetailPanelProvider>
           </ConversationProvider>
         </KnowledgeProvider>
