@@ -31,15 +31,13 @@ export interface UniverseTemporalAxis {
  */
 export const UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT = 60;
 
+/**
+ * World radius of the onion sphere's core. The oldest event's shell sits here
+ * instead of at a singular point, so the deepest layers stay legible.
+ */
+export const UNIVERSE_TEMPORAL_SPHERE_CORE_RADIUS = 150;
+
 export interface UniverseTemporalAxisPolicy {
-  /** Normalized travel distance along the axis. */
-  depthSpan: number;
-  /** Normalized lateral radius at the near and far ends of the axis. */
-  nearLateralSpread: number;
-  farLateralSpread: number;
-  /** Share of the lateral radius that varies per package. */
-  lateralJitter: number;
-  verticalAspect: number;
   /** Shapes depth without changing ordering or endpoints. 1 keeps travel even. */
   ageExponent: number;
 }
@@ -55,16 +53,15 @@ export interface UniverseTemporalBundleInput {
 export interface UniverseTemporalBundleProjection {
   bundleId: string;
   ageProgress: number;
-  /** Add this normalized package offset to the scene's source-centred layout. */
-  normalizedOffset: { x: number; y: number; z: number };
+  /**
+   * Unit direction from the source's core to this package: a deterministic,
+   * uniform point on the sphere derived from package identity alone. The
+   * caller multiplies it by the package's shell radius.
+   */
+  radialDirection: { x: number; y: number; z: number };
 }
 
 export const DEFAULT_UNIVERSE_TEMPORAL_AXIS_POLICY: UniverseTemporalAxisPolicy = {
-  depthSpan: 1,
-  nearLateralSpread: 0.18,
-  farLateralSpread: 0.44,
-  lateralJitter: 0.45,
-  verticalAspect: 0.7,
   ageExponent: 1,
 };
 
@@ -73,16 +70,8 @@ function clamp01(value: number) {
   return Math.max(0, Math.min(1, value));
 }
 
-function nonNegative(value: number | undefined, fallback: number) {
-  return Number.isFinite(value) ? Math.max(0, value as number) : fallback;
-}
-
 function positive(value: number | undefined, fallback: number) {
   return Number.isFinite(value) ? Math.max(Number.EPSILON, value as number) : fallback;
-}
-
-function lerp(from: number, to: number, progress: number) {
-  return from + (to - from) * progress;
 }
 
 function canonicalNumber(value: number) {
@@ -137,33 +126,18 @@ export function resolveUniverseTemporalAxisPolicy(
   input: UniverseTemporalAxisPolicyInput = {},
 ): UniverseTemporalAxisPolicy {
   const defaults = DEFAULT_UNIVERSE_TEMPORAL_AXIS_POLICY;
-  const nearLateralSpread = nonNegative(
-    input.nearLateralSpread,
-    defaults.nearLateralSpread,
-  );
-  // The corridor may only fan wider with age, so depth still reads as travel
-  // even when a caller overrides the spread.
   return {
-    depthSpan: nonNegative(input.depthSpan, defaults.depthSpan),
-    nearLateralSpread,
-    farLateralSpread: Math.max(
-      nearLateralSpread,
-      nonNegative(input.farLateralSpread, defaults.farLateralSpread),
-    ),
-    lateralJitter: clamp01(
-      Number.isFinite(input.lateralJitter)
-        ? (input.lateralJitter as number)
-        : defaults.lateralJitter,
-    ),
-    verticalAspect: nonNegative(input.verticalAspect, defaults.verticalAspect),
     ageExponent: positive(input.ageExponent, defaults.ageExponent),
   };
 }
 
 /**
- * Projects event packages onto the counting axis. An event and its entities
- * share one package offset, so exploration order reads as continuous depth
- * rather than as per-item staggering.
+ * Projects event packages onto the onion sphere. The exploration space has no
+ * privileged direction: each package owns a deterministic, uniformly
+ * distributed bearing on the sphere (identity alone — a package may never
+ * swing because of how the camera travelled), and its age decides how deep
+ * its shell sits. An event and its entities share one package offset, so
+ * exploration order reads as continuous radial depth.
  */
 export function projectUniverseTemporalAxis(
   bundles: readonly UniverseTemporalBundleInput[],
@@ -175,24 +149,20 @@ export function projectUniverseTemporalAxis(
   return bundles.map((bundle) => {
     const ageProgress = universeTemporalAxisAgeProgress(axis, bundle.ordinal);
     const curvedAge = Math.pow(ageProgress, policy.ageExponent);
-    // Every package keeps a lateral radius, jittered per package, so packages
-    // never stack onto the axis line itself.
-    const radius = lerp(
-      policy.nearLateralSpread,
-      policy.farLateralSpread,
-      curvedAge,
-    ) * lerp(1 - policy.lateralJitter, 1, stableUnit(`${bundle.bundleId}:lateral`));
-    // The angle is a pure function of package identity: a package may not swing
-    // sideways because of the direction the camera last travelled.
-    const angle = stableUnit(bundle.bundleId) * Math.PI * 2;
+    // Uniform point on the unit sphere from two independent identity hashes.
+    const zenith = 2 * stableUnit(`${bundle.bundleId}:zenith`) - 1;
+    const azimuth = stableUnit(bundle.bundleId) * Math.PI * 2;
+    const ring = Math.sqrt(Math.max(0, 1 - zenith * zenith));
 
     return {
       bundleId: bundle.bundleId,
-      ageProgress,
-      normalizedOffset: {
-        x: canonicalNumber(Math.cos(angle) * radius),
-        y: canonicalNumber(Math.sin(angle) * radius * policy.verticalAspect),
-        z: canonicalNumber(-policy.depthSpan * curvedAge),
+      // curvedAge is what the caller turns into a shell radius; exposing the
+      // curved value keeps depth shaping in one place.
+      ageProgress: curvedAge,
+      radialDirection: {
+        x: canonicalNumber(Math.cos(azimuth) * ring),
+        y: canonicalNumber(Math.sin(azimuth) * ring),
+        z: canonicalNumber(zenith),
       },
     };
   });

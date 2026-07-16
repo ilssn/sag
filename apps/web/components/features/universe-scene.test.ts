@@ -132,9 +132,10 @@ describe("universe scene production invariants", () => {
     // applied to camera and orbit target together, so orbiting composes freely
     // and no pointer-vs-wheel gesture classifier is needed.
     expect(pointer).toContain("brakeUniverseTemporalFlight");
-    // Glides ride the axis; free wheel flight goes where the gaze points.
-    expect(flight).toContain("camera.position.z -= glideDelta");
-    expect(flight).toContain("this.controls.target.z -= glideDelta");
+    // Glides dive along the local radial; free wheel flight goes where the
+    // gaze points. Both translate camera and orbit target together.
+    expect(flight).toContain("camera.position.addScaledVector(radialOut, -glideDelta)");
+    expect(flight).toContain("this.controls.target.addScaledVector(radialOut, -glideDelta)");
     expect(flight).toContain("camera.position.addScaledVector(forward, allowed)");
     expect(flight).toContain("planUniverseTemporalFlightFollow(");
     // The camera never waits for data: paging along is fire-and-forget.
@@ -730,7 +731,7 @@ describe("universe scene production invariants", () => {
     expect(motionStrength).toContain("performance.now() < this.cameraCalmUntil");
   });
 
-  it("stretches a browsed source's nebula into its exploration corridor on the GPU", () => {
+  it("inflates a browsed source's nebula into its exploration onion on the GPU", () => {
     const nebulaMaterial = sourceBetween(
       "function makeNebulaMaterial(darkTheme: boolean)",
       "class UniverseForceSceneEngine",
@@ -740,36 +741,40 @@ describe("universe scene production invariants", () => {
       "private updateNebulaPositions()",
     );
 
-    // The corridor is the second form of the same particles: the vertex shader
-    // blends galaxy → corridor with the existing detail mix, so diving into a
+    // The onion is the second form of the same particles: the vertex shader
+    // blends galaxy → sphere with the existing detail mix, so diving into a
     // source needs no CPU reposition and no extra particle budget.
     expect(nebulaMaterial).toContain("attribute vec3 aCorridor");
     expect(nebulaMaterial).toContain(
       "vec3 animatedPosition = position + aCorridor * corridorMix",
     );
-    // Dust yields inside the loaded window band, where real packages condensed.
-    expect(nebulaMaterial).toContain("uniform float uCorridorNearZ");
+    // Dust yields inside the loaded radial band, where real packages condensed.
+    expect(nebulaMaterial).toContain("uniform float uCorridorNearR");
+    expect(nebulaMaterial).toContain("length(animatedPosition - uCorridorCenter)");
     expect(nebulaMaterial).toContain("float loadedBand = smoothstep(");
     expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.16, corridorMix * loadedBand)");
-    // Corridor depth lives on the same counting grid as packages and flight.
+    // Shell radii live on the same counting grid as packages and flight, and
+    // the mist fills the volume uniformly (cube-root radius sampling).
     expect(nebulaBuild).toContain("UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT");
+    expect(nebulaBuild).toContain("UNIVERSE_TEMPORAL_SPHERE_CORE_RADIUS");
+    expect(nebulaBuild).toContain("Math.cbrt(");
     expect(nebulaBuild).toContain('geometry.setAttribute("aCorridor"');
     expect(source).toContain("private syncNebulaCorridorUniforms()");
-    expect(source).toContain("material.uniforms.uCorridorNearZ.value = config");
-    expect(source).toContain("const NEBULA_CORRIDOR_BAND_OFF = 1e8");
+    expect(source).toContain("material.uniforms.uCorridorNearR.value = config");
+    expect(source).toContain("const NEBULA_CORRIDOR_BAND_OFF = -1e8");
 
-    // The corridor carries its own light and has no visible far wall: glow
-    // pockets brighten and swell, and the last stretch dissolves.
+    // The onion carries its own light and never crams at the heart: glow
+    // pockets brighten and swell, and the core dissolves into a soft glow.
     expect(nebulaMaterial).toContain("attribute float aCorridorFade");
     expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 1.45, corridorMix * glowParticle)");
     expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, aCorridorFade, corridorMix)");
     expect(nebulaMaterial).toContain("* detailScale * glowScale * corridorBoost");
     expect(nebulaBuild).toContain('geometry.setAttribute("aCorridorFade"');
 
-    // Most dust becomes the distant canyon walls: far out laterally, grown
-    // broad and soft, so a gaze turn barely parallaxes the surrounding nebula.
-    expect(source).toContain("const NEBULA_WALL_SHARE = 0.62");
-    expect(nebulaBuild).toContain("NEBULA_WALL_LATERAL_MIN");
+    // Most dust becomes the enveloping outer haze: big soft motes far from the
+    // camera's shell, so a gaze turn barely parallaxes the surrounding nebula.
+    expect(source).toContain("const NEBULA_SPHERE_HAZE_SHARE = 0.62");
+    expect(nebulaBuild).toContain("share > NEBULA_SPHERE_HAZE_SHARE");
     expect(nebulaBuild).toContain('geometry.setAttribute("aCorridorWall"');
     expect(nebulaMaterial).toContain("mix(1.0, 2.8, corridorMix * aCorridorWall)");
     expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.72, corridorMix * aCorridorWall)");
@@ -808,7 +813,11 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("target.copy(camera.position).add(offset)");
     expect(source).toContain("BROWSE_LOOK_MIN_PHI");
     expect(flight).toContain("camera.getWorldDirection");
-    expect(flight).toContain("const depthPerTravel = -forward.z");
+    expect(flight).toContain("const depthPerTravel = -forward.dot(radialOut)");
+    // Depth derives from the camera's true radius: pan, pinch and focus moves
+    // are exploration too, and no bookkeeping can drift from the camera.
+    expect(flight).toContain("const derivedDepth = this.flightCameraDepth(config)");
+    expect(source).toContain("private flightCameraDepth(config: UniverseSceneTemporalFlight)");
     // The library collapses non-finite axis lengths; free flight must keep its
     // odometer far away from the library walls instead of passing Infinity.
     expect(flight).toContain("FREE_FLIGHT_ODOMETER_BASE");
@@ -818,7 +827,6 @@ describe("universe scene production invariants", () => {
     // the depth rate, never on raw speed.
     expect(flight).toContain("nextState = brakeUniverseTemporalFlight(state)");
     expect(flight).toContain("this.flightDepthRate = nextState.velocity * depthPerTravel");
-    expect(flight).toContain("const spine = this.flightSpine");
     // Sustained flight re-levels the gaze onto the corridor, unless a hand is
     // actively looking around.
     expect(flight).toContain("BROWSE_RELEVEL_TRAVEL_UNITS");
@@ -843,11 +851,12 @@ describe("universe scene production invariants", () => {
       "private miniPanelRect(",
     );
 
-    // Entering a browse session flies to the corridor entrance looking down
-    // the axis — never a bearing-preserving dolly into a ball of nodes.
-    expect(focus).toContain("flight.centerZ - this.appliedFlightDepth");
-    expect(focus).toContain("CORRIDOR_ENTRY_STANDOFF");
-    expect(focus).toContain("entryZ - CORRIDOR_ENTRY_LOOK_AHEAD");
+    // Entering a browse session dives along the camera's own approach bearing
+    // to just outside the newest shell, looking toward the core: every angle
+    // is a valid way into the onion.
+    expect(focus).toContain("const approach = camera.position.clone().sub(center)");
+    expect(focus).toContain("+ SPHERE_VIEW_STANDOFF - flight.windowNearDepth");
+    expect(focus).toContain("SPHERE_ENTRY_LOOK_AHEAD");
 
     // Card discipline keys off real depth travel (wheel inertia and button
     // glides alike) and eases asymmetrically: duck fast, recover after a beat.

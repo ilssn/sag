@@ -80,6 +80,7 @@ import {
   createUniverseTemporalAxis,
   projectUniverseTemporalAxis,
   UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT,
+  UNIVERSE_TEMPORAL_SPHERE_CORE_RADIUS,
   universeTemporalAxisDepth,
 } from "@/lib/universe-temporal-axis";
 import { planUniverseTimelinePrefetch } from "@/lib/universe-timeline-prefetch";
@@ -1680,14 +1681,18 @@ export function KnowledgeUniverse({
         : Math.max(relatedProgress, node.related_count);
       const expansionExhausted = expandedAnchorsRef.current.has(key)
         && !cursorsRef.current.has(key);
+      const shellRadius = temporalProjection
+        ? UNIVERSE_TEMPORAL_SPHERE_CORE_RADIUS
+          + (1 - temporalProjection.ageProgress) * temporalAxisDepth
+        : 0;
       const offset = timelinePlacement
-        // An expansion-discovered event is placed but off the time axis: only
-        // visible timeline packages carry a temporal projection.
+        // An expansion-discovered event is placed but off the onion sphere:
+        // only visible timeline packages carry a temporal projection.
         ? temporalProjection
           ? {
-              x: temporalProjection.normalizedOffset.x * radius * 1.8,
-              y: temporalProjection.normalizedOffset.y * radius * 1.8,
-              z: temporalProjection.normalizedOffset.z * temporalAxisDepth,
+              x: temporalProjection.radialDirection.x * shellRadius,
+              y: temporalProjection.radialDirection.y * shellRadius,
+              z: temporalProjection.radialDirection.z * shellRadius,
             }
           : stableRootEventOffset(
               sourceId,
@@ -1829,10 +1834,16 @@ export function KnowledgeUniverse({
       windowNearAge = Math.min(windowNearAge, projection.ageProgress);
       windowFarAge = Math.max(windowFarAge, projection.ageProgress);
     });
+    const browseSource = browseSessionSourceId
+      ? sourceById.get(browseSessionSourceId)
+      : undefined;
     const temporalFlight = temporalAxis && browseSessionSourceId
       ? {
           sourceId: browseSessionSourceId,
-          centerZ: sourceById.get(browseSessionSourceId)?.z ?? 0,
+          centerX: browseSource?.x ?? 0,
+          centerY: browseSource?.y ?? 0,
+          centerZ: browseSource?.z ?? 0,
+          coreRadius: UNIVERSE_TEMPORAL_SPHERE_CORE_RADIUS,
           unitsPerEvent: TEMPORAL_AXIS_UNITS_PER_EVENT,
           maxDepth: temporalAxisDepth,
           windowNearDepth: Number.isFinite(windowNearAge)

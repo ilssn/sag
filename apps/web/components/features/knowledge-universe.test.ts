@@ -38,8 +38,12 @@ describe("knowledge universe production interaction policy", () => {
   it("puts every timeline event on the temporal axis, with no mode to opt out of", () => {
     expect(source).toContain("timelineEventPlacementByKey");
     expect(source).toContain("projectUniverseTemporalAxis(");
+    // The onion sphere: bearing × shell radius, oldest shells at the core.
     expect(source).toContain(
-      "temporalProjection.normalizedOffset.z * temporalAxisDepth",
+      "+ (1 - temporalProjection.ageProgress) * temporalAxisDepth",
+    );
+    expect(source).toContain(
+      "temporalProjection.radialDirection.x * shellRadius",
     );
     // Depth is the layout, not a presentation mode that can be toggled off or
     // snapped back to a flat plane.

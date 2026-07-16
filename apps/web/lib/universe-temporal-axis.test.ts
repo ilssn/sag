@@ -35,16 +35,18 @@ describe("universe temporal axis", () => {
     expect(universeTemporalAxisDepth(null, 60)).toBe(0);
   });
 
-  it("places an event at exactly ordinal × unit along the axis", () => {
+  it("places an event on its shell: unit bearing × caller-scaled radius", () => {
     // depth = age × axisDepth must land on the counting grid, or the flight's
-    // per-event margins and the window follow thresholds drift apart.
+    // per-event margins and the window follow thresholds drift apart. The
+    // bearing is a unit vector so the caller owns the radius exactly.
     const axisDepth = universeTemporalAxisDepth(TEN, 60);
     const [projection] = projectUniverseTemporalAxis(
       [{ bundleId: "x", ordinal: 4 }],
       TEN,
     );
-    expect(projection.normalizedOffset.z * axisDepth).toBeCloseTo(-240, 10);
-    expect(projection.normalizedOffset.z).toBeCloseTo(-4 / 9, 10);
+    expect(projection.ageProgress * axisDepth).toBeCloseTo(240, 10);
+    const { x, y, z } = projection.radialDirection;
+    expect(Math.hypot(x, y, z)).toBeCloseTo(1, 10);
   });
 
   it("refuses to build an axis only when there is nothing to explore", () => {
@@ -73,22 +75,20 @@ describe("universe temporal axis", () => {
       .toEqual(alone[0]);
   });
 
-  it("separates packages without letting them leave the axis line's spine", () => {
+  it("separates same-shell packages by bearing, never by radius", () => {
     const [a, b] = projectUniverseTemporalAxis([
       { bundleId: "a", ordinal: 5 },
       { bundleId: "b", ordinal: 5 },
     ], TEN);
 
-    expect(a.normalizedOffset.z).toBe(b.normalizedOffset.z);
-    expect(a.normalizedOffset).not.toEqual(b.normalizedOffset);
-    // The near end must keep a lateral radius. Collapsing it to a point is only
-    // safe when exactly one package can ever sit there, which a real axis cannot
-    // promise.
-    expect(Math.hypot(a.normalizedOffset.x, a.normalizedOffset.y)).toBeGreaterThan(0);
-    expect(Math.hypot(b.normalizedOffset.x, b.normalizedOffset.y)).toBeGreaterThan(0);
+    // Same ordinal = same shell; identity spreads them around the sphere.
+    expect(a.ageProgress).toBe(b.ageProgress);
+    expect(a.radialDirection).not.toEqual(b.radialDirection);
   });
 
-  it("derives the lateral angle from package identity alone", () => {
+  it("derives the bearing from package identity alone", () => {
+    // The sphere has no privileged direction and a package may never swing
+    // because of its age or the camera's travel: only its shell may change.
     const [near] = projectUniverseTemporalAxis(
       [{ bundleId: "x", ordinal: 1 }],
       TEN,
@@ -98,12 +98,8 @@ describe("universe temporal axis", () => {
       TEN,
     );
 
-    // Age may only push a package further out along its own bearing. If x and y
-    // scale by one factor the bearing held; anything else means the lane swung.
-    const radialGrowth = far.normalizedOffset.x / near.normalizedOffset.x;
-    expect(far.normalizedOffset.y / near.normalizedOffset.y)
-      .toBeCloseTo(radialGrowth, 10);
-    expect(radialGrowth).toBeGreaterThan(1);
+    expect(far.radialDirection).toEqual(near.radialDirection);
+    expect(far.ageProgress).toBeGreaterThan(near.ageProgress);
   });
 
   it("keeps travel even by default and leaves the curve as a knob", () => {
@@ -114,16 +110,8 @@ describe("universe temporal axis", () => {
       [{ bundleId: "x", ordinal: 4.5 }],
       TEN,
     );
-    expect(half.normalizedOffset.z).toBeCloseTo(-0.5, 10);
-  });
-
-  it("keeps overrides monotonic along the axis", () => {
-    const policy = resolveUniverseTemporalAxisPolicy({
-      farLateralSpread: 0,
-      ageExponent: 0,
-    });
-
-    expect(policy.farLateralSpread).toBe(policy.nearLateralSpread);
-    expect(policy.ageExponent).toBeGreaterThan(0);
+    expect(half.ageProgress).toBeCloseTo(0.5, 10);
+    expect(resolveUniverseTemporalAxisPolicy({ ageExponent: 0 }).ageExponent)
+      .toBeGreaterThan(0);
   });
 });

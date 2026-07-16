@@ -28,7 +28,10 @@ import {
   universeVisualDetailProgress,
 } from "@/lib/universe-presentation";
 import { planUniverseSceneDelta } from "@/lib/universe-scene-transition";
-import { UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT } from "@/lib/universe-temporal-axis";
+import {
+  UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT,
+  UNIVERSE_TEMPORAL_SPHERE_CORE_RADIUS,
+} from "@/lib/universe-temporal-axis";
 import {
   applyUniverseTemporalFlightWheel,
   brakeUniverseTemporalFlight,
@@ -95,7 +98,11 @@ export interface UniverseSceneLink {
  */
 export interface UniverseSceneTemporalFlight {
   sourceId: string;
+  centerX: number;
+  centerY: number;
   centerZ: number;
+  /** World radius of the oldest shell; the sphere's surface is core + maxDepth. */
+  coreRadius: number;
   unitsPerEvent: number;
   maxDepth: number;
   windowNearDepth: number;
@@ -349,8 +356,8 @@ const NEBULA_BURST_MS = 1_400;
 const NEBULA_DETAIL_ALPHA = 1.3;
 const NEBULA_DETAIL_DUST_POINT_SIZE_CSS = 26;
 const NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP = 44;
-/** Sentinel z far outside any real layout: the loaded band dims nothing. */
-const NEBULA_CORRIDOR_BAND_OFF = 1e8;
+/** Sentinel radius no particle can reach: the loaded band dims nothing. */
+const NEBULA_CORRIDOR_BAND_OFF = -1e8;
 /** Ambient drift stays frozen this long after any camera gesture frame. */
 const NEBULA_GESTURE_CALM_MS = 480;
 /**
@@ -364,8 +371,10 @@ const NEBULA_GESTURE_CALM_MS = 480;
 const BROWSE_LOOK_RAD_PER_PX = 0.0024;
 /** Pitch keepout around the poles so the head can never flip over. */
 const BROWSE_LOOK_MIN_PHI = 0.3;
-/** Flying this many units re-levels most of the gaze onto the axis. */
+/** Flying this many units re-levels most of the gaze onto the radial dive. */
 const BROWSE_RELEVEL_TRAVEL_UNITS = 420;
+/** The camera trails its current shell by this much radius. */
+const SPHERE_VIEW_STANDOFF = 130;
 /**
  * Free flight integrates an odometer far from the library's walls; the real
  * axis walls apply scene-side to the depth projection of the travel.
@@ -376,14 +385,9 @@ const BROWSE_MAX_DOLLY_DISTANCE = 1_600;
 const BROWSE_GAZE_PAN_SPEED = 0.4;
 const UNIVERSE_ROTATE_SPEED = 0.42;
 const UNIVERSE_PAN_SPEED = 0.52;
-/** Corridor entry pose: dive standoff behind the entrance plane… */
-const CORRIDOR_ENTRY_STANDOFF = 280;
-/** …looking this far down the axis into the past… */
-const CORRIDOR_ENTRY_LOOK_AHEAD = 150;
-/** …from a slight diagonal so the dust and lateral spread read in parallax. */
-const CORRIDOR_ENTRY_LATERAL_X = 38;
-const CORRIDOR_ENTRY_LATERAL_Y = 24;
-const CORRIDOR_ENTRY_MS = 920;
+/** Entry looks this far past the newest shell, into the onion. */
+const SPHERE_ENTRY_LOOK_AHEAD = 170;
+const SPHERE_ENTRY_MS = 920;
 /** Below this flight speed (units/s) cards are fully expanded. */
 const FLIGHT_CARD_CALM_SPEED = 240;
 /** Above this flight speed cards have fully collapsed into star points. */
@@ -391,18 +395,8 @@ const FLIGHT_CARD_HIDE_SPEED = 760;
 /** Cards duck quickly when speed picks up and re-expand a beat after settling. */
 const FLIGHT_CARD_COLLAPSE_MS = 110;
 const FLIGHT_CARD_RECOVER_MS = 300;
-/** Corridor lateral spread mirrors the package axis policy. */
-const NEBULA_CORRIDOR_NEAR_SPREAD = 0.18;
-const NEBULA_CORRIDOR_FAR_SPREAD = 0.44;
-const NEBULA_CORRIDOR_VERTICAL_ASPECT = 0.7;
-/**
- * Most corridor dust becomes the distant canyon walls: pushed far out
- * laterally it barely parallaxes under a gaze turn, so the nebula reads as a
- * vast illuminated surrounding instead of debris sweeping past the camera.
- */
-const NEBULA_WALL_SHARE = 0.62;
-const NEBULA_WALL_LATERAL_MIN = 4.5;
-const NEBULA_WALL_LATERAL_MAX = 9;
+/** Motes beyond this radius share become the soft enveloping haze shell. */
+const NEBULA_SPHERE_HAZE_SHARE = 0.62;
 const NEBULA_GLOW_POINT_SIZE_CSS_MOBILE = 34;
 const HIGHLIGHT_FLOW_FRAME_MS = 1000 / 30;
 const TIMELINE_WHEEL_LABEL_SELECTOR = "[data-universe-node-id]";
@@ -735,10 +729,11 @@ function makeNebulaMaterial(darkTheme: boolean) {
       uPointSizeCap: { value: NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP },
       uTime: { value: 0 },
       uMotion: { value: 1 },
-      // Loaded-window band on the browsed source's axis, in world z. Particles
+      // Loaded-window radial band around the browsed source's core. Particles
       // inside it yield to the real packages that condensed there.
-      uCorridorNearZ: { value: NEBULA_CORRIDOR_BAND_OFF },
-      uCorridorFarZ: { value: NEBULA_CORRIDOR_BAND_OFF },
+      uCorridorCenter: { value: new THREE.Vector3() },
+      uCorridorNearR: { value: NEBULA_CORRIDOR_BAND_OFF },
+      uCorridorFarR: { value: NEBULA_CORRIDOR_BAND_OFF },
     },
     vertexShader: `
       uniform float uPixelRatio;
@@ -748,8 +743,9 @@ function makeNebulaMaterial(darkTheme: boolean) {
       uniform float uPointSizeCap;
       uniform float uTime;
       uniform float uMotion;
-      uniform float uCorridorNearZ;
-      uniform float uCorridorFarZ;
+      uniform vec3 uCorridorCenter;
+      uniform float uCorridorNearR;
+      uniform float uCorridorFarR;
       attribute vec3 aColor;
       attribute vec3 aCorridor;
       attribute float aCorridorFade;
@@ -792,16 +788,17 @@ function makeNebulaMaterial(darkTheme: boolean) {
         // the source's unloaded history laid out along the counting axis.
         float corridorMix = smoothstep(0.12, 0.88, particleDetail);
         vec3 animatedPosition = position + aCorridor * corridorMix;
-        // Where the loaded window already condensed into real packages, the
-        // corridor dust steps aside instead of double-exposing them.
+        // Where the loaded shells already condensed into real packages, the
+        // onion dust steps aside instead of double-exposing them.
+        float coreDistance = length(animatedPosition - uCorridorCenter);
         float loadedBand = smoothstep(
-          uCorridorFarZ - 30.0,
-          uCorridorFarZ + 30.0,
-          animatedPosition.z
+          uCorridorFarR - 40.0,
+          uCorridorFarR + 40.0,
+          coreDistance
         ) * (1.0 - smoothstep(
-          uCorridorNearZ - 30.0,
-          uCorridorNearZ + 30.0,
-          animatedPosition.z
+          uCorridorNearR - 40.0,
+          uCorridorNearR + 40.0,
+          coreDistance
         ));
         vAlpha *= mix(1.0, 0.16, corridorMix * loadedBand);
         // The corridor's own light: glow pockets brighten into soft beacons
@@ -968,8 +965,6 @@ class UniverseForceSceneEngine {
   /** True while the browse gaze weighting is active. */
   private browseGazeApplied = false;
   private browseGazeTimer: number | null = null;
-  /** Corridor spine (source centre) that free flight softly recenters onto. */
-  private flightSpine: { x: number; y: number } | null = null;
   /** Active first-person look drag, if any. */
   private lookPointerId: number | null = null;
   private lookLastX = 0;
@@ -1339,14 +1334,6 @@ class UniverseForceSceneEngine {
     // The gaze weighting belongs to one corridor: leaving or switching
     // sources frees the camera immediately; the next entry dive re-applies it.
     if (!nextFlight || flightSourceChanged) this.releaseBrowseGaze();
-    const spineSource = nextFlight
-      ? [...this.nodes.values()].find(
-          (node) => node.kind === "source" && node.sourceId === nextFlight.sourceId,
-        )
-      : undefined;
-    this.flightSpine = spineSource
-      ? { x: spineSource.x, y: spineSource.y }
-      : null;
     if (nextFlight && flightSourceChanged) {
       // A fresh browse session starts at its window's newest package. The entry
       // camera framing is authoritative, so this reset applies no delta.
@@ -2170,27 +2157,28 @@ class UniverseForceSceneEngine {
       this.rebuildLabels();
       this.applyHighlight();
     }
-    // Entering a browse session is a dive, not a dolly: the camera flies in
-    // through the nebula shell and settles at the corridor entrance looking
-    // down the counting axis, while the detail morph stretches the dust into
-    // the corridor around it. Layer by layer, like the knowledge it carries.
+    // Entering a browse session is a dive into the onion: the camera settles
+    // just outside the newest shell ALONG ITS OWN APPROACH BEARING, looking
+    // toward the core. Every angle is a valid way in — the sphere has no
+    // privileged direction — and the detail morph inflates the dust around it.
     const flight = this.flightConfig;
     if (flight && flight.sourceId === sourceId) {
-      const entryZ = flight.centerZ - this.appliedFlightDepth;
-      const lookAt = new THREE.Vector3(
-        node.x + CORRIDOR_ENTRY_LATERAL_X * 0.35,
-        node.y + CORRIDOR_ENTRY_LATERAL_Y * 0.35,
-        entryZ - CORRIDOR_ENTRY_LOOK_AHEAD,
-      );
-      const position = new THREE.Vector3(
-        node.x + CORRIDOR_ENTRY_LATERAL_X,
-        node.y + CORRIDOR_ENTRY_LATERAL_Y,
-        entryZ + CORRIDOR_ENTRY_STANDOFF,
+      const center = this.flightCenter(flight);
+      const camera = this.graph.camera();
+      const approach = camera.position.clone().sub(center);
+      if (approach.lengthSq() < 1) approach.set(0.24, 0.18, 1);
+      approach.normalize();
+      const entryRadius = flight.coreRadius + flight.maxDepth
+        + SPHERE_VIEW_STANDOFF - flight.windowNearDepth;
+      const position = center.clone().addScaledVector(approach, entryRadius);
+      const lookAt = center.clone().addScaledVector(
+        approach,
+        Math.max(flight.coreRadius * 0.5, entryRadius - SPHERE_VIEW_STANDOFF - SPHERE_ENTRY_LOOK_AHEAD),
       );
       this.pointerActive = false;
       this.lodArmed = false;
       if (this.hoveredId) this.handleNodeHover(null, false, true);
-      const duration = this.reducedMotion ? 0 : CORRIDOR_ENTRY_MS;
+      const duration = this.reducedMotion ? 0 : SPHERE_ENTRY_MS;
       this.wakeRendering(duration + 900);
       this.host.dataset.universeCamera = [
         position.x.toFixed(1),
@@ -2284,21 +2272,11 @@ class UniverseForceSceneEngine {
     if (!node || !Number.isFinite(node.x) || !Number.isFinite(node.y) || !Number.isFinite(node.z)) {
       return;
     }
-    // Focusing moves the camera on its own, so the flight's notion of depth
-    // must follow — otherwise window-follow would tug the window back toward
-    // wherever the camera used to be.
-    const config = this.flightConfig;
-    if (config && node.kind !== "source" && node.sourceId === config.sourceId) {
-      const depth = THREE.MathUtils.clamp(
-        config.centerZ - node.z,
-        0,
-        config.maxDepth,
-      );
-      this.flightState = createUniverseTemporalFlightState(depth);
-      this.appliedFlightDepth = depth;
-      // The depth jumped without a flight frame; presence must follow now or
-      // the focused neighborhood keeps the dimness of the old camera position.
-      this.updateTemporalPresence();
+    // Focusing moves the camera on its own; depth now derives from the
+    // camera's true radius every flight frame, so the window follows the
+    // focused neighborhood without a manual sync. Just kill any inertia.
+    if (this.flightConfig && node.sourceId === this.flightConfig.sourceId) {
+      this.flightState = brakeUniverseTemporalFlight(this.flightState);
     }
     this.moveCamera(new THREE.Vector3(node.x, node.y, node.z), 112, 480);
   }
@@ -3582,14 +3560,11 @@ class UniverseForceSceneEngine {
     const shapes = new Float32Array(particles.length);
     const phases = new Float32Array(particles.length);
     const twinkles = new Float32Array(particles.length);
-    const axisDepthBySource = new Map(sources.map((source) => [
+    const surfaceRadiusBySource = new Map(sources.map((source) => [
       source.sourceId,
-      Math.max(0, source.sceneNode.eventCount - 1)
-        * UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT,
-    ]));
-    const lateralBySource = new Map(sources.map((source) => [
-      source.sourceId,
-      Math.max(72, source.sceneNode.radius) * 1.8,
+      UNIVERSE_TEMPORAL_SPHERE_CORE_RADIUS
+        + Math.max(0, source.sceneNode.eventCount - 1)
+          * UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT,
     ]));
     particles.forEach((particle, index) => {
       const color = this.sourceVisualColor(particle.sourceId).lerp(
@@ -3608,37 +3583,28 @@ class UniverseForceSceneEngine {
       shapes[index] = particle.glow === 0 && particle.twinkle > 0.84 ? 1 : 0;
       phases[index] = particle.phase;
       twinkles[index] = 0.18 + particle.twinkle * 0.82;
-      // The corridor form: the same dust, laid out along the counting axis as
-      // the source's not-yet-loaded events. Uniform density per unit length is
-      // exactly the counting axis' promise (one event per slice, everywhere).
+      // The onion form: the same dust, filling the source's exploration
+      // sphere as its not-yet-loaded history. Radius via cube root keeps the
+      // volume uniformly misty; identity hashes keep every mote stable.
       const key = `${particle.sourceId}:corridor:${index}`;
-      const axisDepth = axisDepthBySource.get(particle.sourceId) ?? 0;
-      const depth = stableUnit(`${key}:depth`) * axisDepth;
-      const progress = axisDepth > 0 ? depth / axisDepth : 0;
-      // Two shells: sparse wisps you fly through, and the far canyon walls —
-      // big, soft and distant, so a gaze turn barely moves them.
-      const wall = particle.glow === 0
-        && stableUnit(`${key}:shell`) < NEBULA_WALL_SHARE;
-      const lateralScale = wall
-        ? NEBULA_WALL_LATERAL_MIN
-          + stableUnit(`${key}:wall-radius`)
-            * (NEBULA_WALL_LATERAL_MAX - NEBULA_WALL_LATERAL_MIN)
-        : 0.35 + stableUnit(`${key}:radius`) * 0.85;
-      const lateral = (NEBULA_CORRIDOR_NEAR_SPREAD
-        + (NEBULA_CORRIDOR_FAR_SPREAD - NEBULA_CORRIDOR_NEAR_SPREAD) * progress)
-        * (lateralBySource.get(particle.sourceId) ?? 130)
-        * lateralScale;
-      const angle = stableUnit(`${key}:angle`) * Math.PI * 2;
-      corridorWalls[index] = wall ? 1 : 0;
-      corridors[index * 3] = Math.cos(angle) * lateral - particle.offset.x;
-      corridors[index * 3 + 1] = Math.sin(angle) * lateral
-        * NEBULA_CORRIDOR_VERTICAL_ASPECT - particle.offset.y;
-      corridors[index * 3 + 2] = -depth - particle.offset.z;
-      // The last stretch of the axis dissolves into darkness instead of
-      // ending at a visible wall: vastness reads as an unresolved horizon.
-      corridorFades[index] = progress <= 0.82
-        ? 1
-        : 1 - ((progress - 0.82) / 0.18) * 0.8;
+      const surface = surfaceRadiusBySource.get(particle.sourceId)
+        ?? UNIVERSE_TEMPORAL_SPHERE_CORE_RADIUS;
+      const zenith = 2 * stableUnit(`${key}:zenith`) - 1;
+      const azimuth = stableUnit(`${key}:angle`) * Math.PI * 2;
+      const ring = Math.sqrt(Math.max(0, 1 - zenith * zenith));
+      const share = 0.24
+        + Math.cbrt(stableUnit(`${key}:radius`)) * 0.8;
+      // The outer shell is the enveloping haze: bigger, softer motes that
+      // barely parallax under a gaze turn and read as the surrounding nebula.
+      const haze = particle.glow === 0 && share > NEBULA_SPHERE_HAZE_SHARE;
+      const motRadius = surface * share;
+      corridorWalls[index] = haze ? 1 : 0;
+      corridors[index * 3] = Math.cos(azimuth) * ring * motRadius - particle.offset.x;
+      corridors[index * 3 + 1] = Math.sin(azimuth) * ring * motRadius - particle.offset.y;
+      corridors[index * 3 + 2] = zenith * motRadius - particle.offset.z;
+      // The core dissolves into darkness instead of cramming: the deepest
+      // layers keep an unresolved glow at the heart of the onion.
+      corridorFades[index] = THREE.MathUtils.clamp((share - 0.22) / 0.14, 0.18, 1);
     });
     const positionAttribute = new THREE.BufferAttribute(positions, 3)
       .setUsage(THREE.DynamicDrawUsage);
@@ -3666,6 +3632,26 @@ class UniverseForceSceneEngine {
     this.syncNebulaCorridorUniforms();
     this.updateNebulaMotionState();
     this.armNebulaAnimation();
+  }
+
+  private flightCenter(config: UniverseSceneTemporalFlight) {
+    return new THREE.Vector3(config.centerX, config.centerY, config.centerZ);
+  }
+
+  /**
+   * The camera's depth on the onion axis, derived from its true radius: the
+   * sphere's surface (newest shell) is core + maxDepth, and the camera trails
+   * its shell by a fixed standoff. Deriving instead of integrating keeps pan,
+   * pinch and focus moves semantically part of exploration.
+   */
+  private flightCameraDepth(config: UniverseSceneTemporalFlight) {
+    const camera = this.graph.camera();
+    const radius = camera.position.distanceTo(this.flightCenter(config));
+    return THREE.MathUtils.clamp(
+      config.coreRadius + config.maxDepth + SPHERE_VIEW_STANDOFF - radius,
+      0,
+      config.maxDepth,
+    );
   }
 
   /**
@@ -3736,11 +3722,19 @@ class UniverseForceSceneEngine {
     const material = this.nebulaPoints?.material as THREE.ShaderMaterial | undefined;
     if (!material) return;
     const config = this.flightConfig;
-    material.uniforms.uCorridorNearZ.value = config
-      ? config.centerZ - config.windowNearDepth
+    if (config) {
+      (material.uniforms.uCorridorCenter.value as THREE.Vector3).set(
+        config.centerX,
+        config.centerY,
+        config.centerZ,
+      );
+    }
+    const surface = config ? config.coreRadius + config.maxDepth : 0;
+    material.uniforms.uCorridorNearR.value = config
+      ? surface - config.windowNearDepth
       : NEBULA_CORRIDOR_BAND_OFF;
-    material.uniforms.uCorridorFarZ.value = config
-      ? config.centerZ - config.windowFarDepth
+    material.uniforms.uCorridorFarR.value = config
+      ? surface - config.windowFarDepth
       : NEBULA_CORRIDOR_BAND_OFF;
   }
 
@@ -5340,7 +5334,11 @@ class UniverseForceSceneEngine {
       let scale = 1;
       let opacity = 1;
       if (config && node.kind !== "source" && node.sourceId === config.sourceId) {
-        const nodeDepth = config.centerZ - node.z;
+        const nodeDepth = config.coreRadius + config.maxDepth - Math.hypot(
+          node.x - config.centerX,
+          node.y - config.centerY,
+          node.z - config.centerZ,
+        );
         const presence = universeTemporalFlightPresence(
           nodeDepth - this.appliedFlightDepth,
           config.unitsPerEvent,
@@ -5378,10 +5376,20 @@ class UniverseForceSceneEngine {
     }
     const elapsedMs = this.lastFlightStepAt > 0 ? now - this.lastFlightStepAt : 16;
     this.lastFlightStepAt = now;
-    // Gliding (buttons/search) stays on-axis and the library clamps its walls;
-    // free wheel flight integrates pure travel and the walls apply to the
-    // derived axis depth below, because oblique travel spends only part of its
-    // distance on depth.
+    // Depth is derived from the camera's true radius, so pan, pinch and focus
+    // tweens are exploration too: when they moved the camera since the last
+    // frame, adopt their depth and refresh presence before integrating.
+    const derivedDepth = this.flightCameraDepth(config);
+    if (Math.abs(derivedDepth - this.appliedFlightDepth) > 0.5) {
+      this.appliedFlightDepth = derivedDepth;
+      this.flightState = { ...this.flightState, depth: derivedDepth };
+      this.updateTemporalPresence();
+      this.updateLabels(now);
+    }
+    // Gliding (buttons/search) dives radially and the library clamps its
+    // walls; free wheel flight integrates pure travel and the walls apply to
+    // the radial projection below, because oblique travel spends only part of
+    // its distance on depth.
     const gliding = this.flightState.targetDepth !== null;
     const stepState = gliding
       ? this.flightState
@@ -5397,21 +5405,27 @@ class UniverseForceSceneEngine {
     let appliedTravel = 0;
     if (travel !== 0) {
       const camera = this.graph.camera();
+      const center = this.flightCenter(config);
+      const radialOut = camera.position.clone().sub(center);
+      if (radialOut.lengthSq() < 1) radialOut.set(0, 0, 1);
+      radialOut.normalize();
       if (gliding) {
-        // Button glides ride the axis exactly as before.
+        // Button glides dive along the local radial: deeper is inward.
         const glideDepth = THREE.MathUtils.clamp(state.depth, 0, config.maxDepth);
         const glideDelta = glideDepth - this.appliedFlightDepth;
-        camera.position.z -= glideDelta;
-        if (this.controls.target) this.controls.target.z -= glideDelta;
+        camera.position.addScaledVector(radialOut, -glideDelta);
+        if (this.controls.target) {
+          this.controls.target.addScaledVector(radialOut, -glideDelta);
+        }
         this.appliedFlightDepth = glideDepth;
         appliedTravel = glideDelta;
         this.flightDepthRate = glideDelta / Math.max(1, elapsedMs) * 1000;
       } else {
         // Free flight: the wheel flies where the gaze points, so every
         // orientation stays self-consistent — turn left and scroll, and you
-        // fly left. Paging keys on the axis projection of that motion.
+        // fly left. Paging keys on the radial projection of that motion.
         const forward = camera.getWorldDirection(new THREE.Vector3()).normalize();
-        const depthPerTravel = -forward.z;
+        const depthPerTravel = -forward.dot(radialOut);
         let allowed = travel;
         if (Math.abs(depthPerTravel) > 1e-4) {
           const proposedDepth = this.appliedFlightDepth + depthPerTravel * travel;
@@ -5428,15 +5442,14 @@ class UniverseForceSceneEngine {
         }
         appliedTravel = allowed;
         this.flightDepthRate = nextState.velocity * depthPerTravel;
-        // Sustained flight re-levels the gaze onto the corridor: look anywhere,
-        // and flying gently brings the nose back in line — free, never crooked.
+        // Sustained flight re-levels the gaze onto the dive: look anywhere,
+        // and flying gently points the nose back toward (or away from) the
+        // core — free in every direction, never crooked.
         if (this.lookPointerId === null && this.controls.target) {
           const offset = this.controls.target.clone().sub(camera.position);
           const radius = offset.length();
           if (radius > 1e-3 && Math.abs(this.flightDepthRate) > 1) {
-            const desired = new THREE.Vector3(
-              0,
-              0,
+            const desired = radialOut.clone().multiplyScalar(
               this.flightDepthRate > 0 ? -radius : radius,
             );
             const level = 1 - Math.exp(
@@ -5444,20 +5457,6 @@ class UniverseForceSceneEngine {
             );
             offset.lerp(desired, level).setLength(radius);
             this.controls.target.copy(camera.position).add(offset);
-          }
-        }
-        // A soft spine magnet keeps free wander near the corridor without a
-        // wall: lateral offset eases back only while actually flying.
-        const spine = this.flightSpine;
-        if (spine) {
-          const pull = 1 - Math.exp(-elapsedMs / 2600);
-          const dx = (spine.x - camera.position.x) * pull;
-          const dy = (spine.y - camera.position.y) * pull;
-          camera.position.x += dx;
-          camera.position.y += dy;
-          if (this.controls.target) {
-            this.controls.target.x += dx;
-            this.controls.target.y += dy;
           }
         }
       }
