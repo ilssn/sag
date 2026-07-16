@@ -667,7 +667,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                           type="button"
                           variant="outline"
                           size="icon"
-                          className="size-8 border-border/60 bg-background/80 shadow-soft backdrop-blur-md hover:border-cyan-300/35 hover:bg-cyan-300/10 hover:text-cyan-100"
+                          className="size-8 border-border/60 bg-background/80 shadow-soft backdrop-blur-md hover:border-[#7ea6ff]/35 hover:bg-[#4f86ff]/10 hover:text-[#c8d9ff]"
                           aria-label={t("graphSettings")}
                           title={t("graphSettings")}
                           data-universe-settings-trigger="true"

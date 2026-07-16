@@ -91,6 +91,22 @@ describe("knowledge universe production interaction policy", () => {
     expect(source).toContain("temporalFlight: data.temporalFlight ?? null");
   });
 
+  it("shifts every event one vestibule deeper so arrival is nebula-only", () => {
+    // Flight depth 0 is the hero pose in front of the intact galaxy: the first
+    // event, the window band and the axis end all sit one vestibule deeper.
+    // Retreating to the wall at depth 0 therefore restores the initial state.
+    expect(source).toContain("UNIVERSE_TEMPORAL_AXIS_VESTIBULE_UNITS,");
+    expect(source).toContain(
+      "- UNIVERSE_TEMPORAL_AXIS_VESTIBULE_UNITS,",
+    );
+    expect(source).toContain(
+      "vestibuleDepth: UNIVERSE_TEMPORAL_AXIS_VESTIBULE_UNITS",
+    );
+    expect(source).toContain(
+      "maxDepth: temporalAxisDepth + UNIVERSE_TEMPORAL_AXIS_VESTIBULE_UNITS",
+    );
+  });
+
   it("keeps concrete-node clicks presentation-only", () => {
     const handler = sourceBetween(
       "const handleNodeClick = React.useCallback(",

@@ -942,18 +942,62 @@ describe("universe scene production invariants", () => {
       "private updateNebulaPositions()",
     );
 
-    // The site's hero galaxy is pure sharp grain: champagne-gold dust with a
-    // per-source undertone, a white heart carried by density, a sprinkle of
-    // cool blue — and glow pockets as rare accents, never a fog blanket.
-    expect(source).toContain('const NEBULA_BRAND_CHAMPAGNE = new THREE.Color("#e3be82")');
-    expect(source).toContain('const NEBULA_BRAND_BLUE = new THREE.Color("#93b4e0")');
+    // The site's hero galaxy is pure sharp grain: gold #d6ae63 dust with a
+    // per-source undertone, copper outskirts, a white heart carried by
+    // density, a sprinkle of cool blue — and glow pockets as rare accents,
+    // never a fog blanket. The site uses no green anywhere.
+    expect(source).toContain('const NEBULA_BRAND_CHAMPAGNE = new THREE.Color("#d6ae63")');
+    expect(source).toContain('const NEBULA_BRAND_COPPER = new THREE.Color("#a85224")');
+    expect(source).toContain('const NEBULA_BRAND_BLUE = new THREE.Color("#9cc7ff")');
     expect(nebula).toContain("NEBULA_BRAND_CHAMPAGNE,");
-    expect(nebula).toContain("color.lerp(NEBULA_BRAND_BLUE, 0.55)");
+    expect(nebula).toContain("NEBULA_BRAND_COPPER,");
+    expect(nebula).toContain("color.lerp(NEBULA_BRAND_BLUE, 0.6)");
     expect(nebula).toContain("? 0.5 + (1 - particle.radial) * 0.5");
     expect(nebula).toContain("const glowChance = coreParticle ? 0.05 : 0.02");
     expect(source).toContain("const NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP = 22");
-    // Tight arm lanes give the silhouette its edges.
+    // Hero anatomy: half the grains in a blazing tight heart, a thin disc
+    // with tight arm lanes, and a wide whole-frame sprinkle.
+    expect(nebula).toContain("const coreParticle = population < 0.5");
+    expect(nebula).toContain("coreParticle ? 2.55 : 0.7");
+    expect(nebula).toContain("? 1.35 + stableUnit(`${key}:halo`) * 1.65");
     expect(nebula).toContain("* (coreParticle ? 1.3 : 0.5)");
+    // Entities speak the brand's cool blue, not cyan.
+    expect(source).toContain('const ENTITY_COLOR = new THREE.Color("#7ea6ff")');
+  });
+
+  it("arrives at a nebula-only initial state and explores through the vestibule", () => {
+    const nebulaMaterial = sourceBetween(
+      "function makeNebulaMaterial(darkTheme: boolean)",
+      "class UniverseForceSceneEngine",
+    );
+    const focus = sourceBetween(
+      "focusSource(sourceId: string) {",
+      "focusResult() {",
+    );
+    const presence = sourceBetween(
+      "private updateTemporalPresence()",
+      "private updateTemporalFlight(now: number)",
+    );
+
+    // Depth 0 is the hero pose: intact galaxy, no event stars, no cards. The
+    // corridor stretch and the packages both materialize only as the camera
+    // crosses the vestibule — and dissolve again on the way back out.
+    expect(source).toContain("vestibuleDepth: number");
+    expect(nebulaMaterial).toContain("uniform float uCorridorVestibule");
+    expect(nebulaMaterial).toContain(
+      "? smoothstep(0.0, uCorridorVestibule * 0.85, uFlightDepth)",
+    );
+    expect(nebulaMaterial).toContain(
+      "float corridorMix = smoothstep(0.12, 0.88, particleDetail) * diveMix",
+    );
+    expect(presence).toContain("config.vestibuleDepth * 0.85");
+    expect(presence).toContain("opacity = presence.opacity * dive");
+    expect(source).toContain(
+      "material.uniforms.uCorridorVestibule.value = config",
+    );
+    // The arrival stands back far enough for the hero framing.
+    expect(focus).toContain("node.sceneNode.radius * 1.45 * 1.9");
+    expect(focus).toContain("entryZ + heroStandoff");
   });
 
   it("snaps the imperceptible detail-morph tail so stable scenes can sleep", () => {

@@ -31,6 +31,15 @@ export interface UniverseTemporalAxis {
  */
 export const UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT = 60;
 
+/**
+ * The vestibule: a stretch of axis between the entry pose (flight depth 0)
+ * and the first event. Arriving in a source shows only the intact nebula —
+ * the hero pose; scrolling forward crosses the vestibule while the dust
+ * stretches into the corridor and the first events condense in. Scrolling
+ * all the way back lands exactly on this initial state again.
+ */
+export const UNIVERSE_TEMPORAL_AXIS_VESTIBULE_UNITS = 300;
+
 export interface UniverseTemporalAxisPolicy {
   /** Normalized travel distance along the axis. */
   depthSpan: number;

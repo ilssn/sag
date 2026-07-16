@@ -97,6 +97,12 @@ export interface UniverseSceneTemporalFlight {
   sourceId: string;
   centerZ: number;
   unitsPerEvent: number;
+  /**
+   * Axis stretch between the entry pose (depth 0) and the first event: the
+   * initial state shows only the intact nebula, exploration begins by
+   * crossing it, and retreating all the way lands back on it.
+   */
+  vestibuleDepth: number;
   maxDepth: number;
   windowNearDepth: number;
   windowFarDepth: number;
@@ -336,18 +342,22 @@ interface ClusterForce {
 }
 
 const EVENT_COLOR = new THREE.Color("#ffd166");
-const ENTITY_COLOR = new THREE.Color("#75d8e8");
+// Brand cool accent (site CSS #4f86ff family): entities are the blue voice
+// beside the gold events, matching the hero galaxy's accent stars.
+const ENTITY_COLOR = new THREE.Color("#7ea6ff");
 const EVENT_LIGHT_COLOR = new THREE.Color("#b77b0b");
-const ENTITY_LIGHT_COLOR = new THREE.Color("#16879a");
+const ENTITY_LIGHT_COLOR = new THREE.Color("#2f5fd0");
 const WHITE = new THREE.Color("#ffffff");
 /**
- * Brand galaxy palette: champagne-gold grains around a white-hot heart with
- * scattered cool-blue accents — the site's hero look. Each source's own hue
- * survives underneath as a tint, so nebulae stay distinguishable while the
- * universe reads as one consistent brand sky.
+ * Brand galaxy palette, extracted from the site's own hero bundle: CSS gold
+ * #d6ae63, a star ramp running pale gold → copper toward the outskirts
+ * (vec3(1.0,.91,.70) … vec3(.66,.32,.14)), and cool-blue accent stars
+ * (vec3(.61,.78,1.0)). No green anywhere — the perceived olive is gold on
+ * near-black. Each source's own hue survives underneath as a tint.
  */
-const NEBULA_BRAND_CHAMPAGNE = new THREE.Color("#e3be82");
-const NEBULA_BRAND_BLUE = new THREE.Color("#93b4e0");
+const NEBULA_BRAND_CHAMPAGNE = new THREE.Color("#d6ae63");
+const NEBULA_BRAND_COPPER = new THREE.Color("#a85224");
+const NEBULA_BRAND_BLUE = new THREE.Color("#9cc7ff");
 const DETAIL_MORPH_RESPONSE_MS = 92;
 const DETAIL_MORPH_SETTLE_EPSILON = 0.01;
 const HOVER_LABEL_SETTLE_MS = 72;
@@ -769,6 +779,7 @@ function makeNebulaMaterial(darkTheme: boolean) {
       uCorridorSpan: { value: NEBULA_CORRIDOR_WRAP_SPAN },
       uCorridorAxisDepth: { value: 0 },
       uCorridorCenterZ: { value: 0 },
+      uCorridorVestibule: { value: 0 },
     },
     vertexShader: `
       uniform float uPixelRatio;
@@ -784,6 +795,7 @@ function makeNebulaMaterial(darkTheme: boolean) {
       uniform float uCorridorSpan;
       uniform float uCorridorAxisDepth;
       uniform float uCorridorCenterZ;
+      uniform float uCorridorVestibule;
       attribute vec3 aColor;
       attribute vec3 aCorridor;
       attribute float aCorridorWall;
@@ -824,7 +836,13 @@ function makeNebulaMaterial(darkTheme: boolean) {
         // Diving into a source stretches its galaxy into the exploration
         // corridor: the dust that is still a cloud from outside is, inside,
         // the source's unloaded history laid out along the counting axis.
-        float corridorMix = smoothstep(0.12, 0.88, particleDetail);
+        // The vestibule holds it back: at flight depth 0 the nebula is intact
+        // (the hero pose); the stretch happens as the camera crosses into the
+        // axis, and reverses on the way back out.
+        float diveMix = uCorridorVestibule > 0.0
+          ? smoothstep(0.0, uCorridorVestibule * 0.85, uFlightDepth)
+          : 1.0;
+        float corridorMix = smoothstep(0.12, 0.88, particleDetail) * diveMix;
         // Camera-anchored wrap: corridor dust repeats modulo the span around
         // the flight depth, so the density near the camera never depends on
         // the source's size — the fixed-window discipline for particles.
@@ -2224,6 +2242,13 @@ class UniverseForceSceneEngine {
     const flight = this.flightConfig;
     if (flight && flight.sourceId === sourceId) {
       const entryZ = flight.centerZ - this.appliedFlightDepth;
+      // The arrival is the hero pose: stand far enough back that the intact
+      // galaxy fills the frame like the brand site's first screen, then let
+      // the wheel carry the camera through it into the corridor.
+      const heroStandoff = Math.min(
+        560,
+        Math.max(CORRIDOR_ENTRY_STANDOFF, node.sceneNode.radius * 1.45 * 1.9),
+      );
       const lookAt = new THREE.Vector3(
         node.x + CORRIDOR_ENTRY_LATERAL_X * 0.35,
         node.y + CORRIDOR_ENTRY_LATERAL_Y * 0.35,
@@ -2232,7 +2257,7 @@ class UniverseForceSceneEngine {
       const position = new THREE.Vector3(
         node.x + CORRIDOR_ENTRY_LATERAL_X,
         node.y + CORRIDOR_ENTRY_LATERAL_Y,
-        entryZ + CORRIDOR_ENTRY_STANDOFF,
+        entryZ + heroStandoff,
       );
       this.pointerActive = false;
       this.lodArmed = false;
@@ -3574,14 +3599,16 @@ class UniverseForceSceneEngine {
       const ellipticity = 0.72 + stableUnit(`${source.id}:ellipticity`) * 0.12;
       for (let index = 0; index < count; index += 1) {
         const key = `${source.id}:dust:${index}`;
+        // Hero anatomy: half the grains pile into a blazing tight heart, the
+        // disc stays thin, and a wide sprinkle dusts the whole frame.
         const population = stableUnit(`${key}:population`);
-        const coreParticle = population < 0.46;
+        const coreParticle = population < 0.5;
         const haloParticle = population >= 0.88;
         const radial = haloParticle
-          ? 1.3 + stableUnit(`${key}:halo`) * 1.1
+          ? 1.35 + stableUnit(`${key}:halo`) * 1.65
           : Math.pow(
               stableUnit(`${key}:radius`),
-              coreParticle ? 2.1 : 0.7,
+              coreParticle ? 2.55 : 0.7,
             );
         const armIndex = Math.min(
           armCount - 1,
@@ -3602,7 +3629,7 @@ class UniverseForceSceneEngine {
           Math.sin(angle) * planarRadius * ellipticity,
           (stableUnit(`${key}:depth`) - 0.5)
             * radius
-            * (coreParticle ? 0.3 : 0.2)
+            * (coreParticle ? 0.34 : 0.14)
             * (1.16 - radial * 0.36),
         );
         offset.applyEuler(rotation);
@@ -3653,14 +3680,20 @@ class UniverseForceSceneEngine {
     ]));
     particles.forEach((particle, index) => {
       // Brand sky: dust leans champagne with the source hue as an undertone,
-      // a sparse cool-blue accent sprinkle, and a white-hot heart carried by
-      // density — the same anatomy as the site's hero galaxy.
+      // deepens to copper toward the outskirts, carries a sparse cool-blue
+      // accent sprinkle, and burns to a white heart by density — the exact
+      // anatomy of the site's hero galaxy ramp.
       const color = this.sourceVisualColor(particle.sourceId).lerp(
         NEBULA_BRAND_CHAMPAGNE,
-        this.darkTheme ? 0.58 : 0.42,
+        this.darkTheme ? 0.62 : 0.46,
+      );
+      color.lerp(
+        NEBULA_BRAND_COPPER,
+        THREE.MathUtils.smoothstep(particle.radial, 0.55, 1)
+          * (this.darkTheme ? 0.5 : 0.35),
       );
       if (stableUnit(`${particle.sourceId}:${index}:accent`) > 0.93) {
-        color.lerp(NEBULA_BRAND_BLUE, 0.55);
+        color.lerp(NEBULA_BRAND_BLUE, 0.6);
       }
       color.lerp(
         WHITE,
@@ -3796,6 +3829,9 @@ class UniverseForceSceneEngine {
       ? Math.max(0, config.maxDepth)
       : 0;
     material.uniforms.uCorridorCenterZ.value = config ? config.centerZ : 0;
+    material.uniforms.uCorridorVestibule.value = config
+      ? Math.max(0, config.vestibuleDepth)
+      : 0;
   }
 
   private updateNebulaPositions() {
@@ -5432,6 +5468,16 @@ class UniverseForceSceneEngine {
   private updateTemporalPresence() {
     const config = this.flightConfig;
     let linksDirty = false;
+    // Before the camera has crossed the vestibule, the source is still the
+    // intact nebula: no event stars, no cards — the initial state. They
+    // condense in as the dive progresses and dissolve on the way back out.
+    const dive = config && config.vestibuleDepth > 0
+      ? THREE.MathUtils.smoothstep(
+          this.appliedFlightDepth,
+          0,
+          config.vestibuleDepth * 0.85,
+        )
+      : 1;
     this.nodes.forEach((node) => {
       let scale = 1;
       let opacity = 1;
@@ -5442,7 +5488,7 @@ class UniverseForceSceneEngine {
           config.unitsPerEvent,
         );
         scale = presence.scale;
-        opacity = presence.opacity;
+        opacity = presence.opacity * dive;
       }
       if (
         Math.abs((node.temporalPresenceScale ?? 1) - scale) < 0.004

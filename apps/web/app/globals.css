@@ -3044,9 +3044,9 @@
 
   .sag-universe-node-label[data-kind="entity"] {
     box-shadow:
-      inset 2px 0 0 rgb(116 215 232 / 0.76),
+      inset 2px 0 0 rgb(126 166 255 / 0.76),
       0 8px 26px rgb(0 0 0 / 0.1),
-      0 0 18px rgb(116 215 232 / 0.05);
+      0 0 18px rgb(126 166 255 / 0.05);
   }
 
   .sag-universe-node-label[data-kind="entity"][data-compact="true"] {
@@ -3059,9 +3059,9 @@
     border-color: hsl(var(--border) / 0.38);
     background: hsl(var(--background) / 0.62);
     box-shadow:
-      inset 2px 0 0 rgb(116 215 232 / 0.58),
+      inset 2px 0 0 rgb(126 166 255 / 0.58),
       0 4px 12px rgb(0 0 0 / 0.07),
-      0 0 10px rgb(116 215 232 / 0.035);
+      0 0 10px rgb(126 166 255 / 0.035);
     color: hsl(var(--foreground) / 0.86);
     backdrop-filter: blur(8px) saturate(108%);
   }
@@ -3092,7 +3092,7 @@
   }
 
   .sag-universe-node-label[data-kind="entity"]::before {
-    background: rgb(116 215 232 / 0.44);
+    background: rgb(126 166 255 / 0.44);
   }
 
   /* 展开只向外长一点：盒子在指针下方猛长会把 hover 顶掉，读着也晃。 */
@@ -3109,9 +3109,9 @@
 
   .sag-universe-node-label[data-kind="entity"][data-expanded="true"] {
     box-shadow:
-      inset 2px 0 0 rgb(116 215 232 / 0.92),
+      inset 2px 0 0 rgb(126 166 255 / 0.92),
       0 12px 34px rgb(0 0 0 / 0.14),
-      0 0 24px rgb(116 215 232 / 0.08);
+      0 0 24px rgb(126 166 255 / 0.08);
   }
 
   .sag-universe-node-label__eyebrow {
@@ -3144,8 +3144,8 @@
   }
 
   .sag-universe-node-label[data-kind="entity"] .sag-universe-node-label__marker {
-    background: rgb(116 215 232 / 0.96);
-    box-shadow: 0 0 8px rgb(116 215 232 / 0.48);
+    background: rgb(126 166 255 / 0.96);
+    box-shadow: 0 0 8px rgb(126 166 255 / 0.48);
   }
 
   .sag-universe-node-label strong {
@@ -3200,11 +3200,11 @@
 
   .sag-universe-node-label[data-kind="entity"]
     .sag-universe-node-label__explore {
-    border-color: rgb(116 215 232 / 0.36);
+    border-color: rgb(126 166 255 / 0.36);
     box-shadow:
       0 6px 18px rgb(0 0 0 / 0.13),
-      0 0 14px rgb(116 215 232 / 0.09);
-    color: rgb(165 243 252 / 0.96);
+      0 0 14px rgb(126 166 255 / 0.09);
+    color: rgb(163 192 255 / 0.96);
   }
 
   .sag-universe-node-label__explore[hidden] {

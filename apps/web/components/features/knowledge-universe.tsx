@@ -80,6 +80,7 @@ import {
   createUniverseTemporalAxis,
   projectUniverseTemporalAxis,
   UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT,
+  UNIVERSE_TEMPORAL_AXIS_VESTIBULE_UNITS,
   universeTemporalAxisDepth,
 } from "@/lib/universe-temporal-axis";
 import { planUniverseTimelinePrefetch } from "@/lib/universe-timeline-prefetch";
@@ -522,7 +523,7 @@ function LoadProgressRow({
           className={cn(
             "h-full rounded-full transition-[width,filter] duration-500 ease-out",
             tone === "entity"
-              ? "bg-cyan-300 shadow-[0_0_10px_rgb(103_232_249_/_0.48)]"
+              ? "bg-[#7ea6ff] shadow-[0_0_10px_rgb(79_134_255_/_0.48)]"
               : "bg-amber-300 shadow-[0_0_10px_rgb(252_211_77_/_0.42)]",
             metric.loading && "brightness-110",
           )}
@@ -579,7 +580,7 @@ function UniverseLoadProgressPanel({
         {progress.allDone ? (
           <CheckCircle2 className="size-3.5 shrink-0 text-emerald-400" aria-hidden="true" />
         ) : progress.loading ? (
-          <Loader2 className="size-3.5 shrink-0 animate-spin text-cyan-300" aria-hidden="true" />
+          <Loader2 className="size-3.5 shrink-0 animate-spin text-[#7ea6ff]" aria-hidden="true" />
         ) : (
           <span className="size-1.5 shrink-0 rounded-full bg-foreground/25" aria-hidden="true" />
         )}
@@ -1687,7 +1688,11 @@ export function KnowledgeUniverse({
           ? {
               x: temporalProjection.normalizedOffset.x * radius * 1.8,
               y: temporalProjection.normalizedOffset.y * radius * 1.8,
-              z: temporalProjection.normalizedOffset.z * temporalAxisDepth,
+              // Every event sits one vestibule deeper than its ordinal says:
+              // flight depth 0 is the hero pose in front of the intact nebula,
+              // and the first event only condenses after crossing it.
+              z: temporalProjection.normalizedOffset.z * temporalAxisDepth
+                - UNIVERSE_TEMPORAL_AXIS_VESTIBULE_UNITS,
             }
           : stableRootEventOffset(
               sourceId,
@@ -1834,13 +1839,14 @@ export function KnowledgeUniverse({
           sourceId: browseSessionSourceId,
           centerZ: sourceById.get(browseSessionSourceId)?.z ?? 0,
           unitsPerEvent: TEMPORAL_AXIS_UNITS_PER_EVENT,
-          maxDepth: temporalAxisDepth,
-          windowNearDepth: Number.isFinite(windowNearAge)
+          vestibuleDepth: UNIVERSE_TEMPORAL_AXIS_VESTIBULE_UNITS,
+          maxDepth: temporalAxisDepth + UNIVERSE_TEMPORAL_AXIS_VESTIBULE_UNITS,
+          windowNearDepth: (Number.isFinite(windowNearAge)
             ? windowNearAge * temporalAxisDepth
-            : 0,
-          windowFarDepth: Number.isFinite(windowFarAge)
+            : 0) + UNIVERSE_TEMPORAL_AXIS_VESTIBULE_UNITS,
+          windowFarDepth: (Number.isFinite(windowFarAge)
             ? windowFarAge * temporalAxisDepth
-            : 0,
+            : 0) + UNIVERSE_TEMPORAL_AXIS_VESTIBULE_UNITS,
         }
       : null;
     const candidate = {
@@ -3387,7 +3393,7 @@ export function KnowledgeUniverse({
             type="button"
             variant="outline"
             size="icon"
-            className="group pointer-events-auto size-9 shrink-0 border-cyan-300/15 bg-background/72 text-muted-foreground shadow-soft backdrop-blur-md hover:border-cyan-200/35 hover:bg-cyan-500/[0.08] hover:text-foreground"
+            className="group pointer-events-auto size-9 shrink-0 border-[#4f86ff]/15 bg-background/72 text-muted-foreground shadow-soft backdrop-blur-md hover:border-[#7ea6ff]/35 hover:bg-[#4f86ff]/[0.08] hover:text-foreground"
             data-universe-home-control="true"
             aria-label={t("controls.home")}
             title={t("controls.homeHint")}
@@ -3395,7 +3401,7 @@ export function KnowledgeUniverse({
             disabled={!browseSessionSourceId && !working.nodes.length}
           >
             <span className="relative grid size-4 place-items-center" aria-hidden="true">
-              <Orbit className="size-4 text-cyan-300/85 transition-colors group-hover:text-cyan-200" />
+              <Orbit className="size-4 text-[#7ea6ff]/85 transition-colors group-hover:text-[#a3c0ff]" />
               <span className="absolute size-1 rounded-full bg-amber-200 shadow-[0_0_7px_rgb(253_230_138_/_0.9)]" />
             </span>
           </Button>
@@ -3416,7 +3422,7 @@ export function KnowledgeUniverse({
                   ease: [0.22, 1, 0.36, 1],
                 }}
               >
-                <span className="size-1.5 shrink-0 rounded-full bg-cyan-300 shadow-[0_0_10px_rgb(103_232_249_/_0.65)]" />
+                <span className="size-1.5 shrink-0 rounded-full bg-[#7ea6ff] shadow-[0_0_10px_rgb(79_134_255_/_0.65)]" />
                 <span
                   className="min-w-0 max-w-72 truncate font-medium text-foreground/90"
                   title={viewportSource.label}
@@ -3452,7 +3458,7 @@ export function KnowledgeUniverse({
                 }}
               >
                 <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap">
-                  <CircleDot className="size-3.5 text-cyan-200" />
+                  <CircleDot className="size-3.5 text-[#a3c0ff]" />
                   <span className="hidden sm:inline">{t("legend.entities")}</span>
                 </span>
                 <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap">
@@ -3558,7 +3564,7 @@ export function KnowledgeUniverse({
                 className={cn(
                   "size-2 shrink-0 rounded-full",
                   inspectorNode.kind === "entity"
-                    ? "bg-cyan-300 shadow-[0_0_10px_rgb(103_232_249_/_0.75)]"
+                    ? "bg-[#7ea6ff] shadow-[0_0_10px_rgb(79_134_255_/_0.75)]"
                     : "bg-amber-300 shadow-[0_0_10px_rgb(252_211_77_/_0.75)]",
                 )}
               />
@@ -3628,7 +3634,7 @@ export function KnowledgeUniverse({
                 <div
                   className={cn(
                     "h-full rounded-full transition-[width] duration-300",
-                    inspectorNode.kind === "entity" ? "bg-cyan-400/75" : "bg-amber-400/75",
+                    inspectorNode.kind === "entity" ? "bg-[#4f86ff]/75" : "bg-amber-400/75",
                   )}
                   style={{
                     width: `${inspectorTotalKnown && inspectorTotal > 0
