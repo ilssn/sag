@@ -287,6 +287,8 @@ interface NebulaParticle {
   glow: number;
   phase: number;
   twinkle: number;
+  core: boolean;
+  radial: number;
 }
 
 interface SceneLabel {
@@ -362,9 +364,13 @@ const NEBULA_GESTURE_CALM_MS = 480;
  * "deeper" must always stay roughly ahead. Angles are radians around the
  * corridor's axis-aligned entry bearing.
  */
-const BROWSE_GAZE_AZIMUTH_RAD = 0.42;
-const BROWSE_GAZE_POLAR_RAD = 0.3;
-const BROWSE_GAZE_ROTATE_SPEED = 0.26;
+const BROWSE_GAZE_AZIMUTH_RAD = 0.3;
+const BROWSE_GAZE_POLAR_RAD = 0.22;
+const BROWSE_GAZE_ROTATE_SPEED = 0.22;
+/** Pointer parallax: the view leans faintly toward the cursor, brand-style. */
+const BROWSE_PARALLAX_X = 12;
+const BROWSE_PARALLAX_Y = 7;
+const BROWSE_PARALLAX_RESPONSE = 0.055;
 const BROWSE_GAZE_PAN_SPEED = 0.4;
 const UNIVERSE_ROTATE_SPEED = 0.42;
 const UNIVERSE_PAN_SPEED = 0.52;
@@ -409,6 +415,9 @@ const UNIVERSE_CAMERA_MAX_DISTANCE = 50_000;
 const CAMERA_DAMPING_QUIET_MS = 120;
 const CAMERA_DAMPING_RECHECK_MS = 240;
 const TIMELINE_EXIT_MIN_MS = 460;
+/** In-place condensation reads faster than the staged fly-in choreography. */
+const TIMELINE_CONDENSE_MS = 320;
+const TIMELINE_DISSOLVE_MS = 300;
 const TIMELINE_EXIT_VARIANCE_MS = 90;
 const TIMELINE_ENTRY_MS = 560;
 const SOURCE_PALETTE = [
@@ -872,7 +881,9 @@ function makeNebulaMaterial(darkTheme: boolean) {
     transparent: true,
     depthWrite: false,
     depthTest: true,
-    blending: darkTheme ? THREE.AdditiveBlending : THREE.NormalBlending,
+    // Brand look: density carries the light — the white-hot heart comes from
+    // sheer particle count, not additive bloom.
+    blending: THREE.NormalBlending,
   });
 }
 
@@ -954,6 +965,8 @@ class UniverseForceSceneEngine {
   private flightCardPresence = 1;
   /** True while rotation is clamped to the corridor's forward gaze cone. */
   private browseGazeApplied = false;
+  /** Applied pointer-parallax lean, in world units along camera right/up. */
+  private parallaxApplied = { x: 0, y: 0 };
   private browseGazeTimer: number | null = null;
   private sourceSignature = "";
   private labelLayer: HTMLDivElement;
@@ -1129,6 +1142,8 @@ class UniverseForceSceneEngine {
     if (camera.isPerspectiveCamera) {
       camera.near = 0.1;
       camera.far = 100_000;
+      // Brand-wide field of view: the corridor breathes instead of tunnelling.
+      camera.fov = 56;
       camera.updateProjectionMatrix();
     }
 
@@ -1559,7 +1574,7 @@ class UniverseForceSceneEngine {
         // A timeline window is one visual batch. Temporal depth and scale carry
         // chronology; per-node start delays would read as incremental popping.
         startedAt: entryNow,
-        duration: TIMELINE_ENTRY_MS,
+        duration: condenseInPlace ? TIMELINE_CONDENSE_MS : TIMELINE_ENTRY_MS,
         from,
         to: destination.clone(),
         arc,
@@ -1815,8 +1830,10 @@ class UniverseForceSceneEngine {
       node.timelineMotion = {
         kind: "exit",
         startedAt: entryNow,
-        duration: TIMELINE_EXIT_MIN_MS
-          + stableUnit(`${node.id}:timeline-exit-duration`) * TIMELINE_EXIT_VARIANCE_MS,
+        duration: dissolveInPlace
+          ? TIMELINE_DISSOLVE_MS
+          : TIMELINE_EXIT_MIN_MS
+            + stableUnit(`${node.id}:timeline-exit-duration`) * TIMELINE_EXIT_VARIANCE_MS,
         from,
         to: dissolveInPlace
           ? from.clone()
@@ -2221,7 +2238,7 @@ class UniverseForceSceneEngine {
       const aspect = Math.max(0.4, this.host.clientWidth / Math.max(1, this.host.clientHeight));
       const distanceY = size.y / Math.max(0.01, 2 * halfFov);
       const distanceX = size.x / Math.max(0.01, 2 * halfFov * aspect);
-      const distance = Math.max(178, distanceX, distanceY, size.z * 1.32) * 1.08;
+      const distance = Math.max(150, distanceX, distanceY, size.z * 1.32) * 0.9;
       this.moveCamera(center, distance, 620);
       return;
     }
@@ -3438,7 +3455,7 @@ class UniverseForceSceneEngine {
     const configuredBudget = mobile
       ? this.policy.proxy_budget_mobile
       : this.policy.proxy_budget_desktop;
-    const budgetCap = mobile ? 1_200 : 3_000;
+    const budgetCap = mobile ? 2_000 : 6_000;
     const budget = Math.min(
       budgetCap,
       Math.max(0, Number.isFinite(configuredBudget) ? configuredBudget : 0),
@@ -3478,7 +3495,7 @@ class UniverseForceSceneEngine {
       const count = baseCount + Math.floor(
         (weightedBudget * weights[sourceIndex]) / Math.max(1, totalWeight),
       );
-      const radius = Math.max(28, source.sceneNode.radius);
+      const radius = Math.max(40, source.sceneNode.radius * 1.45);
       const rotation = new THREE.Euler(
         (stableUnit(`${source.id}:rx`) - 0.5) * 0.7,
         (stableUnit(`${source.id}:ry`) - 0.5) * 0.9,
@@ -3491,11 +3508,15 @@ class UniverseForceSceneEngine {
       const ellipticity = 0.72 + stableUnit(`${source.id}:ellipticity`) * 0.12;
       for (let index = 0; index < count; index += 1) {
         const key = `${source.id}:dust:${index}`;
-        const coreParticle = stableUnit(`${key}:core`) < 0.38;
-        const radial = Math.pow(
-          stableUnit(`${key}:radius`),
-          coreParticle ? 1.82 : 0.7,
-        );
+        const population = stableUnit(`${key}:population`);
+        const coreParticle = population < 0.46;
+        const haloParticle = population >= 0.88;
+        const radial = haloParticle
+          ? 1.3 + stableUnit(`${key}:halo`) * 1.1
+          : Math.pow(
+              stableUnit(`${key}:radius`),
+              coreParticle ? 2.1 : 0.7,
+            );
         const armIndex = Math.min(
           armCount - 1,
           Math.floor(stableUnit(`${key}:arm-index`) * armCount),
@@ -3524,8 +3545,12 @@ class UniverseForceSceneEngine {
           sourceId: source.sourceId,
           sourceIndex,
           offset,
-          alpha: (coreParticle ? 0.32 : 0.24)
-            + stableUnit(`${key}:alpha`) * (coreParticle ? 0.6 : 0.56),
+          core: coreParticle,
+          radial: Math.min(1, radial),
+          alpha: haloParticle
+            ? 0.05 + stableUnit(`${key}:alpha`) * 0.13
+            : (coreParticle ? 0.4 : 0.24)
+              + stableUnit(`${key}:alpha`) * (coreParticle ? 0.6 : 0.56),
           glow: glowSeed < glowChance
             ? 0.58 + stableUnit(`${key}:glow-strength`) * 0.42
             : 0,
@@ -3559,16 +3584,23 @@ class UniverseForceSceneEngine {
       Math.max(72, source.sceneNode.radius) * 1.8,
     ]));
     particles.forEach((particle, index) => {
+      // Hue stays the source's identity; the luminosity shape follows the
+      // brand galaxy — a white-hot heart melting into tinted dust.
       const color = this.sourceVisualColor(particle.sourceId).lerp(
         WHITE,
-        stableUnit(`${particle.sourceId}:${index}:white`) * (this.darkTheme ? 0.38 : 0.16),
+        particle.core
+          ? 0.45 + (1 - particle.radial) * 0.45
+          : stableUnit(`${particle.sourceId}:${index}:white`)
+            * (this.darkTheme ? 0.38 : 0.16),
       );
       colors[index * 3] = color.r;
       colors[index * 3 + 1] = color.g;
       colors[index * 3 + 2] = color.b;
-      sizes[index] = 1.3
-        + stableUnit(`${particle.sourceId}:${index}:size`) * 3.25
-        + (particle.twinkle > 0.86 ? 0.65 : 0);
+      // Brand grain: fine dust, a denser bright heart carried by size too.
+      sizes[index] = 0.95
+        + stableUnit(`${particle.sourceId}:${index}:size`) * 2.2
+        + (particle.twinkle > 0.86 ? 0.45 : 0)
+        + (particle.core ? (1 - particle.radial) * 0.8 : 0);
       alphas[index] = particle.alpha;
       glows[index] = particle.glow;
       sourceIndices[index] = particle.sourceIndex;
@@ -5244,6 +5276,7 @@ class UniverseForceSceneEngine {
     const entering = this.updateNodeEntries(now);
     const timelineMoving = this.updateTimelineMotions(now);
     const flightMoving = this.updateTemporalFlight(now);
+    const parallaxMoving = this.updatePointerParallax();
     this.updateVisualLayout(now);
     const nebulaAnimating = this.updateNebulaAnimation(now);
     this.updateLabels(now);
@@ -5252,6 +5285,7 @@ class UniverseForceSceneEngine {
       entering
       || timelineMoving
       || flightMoving
+      || parallaxMoving
       || nebulaAnimating
       || now < this.loopKeepAliveUntil
     ) {
@@ -5260,6 +5294,46 @@ class UniverseForceSceneEngine {
       this.host.dataset.universeLoop = "idle";
     }
   };
+
+  /**
+   * Brand-style pointer parallax: the gaze leans faintly toward the cursor,
+   * eased every frame, applied as deltas to the orbit target so it composes
+   * with the user's own drags. Bounded to a whisper — alive, never floaty.
+   */
+  private updatePointerParallax() {
+    const target = this.controls.target;
+    if (!target) return false;
+    const width = Math.max(1, this.host.clientWidth);
+    const height = Math.max(1, this.host.clientHeight);
+    const active = this.browseGazeApplied
+      && !this.reducedMotion
+      && this.pointerActive
+      && !this.paused;
+    const ndcX = THREE.MathUtils.clamp((this.pointerX / width - 0.5) * 2, -1, 1);
+    const ndcY = THREE.MathUtils.clamp((this.pointerY / height - 0.5) * 2, -1, 1);
+    const desiredX = active ? ndcX * BROWSE_PARALLAX_X : 0;
+    const desiredY = active ? -ndcY * BROWSE_PARALLAX_Y : 0;
+    const nextX = THREE.MathUtils.lerp(
+      this.parallaxApplied.x,
+      desiredX,
+      BROWSE_PARALLAX_RESPONSE,
+    );
+    const nextY = THREE.MathUtils.lerp(
+      this.parallaxApplied.y,
+      desiredY,
+      BROWSE_PARALLAX_RESPONSE,
+    );
+    const dx = nextX - this.parallaxApplied.x;
+    const dy = nextY - this.parallaxApplied.y;
+    if (Math.abs(dx) < 0.002 && Math.abs(dy) < 0.002) return false;
+    this.parallaxApplied = { x: nextX, y: nextY };
+    const camera = this.graph.camera();
+    camera.updateMatrixWorld();
+    const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+    const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1).normalize();
+    target.addScaledVector(right, dx).addScaledVector(up, dy);
+    return true;
+  }
 
   /**
    * Camera-relative presence along the flight axis. Whatever the camera

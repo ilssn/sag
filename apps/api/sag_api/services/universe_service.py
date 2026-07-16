@@ -782,7 +782,7 @@ async def universe_timeline(
             page = await engine_manager.universe_timeline(
                 source.sag_source_config_id,
                 source=source,
-                limit=max(1, min(int(limit), 6)),
+                limit=max(1, min(int(limit), 24)),
                 entity_limit=settings.universe_event_entity_limit,
                 direction=direction,
                 cursor=cursor,

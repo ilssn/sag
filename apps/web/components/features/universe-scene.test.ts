@@ -792,8 +792,8 @@ describe("universe scene production invariants", () => {
     // Inside a source the wheel's "deeper" must stay roughly ahead: rotation
     // is a bounded human glance, applied after the entry dive lands and
     // released the moment the session leaves or switches sources.
-    expect(source).toContain("const BROWSE_GAZE_AZIMUTH_RAD = 0.42");
-    expect(source).toContain("const BROWSE_GAZE_POLAR_RAD = 0.3");
+    expect(source).toContain("const BROWSE_GAZE_AZIMUTH_RAD = 0.3");
+    expect(source).toContain("const BROWSE_GAZE_POLAR_RAD = 0.22");
     expect(source).toContain("private applyBrowseGaze()");
     expect(source).toContain("private releaseBrowseGaze()");
     expect(source).toContain(
@@ -896,7 +896,7 @@ describe("universe scene production invariants", () => {
       "private updateNebulaPositions()",
     );
 
-    expect(nebula).toContain("const budgetCap = mobile ? 1_200 : 3_000");
+    expect(nebula).toContain("const budgetCap = mobile ? 2_000 : 6_000");
     expect(nebula).toContain("const budget = Math.min(");
     expect(nebula).toContain("this.host.dataset.universeNebulaBudgetCap");
     expect(nebula).toContain("this.host.dataset.universeNebulaBudget");

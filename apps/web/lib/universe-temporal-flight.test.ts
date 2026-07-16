@@ -211,7 +211,7 @@ describe("universe temporal flight", () => {
     };
 
     // Mid-window is quiet at rest, but flying fast toward the old edge pages
-    // now: 900 units/s × 0.35 s lead crosses the far threshold from anywhere
+    // now: 900 units/s × 0.5 s lead crosses the far threshold from anywhere
     // in this window.
     expect(planUniverseTemporalFlightFollow({ ...window, depth: 780 })).toBeNull();
     expect(planUniverseTemporalFlightFollow({
@@ -229,7 +229,7 @@ describe("universe temporal flight", () => {
     expect(planUniverseTemporalFlightFollow({
       ...window,
       depth: 540,
-      velocity: 900,
+      velocity: 500,
     })).toBeNull();
   });
 

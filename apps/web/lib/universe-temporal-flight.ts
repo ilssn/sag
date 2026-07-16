@@ -67,7 +67,7 @@ export interface UniverseTemporalFlightPresence {
 /** One 120px wheel notch flies roughly this share of two packages. */
 export const UNIVERSE_FLIGHT_UNITS_PER_WHEEL_PIXEL = 0.9;
 /** How far ahead (in seconds of current velocity) the window follow leads. */
-export const UNIVERSE_FLIGHT_FOLLOW_LEAD_S = 0.35;
+export const UNIVERSE_FLIGHT_FOLLOW_LEAD_S = 0.5;
 /** Atmosphere ahead of the camera: full presence within, gone beyond. */
 const PRESENCE_AHEAD_FULL_EVENTS = 1.5;
 const PRESENCE_AHEAD_FAR_EVENTS = 8;

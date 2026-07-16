@@ -125,7 +125,7 @@ class UniverseExpandIn(BaseModel):
 class UniverseTimelineIn(BaseModel):
     epoch: int = Field(ge=1)
     source_id: str = Field(min_length=1, max_length=64)
-    limit: int = Field(default=6, ge=1, le=6)
+    limit: int = Field(default=6, ge=1, le=24)
     direction: UniverseTimelineDirection = "older"
     cursor: str | None = Field(default=None, max_length=2048)
     snapshot_id: str | None = Field(default=None, max_length=2048)
