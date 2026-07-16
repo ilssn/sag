@@ -51,7 +51,9 @@ import {
   UNIVERSE_DETAIL_EVENT,
   UNIVERSE_INTERACTION_EVENT,
   UNIVERSE_RESET_EVENT,
+  UNIVERSE_RESUME_EVENT,
   UNIVERSE_SOURCE_FOCUS_EVENT,
+  dispatchUniverseContext,
 } from "@/lib/universe-events";
 import { cn } from "@/lib/utils";
 import type { WorkspaceSection } from "@/lib/workspace";
@@ -404,10 +406,31 @@ export function Pet({
   }, [appMode]);
 
   React.useEffect(() => {
+    const section = workspaceSection === "search" || workspaceSection === "answer"
+      ? workspaceSection
+      : null;
+    const active = appMode === "explore"
+      && open
+      && miniView === "workspace"
+      && section !== null;
+    dispatchUniverseContext({ active, section: active ? section : null });
+    return () => {
+      if (active) dispatchUniverseContext({ active: false, section: null });
+    };
+  }, [appMode, miniView, open, workspaceSection]);
+
+  React.useEffect(() => {
     if (appMode !== "explore") return;
     const closeForCanvasGesture = () => {
       setOpen(false);
       setPetOverlay("none");
+    };
+    const closeForReset = (event: Event) => {
+      const owner = (event as CustomEvent<{ owner?: string }>).detail?.owner;
+      // Search is a contextual workspace inside exploration. Its lifecycle
+      // must not dismiss the panel that is presenting the search itself.
+      if (owner?.startsWith("search")) return;
+      closeForCanvasGesture();
     };
     const closeOnSourceChange = (event: Event) => {
       const detail = (event as CustomEvent<{
@@ -423,11 +446,13 @@ export function Pet({
       }
     };
     window.addEventListener(UNIVERSE_INTERACTION_EVENT, closeForCanvasGesture);
-    window.addEventListener(UNIVERSE_RESET_EVENT, closeForCanvasGesture);
+    window.addEventListener(UNIVERSE_RESET_EVENT, closeForReset);
+    window.addEventListener(UNIVERSE_RESUME_EVENT, closeForCanvasGesture);
     window.addEventListener(UNIVERSE_SOURCE_FOCUS_EVENT, closeOnSourceChange);
     return () => {
       window.removeEventListener(UNIVERSE_INTERACTION_EVENT, closeForCanvasGesture);
-      window.removeEventListener(UNIVERSE_RESET_EVENT, closeForCanvasGesture);
+      window.removeEventListener(UNIVERSE_RESET_EVENT, closeForReset);
+      window.removeEventListener(UNIVERSE_RESUME_EVENT, closeForCanvasGesture);
       window.removeEventListener(UNIVERSE_SOURCE_FOCUS_EVENT, closeOnSourceChange);
     };
   }, [appMode]);

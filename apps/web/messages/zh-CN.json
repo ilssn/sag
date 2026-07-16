@@ -881,6 +881,7 @@
       "backToWorkspace": "返回迷你工作台",
       "assistantSettings": "助手设置",
       "close": "关闭迷你面板",
+      "returnToExplore": "返回图谱探索",
       "resize": "调整迷你面板大小"
     },
     "search": {
@@ -1031,7 +1032,7 @@
       "browseContinue": "滚动继续探索时间；也可使用下方按钮精确前进或回退",
       "clickStart": "选择信息源开始探索",
       "browseStart": "选择信息源后，滚动进入时间探索",
-      "title": "3D 时间探索",
+      "title": "4D知识宇宙探索",
       "events": "已查询事件 / 来源总量",
       "entities": "当前缓存实体 / 来源总量",
       "sourceComplete": "已完成 {source} 的全部时间轴探索；共查询 {events, number} 个事件，当前缓存 {entities, number} 个实体"
@@ -1115,6 +1116,9 @@
       "home": "返回星系总览",
       "homeHint": "离开当前星系，回到知识宇宙全景",
       "origin": "快速回到当前星系原点",
+      "answerContext": "问答模式 · 当前探索已保留",
+      "searchContext": "搜索模式 · 当前探索已保留",
+      "returnToExplore": "返回图谱探索",
       "playTimeline": "自动播放时间线",
       "pauseTimeline": "暂停自动播放",
       "orderOlder": "倒序：最新 → 更早",

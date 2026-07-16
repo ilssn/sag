@@ -16,6 +16,10 @@ const miniWorkspaceSource = readFileSync(
   new URL("./pet-mini-workspace.tsx", import.meta.url),
   "utf8",
 );
+const petSource = readFileSync(
+  new URL("./pet.tsx", import.meta.url),
+  "utf8",
+);
 
 function sourceBetween(start: string, end: string) {
   const startIndex = source.indexOf(start);
@@ -181,6 +185,23 @@ describe("knowledge universe production interaction policy", () => {
     expect(miniWorkspaceSource).toContain("dispatchUniverseFocus(item.kind, item.id, item.source_id, { lock: true })");
     expect(miniWorkspaceSource).toContain('t("detail.previousEvent")');
     expect(miniWorkspaceSource).toContain('t("detail.nextEvent")');
+  });
+
+  it("keeps search and answer contextual while a timeline browse session is active", () => {
+    const activation = sourceBetween(
+      "React.useEffect(() => {\n    const hasRetainedBrowseSession",
+      "const onFocus = (event: Event) =>",
+    );
+    expect(activation).toContain('origin !== "browse" && hasRetainedBrowseSession()');
+    expect(activation).toContain('value?.owner?.startsWith("search")');
+    expect(activation).toContain("sourceSessionRef.current = null");
+    expect(activation.indexOf('origin !== "browse" && hasRetainedBrowseSession()'))
+      .toBeLessThan(activation.indexOf("sourceSessionRef.current = null"));
+    expect(source).toContain('data-universe-context-return="true"');
+    expect(source).toContain("onClick={dispatchUniverseResume}");
+    expect(petSource).toContain("dispatchUniverseContext({ active, section:");
+    expect(petSource).toContain("UNIVERSE_INTERACTION_EVENT, closeForCanvasGesture");
+    expect(miniWorkspaceSource).not.toContain("data-explore-context-status");
   });
 
   it("keeps autoplay bounded by the existing cached timeline", () => {
@@ -700,7 +721,7 @@ describe("knowledge universe production interaction policy", () => {
   it("automatically reloads one fresh root page after snapshot invalidation", () => {
     const invalidation = sourceBetween(
       "const invalidateSourceSnapshot = React.useCallback(",
-      "React.useEffect(() => {\n    const onActivate",
+      "const onActivate = (event: Event) => {",
     );
     expect(invalidation).toContain("snapshotReloadAttemptsRef.current");
     expect(invalidation).toContain("if (reloadAttempt > 1)");
@@ -808,7 +829,7 @@ describe("knowledge universe production interaction policy", () => {
     // switch is settling. That state must disable navigation, not unmount the
     // rail and make it appear to have vanished.
     expect(controls).not.toContain("interactive && timelineJourney.enabled");
-    expect(controls).toContain("timelineControlsVisible && (");
+    expect(controls).toContain("timelineControlsVisible && !contextualWorkspaceActive && (");
     expect(controls).not.toMatch(/timelineJourney\.has(?:Previous|Next)\s*&&\s*\(/);
 
     expect(controls).toContain('onClick={() => moveTimelineManually("previous")}');

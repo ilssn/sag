@@ -881,6 +881,7 @@
       "backToWorkspace": "Back to mini workspace",
       "assistantSettings": "Assistant settings",
       "close": "Close mini workspace",
+      "returnToExplore": "Return to graph exploration",
       "resize": "Resize mini workspace"
     },
     "search": {
@@ -1031,7 +1032,7 @@
       "browseContinue": "Scroll to continue through time, or use the controls below for precise paging",
       "clickStart": "Choose a source to start exploring",
       "browseStart": "Choose a source, then scroll to begin traveling through time",
-      "title": "3D time exploration",
+      "title": "4D knowledge universe exploration",
       "events": "Queried events / source total",
       "entities": "Resident entities / source total",
       "sourceComplete": "Finished exploring {source}’s timeline; queried {events, plural, one {# event} other {# events}} with {entities, plural, one {# entity} other {# entities}} currently resident"
@@ -1115,6 +1116,9 @@
       "home": "Return to galaxy overview",
       "homeHint": "Leave this galaxy and return to the knowledge universe",
       "origin": "Return to this galaxy's origin",
+      "answerContext": "Answer mode · exploration retained",
+      "searchContext": "Search mode · exploration retained",
+      "returnToExplore": "Return to graph exploration",
       "playTimeline": "Play timeline automatically",
       "pauseTimeline": "Pause timeline playback",
       "orderOlder": "Descending: newest → earlier",

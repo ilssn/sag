@@ -33,15 +33,20 @@ import type {
 } from "@/lib/types";
 import {
   UNIVERSE_ACTIVATE_EVENT,
+  UNIVERSE_CONTEXT_EVENT,
   UNIVERSE_FOCUS_EVENT,
   dispatchUniverseDetail,
   dispatchUniverseInteraction,
+  dispatchUniverseResume,
+  readUniverseContext,
   UNIVERSE_RESET_EVENT,
+  UNIVERSE_RESUME_EVENT,
   UNIVERSE_SOURCE_FOCUS_EVENT,
   dispatchUniverseAsk,
   dispatchUniversePatch,
   dispatchUniversePatchReset,
   dispatchUniverseView,
+  type UniverseContextState,
 } from "@/lib/universe-events";
 import {
   UNIVERSE_RESIDENT_BUDGET,
@@ -751,6 +756,8 @@ export function KnowledgeUniverse({
   const [selectedKey, setSelectedKeyState] = React.useState<string | null>(null);
   const [lockedKey, setLockedKeyState] = React.useState<string | null>(null);
   const [timelinePlaying, setTimelinePlaying] = React.useState(false);
+  const [contextWorkspace, setContextWorkspace] =
+    React.useState<UniverseContextState>(readUniverseContext);
   const [timelinePlaybackOrder, setTimelinePlaybackOrder] =
     React.useState<UniverseTimelinePlaybackOrder>("reverse");
   const [documentHidden, setDocumentHidden] = React.useState(false);
@@ -771,6 +778,15 @@ export function KnowledgeUniverse({
     React.useState<UniverseSceneUnavailableReason | null>(null);
   const [sceneAttempt, setSceneAttempt] = React.useState(0);
   const sceneRetryFrameRef = React.useRef<number | null>(null);
+
+  React.useEffect(() => {
+    const onContext = (event: Event) => {
+      const value = (event as CustomEvent<UniverseContextState>).detail;
+      if (value) setContextWorkspace(value);
+    };
+    window.addEventListener(UNIVERSE_CONTEXT_EVENT, onContext);
+    return () => window.removeEventListener(UNIVERSE_CONTEXT_EVENT, onContext);
+  }, []);
 
   // The loaded browse session is the data authority for timeline paging.
   // `activePartition` is intentionally kept as camera/presentation state so
@@ -1365,10 +1381,17 @@ export function KnowledgeUniverse({
   }, [bundleWindow, clearTimelineSettle, commitWorkingSet, refreshLoadProgress, setLockedKey, setSelectedKey, sourceById, t]);
 
   React.useEffect(() => {
+    const hasRetainedBrowseSession = () => Boolean(
+      sourceSessionRef.current && activationOriginRef.current === "browse",
+    );
     const onActivate = (event: Event) => {
       const activation = (event as CustomEvent<UniverseActivation>).detail;
       const epoch = activation?.epoch ?? epochRef.current + 1;
       if (!activation || epoch < epochRef.current) return;
+      const origin = activation.origin ?? "assistant";
+      if (origin !== "browse" && hasRetainedBrowseSession()) {
+        return;
+      }
       epochRef.current = epoch;
       expandAbortRef.current?.abort();
       expandAbortRef.current = null;
@@ -1397,7 +1420,6 @@ export function KnowledgeUniverse({
       setLockedKey(null);
       setSelectedKey(null);
       setSourceHits(activation.source_hits ?? []);
-      const origin = activation.origin ?? "assistant";
       activationOriginRef.current = origin;
       setActivationOrigin(origin);
       setMoreHint("");
@@ -1422,8 +1444,17 @@ export function KnowledgeUniverse({
       }
     };
     const onReset = (event: Event) => {
-      const value = (event as CustomEvent<{ epoch: number }>).detail;
+      const value = (event as CustomEvent<{ epoch: number; owner?: string }>).detail;
+      if (value?.owner?.startsWith("search") && hasRetainedBrowseSession()) {
+        return;
+      }
       resetScene(value?.epoch ?? epochRef.current + 1);
+    };
+    const onResume = () => {
+      graphRef.current?.clearSelection();
+      setLockedKey(null);
+      setSelectedKey(null);
+      setMoreHint("");
     };
     const onFocus = (event: Event) => {
       const value = (
@@ -1457,10 +1488,12 @@ export function KnowledgeUniverse({
     };
     window.addEventListener(UNIVERSE_ACTIVATE_EVENT, onActivate);
     window.addEventListener(UNIVERSE_RESET_EVENT, onReset);
+    window.addEventListener(UNIVERSE_RESUME_EVENT, onResume);
     window.addEventListener(UNIVERSE_FOCUS_EVENT, onFocus);
     return () => {
       window.removeEventListener(UNIVERSE_ACTIVATE_EVENT, onActivate);
       window.removeEventListener(UNIVERSE_RESET_EVENT, onReset);
+      window.removeEventListener(UNIVERSE_RESUME_EVENT, onResume);
       window.removeEventListener(UNIVERSE_FOCUS_EVENT, onFocus);
     };
   }, [
@@ -1474,6 +1507,7 @@ export function KnowledgeUniverse({
     resetScene,
     setLockedKey,
     setSelectedKey,
+    t,
   ]);
 
   const graphData = React.useMemo(() => {
@@ -3032,6 +3066,11 @@ export function KnowledgeUniverse({
     && browseSessionSourceId
     && timelineWindow,
   );
+  const contextualWorkspaceActive = Boolean(
+    timelineControlsVisible
+    && contextWorkspace.active
+    && contextWorkspace.section,
+  );
 
   const handleTimelineSettled = React.useCallback((revision: number) => {
     const session = sourceSessionRef.current;
@@ -3754,7 +3793,30 @@ export function KnowledgeUniverse({
         </div>
       )}
 
-      {timelineControlsVisible && (
+      {timelineControlsVisible && contextualWorkspaceActive && (
+        <div
+          className="absolute bottom-5 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-amber-400/25 bg-background/82 p-1.5 pl-3 shadow-soft backdrop-blur-xl"
+          data-universe-context-return="true"
+        >
+          <span className="whitespace-nowrap text-[10px] text-muted-foreground">
+            {t(contextWorkspace.section === "answer"
+              ? "controls.answerContext"
+              : "controls.searchContext")}
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 rounded-full border-amber-400/30 bg-amber-400/10 px-3 text-[11px] text-amber-700 hover:bg-amber-400/15 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200"
+            onClick={dispatchUniverseResume}
+          >
+            <Orbit className="size-3.5" />
+            {t("controls.returnToExplore")}
+          </Button>
+        </div>
+      )}
+
+      {timelineControlsVisible && !contextualWorkspaceActive && (
         <TooltipProvider delayDuration={200}>
           <div
             className="absolute bottom-5 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border/65 bg-background/76 p-1.5 shadow-soft backdrop-blur-xl"
