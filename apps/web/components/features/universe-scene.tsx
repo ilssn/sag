@@ -451,6 +451,7 @@ const NEBULA_CORRIDOR_WRAP_SPAN = 2400;
 const NEBULA_GLOW_POINT_SIZE_CSS_MOBILE = 18;
 const HIGHLIGHT_FLOW_FRAME_MS = 1000 / 30;
 const TIMELINE_WHEEL_LABEL_SELECTOR = "[data-universe-node-id]";
+const MINI_WORKSPACE_SELECTOR = "[data-mini-workspace='true']";
 const MAX_RENDER_PIXELS_DESKTOP = 2_400_000;
 const MAX_RENDER_PIXELS_MOBILE = 1_100_000;
 const UNIVERSE_CAMERA_MIN_DISTANCE = 24;
@@ -5820,6 +5821,11 @@ class UniverseForceSceneEngine {
   private timelineWheelSurface(target: EventTarget | null): "canvas" | "label" | null {
     if (target === this.rendererCanvas) return "canvas";
     if (!(target instanceof Element) || !this.host.contains(target)) return null;
+    // The pet workspace is a sibling overlay in the explore shell. Its wheel
+    // and pointer events must never be interpreted as graph gestures; in
+    // particular, submitting an answer may update/focus the graph while the
+    // user is still scrolling the answer transcript.
+    if (target.closest(MINI_WORKSPACE_SELECTOR)) return null;
     const label = target.closest<HTMLElement>(TIMELINE_WHEEL_LABEL_SELECTOR);
     return label && this.labelLayer.contains(label) ? "label" : null;
   }

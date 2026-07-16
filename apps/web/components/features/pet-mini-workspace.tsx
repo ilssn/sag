@@ -1207,14 +1207,14 @@ export function PetMiniWorkspace({
           <div className="flex h-full min-h-0 flex-col">
             <ScrollArea className="min-h-0 flex-1">
               <AnimatePresence mode="wait" initial={false}>
-              {detailTarget ? (
-                <motion.div
-                  key={`${detailTarget.kind}:${detailTarget.id}`}
-                  initial={{ opacity: 0, x: 10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -10 }}
-                  className="p-4"
-                >
+                {detailTarget ? (
+                  <motion.div
+                    key={`${detailTarget.kind}:${detailTarget.id}`}
+                    initial={{ opacity: 0, x: 10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -10 }}
+                    className="p-4"
+                  >
                   {detailTarget.kind === "citation" ? (
                     <div className="space-y-4">
                       <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
@@ -1311,8 +1311,8 @@ export function PetMiniWorkspace({
                       {detailError || t("detail.unavailable")}
                     </div>
                   )}
-                </motion.div>
-              ) : null}
+                  </motion.div>
+                ) : null}
               </AnimatePresence>
             </ScrollArea>
             {eventNavigation && (

@@ -727,6 +727,8 @@ describe("knowledge universe production interaction policy", () => {
       "const moveTimelineManually = React.useCallback(",
     );
     expect(click).toContain("lockNodeForReading(concreteNode)");
+    expect(click).toContain("lockedKeyRef.current === concreteNode.id");
+    expect(click).toContain("clearSelection()");
     expect(source).toContain("graphRef.current?.clearSelection()");
     expect(click).not.toContain("workingRef.current");
     expect(click).not.toContain("setUniversePinnedNetwork(");

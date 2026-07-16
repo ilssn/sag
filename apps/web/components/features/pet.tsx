@@ -52,7 +52,6 @@ import {
   UNIVERSE_INTERACTION_EVENT,
   UNIVERSE_RESET_EVENT,
   UNIVERSE_SOURCE_FOCUS_EVENT,
-  UNIVERSE_VIEW_EVENT,
 } from "@/lib/universe-events";
 import { cn } from "@/lib/utils";
 import type { WorkspaceSection } from "@/lib/workspace";
@@ -426,12 +425,10 @@ export function Pet({
     window.addEventListener(UNIVERSE_INTERACTION_EVENT, closeForCanvasGesture);
     window.addEventListener(UNIVERSE_RESET_EVENT, closeForCanvasGesture);
     window.addEventListener(UNIVERSE_SOURCE_FOCUS_EVENT, closeOnSourceChange);
-    window.addEventListener(UNIVERSE_VIEW_EVENT, closeOnSourceChange);
     return () => {
       window.removeEventListener(UNIVERSE_INTERACTION_EVENT, closeForCanvasGesture);
       window.removeEventListener(UNIVERSE_RESET_EVENT, closeForCanvasGesture);
       window.removeEventListener(UNIVERSE_SOURCE_FOCUS_EVENT, closeOnSourceChange);
-      window.removeEventListener(UNIVERSE_VIEW_EVENT, closeOnSourceChange);
     };
   }, [appMode]);
 
