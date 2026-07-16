@@ -110,10 +110,6 @@ import {
   type UniverseTimelineJourney,
   type UniverseSceneView,
 } from "@/components/features/universe-scene";
-import {
-  UniverseNodeDetailPanel,
-  type UniverseNodeDetailPanelText,
-} from "@/components/features/universe-node-detail-panel";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -1431,13 +1427,29 @@ export function KnowledgeUniverse({
     };
     const onFocus = (event: Event) => {
       const value = (
-        event as CustomEvent<{ kind: UniverseNodeKind; id: string; source_id: string }>
+        event as CustomEvent<{
+          kind: UniverseNodeKind;
+          id: string;
+          source_id: string;
+          lock?: boolean;
+        }>
       ).detail;
       if (!value) return;
       clearCameraSchedule();
       const exactKey = universeNodeKey(value.kind, value.id, value.source_id);
       const node = nodeByIdRef.current.get(exactKey);
       if (!node) return;
+      if (value.lock && isConcreteUniverseNode(node)) {
+        setTimelinePlaying(false);
+        if (timelineRequestRef.current?.cause !== "source-entry") {
+          timelineRequestRef.current?.controller.abort();
+        }
+        setLockedKey(node.id);
+        setSelectedKey(node.id);
+        graphRef.current?.lockNode(node.id);
+        if (interactiveRef.current) focusNode(node);
+        return;
+      }
       graphRef.current?.unlockNode();
       setLockedKey(null);
       setSelectedKey(node.id);
@@ -1777,6 +1789,7 @@ export function KnowledgeUniverse({
         // now: the scene computes it per frame from the flight depth, so a
         // package the camera reaches is always fully present.
         timelineBundleId: temporalBundleId,
+        timelineOrder: node.kind === "event" ? timelinePlacement?.index : undefined,
         ...position,
       });
       exactByRaw.set(key, key);
@@ -1922,12 +1935,6 @@ export function KnowledgeUniverse({
     timelineWindowRevision,
     working,
   ]);
-  const selectedNode = React.useMemo(
-    () => selectedKey
-      ? graphData.nodes.find((node) => node.id === selectedKey) ?? null
-      : null,
-    [graphData, selectedKey],
-  );
   React.useEffect(() => {
     const journeyCommit = timelineJourneyCommitRef.current;
     if (
@@ -1941,10 +1948,6 @@ export function KnowledgeUniverse({
     // revision from inheriting a stale forward/backward edge animation.
     timelineJourneyCommitRef.current = null;
   }, [graphData, timelineWindowRevision]);
-  const selectedConcreteNode = React.useMemo(
-    () => isConcreteUniverseNode(selectedNode) ? selectedNode : null,
-    [selectedNode],
-  );
   const visibleGraphCounts = React.useMemo(() => ({
     events: graphData.nodes.filter((node) => node.kind === "event").length,
     entities: graphData.nodes.filter((node) => node.kind === "entity").length,
@@ -1963,32 +1966,6 @@ export function KnowledgeUniverse({
       publishUniverseEntityCategories(entityCategories);
     }
   }, [entityCategories]);
-  const detailNode = selectedConcreteNode;
-  const detailProgress = detailNode
-    ? universeAnchorProgress(
-        working,
-        detailNode.kind,
-        detailNode.rawId,
-        detailNode.sourceId,
-      )
-    : 0;
-  const detailTotal = detailNode
-    ? Math.max(detailProgress, detailNode.relatedCount)
-    : 0;
-  const detailTotalKnown = Boolean(detailNode?.relatedCountKnown);
-  const detailRemaining = detailTotalKnown
-    ? Math.max(0, detailTotal - detailProgress)
-    : null;
-  const detailAnchorKey = detailNode
-    ? universeNodeKey(detailNode.kind, detailNode.rawId, detailNode.sourceId)
-    : null;
-  const detailExhausted = Boolean(
-    detailAnchorKey
-    && expandedAnchorsRef.current.has(detailAnchorKey)
-    && !cursorsRef.current.has(detailAnchorKey)
-  );
-  const detailCanExpand = !detailExhausted
-    && (!detailTotalKnown || (detailRemaining ?? 0) > 0);
   const visibleTimelineEventNodes = React.useMemo(() => {
     const deque = sourceSessionRef.current?.timeline.deque;
     if (!deque || !timelineWindow) return [];
@@ -2005,45 +1982,6 @@ export function KnowledgeUniverse({
         node && node.kind === "event",
       ));
   }, [graphData.nodes, timelineWindow]);
-  const selectedTimelineEventIndex = detailNode?.kind === "event"
-    ? visibleTimelineEventNodes.findIndex((node) => node.id === detailNode.id)
-    : -1;
-  const previousTimelineEvent = selectedTimelineEventIndex > 0
-    ? visibleTimelineEventNodes[selectedTimelineEventIndex - 1]
-    : null;
-  const nextTimelineEvent = selectedTimelineEventIndex >= 0
-    && selectedTimelineEventIndex < visibleTimelineEventNodes.length - 1
-    ? visibleTimelineEventNodes[selectedTimelineEventIndex + 1]
-    : null;
-  const detailStartTime = React.useMemo(() => {
-    if (detailNode?.kind !== "event") return null;
-    if (!timelineWindow) return null;
-    const deque = sourceSessionRef.current?.timeline.deque;
-    return deque?.bundles.find((bundle) =>
-      bundle.event.id === detailNode.rawId
-      && bundle.event.source_id === detailNode.sourceId)?.event.start_time ?? null;
-  }, [detailNode, timelineWindow]);
-  const detailPanelText = React.useMemo<UniverseNodeDetailPanelText>(() => ({
-    panelLabel: t("detailPanel.aria"),
-    event: t("detailPanel.event"),
-    entity: t("detailPanel.entity"),
-    details: t("detailPanel.details"),
-    sourceEvidence: t("detailPanel.sourceEvidence"),
-    sourceDocument: t("detailPanel.sourceDocument"),
-    sourceSection: t("detailPanel.sourceSection"),
-    relatedProgress: t("detailPanel.relatedProgress"),
-    exploreMore: t("detailPanel.exploreMore"),
-    askAi: t("detailPanel.askAi"),
-    previousEvent: t("detailPanel.previousEvent"),
-    nextEvent: t("detailPanel.nextEvent"),
-    close: t("detailPanel.close"),
-    loading: t("detailPanel.loading"),
-    loadFailed: t("detailPanel.loadFailed"),
-    retry: t("detailPanel.retry"),
-    noDetails: t("detailPanel.noDetails"),
-    noEvidence: t("detailPanel.noEvidence"),
-    unknownSource: t("detailPanel.localKnowledge"),
-  }), [t]);
 
   const requestExpansion = React.useCallback(
     (
@@ -3171,10 +3109,34 @@ export function KnowledgeUniverse({
     [],
   );
 
+  const clearSelection = React.useCallback(() => {
+    graphRef.current?.clearSelection();
+    setLockedKey(null);
+    setSelectedKey(null);
+    dispatchUniverseInteraction();
+  }, [setLockedKey, setSelectedKey]);
+
+  const timelineNavigationForNode = React.useCallback(
+    (node: UniverseConcrete3DNode) => {
+      if (node.kind !== "event") return undefined;
+      const index = visibleTimelineEventNodes.findIndex((item) => item.id === node.id);
+      if (index < 0) return undefined;
+      return {
+        items: visibleTimelineEventNodes.map((item) => ({
+          kind: "event" as const,
+          id: item.rawId,
+          source_id: item.sourceId,
+        })),
+        index,
+      };
+    },
+    [visibleTimelineEventNodes],
+  );
+
   const lockNodeForReading = React.useCallback(
     (node: UniverseConcrete3DNode) => {
       setTimelinePlaying(false);
-      // Locking is presentation-only. The detail panel reads through the node
+      // Locking is presentation-only. The mini workspace reads through the
       // detail endpoint and expansion stays behind the explicit action.
       if (timelineRequestRef.current?.cause !== "source-entry") {
         timelineRequestRef.current?.controller.abort();
@@ -3193,24 +3155,28 @@ export function KnowledgeUniverse({
         activatePartition(node as Universe3DNode);
         return;
       }
+      const concreteNode = node as UniverseConcrete3DNode;
+      if (lockedKeyRef.current === concreteNode.id) {
+        clearSelection();
+        return;
+      }
       // A deliberate card activation is the explicit affordance that brings
       // the contextual pet workspace back after a canvas gesture closed it.
-      dispatchUniverseDetail(node.kind, node.rawId, node.sourceId);
-      lockNodeForReading(node as UniverseConcrete3DNode);
+      dispatchUniverseDetail(
+        concreteNode.kind,
+        concreteNode.rawId,
+        concreteNode.sourceId,
+        timelineNavigationForNode(concreteNode),
+      );
+      lockNodeForReading(concreteNode);
     },
-    [activatePartition, lockNodeForReading],
+    [activatePartition, clearSelection, lockNodeForReading, timelineNavigationForNode],
   );
-
-  const clearSelection = React.useCallback(() => {
-    graphRef.current?.clearSelection();
-    setLockedKey(null);
-    setSelectedKey(null);
-  }, [setLockedKey, setSelectedKey]);
 
   const moveTimelineManually = React.useCallback((direction: "next" | "previous") => {
     setTimelinePlaying(false);
-    dispatchUniverseInteraction();
     if (lockedKeyRef.current) clearSelection();
+    else dispatchUniverseInteraction();
     window.requestAnimationFrame(() => {
       void graphRef.current?.moveTimeline(direction);
     });
@@ -3550,8 +3516,8 @@ export function KnowledgeUniverse({
             onSourceLod={handleSourceLod}
             onSelectionClear={clearSelection}
             actionLabels={{
-              exploreMore: t("detailPanel.exploreMore"),
-              askAi: t("detailPanel.askAi"),
+              exploreMore: t("nodeActions.exploreMore"),
+              askAi: t("nodeActions.askAi"),
             }}
             onExploreMore={handleExploreMore}
             onAskNode={handleAskNode}
@@ -3781,47 +3747,6 @@ export function KnowledgeUniverse({
           {error || moreHint}
         </div>
       )}
-
-      <AnimatePresence initial={false}>
-        {interactive && detailNode && (
-          <UniverseNodeDetailPanel
-            key={`${detailNode.kind}:${detailNode.sourceId}:${detailNode.rawId}`}
-            node={{
-              kind: detailNode.kind,
-              rawId: detailNode.rawId,
-              sourceId: detailNode.sourceId,
-              label: detailNode.label,
-              description: detailNode.description,
-              category: detailNode.category,
-              startTime: detailStartTime,
-              relatedProgress: detailProgress,
-              relatedTotal: detailTotalKnown ? detailTotal : null,
-            }}
-            locale={locale}
-            text={detailPanelText}
-            onClose={clearSelection}
-            onExploreMore={() => void expandNode(detailNode)}
-            onAsk={() => dispatchUniverseAsk(detailNode)}
-            onPreviousEvent={previousTimelineEvent
-              ? () => lockNodeForReading(previousTimelineEvent)
-              : undefined}
-            onNextEvent={nextTimelineEvent
-              ? () => lockNodeForReading(nextTimelineEvent)
-              : undefined}
-            previousEventAvailable={Boolean(previousTimelineEvent)}
-            nextEventAvailable={Boolean(nextTimelineEvent)}
-            eventPositionLabel={selectedTimelineEventIndex >= 0
-              ? t("detailPanel.eventPosition", {
-                  current: selectedTimelineEventIndex + 1,
-                  total: visibleTimelineEventNodes.length,
-                })
-              : undefined}
-            canExploreMore={detailCanExpand}
-            exploreMoreLoading={expandingKey === detailNode.id}
-            className="sm:bottom-5 sm:left-5 sm:top-44"
-          />
-        )}
-      </AnimatePresence>
 
       {(loading || webglAvailable === null) && (
         <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center">

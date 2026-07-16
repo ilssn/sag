@@ -12,8 +12,8 @@ const source = readFileSync(
   new URL("./knowledge-universe.tsx", import.meta.url),
   "utf8",
 );
-const detailPanelSource = readFileSync(
-  new URL("./universe-node-detail-panel.tsx", import.meta.url),
+const miniWorkspaceSource = readFileSync(
+  new URL("./pet-mini-workspace.tsx", import.meta.url),
   "utf8",
 );
 
@@ -114,10 +114,10 @@ describe("knowledge universe production interaction policy", () => {
   it("keeps concrete-node clicks presentation-only", () => {
     const handler = sourceBetween(
       "const handleNodeClick = React.useCallback(",
-      "const clearSelection = React.useCallback(",
+      "const moveTimelineManually = React.useCallback(",
     );
     expect(handler).toContain("activatePartition(node as Universe3DNode)");
-    expect(handler).toContain("lockNodeForReading(node as UniverseConcrete3DNode)");
+    expect(handler).toContain("lockNodeForReading(concreteNode)");
     expect(source).toContain("graphRef.current?.lockNode(node.id)");
     expect(source).toContain("graphRef.current?.clearSelection()");
     expect(handler).not.toContain("expandNode(");
@@ -128,16 +128,17 @@ describe("knowledge universe production interaction policy", () => {
   it("clears a canvas lock without changing graph data or the camera", () => {
     const clearSelection = sourceBetween(
       "const clearSelection = React.useCallback(",
-      "const moveTimelineManually = React.useCallback(",
+      "const timelineNavigationForNode = React.useCallback(",
     );
     const handler = sourceBetween(
       "const handleNodeClick = React.useCallback(",
-      "const clearSelection = React.useCallback(",
+      "const moveTimelineManually = React.useCallback(",
     );
 
     expect(clearSelection).toContain("graphRef.current?.clearSelection()");
     expect(clearSelection).toContain("setLockedKey(null)");
     expect(clearSelection).toContain("setSelectedKey(null)");
+    expect(clearSelection).toContain("dispatchUniverseInteraction()");
     expect(clearSelection).not.toMatch(/focusOverview\(|resetOverview\(|setData\(|loadSourceTimelinePage\(|api\./);
     expect(handler).not.toContain("commitWorkingSet(");
     expect(handler).not.toContain("setUniversePinnedNetwork(");
@@ -146,39 +147,40 @@ describe("knowledge universe production interaction policy", () => {
   });
 
   it("keeps transient hover inside the scene instead of mounting a second reading panel", () => {
-    expect(source).toContain("const detailNode = selectedConcreteNode;");
     expect(source).toContain("const handleSceneHover = React.useCallback(() => undefined, [])");
     expect(source).not.toContain("hoveredConcreteKey");
     expect(source).not.toContain("hoveredConcreteNode");
+    expect(source).not.toContain("UniverseNodeDetailPanel");
   });
 
   it("derives hover exploration progress without loading and reserves actions for click lock", () => {
     const graphProjection = sourceBetween(
       "const graphData = React.useMemo",
-      "const selectedNode = React.useMemo",
+      "const visibleGraphCounts = React.useMemo",
     );
     const handler = sourceBetween(
       "const handleNodeClick = React.useCallback(",
-      "const clearSelection = React.useCallback(",
+      "const moveTimelineManually = React.useCallback(",
     );
     expect(graphProjection).toContain("relatedProgressByKey");
     expect(graphProjection).toContain("relatedProgress,");
     expect(graphProjection).toContain("canExploreMore:");
-    expect(handler).toContain("lockNodeForReading(node as UniverseConcrete3DNode)");
+    expect(handler).toContain("lockNodeForReading(concreteNode)");
     expect(handler).not.toMatch(/expandNode\(|requestExpansion\(|loadSourceTimelinePage\(|api\./);
-    expect(source).toContain("const detailNode = selectedConcreteNode;");
-    expect(source).toContain("onAsk={() => dispatchUniverseAsk(detailNode)}");
-    expect(source).toContain("onExploreMore={() => void expandNode(detailNode)}");
+    expect(source).toContain("onAskNode={handleAskNode}");
+    expect(source).toContain("onExploreMore={handleExploreMore}");
   });
 
-  it("uses one left reading panel without the legacy lower-left inspector", () => {
-    expect(source).toContain("<UniverseNodeDetailPanel");
-    expect(detailPanelSource).toContain('data-universe-detail-panel="true"');
+  it("uses the mini workspace as the only reading panel with linked event navigation", () => {
+    expect(source).not.toContain("<UniverseNodeDetailPanel");
+    expect(source).not.toContain('data-universe-detail-panel="true"');
     expect(source).not.toContain('data-universe-inspector="true"');
-    expect(detailPanelSource).toContain("api.universeNode");
-    expect(source).toContain("onAsk={() => dispatchUniverseAsk(detailNode)}");
-    expect(source).toContain("previousEventAvailable={Boolean(previousTimelineEvent)}");
-    expect(source).toContain("nextEventAvailable={Boolean(nextTimelineEvent)}");
+    expect(source).toContain("timelineNavigationForNode(concreteNode)");
+    expect(miniWorkspaceSource).toContain(".universeNode(");
+    expect(miniWorkspaceSource).toContain("const openTimelineEvent = React.useCallback(");
+    expect(miniWorkspaceSource).toContain("dispatchUniverseFocus(item.kind, item.id, item.source_id, { lock: true })");
+    expect(miniWorkspaceSource).toContain('t("detail.previousEvent")');
+    expect(miniWorkspaceSource).toContain('t("detail.nextEvent")');
   });
 
   it("keeps autoplay bounded by the existing cached timeline", () => {
@@ -250,7 +252,8 @@ describe("knowledge universe production interaction policy", () => {
   });
 
   it("keeps expansion behind the explicit detail action", () => {
-    expect(source).toContain("onExploreMore={() => void expandNode(detailNode)}");
+    expect(source).toContain("onExploreMore={handleExploreMore}");
+    expect(source).toContain("void expandNode(node as UniverseConcrete3DNode)");
   });
 
   it("keeps one source session with cache, visible window and working set", () => {
@@ -585,7 +588,7 @@ describe("knowledge universe production interaction policy", () => {
     );
     const graph = sourceBetween(
       "const graphData = React.useMemo(() => {",
-      "const selectedNode = React.useMemo(",
+      "const visibleGraphCounts = React.useMemo(",
     );
     expect(expansion).toContain(
       "browseSession ? residentBudgetRef.current : budgetRef.current",
@@ -651,7 +654,7 @@ describe("knowledge universe production interaction policy", () => {
   it("derives browse root roles from the visible window instead of cached ownership", () => {
     const graph = sourceBetween(
       "const graphData = React.useMemo(() => {",
-      "const selectedNode = React.useMemo(",
+      "const visibleGraphCounts = React.useMemo(",
     );
     expect(graph).toContain("const visibleTimelineNodeKeys = new Set(");
     expect(graph).toContain("const isVisualRoot =");
@@ -721,9 +724,9 @@ describe("knowledge universe production interaction policy", () => {
   it("keeps click lock presentation-only and out of the working-set projection", () => {
     const click = sourceBetween(
       "const handleNodeClick = React.useCallback(",
-      "const clearSelection = React.useCallback(",
+      "const moveTimelineManually = React.useCallback(",
     );
-    expect(click).toContain("lockNodeForReading(node as UniverseConcrete3DNode)");
+    expect(click).toContain("lockNodeForReading(concreteNode)");
     expect(source).toContain("graphRef.current?.clearSelection()");
     expect(click).not.toContain("workingRef.current");
     expect(click).not.toContain("setUniversePinnedNetwork(");
@@ -761,8 +764,8 @@ describe("knowledge universe production interaction policy", () => {
     );
     expect(pruning).not.toContain("universeAnchorProgress(");
     expect(source).not.toContain("residentProgress >= exactNode.relatedCount");
-    expect(source).toContain("expandedAnchorsRef.current.has(detailAnchorKey)");
-    expect(source).toContain("!cursorsRef.current.has(detailAnchorKey)");
+    expect(source).toContain("expandedAnchorsRef.current.has(anchorKey)");
+    expect(source).toContain("!cursorsRef.current.has(key)");
     expect(source).toContain("committedCount < totalCount");
   });
 
@@ -846,7 +849,7 @@ describe("knowledge universe production interaction policy", () => {
     );
     const graph = sourceBetween(
       "const graphData = React.useMemo(() => {",
-      "const selectedNode = React.useMemo(",
+      "const visibleGraphCounts = React.useMemo(",
     );
 
     expect(activation).toContain('activationOriginRef.current = "browse"');

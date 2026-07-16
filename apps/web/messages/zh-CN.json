@@ -916,6 +916,9 @@
       "loading": "正在读取星点",
       "relatedNodes": "关联星点",
       "sourceEvidence": "原文证据",
+      "previousEvent": "上一事件",
+      "nextEvent": "下一事件",
+      "eventPosition": "第 {current, number} / {total, number} 个事件",
       "unavailable": "星点详情暂时不可用"
     }
   },
@@ -1093,30 +1096,9 @@
       "label": "显式探索",
       "description": "搜索结果中滚轮仅用于缩放；锁定节点后，可在详情中选择“探索更多”"
     },
-    "detailPanel": {
-      "aria": "当前知识节点详情",
-      "event": "事件",
-      "entity": "实体",
-      "loading": "正在读取详情",
-      "loadFailed": "详情读取失败",
-      "retry": "重试",
-      "close": "关闭详情并解除锁定",
-      "timeMissing": "时间未标注",
-      "details": "详情",
-      "noDetails": "暂无更多详情",
-      "sourceEvidence": "引用原文",
-      "noEvidence": "暂无可引用原文",
-      "localKnowledge": "本地知识库",
-      "sourceDocument": "来源文档",
-      "sourceSection": "原文章节",
-      "previousEvent": "上一事件",
-      "nextEvent": "下一事件",
-      "eventPosition": "第 {current, number} / {total, number} 个事件",
+    "nodeActions": {
       "exploreMore": "探索更多",
-      "askAi": "AI 问答",
-      "expanding": "正在拓展关联内容",
-      "relatedProgress": "关联探索",
-      "unlockHint": "滚动画布、点击空白处或按 Esc 解除锁定"
+      "askAi": "AI 问答"
     },
     "controls": {
       "currentResult": "回到当前结果",

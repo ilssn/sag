@@ -916,6 +916,9 @@
       "loading": "Loading node",
       "relatedNodes": "Related nodes",
       "sourceEvidence": "Source evidence",
+      "previousEvent": "Previous event",
+      "nextEvent": "Next event",
+      "eventPosition": "Event {current, number} of {total, number}",
       "unavailable": "Node details are temporarily unavailable"
     }
   },
@@ -1093,30 +1096,9 @@
       "label": "Explicit exploration",
       "description": "In search results, the wheel only zooms. Lock a node, then choose Explore more in the details panel."
     },
-    "detailPanel": {
-      "aria": "Current knowledge node details",
-      "event": "Event",
-      "entity": "Entity",
-      "loading": "Loading details",
-      "loadFailed": "Failed to load details",
-      "retry": "Retry",
-      "close": "Close details and unlock",
-      "timeMissing": "Time not specified",
-      "details": "Details",
-      "noDetails": "No further details are available",
-      "sourceEvidence": "Original passage",
-      "noEvidence": "No original passage is available",
-      "localKnowledge": "Local knowledge",
-      "sourceDocument": "Source document",
-      "sourceSection": "Source section",
-      "previousEvent": "Previous event",
-      "nextEvent": "Next event",
-      "eventPosition": "Event {current, number} of {total, number}",
+    "nodeActions": {
       "exploreMore": "Explore more",
-      "askAi": "Ask AI",
-      "expanding": "Expanding related knowledge",
-      "relatedProgress": "Related exploration",
-      "unlockHint": "Scroll the canvas, click empty space, or press Esc to unlock"
+      "askAi": "Ask AI"
     },
     "controls": {
       "currentResult": "Return to current result",

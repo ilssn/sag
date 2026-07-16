@@ -6,6 +6,8 @@ import { usePathname } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import {
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   CircleDot,
   FileText,
   Grip,
@@ -317,6 +319,23 @@ export function PetMiniWorkspace({
   const panelRef = React.useRef<HTMLDivElement>(null);
   const detailTarget = detailTrail[detailTrail.length - 1] ?? null;
   detailTargetRef.current = detailTarget;
+  const eventNavigation = React.useMemo(() => {
+    if (detailTarget?.kind !== "event" || !detailTarget.navigation?.items.length) {
+      return null;
+    }
+    const navigation = detailTarget.navigation;
+    const matchedIndex = navigation.items.findIndex((item) =>
+      item.id === detailTarget.id && item.source_id === detailTarget.source_id);
+    const index = matchedIndex >= 0
+      ? matchedIndex
+      : Math.min(Math.max(0, navigation.index), navigation.items.length - 1);
+    return {
+      index,
+      total: navigation.items.length,
+      previous: index > 0 ? index - 1 : null,
+      next: index < navigation.items.length - 1 ? index + 1 : null,
+    };
+  }, [detailTarget]);
   const miniPanelStorageKey = `sag:mini-workspace-size:${user?.id ?? "local"}`;
   const answerRun = answerSnapshot?.run ?? null;
   const answerBusy = answerRun !== null;
@@ -385,6 +404,19 @@ export function PetMiniWorkspace({
       });
     },
     [onPanelViewChange],
+  );
+
+  const openTimelineEvent = React.useCallback(
+    (index: number) => {
+      const current = detailTargetRef.current;
+      if (current?.kind !== "event" || !current.navigation?.items.length) return;
+      const item = current.navigation.items[index];
+      if (!item) return;
+      const navigation = { ...current.navigation, index };
+      dispatchUniverseFocus(item.kind, item.id, item.source_id, { lock: true });
+      openDetail({ ...item, navigation });
+    },
+    [openDetail],
   );
 
   const openSearchEvent = React.useCallback(
@@ -1172,8 +1204,9 @@ export function PetMiniWorkspace({
             </motion.div>
           </AnimatePresence>
         ) : (
-          <ScrollArea className="h-full">
-            <AnimatePresence mode="wait" initial={false}>
+          <div className="flex h-full min-h-0 flex-col">
+            <ScrollArea className="min-h-0 flex-1">
+              <AnimatePresence mode="wait" initial={false}>
               {detailTarget ? (
                 <motion.div
                   key={`${detailTarget.kind}:${detailTarget.id}`}
@@ -1280,8 +1313,53 @@ export function PetMiniWorkspace({
                   )}
                 </motion.div>
               ) : null}
-            </AnimatePresence>
-          </ScrollArea>
+              </AnimatePresence>
+            </ScrollArea>
+            {eventNavigation && (
+              <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-t px-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 gap-1 px-2 text-xs"
+                  disabled={eventNavigation.previous === null}
+                  onClick={() => {
+                    if (eventNavigation.previous !== null) {
+                      openTimelineEvent(eventNavigation.previous);
+                    }
+                  }}
+                  aria-label={t("detail.previousEvent")}
+                  title={t("detail.previousEvent")}
+                >
+                  <ChevronLeft className="size-3.5" />
+                  {t("detail.previousEvent")}
+                </Button>
+                <span className="whitespace-nowrap text-[10px] text-muted-foreground">
+                  {t("detail.eventPosition", {
+                    current: eventNavigation.index + 1,
+                    total: eventNavigation.total,
+                  })}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 gap-1 px-2 text-xs"
+                  disabled={eventNavigation.next === null}
+                  onClick={() => {
+                    if (eventNavigation.next !== null) {
+                      openTimelineEvent(eventNavigation.next);
+                    }
+                  }}
+                  aria-label={t("detail.nextEvent")}
+                  title={t("detail.nextEvent")}
+                >
+                  {t("detail.nextEvent")}
+                  <ChevronRight className="size-3.5" />
+                </Button>
+              </div>
+            )}
+          </div>
         )}
       </div>
 

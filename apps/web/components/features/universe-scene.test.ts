@@ -388,8 +388,10 @@ describe("universe scene production invariants", () => {
     expect(layout).toContain("Boolean(focusCardIds?.has(node.id))");
     expect(layout).toContain("new Set([labelFocusId, ...(labelFocusNeighbors ?? [])])");
     expect(layout).toContain("Math.max(0.72, calculatedOpacity)");
+    expect(layout).toContain("const timelineEventCard = label.kind === \"node\"");
+    expect(layout).toContain("const distributedCard = requiredFocusCard || timelineEventCard");
     expect(layout).toContain("const clampedCandidates = requiredFocusCard");
-    expect(layout).toContain("const focusGridCandidates: LabelRect[] = []");
+    expect(layout).not.toContain("focusGridCandidates");
     expect(layout).toContain("requiredFocusCard || emphasized");
     expect(source).toContain("visibleEntityLabels >= this.labelPlacementBudget.entities");
     expect(source).toContain("this.host.dataset.universeEntityLabelCount");
@@ -480,8 +482,8 @@ describe("universe scene production invariants", () => {
     expect(wheel).toContain("this.callbacks.onSelectionClear()");
     expect(wheel.indexOf("this.callbacks.onSelectionClear()"))
       .toBeLessThan(wheel.indexOf("applyUniverseTemporalFlightWheel"));
-    expect(labelLayout).toContain('"[data-universe-detail-panel=\'true\']"');
-    expect(safeViewport).toContain('"[data-universe-detail-panel=\'true\']"');
+    expect(labelLayout).not.toContain('"[data-universe-detail-panel=\'true\']"');
+    expect(safeViewport).not.toContain('"[data-universe-detail-panel=\'true\']"');
   });
 
   it("dismisses a locked network atomically on blank canvas without reloading or moving it", () => {
@@ -688,7 +690,8 @@ describe("universe scene production invariants", () => {
     expect(linkStyle).toContain("if (this.transientHoverFocusId())");
     expect(linkStyle).toContain("this.restingLinkOpacity() * 0.68");
     expect(linkStyle).toContain("if (this.labelFocusId())");
-    expect(highlight).toContain("if (anchorId && !transientHover)");
+    expect(highlight).toContain("if (anchorId)");
+    expect(highlight).toContain("transientHover ? 0.76 : 0.92");
     expect(highlight).toContain("this.syncHighlightFlowSprites()");
     expect(source).toContain("HIGHLIGHT_FLOW_FRAME_MS");
     expect(source).toContain("private updateHighlightFlowSprites(now: number, animate: boolean)");

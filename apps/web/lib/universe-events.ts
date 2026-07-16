@@ -24,10 +24,22 @@ export interface UniverseViewState {
   progress: number;
 }
 
+export interface UniverseDetailTimelineItem {
+  kind: "event";
+  id: string;
+  source_id: string;
+}
+
+export interface UniverseDetailTimelineNavigation {
+  items: UniverseDetailTimelineItem[];
+  index: number;
+}
+
 export interface UniverseDetailTarget {
   kind: "event" | "entity";
   id: string;
   source_id: string;
+  navigation?: UniverseDetailTimelineNavigation;
 }
 
 export interface UniverseAskTarget extends UniverseDetailTarget {
@@ -175,11 +187,12 @@ export function dispatchUniverseFocus(
   kind: "event" | "entity",
   id: string,
   sourceId: string,
+  options?: { lock?: boolean },
 ) {
   if (typeof window === "undefined") return;
   window.dispatchEvent(
     new CustomEvent(UNIVERSE_FOCUS_EVENT, {
-      detail: { kind, id, source_id: sourceId },
+      detail: { kind, id, source_id: sourceId, lock: options?.lock === true },
     }),
   );
 }
@@ -197,9 +210,10 @@ export function dispatchUniverseDetail(
   kind: "event" | "entity",
   id: string,
   sourceId: string,
+  navigation?: UniverseDetailTimelineNavigation,
 ) {
   if (typeof window === "undefined") return;
-  pendingUniverseDetail = { kind, id, source_id: sourceId };
+  pendingUniverseDetail = { kind, id, source_id: sourceId, navigation };
   window.dispatchEvent(
     new CustomEvent<UniverseDetailTarget>(UNIVERSE_DETAIL_EVENT, {
       detail: pendingUniverseDetail,

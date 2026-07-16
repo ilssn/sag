@@ -76,6 +76,8 @@ export interface UniverseSceneNode {
   presentationOpacity?: number;
   /** Groups an event and its entities onto one shared time-transition path. */
   timelineBundleId?: string;
+  /** Snapshot-stable order within the source timeline (0 = newest package). */
+  timelineOrder?: number;
 }
 
 export interface UniverseSceneLink {
@@ -3208,7 +3210,21 @@ class UniverseForceSceneEngine {
     });
   }
 
+  /**
+   * Focus used by the label layout. Pointer hover is deliberately excluded:
+   * moving across a card should highlight the relationship, not rebuild the
+   * collision layout underneath the pointer. Click/keyboard focus remains a
+   * committed layout change and is allowed to reveal its one-hop network.
+   */
   private labelFocusId() {
+    const focusId = this.lockedId
+      ?? this.selectedId
+      ?? this.keyboardFocusedId;
+    return focusId && this.nodes.get(focusId)?.kind !== "source" ? focusId : null;
+  }
+
+  /** Focus used by WebGL/link highlighting; unlike layout focus it includes a transient hover. */
+  private interactionFocusId() {
     const focusId = this.lockedId
       ?? this.selectedId
       ?? this.keyboardFocusedId
@@ -3283,7 +3299,13 @@ class UniverseForceSceneEngine {
     }
     if (node && this.keyboardFocusedId) this.clearKeyboardFocus(false, false);
     const nextId = node?.id ?? null;
-    if (nextId === this.hoveredId) return;
+    if (nextId === this.hoveredId) {
+      // A pointer can leave the DOM card and enter its WebGL star without
+      // changing the node id. Keep the hover alive and hand ownership back to
+      // the canvas instead of scheduling a false clear between the two layers.
+      if (node && !fromLabel) this.hoveredFromLabel = false;
+      return;
+    }
     this.wakeRendering(700);
     this.hoveredId = nextId;
     this.hoveredFromLabel = Boolean(node && fromLabel);
@@ -3301,7 +3323,8 @@ class UniverseForceSceneEngine {
   }
 
   private applyHighlight() {
-    const anchorId = this.labelFocusId();
+    const anchorId = this.interactionFocusId();
+    const layoutFocusId = this.labelFocusId();
     const anchor = anchorId ? this.nodes.get(anchorId) : undefined;
     const neighbors = anchorId ? this.adjacency.get(anchorId) ?? new Set<string>() : null;
     const transientHoverId = this.transientHoverFocusId();
@@ -3326,15 +3349,16 @@ class UniverseForceSceneEngine {
         // keeps a visible glyph even when it does not receive a compact label.
         opacity = node.kind === "event" ? 0.52 : 0.48;
       }
-      // Hover is a transient relationship preview: preserve the spatial and
-      // brightness structure. Persistent selection may still mute unrelated
-      // context to support deliberate inspection.
-      if (anchorId && !transientHover) {
+      // Hover is a transient relationship preview: keep the current node and
+      // its one-hop neighbors readable, while the unrelated field recedes.
+      // The same hierarchy is used for a persistent click focus, only with a
+      // slightly stronger context mute.
+      if (anchorId) {
         if (node.id === anchorId) opacity = 1;
-        else if (neighbors?.has(node.id)) opacity = 0.92;
+        else if (neighbors?.has(node.id)) opacity = transientHover ? 0.76 : 0.92;
         else if (node.kind === "source" && anchor?.sourceId === node.sourceId) {
-          opacity = 0.38;
-        } else opacity = 0.18;
+          opacity = transientHover ? 0.28 : 0.38;
+        } else opacity = transientHover ? 0.12 : 0.18;
       }
       const overviewSourceHovered = node.kind === "source"
         && this.visualDetailMix < 0.5
@@ -3348,7 +3372,7 @@ class UniverseForceSceneEngine {
       const labelNode = this.nodes.get(label.nodeId);
       label.element.dataset.expanded = String(
         labelNode?.kind === "event"
-          && label.nodeId === anchorId
+          && label.nodeId === layoutFocusId
           && !transientHover,
       );
     });
@@ -3358,9 +3382,56 @@ class UniverseForceSceneEngine {
     this.updateNebulaAlphas();
     this.updateLinkVisuals();
     this.syncHighlightFlowSprites();
-    this.sortLabelsForLayout();
-    this.updateLabels(performance.now(), true);
+    // Highlighting is paint-only unless the committed layout focus changed.
+    // Re-running the greedy placement pass for a pointer hover used to move
+    // cards under the pointer, which caused pointerleave/pointerenter loops
+    // and visible flicker. Persistent focus still gets a normal rebuild.
+    if (layoutFocusId !== this.renderedLabelFocusId) {
+      this.rebuildLabels();
+    } else {
+      this.updateHoverLabelState();
+    }
     this.renderOnce();
+  }
+
+  private updateHoverLabelState() {
+    const transientId = this.transientHoverFocusId();
+    const emphasizedId = this.lockedId
+      ?? this.selectedId
+      ?? this.keyboardFocusedId
+      ?? this.hoveredId;
+    this.labels.forEach((label) => {
+      const node = this.nodes.get(label.nodeId);
+      if (!node) return;
+      const hovered = node.id === this.hoveredId;
+      const emphasized = node.id === emphasizedId;
+      label.element.dataset.hovered = String(hovered);
+      label.element.dataset.highlighted = String(
+        emphasized || this.sourceHits.some((hit) => hit.source_id === node.sourceId),
+      );
+      const baseOpacity = Number(label.element.dataset.baseOpacity);
+      if (Number.isFinite(baseOpacity)) {
+        label.element.style.opacity = String(
+          baseOpacity * this.hoverLabelOpacityFactor(node),
+        );
+      }
+      label.element.dataset.expanded = String(
+        node.kind === "event"
+          && node.id === this.labelFocusId()
+          && !transientId,
+      );
+      label.element.style.zIndex = emphasized
+        ? "4"
+        : label.kind === "node" ? "2" : "1";
+    });
+  }
+
+  private hoverLabelOpacityFactor(node: ForceNode) {
+    const anchorId = this.transientHoverFocusId();
+    if (!anchorId || node.kind === "source") return 1;
+    if (node.id === anchorId) return 1;
+    if (this.adjacency.get(anchorId)?.has(node.id)) return 0.76;
+    return 0.16;
   }
 
   private updateObjectOpacities() {
@@ -4300,6 +4371,15 @@ class UniverseForceSceneEngine {
       const leftConnected = Boolean(focusNeighbors?.has(left.id));
       const rightConnected = Boolean(focusNeighbors?.has(right.id));
       if (leftConnected !== rightConnected) return leftConnected ? -1 : 1;
+      const leftTimelineOrder = left.sceneNode.timelineOrder;
+      const rightTimelineOrder = right.sceneNode.timelineOrder;
+      if ((leftTimelineOrder !== undefined) !== (rightTimelineOrder !== undefined)) {
+        return leftTimelineOrder !== undefined ? -1 : 1;
+      }
+      if (leftTimelineOrder !== undefined && rightTimelineOrder !== undefined) {
+        const timelineDifference = leftTimelineOrder - rightTimelineOrder;
+        if (timelineDifference) return timelineDifference;
+      }
       if (left.sceneNode.root !== right.sceneNode.root) return left.sceneNode.root ? -1 : 1;
       const importanceDifference = right.sceneNode.importance - left.sceneNode.importance;
       if (importanceDifference) return importanceDifference;
@@ -4545,7 +4625,18 @@ class UniverseForceSceneEngine {
         if (focusNeighbors?.has(label.nodeId)) return 4;
         return label.kind === "source" ? 5 : 6;
       };
-      return layoutRank(left) - layoutRank(right);
+      const rankDifference = layoutRank(left) - layoutRank(right);
+      if (rankDifference) return rankDifference;
+      const leftOrder = this.nodes.get(left.nodeId)?.sceneNode.timelineOrder;
+      const rightOrder = this.nodes.get(right.nodeId)?.sceneNode.timelineOrder;
+      if ((leftOrder !== undefined) !== (rightOrder !== undefined)) {
+        return leftOrder !== undefined ? -1 : 1;
+      }
+      if (leftOrder !== undefined && rightOrder !== undefined) {
+        const timelineDifference = leftOrder - rightOrder;
+        if (timelineDifference) return timelineDifference;
+      }
+      return left.nodeId.localeCompare(right.nodeId);
     });
   }
 
@@ -4644,11 +4735,6 @@ class UniverseForceSceneEngine {
     const progressRect = this.relativeOverlayRect(
       "[data-universe-load-progress='true']",
       8,
-      hostRect,
-    );
-    const detailPanelRect = this.relativeOverlayRect(
-      "[data-universe-detail-panel='true']",
-      10,
       hostRect,
     );
     const placed: Array<{ left: number; top: number; right: number; bottom: number }> = [];
@@ -4812,6 +4898,14 @@ class UniverseForceSceneEngine {
       label.element.dataset.locked = String(locked);
       label.element.dataset.expanded = String(expanded);
       label.element.dataset.compact = String(compact);
+      // Timeline events arrive in a tight temporal corridor. Give their
+      // bounded card set a few screen-space escape routes so overlap guards do
+      // not make a full page look like only two or three events were loaded.
+      const timelineEventCard = label.kind === "node"
+        && node.kind === "event"
+        && Boolean(node.sceneNode.timelineBundleId)
+        && node.sceneNode.root;
+      const distributedCard = requiredFocusCard || timelineEventCard;
       const actions = label.kind === "node"
         ? label.element.querySelector<HTMLElement>("[data-universe-node-actions]")
         : null;
@@ -4875,7 +4969,7 @@ class UniverseForceSceneEngine {
       const focusGapStep = compact
         ? 18
         : Math.min(72, Math.max(40, labelWidth * 0.25));
-      const nodeLabelGaps = compact || requiredFocusCard
+      const nodeLabelGaps = compact || distributedCard
         ? [labelGap, labelGap + focusGapStep, labelGap + focusGapStep * 2]
         : [labelGap];
       const nodeCandidates = nodeLabelGaps.flatMap((gap) => [
@@ -4945,7 +5039,6 @@ class UniverseForceSceneEngine {
           || rect.bottom > height - 42;
         const overlapsPanel = [
           panelRect,
-          detailPanelRect,
           summaryRect,
           progressRect,
         ].some((overlay) => overlay
@@ -4980,33 +5073,14 @@ class UniverseForceSceneEngine {
             );
           })
         : [];
-      const focusGridCandidates: LabelRect[] = [];
-      if (requiredFocusCard) {
-        const stepX = Math.max(72, labelWidth + 8);
-        const stepY = Math.max(34, labelHeight + 8);
-        for (let top = 58; top + labelHeight <= height - 42; top += stepY) {
-          for (let left = 10; left + labelWidth <= width - 10; left += stepX) {
-            const side: LabelSide = left + labelWidth / 2 >= screen.x ? "right" : "left";
-            focusGridCandidates.push(makeRect(left, top, labelWidth, labelHeight, side));
-          }
-        }
-        focusGridCandidates.sort((left, right) => {
-          const distance = (rect: LabelRect) => Math.hypot(
-            rect.left + labelWidth / 2 - screen.x,
-            rect.top + labelHeight / 2 - screen.y,
-          );
-          return distance(left) - distance(right);
-        });
-      }
       const isOpenPlacement = (candidate: LabelRect) =>
         !blockedByViewportOrPanel(candidate)
         && !overlapsPlacedLabel(candidate)
         && !overlapsEventStar(candidate);
       const rect = candidates.find(isOpenPlacement)
         ?? clampedCandidates.find(isOpenPlacement)
-        ?? focusGridCandidates.find(isOpenPlacement)
         ?? (requiredFocusCard || emphasized
-          ? [...clampedCandidates, ...focusGridCandidates, ...candidates]
+          ? [...clampedCandidates, ...candidates]
               .find((candidate) => !blockedByViewportOrPanel(candidate))
             ?? clampedCandidates[0]
             ?? candidates[0]
@@ -5025,10 +5099,12 @@ class UniverseForceSceneEngine {
       label.element.dataset.highlighted = String(emphasized || this.sourceHits.some(
         (hit) => hit.source_id === node.sourceId,
       ));
+      const baseLabelOpacity = visibleOpacity * (
+        emphasized ? 1 : label.kind === "source" ? 0.94 : 0.84
+      );
+      label.element.dataset.baseOpacity = baseLabelOpacity.toFixed(3);
       label.element.style.opacity = String(
-        visibleOpacity * (
-          emphasized ? 1 : label.kind === "source" ? 0.94 : 0.84
-        ),
+        baseLabelOpacity * this.hoverLabelOpacityFactor(node),
       );
       label.element.style.pointerEvents = label.kind === "source"
         ? visibleOpacity >= 0.58 ? "auto" : "none"
@@ -5118,10 +5194,8 @@ class UniverseForceSceneEngine {
     let right = width - 72;
     let top = 68;
     let bottom = height - 54;
-    const panels = [
-      this.miniPanelRect(),
-      this.relativeOverlayRect("[data-universe-detail-panel='true']", 10),
-    ].filter((panel): panel is NonNullable<typeof panel> => panel !== null);
+    const panels = [this.miniPanelRect()]
+      .filter((panel): panel is NonNullable<typeof panel> => panel !== null);
     panels.forEach((panel) => {
       const panelCenterX = (panel.left + panel.right) / 2;
       if (panelCenterX < width / 2) left = Math.max(left, panel.right + 18);
@@ -5746,7 +5820,6 @@ class UniverseForceSceneEngine {
   private timelineWheelSurface(target: EventTarget | null): "canvas" | "label" | null {
     if (target === this.rendererCanvas) return "canvas";
     if (!(target instanceof Element) || !this.host.contains(target)) return null;
-    if (target.closest("[data-universe-detail-panel='true']")) return null;
     const label = target.closest<HTMLElement>(TIMELINE_WHEEL_LABEL_SELECTOR);
     return label && this.labelLayer.contains(label) ? "label" : null;
   }
@@ -5855,7 +5928,12 @@ class UniverseForceSceneEngine {
       const label = target instanceof Element
         ? target.closest<HTMLElement>("[data-universe-node-id]")
         : null;
-      if (label?.dataset.universeNodeId !== this.hoveredId) this.handleNodeHover(null);
+      // Let three-force-graph decide whether the pointer is still over the
+      // same star. Clearing here on every canvas move creates a one-frame gap
+      // between the DOM card and its WebGL hit target.
+      if (target !== this.rendererCanvas && label?.dataset.universeNodeId !== this.hoveredId) {
+        this.handleNodeHover(null);
+      }
     }
   };
 
