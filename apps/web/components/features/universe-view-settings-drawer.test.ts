@@ -14,6 +14,10 @@ const appShellSource = readFileSync(
   new URL("./app-shell.tsx", import.meta.url),
   "utf8",
 );
+const themeToggleSource = readFileSync(
+  new URL("./theme-toggle.tsx", import.meta.url),
+  "utf8",
+);
 const petSource = readFileSync(
   new URL("./pet.tsx", import.meta.url),
   "utf8",
@@ -32,7 +36,7 @@ const en = JSON.parse(readFileSync(
 ));
 
 describe("universe view settings drawer", () => {
-  it("places the settings trigger immediately before exit in the explore controls", () => {
+  it("orders theme, settings, then exit in the explore controls", () => {
     const controls = appShellSource.slice(
       appShellSource.indexOf('data-explore-controls="true"'),
       appShellSource.indexOf("</motion.div>", appShellSource.indexOf('data-explore-controls="true"')),
@@ -40,13 +44,21 @@ describe("universe view settings drawer", () => {
 
     expect(appShellSource).toContain('import { Grip, Settings2 } from "lucide-react"');
     expect(appShellSource).toContain(
+      'import { ThemeToggle } from "@/components/features/theme-toggle"',
+    );
+    expect(appShellSource).toContain(
       'className="fixed right-4 top-3 z-[45] flex items-center gap-2"',
     );
     expect(petSource).toContain('sag-pet-shell group/pet fixed z-40');
     expect(sheetSource).toContain("fixed inset-0 z-50");
+    expect(controls).toContain("<ThemeToggle");
     expect(controls).toContain("<Settings2");
+    expect(controls.indexOf("<ThemeToggle"))
+      .toBeLessThan(controls.indexOf("<UniverseViewSettingsDrawer"));
     expect(controls.indexOf("<UniverseViewSettingsDrawer"))
       .toBeLessThan(controls.indexOf("onClick={exitExploreMode}"));
+    expect(themeToggleSource).toContain('type="button"');
+    expect(themeToggleSource).toContain("className={className}");
   });
 
   it("uses one responsive sheet with a light graph-preserving overlay", () => {

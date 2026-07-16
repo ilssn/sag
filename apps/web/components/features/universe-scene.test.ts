@@ -104,7 +104,7 @@ describe("universe scene production invariants", () => {
     expect(source).toContain('this.host.removeEventListener("wheel", this.handleTimelineWheel, true)');
     expect(source).toContain('from "@/lib/universe-timeline-wheel"');
     expect(source).toContain("planUniverseTimelineWheel(this.timelineWheelState");
-    expect(source).toContain("drainUniverseTimelineWheel(this.timelineWheelState");
+    expect(source).not.toContain("drainUniverseTimelineWheel");
     expect(source).not.toContain("timelineDepthGateReached");
     expect(source).not.toContain("timelineWheelAccumulator");
     expect(source).toContain("this.controls.minDistance = UNIVERSE_CAMERA_MIN_DISTANCE");
@@ -128,6 +128,7 @@ describe("universe scene production invariants", () => {
     expect(pointer).toContain("this.resetTimelineWheel()");
     expect(cameraStart).toContain("this.cameraGesturePosition.copy(camera.position)");
     expect(cameraStart).toContain("this.lodArmed = true");
+    expect(cameraStart).not.toContain("this.armNebulaAnimation");
     expect(cameraStart).not.toContain("this.callbacks.onCameraInteraction()");
     expect(cameraChange).toContain("positionChanged || targetChanged");
     expect(cameraChange).toContain('this.cameraGestureKind === "pointer"');
@@ -166,26 +167,29 @@ describe("universe scene production invariants", () => {
       "\n  focusOverview() {",
     );
 
-    expect(source).toContain('kind: "enter" | "shift" | "exit"');
+    expect(source).toContain('kind: "enter" | "exit"');
     expect(source).toContain("planUniverseSceneDelta(");
     expect(source).toContain("private pruneRetiringTimelineElements()");
     expect(source).toContain("this.timelineExitSide(node)");
     expect(source).toContain("TIMELINE_EXIT_MIN_MS");
     expect(source).toContain("TIMELINE_ENTRY_MS");
     expect(dataCommit).toContain("const animateTimelineWindow = windowChanged");
+    expect(dataCommit).toContain('windowChangeCause === "journey"');
     expect(dataCommit).toContain("nextWindowRevision !== this.dataWindowRevision");
     expect(dataCommit).toContain("const timelineMotionFor = (");
     expect(dataCommit).toContain("const timelineMotion = timelineMotionFor(");
-    expect(dataCommit).toContain("previousVisual");
+    expect(dataCommit).not.toContain('kind: existingPosition ? "shift" : "enter"');
     expect(dataCommit).toContain("existing.timelineRetiring = false");
     expect(dataCommit).toContain("node.timelineRetiring = true");
     expect(dataCommit).toContain('windowDirection === "previous"');
     expect(dataCommit).toContain("const timelineTransitionOrigin =");
+    expect(dataCommit).toContain("this.timelineTransitionOrigin?.clone()");
     expect(dataCommit).toContain(
-      "const from = existingPosition?.clone() ?? timelineTransitionOrigin.clone()",
+      "const desired = new THREE.Vector3(existing.x, existing.y, existing.z)",
     );
     expect(dataCommit).toContain("collapseTarget");
     expect(dataCommit).toContain("if (topologyChanged) {");
+    expect(dataCommit.match(/this\.graph\.graphData/g)).toHaveLength(1);
     expect(dataCommit).toContain('this.timelineMotionPhase = "entering"');
     expect(source).toContain("const startWindowRevision = this.dataWindowRevision");
     expect(source).toContain("this.dataWindowRevision === startWindowRevision");
@@ -195,6 +199,22 @@ describe("universe scene production invariants", () => {
       "moveTimeline: (direction) => engineRef.current?.moveTimeline(direction)",
     );
     expect(source).not.toContain("waitForTimelineMotions");
+  });
+
+  it("settles a journey page without a second topology commit", () => {
+    const hideRetiring = sourceBetween(
+      "private hideRetiringTimelineElements()",
+      "private finishTimelineMotionPhase()",
+    );
+    const finish = sourceBetween(
+      "private finishTimelineMotionPhase()",
+      "private updateTimelineMotions(now: number)",
+    );
+
+    expect(hideRetiring).not.toContain("this.graph.graphData(");
+    expect(finish).toContain('this.timelineJourney.mode === "stable"');
+    expect(finish).toContain("this.hideRetiringTimelineElements()");
+    expect(finish).not.toContain("this.drainTimelineWheelIntent()");
   });
 
   it("starts every node in a timeline window on one shared batch clock", () => {
@@ -552,7 +572,7 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("this.host.dataset.universeEntityGlyphCount");
   });
 
-  it("shows every factual edge by default and only dims context on focus", () => {
+  it("shows focus relations during journey and the full topology only when stable", () => {
     const dataCommit = sourceBetween(
       "setData(\n    data: UniverseSceneData",
       "\n  focusOverview() {",
@@ -580,14 +600,15 @@ describe("universe scene production invariants", () => {
 
     expect(dataCommit).toContain("existing.visible = true");
     expect(dataCommit).toContain("visible: true");
-    expect(dataCommit).toContain(
-      "this.visibleEdgeIds = new Set(this.links.map((link) => link.id))",
-    );
-    expect(dataCommit).toContain("link.visible = true");
+    expect(dataCommit).toContain("const showStableRelations =");
+    expect(dataCommit).toContain("link.visible = showStableRelations");
     expect(highlight).toContain(
-      "link.visible && anchorId && (source === anchorId || target === anchorId)",
+      "&& (source === anchorId || target === anchorId)",
     );
-    expect(highlight).not.toMatch(/link\.visible\s*=/);
+    expect(highlight).toContain(
+      "link.visible = (!link.timelineRetiring && showStableRelations) || link.highlighted",
+    );
+    expect(highlight).toContain('this.host.dataset.universeRelationPresentation');
     expect(source).not.toContain("edgeDensity");
     expect(source).toContain("new THREE.MeshBasicMaterial(");
     expect(source).toContain("private restingLinkOpacity()");

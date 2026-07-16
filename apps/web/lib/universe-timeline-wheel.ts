@@ -5,8 +5,6 @@ export interface UniverseTimelineWheelState {
   /** Distance accumulated in one direction, expressed in CSS pixels. */
   accumulatedDistance: number;
   direction: UniverseTimelineWheelDirection | null;
-  /** At most one accepted threshold is retained while a transition is busy. */
-  queuedDirection: UniverseTimelineWheelDirection | null;
 }
 
 export interface UniverseTimelineWheelInput {
@@ -29,20 +27,15 @@ export interface UniverseTimelineWheelIntent {
 export type UniverseTimelineWheelOutcome =
   | "idle"
   | "zoom-only"
+  | "busy"
   | "accumulating"
-  | "intent"
-  | "queued";
+  | "intent";
 
 export interface UniverseTimelineWheelPlan {
   state: UniverseTimelineWheelState;
   intent: UniverseTimelineWheelIntent | null;
   normalizedDelta: number;
   outcome: UniverseTimelineWheelOutcome;
-}
-
-export interface UniverseTimelineWheelDrainInput {
-  busy: boolean;
-  mode: UniverseTimelineWheelMode;
 }
 
 export const DEFAULT_UNIVERSE_TIMELINE_WHEEL_THRESHOLD = 120;
@@ -89,18 +82,18 @@ export function createUniverseTimelineWheelState(): UniverseTimelineWheelState {
   return {
     accumulatedDistance: 0,
     direction: null,
-    queuedDirection: null,
   };
 }
 
-/** Clears gesture residue and any delayed page intent. */
+/** Clears gesture residue. */
 export function resetUniverseTimelineWheelState(): UniverseTimelineWheelState {
   return createUniverseTimelineWheelState();
 }
 
 /**
- * Plans one wheel sample. Positive deltas follow document-navigation convention
- * and move to the next (older) page; negative deltas move to the previous page.
+ * Plans one wheel sample using the same spatial contract as OrbitControls:
+ * dolly-in (negative delta) explores deeper/older data, while dolly-out
+ * (positive delta) rewinds toward newer data.
  * The planner emits at most one page intent for one sample, even for page-mode
  * or unusually large deltas.
  */
@@ -115,13 +108,10 @@ export function planUniverseTimelineWheel(
   );
 
   // Browser/trackpad pinch gestures commonly surface as ctrl+wheel. They stay
-  // camera-only and must not leave a partial or queued time-navigation gesture
-  // behind. In particular, a pinch during an active scene transition cancels
-  // the one-slot queue so settling that transition cannot advance the timeline.
+  // camera-only and must not leave partial time-navigation residue behind.
   if (input.ctrlKey || input.metaKey) {
     const next = state.accumulatedDistance === 0 &&
-        state.direction === null &&
-        state.queuedDirection === null
+        state.direction === null
       ? state
       : resetUniverseTimelineWheelState();
     return {
@@ -141,7 +131,19 @@ export function planUniverseTimelineWheel(
     };
   }
 
-  const direction: UniverseTimelineWheelDirection = normalizedDelta > 0
+  // Camera zoom remains live while a page is loading or animating, but an old
+  // wheel sample must never be replayed after the scene settles. Delayed replay
+  // lets camera and data move at different times and reads as a direction flip.
+  if (input.busy) {
+    return {
+      state: resetUniverseTimelineWheelState(),
+      intent: null,
+      normalizedDelta,
+      outcome: "busy",
+    };
+  }
+
+  const direction: UniverseTimelineWheelDirection = normalizedDelta < 0
     ? "next"
     : "previous";
   // Reversal starts a fresh gesture. Opposite residual distance can therefore
@@ -167,55 +169,10 @@ export function planUniverseTimelineWheel(
     };
   }
 
-  const settledGesture = {
-    accumulatedDistance: 0,
-    direction: null,
-  } as const;
-  if (input.busy) {
-    return {
-      state: {
-        ...settledGesture,
-        // Latest accepted direction wins; the queue never grows with momentum.
-        queuedDirection: direction,
-      },
-      intent: null,
-      normalizedDelta,
-      outcome: "queued",
-    };
-  }
-
-  return {
-    state: {
-      ...settledGesture,
-      queuedDirection: null,
-    },
-    intent: intent(direction, input.mode),
-    normalizedDelta,
-    outcome: "intent",
-  };
-}
-
-/**
- * Releases the single delayed direction after data and scene motion settle.
- * Draining also clears any sub-threshold momentum gathered during the prior
- * transition, so one trackpad fling cannot cascade through multiple pages.
- */
-export function drainUniverseTimelineWheel(
-  state: UniverseTimelineWheelState,
-  input: UniverseTimelineWheelDrainInput,
-): UniverseTimelineWheelPlan {
-  if (input.busy || !state.queuedDirection) {
-    return {
-      state,
-      intent: null,
-      normalizedDelta: 0,
-      outcome: "idle",
-    };
-  }
   return {
     state: resetUniverseTimelineWheelState(),
-    intent: intent(state.queuedDirection, input.mode),
-    normalizedDelta: 0,
+    intent: intent(direction, input.mode),
+    normalizedDelta,
     outcome: "intent",
   };
 }

@@ -14,3 +14,8 @@
 - [**Agent Runtime**](architecture/agent-runtime.md) —— extract-ready 的 `sag_agent` Core：公共 API、生命周期、事件契约、工具审批与宿主适配。
 - [连接器框架](architecture/connectors.md) —— 采集抽象：file_upload / web，统一接入协议。
 - 顶层 [README](../README.md) —— 快速开始、三步主干、MCP 用法、OpenAI 兼容端点。
+
+## 目标设计与实施计划
+
+- [**下一代 4D 知识探索工作台**](superpowers/plans/2026-07-15-next-generation-knowledge-atlas.md)
+  —— 统一范围、渐进式 4D 呈现、探索—阅读—问答闭环、v3 数据契约、性能门禁与一次切换计划。

@@ -215,7 +215,7 @@ describe("universe temporal presentation", () => {
     expect(middle.normalizedOffset.z).toBe(-0.5);
   });
 
-  it("uses a deterministic package lane and mirrors it for reverse journey", () => {
+  it("uses one deterministic package lane for forward and reverse journey", () => {
     const input = [{ bundleId: "event-package", ageProgress: 0.8 }];
     const forward = projectUniverseTemporalBatch(input, {
       mode: "journey",
@@ -231,9 +231,7 @@ describe("universe temporal presentation", () => {
     })[0];
 
     expect(repeated.normalizedOffset).toEqual(forward.normalizedOffset);
-    expect(reverse.normalizedOffset.x).toBeCloseTo(forward.normalizedOffset.x);
-    expect(reverse.normalizedOffset.y).toBeCloseTo(-forward.normalizedOffset.y);
-    expect(reverse.normalizedOffset.z).toBe(forward.normalizedOffset.z);
+    expect(reverse.normalizedOffset).toEqual(forward.normalizedOffset);
   });
 
   it("normalizes custom policy while preserving near/far visual invariants", () => {

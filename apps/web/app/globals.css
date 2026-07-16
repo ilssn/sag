@@ -372,7 +372,7 @@
     z-index: 3;
   }
 
-  .sag-space-sparkles[data-universe-view="detail"]
+  .sag-space-sparkles[data-ambient-motion="paused"]
     :is(.sag-space-dust, .sag-space-meteor, .sag-space-sparkle) {
     animation-play-state: paused;
   }

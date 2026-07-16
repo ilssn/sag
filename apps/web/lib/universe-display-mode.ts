@@ -453,7 +453,6 @@ export function projectUniverseTemporalBatch(
   const fromModeProgress = fromMode === "journey" ? 1 : 0;
   const toModeProgress = options.mode === "journey" ? 1 : 0;
   const modeProgress = lerp(fromModeProgress, toModeProgress, progress);
-  const mirror = options.direction === "previous" ? -1 : 1;
 
   return bundles.map((bundle) => {
     const targetAge = clamp01(bundle.ageProgress);
@@ -470,7 +469,10 @@ export function projectUniverseTemporalBatch(
           policy.journey.farLateralSpread,
           curvedAge,
         );
-    const angle = stableUnit(bundle.bundleId) * Math.PI * 2 * mirror;
+    // A bundle owns one deterministic lane for the entire session. Reversing
+    // time changes progress along that lane; mirroring the lane would send
+    // retained nodes around the opposite side of the scene and break rewind.
+    const angle = stableUnit(bundle.bundleId) * Math.PI * 2;
     const journeyOffset = {
       x: Math.cos(angle) * spread,
       y: Math.sin(angle) * spread * policy.journey.verticalAspect,

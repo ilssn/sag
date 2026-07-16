@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   createUniverseTimelineWheelState,
-  drainUniverseTimelineWheel,
   normalizeUniverseTimelineWheelDelta,
   planUniverseTimelineWheel,
   resetUniverseTimelineWheelState,
@@ -33,7 +32,7 @@ describe("universe timeline wheel coordinator", () => {
 
   it("emits next after the stable-view threshold and enters the journey", () => {
     const first = plan(createUniverseTimelineWheelState(), {
-      deltaY: 70,
+      deltaY: -70,
       threshold: 120,
     });
     expect(first).toMatchObject({
@@ -42,21 +41,20 @@ describe("universe timeline wheel coordinator", () => {
       state: { accumulatedDistance: 70, direction: "next" },
     });
 
-    const second = plan(first.state, { deltaY: 50, threshold: 120 });
+    const second = plan(first.state, { deltaY: -50, threshold: 120 });
     expect(second).toMatchObject({
       intent: { direction: "next", action: "enter-journey" },
       outcome: "intent",
       state: {
         accumulatedDistance: 0,
         direction: null,
-        queuedDirection: null,
       },
     });
   });
 
   it("emits previous while continuing an existing journey", () => {
     const result = plan(createUniverseTimelineWheelState(), {
-      deltaY: -3,
+      deltaY: 3,
       deltaMode: 1,
       threshold: 40,
       mode: "journey",
@@ -69,11 +67,11 @@ describe("universe timeline wheel coordinator", () => {
 
   it("clears accumulated distance when the direction reverses", () => {
     const forward = plan(createUniverseTimelineWheelState(), {
-      deltaY: 90,
+      deltaY: -90,
       threshold: 120,
     });
     const reverse = plan(forward.state, {
-      deltaY: -40,
+      deltaY: 40,
       threshold: 120,
       mode: "journey",
     });
@@ -83,7 +81,7 @@ describe("universe timeline wheel coordinator", () => {
     });
 
     const accepted = plan(reverse.state, {
-      deltaY: -80,
+      deltaY: 80,
       threshold: 120,
       mode: "journey",
     });
@@ -92,7 +90,7 @@ describe("universe timeline wheel coordinator", () => {
 
   it("keeps ctrl/meta wheel camera-only and clears partial gesture residue", () => {
     const partial = plan(createUniverseTimelineWheelState(), {
-      deltaY: 80,
+      deltaY: -80,
       threshold: 120,
     });
     const ctrlZoom = plan(partial.state, {
@@ -116,31 +114,25 @@ describe("universe timeline wheel coordinator", () => {
     expect(metaZoom.outcome).toBe("zoom-only");
   });
 
-  it("cancels a queued direction when pinch zoom occurs before settling", () => {
-    const queued = plan(createUniverseTimelineWheelState(), {
-      deltaY: 180,
+  it("keeps busy wheel camera-only and never replays it after settling", () => {
+    const partial = plan(createUniverseTimelineWheelState(), {
+      deltaY: -80,
+      threshold: 120,
+    });
+    const busy = plan(partial.state, {
+      deltaY: -120,
+      threshold: 120,
       busy: true,
       mode: "journey",
     });
-    expect(queued.state.queuedDirection).toBe("next");
-
-    const pinch = plan(queued.state, {
-      deltaY: -240,
-      ctrlKey: true,
-      busy: true,
-      mode: "journey",
-    });
-    expect(pinch).toMatchObject({
+    expect(busy).toMatchObject({
       intent: null,
-      outcome: "zoom-only",
-      state: {
-        accumulatedDistance: 0,
-        direction: null,
-        queuedDirection: null,
-      },
+      outcome: "busy",
+      state: { accumulatedDistance: 0, direction: null },
     });
 
-    const settled = drainUniverseTimelineWheel(pinch.state, {
+    const settled = plan(busy.state, {
+      deltaY: 0,
       busy: false,
       mode: "journey",
     });
@@ -148,80 +140,21 @@ describe("universe timeline wheel coordinator", () => {
     expect(settled.outcome).toBe("idle");
   });
 
-  it("keeps only the latest accepted direction while busy", () => {
-    const queuedNext = plan(createUniverseTimelineWheelState(), {
-      deltaY: 120,
-      threshold: 120,
-      busy: true,
-      mode: "journey",
-    });
-    expect(queuedNext).toMatchObject({
-      intent: null,
-      outcome: "queued",
-      state: { queuedDirection: "next" },
-    });
-
-    const queuedPrevious = plan(queuedNext.state, {
-      deltaY: -120,
-      threshold: 120,
-      busy: true,
-      mode: "journey",
-    });
-    expect(queuedPrevious.state.queuedDirection).toBe("previous");
-    expect(Object.keys(queuedPrevious.state)).toEqual([
-      "accumulatedDistance",
-      "direction",
-      "queuedDirection",
-    ]);
-  });
-
-  it("drains one queued direction only after the coordinator is idle", () => {
-    const queued = plan(createUniverseTimelineWheelState(), {
-      deltaY: 200,
-      busy: true,
-      mode: "journey",
-    }).state;
-
-    const stillBusy = drainUniverseTimelineWheel(queued, {
-      busy: true,
-      mode: "journey",
-    });
-    expect(stillBusy.state).toBe(queued);
-    expect(stillBusy.intent).toBeNull();
-
-    const drained = drainUniverseTimelineWheel(queued, {
-      busy: false,
-      mode: "journey",
-    });
-    expect(drained.intent).toEqual({
-      direction: "next",
-      action: "continue-journey",
-    });
-    expect(drained.state).toEqual(createUniverseTimelineWheelState());
-
-    expect(drainUniverseTimelineWheel(drained.state, {
-      busy: false,
-      mode: "journey",
-    }).intent).toBeNull();
-  });
-
-  it("resets accumulation and queued intent together", () => {
+  it("resets accumulated intent together", () => {
     expect(resetUniverseTimelineWheelState()).toEqual({
       accumulatedDistance: 0,
       direction: null,
-      queuedDirection: null,
     });
   });
 
   it("emits at most one intent for a very large delta", () => {
     const result = plan(createUniverseTimelineWheelState(), {
-      deltaY: 5,
+      deltaY: -5,
       deltaMode: 2,
       viewportHeight: 900,
       threshold: 120,
     });
     expect(result.intent?.direction).toBe("next");
     expect(result.state.accumulatedDistance).toBe(0);
-    expect(result.state.queuedDirection).toBeNull();
   });
 });
