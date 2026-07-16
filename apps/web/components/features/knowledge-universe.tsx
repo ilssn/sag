@@ -1737,10 +1737,13 @@ export function KnowledgeUniverse({
         statsReady: true,
         state: node.state ?? "active",
         root: isVisualRoot(node),
-        // Depth presence (scale/opacity along the axis) is the camera's story
-        // now: the scene computes it per frame from the flight depth, so a
+        // Depth presence (scale/opacity along the stream) is the camera's
+        // story: the scene computes it per frame from the odometer, so a
         // package the camera reaches is always fully present.
         timelineBundleId: temporalBundleId,
+        timelineDepth: temporalProjection
+          ? temporalProjection.ageProgress * temporalAxisDepth
+          : undefined,
         ...position,
       });
       exactByRaw.set(key, key);
