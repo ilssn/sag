@@ -745,14 +745,16 @@ describe("universe scene production invariants", () => {
     // band in TWO uniforms — never a per-ordinal attribute or particle.
     expect(nebulaMaterial).toContain("uniform float uBandT0");
     expect(nebulaMaterial).toContain("float lit = onArm * step(uBandT0, aArmT) * step(aArmT, uBandT1)");
-    expect(source).toContain("function galaxyAgeToT(");
-    expect(source).toContain("const GALAXY_BAND_MIN_T = 0.34");
+    expect(source).toContain("function galaxyAgeToShell(");
+    expect(source).toContain("const GALAXY_BAND_MIN_SHARE = 0.05");
     expect(source).toContain("material.uniforms.uBandT0.value = inner");
-    // Brand anatomy: three populations (core 46 / arms 42 / halo 12), face-on
-    // ellipse, slow in-plane spin frozen for the browsed galaxy, and density
-    // (normal blending) instead of additive bloom.
+    // Ball anatomy: three populations (core 46 / shells 42 / halo 12), the
+    // white-hot heart carried by density, uniform-radius shells so every
+    // layer owns the same dust count, slow Y-spin frozen for the browsed
+    // ball, and normal blending instead of additive bloom.
     expect(nebulaBuild).toContain("roll < 0.46");
     expect(nebulaBuild).toContain("roll < 0.88");
+    expect(nebulaBuild).toContain("galaxyBearing(");
     expect(nebulaMaterial).toContain("* uSpin * (1.0 - sourceMatch) * (1.0 - aSky)");
     expect(nebulaMaterial).toContain("blending: THREE.NormalBlending");
     expect(nebulaMaterial).not.toContain("AdditiveBlending");
@@ -782,10 +784,10 @@ describe("universe scene production invariants", () => {
     );
 
     // Events ARE nebula particles: their seats come from the same analytic
-    // arm mapping the dust band uses, seeded by ordinal — deterministic
+    // shell mapping the dust band uses, seeded by ordinal — deterministic
     // forever, O(1) per node, no session memory and no camera dependence.
-    expect(source).toContain("function galaxyArmSeat(");
-    expect(dataCommit).toContain("galaxyArmSeat(");
+    expect(source).toContain("function galaxyShellSeat(");
+    expect(dataCommit).toContain("galaxyShellSeat(");
     expect(dataCommit).toContain("const eventBase = bundleEventBase.get(node.timelineBundleId)");
     // No angle clamps, no first-person takeover, no gaze weighting: outside
     // the galaxy the standard orbit is the right instrument.
@@ -815,9 +817,10 @@ describe("universe scene production invariants", () => {
       "private updateTemporalFlight(now: number)",
     );
 
-    // Entry keeps the explorer outside: the default framing shows the whole
-    // galaxy; there is no dive pose and no camera teleport.
-    expect(focus).toContain("frames the whole galaxy");
+    // Entry pivots the orbit on the ball's centre and keeps the explorer
+    // outside: no dive pose, no camera teleport.
+    expect(focus).toContain("pivots the orbit on the ball's centre");
+    expect(focus).toContain("Math.max(340, ballRadius * 2.6)");
     expect(focus).not.toContain("cameraPosition(");
 
     // Presence is a pure window band: loaded = stars, behind = embers,

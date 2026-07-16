@@ -411,23 +411,17 @@ function stableUnit(value: string) {
 }
 
 /**
- * The face-on spiral galaxy every source wears. Constants follow the brand
- * hero: three arms, winding 0.72 rad per t, elliptical squash, a core biased
- * by t^1.9 and a faint far halo. The arm parameter t maps ANALYTICALLY to the
- * exploration age, so the loaded window becomes a radius band the shader can
- * light with two uniforms — per-identity cost exists only for the ≤ window
- * real nodes, never per ordinal.
+ * Every source is a SOLID BALL of dust: a white-hot core (density, not glow),
+ * a volume of shells around it, and a faint far halo. The shell radius maps
+ * ANALYTICALLY to exploration age — newest history on the surface, the oldest
+ * at the bright heart — so the loaded window becomes a spherical band the
+ * shader lights with two uniforms. Per-identity cost exists only for the
+ * ≤ window real nodes, never per ordinal: dust is bounded like the data.
  */
-const GALAXY_ARM_COUNT = 3;
-const GALAXY_ARM_T_MIN = 0.65;
-const GALAXY_ARM_T_SPAN = 6.3;
-const GALAXY_ARM_T_MAX = GALAXY_ARM_T_MIN + GALAXY_ARM_T_SPAN;
-const GALAXY_ARM_T_POW = 0.78;
-const GALAXY_ARM_WINDING = 0.72;
-const GALAXY_ELLIPSE_ASPECT = 0.48;
+const GALAXY_CORE_SHARE = 0.2;
 const GALAXY_SPIN_RAD_PER_S = 0.04;
-/** The lit band never collapses below this many t-units on huge sources. */
-const GALAXY_BAND_MIN_T = 0.34;
+/** The lit shell never collapses below this share of the radius. */
+const GALAXY_BAND_MIN_SHARE = 0.05;
 
 function galaxyGauss(seed: string) {
   let sum = 0;
@@ -437,36 +431,40 @@ function galaxyGauss(seed: string) {
   return sum - 3;
 }
 
-/** Exploration age (0 newest … 1 oldest) → arm parameter t (outer → core). */
-function galaxyAgeToT(age: number) {
+/** Exploration age (0 newest … 1 oldest) → shell radius share (surface → core). */
+function galaxyAgeToShell(age: number) {
   const clamped = Math.min(1, Math.max(0, age));
-  return GALAXY_ARM_T_MIN + GALAXY_ARM_T_SPAN * Math.pow(1 - clamped, GALAXY_ARM_T_POW);
+  return 1 - clamped * (1 - GALAXY_CORE_SHARE);
+}
+
+/** Deterministic uniform bearing on the sphere from an identity seed. */
+function galaxyBearing(seed: string) {
+  const zenith = 2 * stableUnit(`${seed}:zenith`) - 1;
+  const azimuth = stableUnit(`${seed}:azimuth`) * Math.PI * 2;
+  const ring = Math.sqrt(Math.max(0, 1 - zenith * zenith));
+  return new THREE.Vector3(
+    Math.cos(azimuth) * ring,
+    zenith,
+    Math.sin(azimuth) * ring,
+  );
 }
 
 /**
- * The deterministic seat of one exploration ordinal on its source's galaxy.
- * Newest events sit on the outer arm tips; the stream sinks toward the
- * white-hot core — the same seat the window band lights in the dust.
+ * The deterministic seat of one exploration ordinal inside its source's ball.
+ * Newest events sit on the surface; the stream sinks toward the white-hot
+ * core — the same shell the window band lights in the dust.
  */
-function galaxyArmSeat(
+function galaxyShellSeat(
   sourceId: string,
   ordinal: number,
   total: number,
   radius: number,
 ) {
   const age = total <= 1 ? 0 : Math.min(1, Math.max(0, ordinal / (total - 1)));
-  const t = galaxyAgeToT(age);
   const seed = `${sourceId}:seat:${ordinal}`;
-  const angle = ((ordinal % GALAXY_ARM_COUNT) / GALAXY_ARM_COUNT) * Math.PI * 2
-    + GALAXY_ARM_WINDING * t
-    + galaxyGauss(`${seed}:angle`) * 0.24;
-  const unit = radius / GALAXY_ARM_T_MAX;
-  return new THREE.Vector3(
-    Math.cos(angle) * t * 1.08 * unit,
-    Math.sin(angle) * t * GALAXY_ELLIPSE_ASPECT * unit
-      + galaxyGauss(`${seed}:y`) * (0.08 + 0.018 * t) * unit,
-    galaxyGauss(`${seed}:z`) * (0.16 + 0.045 * t) * unit,
-  );
+  const shell = galaxyAgeToShell(age)
+    + galaxyGauss(`${seed}:jitter`) * 0.012;
+  return galaxyBearing(seed).multiplyScalar(Math.max(0.05, shell) * radius);
 }
 
 function stableDirection(key: string) {
@@ -827,30 +825,25 @@ function makeNebulaMaterial(darkTheme: boolean) {
         float wave = 0.5 + 0.5 * sin(uTime * (0.72 + aTwinkle * 1.38) + aPhase);
         float glint = pow(wave, mix(2.2, 7.0, aTwinkle));
         float pulse = mix(1.0, 0.8 + glint * 0.5, uMotion * aTwinkle);
-        // Stately in-plane spin, brand-slow. The browsed galaxy is frozen so
-        // its lit seats and their cards stay perfectly registered; the squash
-        // is un-applied, rotated and re-applied to keep the ellipse true.
+        // Stately spin of the ball around its own axis, brand-slow. The
+        // browsed ball is frozen so lit seats and cards stay registered.
         float spinAngle = uTime * ${GALAXY_SPIN_RAD_PER_S.toFixed(3)}
           * uSpin * (1.0 - sourceMatch) * (1.0 - aSky);
         vec3 spun = position;
-        vec2 plane = vec2(
-          position.x - aCenter.x,
-          (position.y - aCenter.y) / ${GALAXY_ELLIPSE_ASPECT.toFixed(2)}
-        );
+        vec2 plane = vec2(position.x - aCenter.x, position.z - aCenter.z);
         float spinCos = cos(spinAngle);
         float spinSin = sin(spinAngle);
         spun.x = aCenter.x + plane.x * spinCos - plane.y * spinSin;
-        spun.y = aCenter.y
-          + (plane.x * spinSin + plane.y * spinCos) * ${GALAXY_ELLIPSE_ASPECT.toFixed(2)};
+        spun.z = aCenter.z + plane.x * spinSin + plane.y * spinCos;
         // Free sky dust wraps around the camera: the background never ends.
         vec3 wrapped = uFogCamera + mod(
           position - uFogCamera + vec3(${(NEBULA_FOG_WRAP_SIZE / 2).toFixed(1)}),
           vec3(${NEBULA_FOG_WRAP_SIZE.toFixed(1)})
         ) - vec3(${(NEBULA_FOG_WRAP_SIZE / 2).toFixed(1)});
         vec3 animatedPosition = mix(spun, wrapped, aSky);
-        // The loaded window is a radius band on the arms: dust inside it has
-        // resolved into stars, dust past it (nearer the core) is unread, dust
-        // outside it (outer) has been travelled and cools to embers.
+        // The loaded window is a spherical band: shells inside it have
+        // resolved into stars, deeper shells (toward the core) are unread,
+        // outer shells have been travelled through and cool to embers.
         float onArm = step(0.0, aArmT) * sourceMatch * uBandOn;
         float lit = onArm * step(uBandT0, aArmT) * step(aArmT, uBandT1);
         float unread = onArm * (1.0 - step(uBandT0, aArmT));
@@ -1563,7 +1556,7 @@ class UniverseForceSceneEngine {
           (sourceScene?.radius ?? 90) * 1.45,
         );
         const unitsPerEvent = Math.max(1, flight.unitsPerEvent);
-        const anchor = sourceNode.clone().add(galaxyArmSeat(
+        const anchor = sourceNode.clone().add(galaxyShellSeat(
           node.sourceId,
           Math.round((node.timelineDepth ?? 0) / unitsPerEvent),
           Math.round(flight.maxDepth / unitsPerEvent) + 1,
@@ -2234,9 +2227,19 @@ class UniverseForceSceneEngine {
       this.rebuildLabels();
       this.applyHighlight();
     }
-    // Entering a browse session frames the whole galaxy from its far side:
-    // exploration happens from out here — the wheel scrubs which particles
-    // are lit, orbiting looks around it, pinch leans in to read.
+    // Entering a browse session pivots the orbit on the ball's centre and
+    // frames the whole of it: the wheel scrubs which shell is lit, dragging
+    // orbits around the centre, pinch leans toward the bright heart.
+    const flight = this.flightConfig;
+    if (flight && flight.sourceId === sourceId) {
+      const ballRadius = Math.max(40, node.sceneNode.radius * 1.45);
+      this.moveCamera(
+        new THREE.Vector3(node.x, node.y, node.z),
+        Math.max(340, ballRadius * 2.6),
+        760,
+      );
+      return;
+    }
     const concreteNodes = [...this.nodes.values()].filter(
       (candidate) =>
         candidate.kind !== "source"
@@ -3554,52 +3557,31 @@ class UniverseForceSceneEngine {
         (weightedBudget * weights[sourceIndex]) / Math.max(1, totalWeight),
       );
       const radius = Math.max(40, source.sceneNode.radius * 1.45);
-      const unit = radius / GALAXY_ARM_T_MAX;
       for (let index = 0; index < count; index += 1) {
         const key = `${source.id}:dust:${index}`;
         const roll = stableUnit(`${key}:population`);
         let offset: THREE.Vector3;
         let emphasis: number;
-        let armT = -1;
+        let shellShare = -1;
         if (roll < 0.46) {
-          // Dense core, biased hard toward the centre: the white-hot heart is
-          // particle density, not a glow sprite.
-          const depthBias = Math.pow(stableUnit(`${key}:radius`), 1.9);
-          const theta = stableUnit(`${key}:theta`) * Math.PI * 2;
-          const zenith = 2 * stableUnit(`${key}:zenith`) - 1;
-          const ring = Math.sqrt(Math.max(0, 1 - zenith * zenith));
-          offset = new THREE.Vector3(
-            Math.cos(theta) * ring * 1.9 * depthBias * unit,
-            zenith * 1.05 * depthBias * unit * GALAXY_ELLIPSE_ASPECT * 1.6,
-            Math.sin(theta) * ring * 0.95 * depthBias * unit * 0.5,
-          );
+          // The white-hot heart: a dense core ball, brightness by density.
+          const depthBias = Math.pow(stableUnit(`${key}:radius`), 2.1);
+          offset = galaxyBearing(`${key}:bearing`)
+            .multiplyScalar(depthBias * GALAXY_CORE_SHARE * 1.6 * radius);
           emphasis = 0.8 + stableUnit(`${key}:emphasis`) * 0.2;
         } else if (roll < 0.88) {
-          // Spiral arms: the same t-parametrised lanes the event seats use,
-          // so the window band lights dust and stars in one geometry.
-          const t = GALAXY_ARM_T_MIN
-            + GALAXY_ARM_T_SPAN * Math.pow(stableUnit(`${key}:t`), 0.78);
-          const angle = (Math.floor(stableUnit(`${key}:arm`) * GALAXY_ARM_COUNT)
-            / GALAXY_ARM_COUNT) * Math.PI * 2
-            + GALAXY_ARM_WINDING * t
-            + galaxyGauss(`${key}:spread`) * 0.24;
-          offset = new THREE.Vector3(
-            Math.cos(angle) * t * 1.08 * unit,
-            Math.sin(angle) * t * GALAXY_ELLIPSE_ASPECT * unit
-              + galaxyGauss(`${key}:y`) * (0.08 + 0.018 * t) * unit,
-            galaxyGauss(`${key}:z`) * (0.16 + 0.045 * t) * unit,
-          );
+          // Volume shells: radius sampled uniformly, so every layer owns the
+          // same dust count and density rises naturally toward the core —
+          // the band lights these when the window reaches their depth.
+          const share = GALAXY_CORE_SHARE
+            + stableUnit(`${key}:shell`) * (1 - GALAXY_CORE_SHARE) * 1.04;
+          offset = galaxyBearing(`${key}:bearing`).multiplyScalar(share * radius);
           emphasis = 0.2 + stableUnit(`${key}:emphasis`) * 0.3;
-          armT = t;
+          shellShare = share;
         } else {
           // Faint far halo: the vast outskirts that fill the frame.
-          const angle = stableUnit(`${key}:halo-angle`) * Math.PI * 2;
-          const reach = 5.4 + stableUnit(`${key}:halo-r`) * 3.6;
-          offset = new THREE.Vector3(
-            Math.cos(angle) * reach * 1.12 * unit,
-            Math.sin(angle) * reach * 0.68 * unit * GALAXY_ELLIPSE_ASPECT * 1.4,
-            galaxyGauss(`${key}:halo-z`) * (0.7 + 0.04 * reach) * unit * 0.4,
-          );
+          const reach = 1.25 + stableUnit(`${key}:halo`) * 1.15;
+          offset = galaxyBearing(`${key}:bearing`).multiplyScalar(reach * radius);
           emphasis = 0.04 + stableUnit(`${key}:emphasis`) * 0.12;
         }
         const twinkle = Math.pow(stableUnit(`${key}:twinkle`), 1.18);
@@ -3616,7 +3598,7 @@ class UniverseForceSceneEngine {
           twinkle,
           core: roll < 0.46,
           radial: Math.min(1, offset.length() / Math.max(1, radius)),
-          armT,
+          armT: shellShare,
           emphasis,
         });
       }
@@ -3715,9 +3697,9 @@ class UniverseForceSceneEngine {
     material.uniforms.uBandOn.value = config ? 1 : 0;
     if (config) {
       const maxDepth = Math.max(1, config.maxDepth);
-      let inner = galaxyAgeToT(config.windowFarDepth / maxDepth);
-      let outer = galaxyAgeToT(config.windowNearDepth / maxDepth);
-      const shortfall = GALAXY_BAND_MIN_T - (outer - inner);
+      let inner = galaxyAgeToShell(config.windowFarDepth / maxDepth);
+      let outer = galaxyAgeToShell(config.windowNearDepth / maxDepth);
+      const shortfall = GALAXY_BAND_MIN_SHARE - (outer - inner);
       if (shortfall > 0) {
         inner -= shortfall / 2;
         outer += shortfall / 2;
