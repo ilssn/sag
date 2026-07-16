@@ -672,8 +672,8 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("sprite.userData.sourceCore = true");
     expect(source).toContain("private sourceMarkerDetailFactor(");
     expect(source).toContain("return Math.max(0, 1 - detail)");
-    expect(source).toContain("const NEBULA_DETAIL_ALPHA = 0.9");
-    expect(source).toContain("const NEBULA_DETAIL_DUST_POINT_SIZE_CSS = 18");
+    expect(source).toContain("const NEBULA_DETAIL_ALPHA = 1.15");
+    expect(source).toContain("const NEBULA_DETAIL_DUST_POINT_SIZE_CSS = 22");
     expect(source).toContain("uDetail: { value: 0 }");
     expect(source).toContain("uDetailAlpha: { value: NEBULA_DETAIL_ALPHA }");
     expect(source).toContain("attribute float aGlow");
@@ -697,6 +697,35 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("this.host.dataset.universeNebulaPointSizeCap");
     expect(source).toContain("this.host.dataset.universeNebulaDetailFactor");
     expect(source).toContain("this.updateNebulaAlphas();");
+  });
+
+  it("lets the browse session own the detail latch and calms the sky under gestures", () => {
+    const layout = sourceBetween(
+      "private updateVisualLayout(now: number",
+      "private evaluateLod(now: number)",
+    );
+    const controls = sourceBetween(
+      "private handleControlsStart = () =>",
+      "private handlePointerMove = (event: PointerEvent)",
+    );
+    const motionStrength = sourceBetween(
+      "private nebulaMotionStrength()",
+      "private shouldAnimateNebula(",
+    );
+
+    // The radius heuristic measures distance to the source's centre, but the
+    // flight travels along the axis away from it by design. Unlatching mid-
+    // flight hid every card, collapsed the corridor and re-enabled the drift.
+    expect(layout).toContain(
+      "const browseDetailSourceId = this.timelineJourney.enabled && this.flightConfig",
+    );
+    expect(layout).toContain("browseDetailSourceId ?? resolveUniverseDetailSource({");
+    expect(layout).toMatch(/browseDetailSourceId\s*&& visual\?\.sourceId === browseDetailSourceId\s*\?\s*1/);
+
+    // Camera gestures freeze the ambient drift instead of igniting it.
+    expect(controls).not.toContain("this.armNebulaAnimation(");
+    expect(controls.match(/cameraCalmUntil = /g)?.length).toBe(2);
+    expect(motionStrength).toContain("performance.now() < this.cameraCalmUntil");
   });
 
   it("stretches a browsed source's nebula into its exploration corridor on the GPU", () => {

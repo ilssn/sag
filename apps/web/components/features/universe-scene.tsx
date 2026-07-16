@@ -343,11 +343,15 @@ const NEBULA_BURST_MS = 1_400;
 // Keep the focused source luminous while retaining the bounded particle
 // budget. Detail uses a little more fill-rate only for the selected source;
 // overview particles keep the smaller cap and the same 3k ceiling.
-const NEBULA_DETAIL_ALPHA = 0.9;
-const NEBULA_DETAIL_DUST_POINT_SIZE_CSS = 18;
+// Inside a source the dust is the medium being explored: slightly brighter
+// than the overview, so diving in reads as entering the nebula, not leaving it.
+const NEBULA_DETAIL_ALPHA = 1.15;
+const NEBULA_DETAIL_DUST_POINT_SIZE_CSS = 22;
 const NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP = 44;
 /** Sentinel z far outside any real layout: the loaded band dims nothing. */
 const NEBULA_CORRIDOR_BAND_OFF = 1e8;
+/** Ambient drift stays frozen this long after any camera gesture frame. */
+const NEBULA_GESTURE_CALM_MS = 480;
 /** Corridor lateral spread mirrors the package axis policy. */
 const NEBULA_CORRIDOR_NEAR_SPREAD = 0.18;
 const NEBULA_CORRIDOR_FAR_SPREAD = 0.44;
@@ -745,8 +749,10 @@ function makeNebulaMaterial(darkTheme: boolean) {
           animatedPosition.z
         ));
         vAlpha *= mix(1.0, 0.16, corridorMix * loadedBand);
-        animatedPosition.x += sin(uTime * 0.28 + aPhase) * 0.36 * uMotion * aTwinkle;
-        animatedPosition.y += cos(uTime * 0.24 + aPhase) * 0.28 * uMotion * aTwinkle;
+        // Ambient drift is a whisper, not a float: it breathes only while the
+        // camera is idle and holds still under any gesture.
+        animatedPosition.x += sin(uTime * 0.28 + aPhase) * 0.16 * uMotion * aTwinkle;
+        animatedPosition.y += cos(uTime * 0.24 + aPhase) * 0.12 * uMotion * aTwinkle;
         vec4 mvPosition = modelViewMatrix * vec4(animatedPosition, 1.0);
         float perspective = clamp(360.0 / max(1.0, -mvPosition.z), 0.42, 2.2);
         float detailScale = mix(1.0, 1.28, vDetail);
@@ -883,6 +889,8 @@ class UniverseForceSceneEngine {
   private nebulaAlphaUploads = 0;
   private lastNebulaAnimationAt = 0;
   private nebulaAnimationUntil = 0;
+  /** While in the future, the ambient nebula drift holds still (camera gestures). */
+  private cameraCalmUntil = 0;
   private sourceSignature = "";
   private labelLayer: HTMLDivElement;
   private labels: SceneLabel[] = [];
@@ -2143,6 +2151,9 @@ class UniverseForceSceneEngine {
       );
       this.flightState = createUniverseTemporalFlightState(depth);
       this.appliedFlightDepth = depth;
+      // The depth jumped without a flight frame; presence must follow now or
+      // the focused neighborhood keeps the dimness of the old camera position.
+      this.updateTemporalPresence();
     }
     this.moveCamera(new THREE.Vector3(node.x, node.y, node.z), 112, 480);
   }
@@ -3581,6 +3592,7 @@ class UniverseForceSceneEngine {
       || !this.interactive
       || this.reducedMotion
       || this.reportedViewSourceId
+      || performance.now() < this.cameraCalmUntil
       || document.visibilityState !== "visible"
     ) return 0;
     return THREE.MathUtils.clamp((0.52 - this.visualDetailMix) / 0.22, 0, 1);
@@ -4793,9 +4805,17 @@ class UniverseForceSceneEngine {
       );
     }
 
+    // An active browse session owns the detail latch. The radius heuristic
+    // measures distance to the source's centre, but flight travels along the
+    // axis away from that centre by design — letting the heuristic unlatch
+    // mid-flight would hide every card, collapse the nebula corridor and
+    // re-enable the overview drift while the user is inside the source.
+    const browseDetailSourceId = this.timelineJourney.enabled && this.flightConfig
+      ? this.flightConfig.sourceId
+      : null;
     const nextLatchedSourceId = suppressDetail
       ? null
-      : resolveUniverseDetailSource({
+      : browseDetailSourceId ?? resolveUniverseDetailSource({
           currentSourceId: this.latchedDetailSourceId,
           currentRadiusPx,
           candidateSourceId: inferredVisual?.node.sourceId ?? null,
@@ -4820,14 +4840,17 @@ class UniverseForceSceneEngine {
     const visualRadiusPx = visual
       ? this.projectedSourceRadius(visual, cameraRight)
       : null;
-    const naturalTarget = visual
-      ? universeVisualDetailProgress(
-          visualRadiusPx,
-          this.policy.lod_orbit_px,
-          this.policy.lod_near_px,
-          this.policy.lod_deep_px,
-        )
-      : 0;
+    const naturalTarget = browseDetailSourceId
+      && visual?.sourceId === browseDetailSourceId
+      ? 1
+      : visual
+        ? universeVisualDetailProgress(
+            visualRadiusPx,
+            this.policy.lod_orbit_px,
+            this.policy.lod_near_px,
+            this.policy.lod_deep_px,
+          )
+        : 0;
     const nextTarget = this.requestedSourceId === visual?.sourceId
       ? Math.max(previousMix, naturalTarget)
       : naturalTarget;
@@ -5227,7 +5250,9 @@ class UniverseForceSceneEngine {
   private handleControlsStart = () => {
     if (this.paused || !this.interactive) return;
     this.wakeRendering(1_400);
-    this.armNebulaAnimation(1_400);
+    // A camera gesture wants a steady sky: freeze the ambient drift instead of
+    // igniting it, so the background never floats under the user's hand.
+    this.cameraCalmUntil = performance.now() + NEBULA_GESTURE_CALM_MS;
     this.lodArmed = true;
     this.startLoop(this.policy.lod_debounce_ms + 240);
   };
@@ -5236,6 +5261,7 @@ class UniverseForceSceneEngine {
     if (this.paused) return;
     const now = performance.now();
     this.lastControlsChangeAt = now;
+    this.cameraCalmUntil = now + NEBULA_GESTURE_CALM_MS;
     this.updateVisualLayout(now);
     this.updateNodeMorphScales(now);
     this.updateLabels(now);
