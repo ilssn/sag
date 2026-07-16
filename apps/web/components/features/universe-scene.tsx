@@ -294,6 +294,10 @@ interface NebulaParticle {
   twinkle: number;
   core: boolean;
   radial: number;
+  /** Arm parameter t for arm dust (−1 elsewhere); the window band lights it. */
+  armT: number;
+  /** Brand emphasis channel: drives size, brightness and whiteness together. */
+  emphasis: number;
 }
 
 interface SceneLabel {
@@ -369,8 +373,6 @@ const FLIGHT_CARD_HIDE_SPEED = 760;
 /** Cards duck quickly when speed picks up and re-expand a beat after settling. */
 const FLIGHT_CARD_COLLAPSE_MS = 110;
 const FLIGHT_CARD_RECOVER_MS = 300;
-/** Motes beyond this radius share become the soft enveloping haze shell. */
-const NEBULA_SPHERE_HAZE_SHARE = 0.62;
 const NEBULA_GLOW_POINT_SIZE_CSS_MOBILE = 34;
 const HIGHLIGHT_FLOW_FRAME_MS = 1000 / 30;
 const TIMELINE_WHEEL_LABEL_SELECTOR = "[data-universe-node-id]";
@@ -409,34 +411,62 @@ function stableUnit(value: string) {
 }
 
 /**
- * A deterministic position on a source's galaxy — the same spiral-arm math the
- * dust uses, seeded by any identity. Events ARE particles of the nebula: a
- * loaded package simply lights up where its dust has always been.
+ * The face-on spiral galaxy every source wears. Constants follow the brand
+ * hero: three arms, winding 0.72 rad per t, elliptical squash, a core biased
+ * by t^1.9 and a faint far halo. The arm parameter t maps ANALYTICALLY to the
+ * exploration age, so the loaded window becomes a radius band the shader can
+ * light with two uniforms — per-identity cost exists only for the ≤ window
+ * real nodes, never per ordinal.
  */
-function galaxyArmOffset(sourceId: string, seed: string, radius: number) {
-  const rotation = new THREE.Euler(
-    (stableUnit(`${sourceId}:rx`) - 0.5) * 0.7,
-    (stableUnit(`${sourceId}:ry`) - 0.5) * 0.9,
-    stableUnit(`${sourceId}:rz`) * Math.PI,
+const GALAXY_ARM_COUNT = 3;
+const GALAXY_ARM_T_MIN = 0.65;
+const GALAXY_ARM_T_SPAN = 6.3;
+const GALAXY_ARM_T_MAX = GALAXY_ARM_T_MIN + GALAXY_ARM_T_SPAN;
+const GALAXY_ARM_T_POW = 0.78;
+const GALAXY_ARM_WINDING = 0.72;
+const GALAXY_ELLIPSE_ASPECT = 0.48;
+const GALAXY_SPIN_RAD_PER_S = 0.04;
+/** The lit band never collapses below this many t-units on huge sources. */
+const GALAXY_BAND_MIN_T = 0.34;
+
+function galaxyGauss(seed: string) {
+  let sum = 0;
+  for (let index = 0; index < 6; index += 1) {
+    sum += stableUnit(`${seed}:${index}`);
+  }
+  return sum - 3;
+}
+
+/** Exploration age (0 newest … 1 oldest) → arm parameter t (outer → core). */
+function galaxyAgeToT(age: number) {
+  const clamped = Math.min(1, Math.max(0, age));
+  return GALAXY_ARM_T_MIN + GALAXY_ARM_T_SPAN * Math.pow(1 - clamped, GALAXY_ARM_T_POW);
+}
+
+/**
+ * The deterministic seat of one exploration ordinal on its source's galaxy.
+ * Newest events sit on the outer arm tips; the stream sinks toward the
+ * white-hot core — the same seat the window band lights in the dust.
+ */
+function galaxyArmSeat(
+  sourceId: string,
+  ordinal: number,
+  total: number,
+  radius: number,
+) {
+  const age = total <= 1 ? 0 : Math.min(1, Math.max(0, ordinal / (total - 1)));
+  const t = galaxyAgeToT(age);
+  const seed = `${sourceId}:seat:${ordinal}`;
+  const angle = ((ordinal % GALAXY_ARM_COUNT) / GALAXY_ARM_COUNT) * Math.PI * 2
+    + GALAXY_ARM_WINDING * t
+    + galaxyGauss(`${seed}:angle`) * 0.24;
+  const unit = radius / GALAXY_ARM_T_MAX;
+  return new THREE.Vector3(
+    Math.cos(angle) * t * 1.08 * unit,
+    Math.sin(angle) * t * GALAXY_ELLIPSE_ASPECT * unit
+      + galaxyGauss(`${seed}:y`) * (0.08 + 0.018 * t) * unit,
+    galaxyGauss(`${seed}:z`) * (0.16 + 0.045 * t) * unit,
   );
-  const armCount = 3 + Math.floor(stableUnit(`${sourceId}:arm-count`) * 2);
-  const winding = Math.PI * (2.7 + stableUnit(`${sourceId}:arm-winding`) * 0.8);
-  const ellipticity = 0.72 + stableUnit(`${sourceId}:ellipticity`) * 0.12;
-  const radial = 0.24 + Math.pow(stableUnit(`${seed}:radius`), 0.72) * 0.72;
-  const armIndex = Math.min(
-    armCount - 1,
-    Math.floor(stableUnit(`${seed}:arm-index`) * armCount),
-  );
-  const angle = (armIndex / armCount) * Math.PI * 2
-    + radial * winding
-    + (stableUnit(`${seed}:arm-spread`) - 0.5) * 0.5 * (1.08 - radial * 0.42);
-  const planarRadius = radius * radial;
-  const offset = new THREE.Vector3(
-    Math.cos(angle) * planarRadius * (1.08 + stableUnit(`${seed}:stretch`) * 0.12),
-    Math.sin(angle) * planarRadius * ellipticity,
-    (stableUnit(`${seed}:depth`) - 0.5) * radius * 0.24 * (1.16 - radial * 0.36),
-  );
-  return offset.applyEuler(rotation);
 }
 
 function stableDirection(key: string) {
@@ -734,9 +764,16 @@ function makeNebulaMaterial(darkTheme: boolean) {
       uPointSizeCap: { value: NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP },
       uTime: { value: 0 },
       uMotion: { value: 1 },
+      uSpin: { value: 1 },
       // The browse fog wraps around this point: kept on the camera while
       // inside a source, parked far away otherwise.
       uFogCamera: { value: new THREE.Vector3() },
+      // The loaded window as an analytic arm-band [t0, t1]: two uniforms light
+      // the right dust whatever the source's event count — O(1), never
+      // per-ordinal. uBandOn gates it to the browsed source only.
+      uBandT0: { value: 0 },
+      uBandT1: { value: 0 },
+      uBandOn: { value: 0 },
     },
     vertexShader: `
       uniform float uPixelRatio;
@@ -746,9 +783,15 @@ function makeNebulaMaterial(darkTheme: boolean) {
       uniform float uPointSizeCap;
       uniform float uTime;
       uniform float uMotion;
+      uniform float uSpin;
       uniform vec3 uFogCamera;
+      uniform float uBandT0;
+      uniform float uBandT1;
+      uniform float uBandOn;
       attribute vec3 aColor;
-      attribute float aCorridorWall;
+      attribute vec3 aCenter;
+      attribute float aArmT;
+      attribute float aEmphasis;
       attribute float aSky;
       attribute float aSize;
       attribute float aAlpha;
@@ -784,21 +827,36 @@ function makeNebulaMaterial(darkTheme: boolean) {
         float wave = 0.5 + 0.5 * sin(uTime * (0.72 + aTwinkle * 1.38) + aPhase);
         float glint = pow(wave, mix(2.2, 7.0, aTwinkle));
         float pulse = mix(1.0, 0.8 + glint * 0.5, uMotion * aTwinkle);
-        // Inside a source the dust becomes a fog that WRAPS around the
-        // camera: fly any distance in any direction and you are always inside
-        // the nebula — perception is the anchor, not the source's geometry.
-        float corridorMix = smoothstep(0.12, 0.88, particleDetail);
-        float wrapMix = aSky;
+        // Stately in-plane spin, brand-slow. The browsed galaxy is frozen so
+        // its lit seats and their cards stay perfectly registered; the squash
+        // is un-applied, rotated and re-applied to keep the ellipse true.
+        float spinAngle = uTime * ${GALAXY_SPIN_RAD_PER_S.toFixed(3)}
+          * uSpin * (1.0 - sourceMatch) * (1.0 - aSky);
+        vec3 spun = position;
+        vec2 plane = vec2(
+          position.x - aCenter.x,
+          (position.y - aCenter.y) / ${GALAXY_ELLIPSE_ASPECT.toFixed(2)}
+        );
+        float spinCos = cos(spinAngle);
+        float spinSin = sin(spinAngle);
+        spun.x = aCenter.x + plane.x * spinCos - plane.y * spinSin;
+        spun.y = aCenter.y
+          + (plane.x * spinSin + plane.y * spinCos) * ${GALAXY_ELLIPSE_ASPECT.toFixed(2)};
+        // Free sky dust wraps around the camera: the background never ends.
         vec3 wrapped = uFogCamera + mod(
           position - uFogCamera + vec3(${(NEBULA_FOG_WRAP_SIZE / 2).toFixed(1)}),
           vec3(${NEBULA_FOG_WRAP_SIZE.toFixed(1)})
         ) - vec3(${(NEBULA_FOG_WRAP_SIZE / 2).toFixed(1)});
-        vec3 animatedPosition = mix(position, wrapped, wrapMix);
-        // The fog carries its own light: glow pockets brighten into soft
-        // beacons drifting past, and haze motes envelop softly.
+        vec3 animatedPosition = mix(spun, wrapped, aSky);
+        // The loaded window is a radius band on the arms: dust inside it has
+        // resolved into stars, dust past it (nearer the core) is unread, dust
+        // outside it (outer) has been travelled and cools to embers.
+        float onArm = step(0.0, aArmT) * sourceMatch * uBandOn;
+        float lit = onArm * step(uBandT0, aArmT) * step(aArmT, uBandT1);
+        float unread = onArm * (1.0 - step(uBandT0, aArmT));
+        float travelled = onArm * step(uBandT1, aArmT) * (1.0 - lit);
+        vAlpha *= 1.0 + 0.75 * lit - 0.42 * unread - 0.18 * travelled;
         float glowParticle = step(0.001, aGlow);
-        vAlpha *= mix(1.0, 1.45, corridorMix * glowParticle);
-        vAlpha *= mix(1.0, 0.72, corridorMix * aCorridorWall);
         // Ambient drift is a whisper, not a float: it breathes only while the
         // camera is idle and holds still under any gesture.
         animatedPosition.x += sin(uTime * 0.28 + aPhase) * 0.16 * uMotion * aTwinkle;
@@ -807,22 +865,14 @@ function makeNebulaMaterial(darkTheme: boolean) {
         float perspective = clamp(360.0 / max(1.0, -mvPosition.z), 0.42, 2.2);
         float detailScale = mix(1.0, 1.28, vDetail);
         float glowScale = mix(1.0, mix(3.6, 4.8, vDetail), aGlow);
-        // Corridor beacons swell into soft volumetric pockets of light, and
-        // the far walls grow into broad luminous banks.
-        float corridorBoost = mix(1.0, mix(1.1, 1.6, glowParticle), corridorMix)
-          * mix(1.0, 2.8, corridorMix * aCorridorWall);
         float rawPointSize = aSize * uPixelRatio * perspective * pulse
-          * detailScale * glowScale * corridorBoost;
+          * detailScale * glowScale * (1.0 + 0.5 * lit);
         float detailDustCap = mix(13.0, ${NEBULA_DETAIL_DUST_POINT_SIZE_CSS.toFixed(1)}, vDetail)
           * uPixelRatio;
-        float capSelect = max(glowParticle, aCorridorWall * corridorMix);
-        float pointSizeCap = mix(
-          detailDustCap,
-          uPointSizeCap * (1.0 + 0.7 * corridorMix),
-          capSelect
-        );
+        float pointSizeCap = mix(detailDustCap, uPointSizeCap, glowParticle);
         gl_PointSize = min(max(1.15, rawPointSize), pointSizeCap);
-        vPulse = mix(0.92, 1.2, glint);
+        vPulse = mix(0.92, 1.2, glint) * (1.0 + 0.3 * lit);
+        vDetail = max(vDetail, lit * 0.6);
         gl_Position = projectionMatrix * mvPosition;
       }
     `,
@@ -870,7 +920,9 @@ function makeNebulaMaterial(darkTheme: boolean) {
     transparent: true,
     depthWrite: false,
     depthTest: true,
-    blending: darkTheme ? THREE.AdditiveBlending : THREE.NormalBlending,
+    // Brand look: density carries the light. Normal blending keeps the core
+    // white-hot from sheer particle count instead of additive bloom.
+    blending: THREE.NormalBlending,
   });
 }
 
@@ -1510,9 +1562,11 @@ class UniverseForceSceneEngine {
           40,
           (sourceScene?.radius ?? 90) * 1.45,
         );
-        const anchor = sourceNode.clone().add(galaxyArmOffset(
+        const unitsPerEvent = Math.max(1, flight.unitsPerEvent);
+        const anchor = sourceNode.clone().add(galaxyArmSeat(
           node.sourceId,
-          `${node.timelineBundleId}:star`,
+          Math.round((node.timelineDepth ?? 0) / unitsPerEvent),
+          Math.round(flight.maxDepth / unitsPerEvent) + 1,
           galaxyRadius,
         ));
         // Members keep their data-space offsets relative to the bundle's event,
@@ -3448,9 +3502,11 @@ class UniverseForceSceneEngine {
     this.nebulaSourceIndices = new Map(
       sources.map((source, index) => [source.sourceId, index]),
     );
+    // The browsed galaxy owns most of the sky while inside it: a hard floor
+    // of the budget, still bounded whatever the source's event count.
     const weights = sources.map((source) =>
       Math.max(1, Math.log2(source.sceneNode.eventCount + source.sceneNode.entityCount + 2))
-        * (source.sourceId === browsedSourceId ? 4 : 1),
+        * (source.sourceId === browsedSourceId ? 9 : 1),
     );
     const totalWeight = weights.reduce((sum, value) => sum + value, 0);
     // The particles ARE the sky: a share of the budget becomes free dust that
@@ -3480,6 +3536,8 @@ class UniverseForceSceneEngine {
         twinkle: Math.pow(stableUnit(`${key}:twinkle`), 1.18),
         core: false,
         radial: 1,
+        armT: -1,
+        emphasis: 0.08 + stableUnit(`${key}:emphasis`) * 0.14,
       });
     }
     sources.forEach((source, sourceIndex) => {
@@ -3487,60 +3545,70 @@ class UniverseForceSceneEngine {
         (weightedBudget * weights[sourceIndex]) / Math.max(1, totalWeight),
       );
       const radius = Math.max(40, source.sceneNode.radius * 1.45);
-      const rotation = new THREE.Euler(
-        (stableUnit(`${source.id}:rx`) - 0.5) * 0.7,
-        (stableUnit(`${source.id}:ry`) - 0.5) * 0.9,
-        stableUnit(`${source.id}:rz`) * Math.PI,
-      );
-      const armCount = 3 + Math.floor(stableUnit(`${source.id}:arm-count`) * 2);
-      const winding = Math.PI * (
-        2.7 + stableUnit(`${source.id}:arm-winding`) * 0.8
-      );
-      const ellipticity = 0.72 + stableUnit(`${source.id}:ellipticity`) * 0.12;
+      const unit = radius / GALAXY_ARM_T_MAX;
       for (let index = 0; index < count; index += 1) {
         const key = `${source.id}:dust:${index}`;
-        const coreParticle = stableUnit(`${key}:core`) < 0.42;
-        const radial = Math.pow(
-          stableUnit(`${key}:radius`),
-          coreParticle ? 2.4 : 0.7,
-        );
-        const armIndex = Math.min(
-          armCount - 1,
-          Math.floor(stableUnit(`${key}:arm-index`) * armCount),
-        );
-        const armAngle = (armIndex / armCount) * Math.PI * 2 + radial * winding;
-        const armSpread = (stableUnit(`${key}:arm-spread`) - 0.5)
-          * (coreParticle ? 1.3 : 0.6)
-          * (1.08 - radial * 0.42);
-        const angle = armAngle + armSpread;
-        const planarRadius = radius * radial;
-        const offset = new THREE.Vector3(
-          Math.cos(angle) * planarRadius * (
-            1.08 + stableUnit(`${key}:stretch`) * 0.12
-          ),
-          Math.sin(angle) * planarRadius * ellipticity,
-          (stableUnit(`${key}:depth`) - 0.5)
-            * radius
-            * (coreParticle ? 0.3 : 0.2)
-            * (1.16 - radial * 0.36),
-        );
-        offset.applyEuler(rotation);
+        const roll = stableUnit(`${key}:population`);
+        let offset: THREE.Vector3;
+        let emphasis: number;
+        let armT = -1;
+        if (roll < 0.46) {
+          // Dense core, biased hard toward the centre: the white-hot heart is
+          // particle density, not a glow sprite.
+          const depthBias = Math.pow(stableUnit(`${key}:radius`), 1.9);
+          const theta = stableUnit(`${key}:theta`) * Math.PI * 2;
+          const zenith = 2 * stableUnit(`${key}:zenith`) - 1;
+          const ring = Math.sqrt(Math.max(0, 1 - zenith * zenith));
+          offset = new THREE.Vector3(
+            Math.cos(theta) * ring * 1.9 * depthBias * unit,
+            zenith * 1.05 * depthBias * unit * GALAXY_ELLIPSE_ASPECT * 1.6,
+            Math.sin(theta) * ring * 0.95 * depthBias * unit * 0.5,
+          );
+          emphasis = 0.8 + stableUnit(`${key}:emphasis`) * 0.2;
+        } else if (roll < 0.88) {
+          // Spiral arms: the same t-parametrised lanes the event seats use,
+          // so the window band lights dust and stars in one geometry.
+          const t = GALAXY_ARM_T_MIN
+            + GALAXY_ARM_T_SPAN * Math.pow(stableUnit(`${key}:t`), 0.78);
+          const angle = (Math.floor(stableUnit(`${key}:arm`) * GALAXY_ARM_COUNT)
+            / GALAXY_ARM_COUNT) * Math.PI * 2
+            + GALAXY_ARM_WINDING * t
+            + galaxyGauss(`${key}:spread`) * 0.24;
+          offset = new THREE.Vector3(
+            Math.cos(angle) * t * 1.08 * unit,
+            Math.sin(angle) * t * GALAXY_ELLIPSE_ASPECT * unit
+              + galaxyGauss(`${key}:y`) * (0.08 + 0.018 * t) * unit,
+            galaxyGauss(`${key}:z`) * (0.16 + 0.045 * t) * unit,
+          );
+          emphasis = 0.2 + stableUnit(`${key}:emphasis`) * 0.3;
+          armT = t;
+        } else {
+          // Faint far halo: the vast outskirts that fill the frame.
+          const angle = stableUnit(`${key}:halo-angle`) * Math.PI * 2;
+          const reach = 5.4 + stableUnit(`${key}:halo-r`) * 3.6;
+          offset = new THREE.Vector3(
+            Math.cos(angle) * reach * 1.12 * unit,
+            Math.sin(angle) * reach * 0.68 * unit * GALAXY_ELLIPSE_ASPECT * 1.4,
+            galaxyGauss(`${key}:halo-z`) * (0.7 + 0.04 * reach) * unit * 0.4,
+          );
+          emphasis = 0.04 + stableUnit(`${key}:emphasis`) * 0.12;
+        }
         const twinkle = Math.pow(stableUnit(`${key}:twinkle`), 1.18);
         const glowSeed = stableUnit(`${key}:glow`);
-        const glowChance = coreParticle ? 0.14 : 0.045;
         particles.push({
           sourceId: source.sourceId,
           sourceIndex,
           offset,
-          alpha: (coreParticle ? 0.4 : 0.24)
-            + stableUnit(`${key}:alpha`) * (coreParticle ? 0.6 : 0.56),
-          glow: glowSeed < glowChance
+          alpha: 0.16 + emphasis * 0.62 + stableUnit(`${key}:alpha`) * 0.14,
+          glow: glowSeed < 0.05
             ? 0.58 + stableUnit(`${key}:glow-strength`) * 0.42
             : 0,
           phase: stableUnit(`${key}:phase`) * Math.PI * 2,
           twinkle,
-          core: coreParticle,
-          radial,
+          core: roll < 0.46,
+          radial: Math.min(1, offset.length() / Math.max(1, radius)),
+          armT,
+          emphasis,
         });
       }
     });
@@ -3548,7 +3616,9 @@ class UniverseForceSceneEngine {
     this.nebulaParticles = particles;
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(particles.length * 3);
-    const corridorWalls = new Float32Array(particles.length);
+    const centers = new Float32Array(particles.length * 3);
+    const armTs = new Float32Array(particles.length);
+    const emphases = new Float32Array(particles.length);
     const skies = new Float32Array(particles.length);
     const colors = new Float32Array(particles.length * 3);
     const sizes = new Float32Array(particles.length);
@@ -3578,22 +3648,18 @@ class UniverseForceSceneEngine {
       colors[index * 3] = color.r;
       colors[index * 3 + 1] = color.g;
       colors[index * 3 + 2] = color.b;
-      sizes[index] = 0.85
-        + stableUnit(`${particle.sourceId}:${index}:size`) * 2.3
-        + (particle.twinkle > 0.86 ? 0.5 : 0)
-        + (particle.core ? (1 - particle.radial) * 0.9 : 0);
+      // Brand grain: (1.35 + hash×2.4) × role(0.72–1.55 by emphasis), fine.
+      sizes[index] = (1.05 + stableUnit(`${particle.sourceId}:${index}:size`) * 1.9)
+        * (0.72 + particle.emphasis * 0.83)
+        + (particle.core ? (1 - particle.radial) * 0.7 : 0);
       alphas[index] = particle.alpha;
       glows[index] = particle.glow;
       sourceIndices[index] = particle.sourceIndex;
       shapes[index] = particle.glow === 0 && particle.twinkle > 0.84 ? 1 : 0;
       phases[index] = particle.phase;
       twinkles[index] = 0.18 + particle.twinkle * 0.82;
-      // A share of the dust becomes the enveloping haze: bigger, softer
-      // motes that read as the surrounding nebula while the fog wraps.
-      const key = `${particle.sourceId}:corridor:${index}`;
-      const haze = particle.glow === 0
-        && Math.cbrt(stableUnit(`${key}:radius`)) > NEBULA_SPHERE_HAZE_SHARE;
-      corridorWalls[index] = haze ? 1 : 0;
+      armTs[index] = particle.armT;
+      emphases[index] = particle.emphasis;
       skies[index] = particle.sourceIndex < 0 ? 1 : 0;
     });
     const positionAttribute = new THREE.BufferAttribute(positions, 3)
@@ -3601,7 +3667,10 @@ class UniverseForceSceneEngine {
     const alphaAttribute = new THREE.BufferAttribute(alphas, 1)
       .setUsage(THREE.DynamicDrawUsage);
     geometry.setAttribute("position", positionAttribute);
-    geometry.setAttribute("aCorridorWall", new THREE.BufferAttribute(corridorWalls, 1));
+    geometry.setAttribute("aCenter", new THREE.BufferAttribute(centers, 3)
+      .setUsage(THREE.DynamicDrawUsage));
+    geometry.setAttribute("aArmT", new THREE.BufferAttribute(armTs, 1));
+    geometry.setAttribute("aEmphasis", new THREE.BufferAttribute(emphases, 1));
     geometry.setAttribute("aSky", new THREE.BufferAttribute(skies, 1));
     geometry.setAttribute("aColor", new THREE.BufferAttribute(colors, 3));
     geometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
@@ -3623,17 +3692,36 @@ class UniverseForceSceneEngine {
     this.armNebulaAnimation();
   }
 
-  /** Keeps the browse fog centred on the camera while inside a source. */
+  /**
+   * Keeps the sky-wrap centred on the camera and points the analytic window
+   * band at the browsed source's loaded ordinals — two uniforms, O(1) for any
+   * source size, with a minimum visible thickness on huge sources.
+   */
   private syncNebulaCorridorUniforms() {
     const material = this.nebulaPoints?.material as THREE.ShaderMaterial | undefined;
     if (!material) return;
     const camera = this.graph.camera();
     (material.uniforms.uFogCamera.value as THREE.Vector3).copy(camera.position);
+    const config = this.flightConfig;
+    material.uniforms.uBandOn.value = config ? 1 : 0;
+    if (config) {
+      const maxDepth = Math.max(1, config.maxDepth);
+      let inner = galaxyAgeToT(config.windowFarDepth / maxDepth);
+      let outer = galaxyAgeToT(config.windowNearDepth / maxDepth);
+      const shortfall = GALAXY_BAND_MIN_T - (outer - inner);
+      if (shortfall > 0) {
+        inner -= shortfall / 2;
+        outer += shortfall / 2;
+      }
+      material.uniforms.uBandT0.value = inner;
+      material.uniforms.uBandT1.value = outer;
+    }
   }
 
   private updateNebulaPositions() {
     if (!this.nebulaPoints) return;
     const position = this.nebulaPoints.geometry.getAttribute("position") as THREE.BufferAttribute;
+    const center = this.nebulaPoints.geometry.getAttribute("aCenter") as THREE.BufferAttribute;
     const sources = new Map(
       [...this.nodes.values()]
         .filter((node) => node.kind === "source")
@@ -3644,6 +3732,7 @@ class UniverseForceSceneEngine {
         // Free sky dust: its base position is arbitrary — the shader wraps it
         // around the camera wherever the camera is.
         position.setXYZ(index, particle.offset.x, particle.offset.y, particle.offset.z);
+        center.setXYZ(index, 0, 0, 0);
         return;
       }
       const source = sources.get(particle.sourceId);
@@ -3654,8 +3743,11 @@ class UniverseForceSceneEngine {
         source.y + particle.offset.y,
         source.z + particle.offset.z,
       );
+      // The spin pivot: the shader rotates arm dust in-plane around this.
+      center.setXYZ(index, source.x, source.y, source.z);
     });
     position.needsUpdate = true;
+    center.needsUpdate = true;
   }
 
   private updateNebulaAlphas(force = false) {
@@ -3754,6 +3846,10 @@ class UniverseForceSceneEngine {
     if (!this.nebulaPoints) return false;
     const material = this.nebulaPoints.material as THREE.ShaderMaterial;
     material.uniforms.uMotion.value = strength;
+    // The galaxies' stately spin advances whenever a frame is drawn anyway —
+    // it costs nothing extra and pauses with the renderer's own sleep.
+    material.uniforms.uTime.value = now / 1000;
+    material.uniforms.uSpin.value = this.reducedMotion ? 0 : 1;
     if (!active) {
       this.host.dataset.universeNebulaMotion = "idle";
       return false;
@@ -3762,7 +3858,6 @@ class UniverseForceSceneEngine {
     const frameInterval = this.host.clientWidth < 768 ? 50 : 1000 / 30;
     if (now - this.lastNebulaAnimationAt >= frameInterval) {
       this.lastNebulaAnimationAt = now;
-      material.uniforms.uTime.value = now / 1000;
       if (!this.renderingAwake) {
         this.graph.renderer().render(this.graph.scene(), this.graph.camera());
       }

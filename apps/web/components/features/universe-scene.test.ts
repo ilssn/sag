@@ -730,7 +730,7 @@ describe("universe scene production invariants", () => {
     expect(motionStrength).toContain("performance.now() < this.cameraCalmUntil");
   });
 
-  it("wraps a browsed source's nebula around the camera as travelling fog", () => {
+  it("keeps the galaxy bounded and lights the loaded window as an analytic band", () => {
     const nebulaMaterial = sourceBetween(
       "function makeNebulaMaterial(darkTheme: boolean)",
       "class UniverseForceSceneEngine",
@@ -740,39 +740,35 @@ describe("universe scene production invariants", () => {
       "private updateNebulaPositions()",
     );
 
-    // The galaxy IS the content and keeps its shape while browsed; only the
-    // free sky dust wraps around the camera, carrying the background in every
-    // direction — one particle continuum from backdrop to stars.
-    expect(nebulaMaterial).toContain("uniform vec3 uFogCamera");
-    expect(nebulaMaterial).toContain("vec3 animatedPosition = mix(position, wrapped, wrapMix)");
-    expect(nebulaMaterial).toContain("float wrapMix = aSky");
-    expect(nebulaBuild).toContain('geometry.setAttribute("aSky"');
+    // Bounded like the data: dust count is the fixed budget whatever the
+    // source's event count; the loaded window reaches the dust as a radius
+    // band in TWO uniforms — never a per-ordinal attribute or particle.
+    expect(nebulaMaterial).toContain("uniform float uBandT0");
+    expect(nebulaMaterial).toContain("float lit = onArm * step(uBandT0, aArmT) * step(aArmT, uBandT1)");
+    expect(source).toContain("function galaxyAgeToT(");
+    expect(source).toContain("const GALAXY_BAND_MIN_T = 0.34");
+    expect(source).toContain("material.uniforms.uBandT0.value = inner");
+    // Brand anatomy: three populations (core 46 / arms 42 / halo 12), face-on
+    // ellipse, slow in-plane spin frozen for the browsed galaxy, and density
+    // (normal blending) instead of additive bloom.
+    expect(nebulaBuild).toContain("roll < 0.46");
+    expect(nebulaBuild).toContain("roll < 0.88");
+    expect(nebulaMaterial).toContain("* uSpin * (1.0 - sourceMatch) * (1.0 - aSky)");
+    expect(nebulaMaterial).toContain("blending: THREE.NormalBlending");
+    expect(nebulaMaterial).not.toContain("AdditiveBlending");
+    // Free sky dust still wraps around the camera as the universal backdrop.
+    expect(nebulaMaterial).toContain("vec3 animatedPosition = mix(spun, wrapped, aSky)");
     expect(nebulaBuild).toContain('sourceId: "__sky__"');
-    expect(source).toContain("const NEBULA_FOG_WRAP_SIZE = 1_700.0");
-    expect(source).toContain("private syncNebulaCorridorUniforms()");
-    expect(source).toContain("(material.uniforms.uFogCamera.value as THREE.Vector3).copy(camera.position)");
-    // The sky dust may never detach from the view: its wrap centre follows
-    // the camera on every frame and every camera gesture.
+    // While inside one source the rest of the sky recedes, and the browsed
+    // source claims a bounded floor of the fixed particle budget.
+    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.12, uDetail * (1.0 - sourceMatch) * (1.0 - aSky))");
+    expect(nebulaBuild).toContain("source.sourceId === browsedSourceId ? 9 : 1");
+    // The sky wrap follows the camera on every frame and gesture.
     const renderLoop = sourceBetween(
       "private loop = (now: number) =>",
       "private updateTemporalPresence()",
     );
     expect(renderLoop).toContain("this.syncNebulaCorridorUniforms()");
-
-    // The fog carries its own light: glow pockets brighten and swell, and a
-    // share of the dust becomes the big soft enveloping haze.
-    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 1.45, corridorMix * glowParticle)");
-    expect(nebulaMaterial).toContain("* detailScale * glowScale * corridorBoost");
-    expect(nebulaMaterial).toContain("mix(1.0, 2.8, corridorMix * aCorridorWall)");
-    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.72, corridorMix * aCorridorWall)");
-    expect(source).toContain("const NEBULA_SPHERE_HAZE_SHARE = 0.62");
-    expect(nebulaBuild).toContain('geometry.setAttribute("aCorridorWall"');
-
-    // While inside one source the rest of the sky recedes, and the browsed
-    // source claims a heavier share of the fixed particle budget.
-    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.12, uDetail * (1.0 - sourceMatch) * (1.0 - aSky))");
-    expect(nebulaBuild).toContain("source.sourceId === browsedSourceId ? 4 : 1");
-    expect(nebulaBuild).toContain("const browsedSourceId = this.flightConfig?.sourceId ?? null");
   });
 
   it("lights events on the galaxy's own arms while the camera stays free", () => {
@@ -785,11 +781,11 @@ describe("universe scene production invariants", () => {
       "\n  focusOverview() {",
     );
 
-    // Events ARE nebula particles: their anchors come from the same spiral-arm
-    // math as the dust, seeded by identity — deterministic forever, with no
-    // session memory and no camera dependence.
-    expect(source).toContain("function galaxyArmOffset(");
-    expect(dataCommit).toContain("galaxyArmOffset(");
+    // Events ARE nebula particles: their seats come from the same analytic
+    // arm mapping the dust band uses, seeded by ordinal — deterministic
+    // forever, O(1) per node, no session memory and no camera dependence.
+    expect(source).toContain("function galaxyArmSeat(");
+    expect(dataCommit).toContain("galaxyArmSeat(");
     expect(dataCommit).toContain("const eventBase = bundleEventBase.get(node.timelineBundleId)");
     // No angle clamps, no first-person takeover, no gaze weighting: outside
     // the galaxy the standard orbit is the right instrument.
