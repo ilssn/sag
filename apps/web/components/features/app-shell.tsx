@@ -369,7 +369,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [router]);
 
   React.useEffect(() => {
-    const revealDetail = () => enterExploreMode("search");
+    // A node click opens a detail preview inside the current exploration; it
+    // must not silently switch the workspace to search/cumulative mode.
+    const revealDetail = () => enterExploreMode();
     const revealAsk = () => enterExploreMode("answer");
     window.addEventListener(UNIVERSE_DETAIL_EVENT, revealDetail);
     window.addEventListener(UNIVERSE_ASK_EVENT, revealAsk);
@@ -644,9 +646,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <div
                 className={cn(
                   "bg-space-field relative grid h-svh min-h-0 overflow-hidden",
-                  // Explore keeps only the lightweight overview atmosphere;
-                  // source galaxies and their depth still belong to WebGL.
-                  appMode === "explore" && "bg-space-field--void",
                   windowed && "place-items-center p-4",
                 )}
               >

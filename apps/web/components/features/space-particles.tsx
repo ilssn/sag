@@ -6,7 +6,7 @@ import Particles, { ParticlesProvider } from "@tsparticles/react";
 import { loadSlim } from "@tsparticles/slim";
 import { useTheme } from "next-themes";
 
-const BASE_PARTICLE_COUNT = 104;
+const BASE_PARTICLE_COUNT = 264;
 
 function createParticleOptions(
   dark: boolean,
@@ -49,7 +49,7 @@ function createParticleOptions(
           startValue: "random",
           sync: false,
         },
-        value: dark ? { min: 0.12, max: 0.68 } : { min: 0.12, max: 0.42 },
+        value: dark ? { min: 0.18, max: 0.82 } : { min: 0.14, max: 0.48 },
       },
       shape: { type: "circle" },
       size: {

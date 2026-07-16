@@ -113,6 +113,7 @@ import {
   type UniverseSceneLink,
   type UniverseSceneNode,
   type UniverseSceneUnavailableReason,
+  type UniverseSelectionClearOptions,
   type UniverseTimelineIntentResult,
   type UniverseTimelineJourney,
   type UniverseSceneView,
@@ -235,9 +236,9 @@ const ENTITY_EXPANSION_EVENT_LIMIT = 4;
 // Keep the original deterministic placement model, but give the visible
 // timeline packages a wider stage so cards do not collapse into the source
 // core. These are bounded world-space multipliers, not a force simulation.
-const TIMELINE_EVENT_LATERAL_SPREAD = 2.6;
-const LOCAL_ENTITY_SPREAD_MIN = 56;
-const LOCAL_ENTITY_SPREAD_RANGE = 56;
+const TIMELINE_EVENT_LATERAL_SPREAD = 4.25;
+const LOCAL_ENTITY_SPREAD_MIN = 92;
+const LOCAL_ENTITY_SPREAD_RANGE = 96;
 const EMPTY_TIMELINE_BUNDLE_IDS: string[] = [];
 // World length of one event's slice of its source's counting axis. The axis
 // length is event count × this, so the handful of visible packages always
@@ -3498,9 +3499,9 @@ export function KnowledgeUniverse({
     [],
   );
 
-  const clearSelection = React.useCallback(() => {
+  const clearSelection = React.useCallback((options?: UniverseSelectionClearOptions) => {
     releaseReadingFocus();
-    dispatchUniverseInteraction();
+    if (options?.dismissWorkspace !== false) dispatchUniverseInteraction();
   }, [releaseReadingFocus]);
 
   const timelineNavigationForNode = React.useCallback(
@@ -3882,10 +3883,10 @@ export function KnowledgeUniverse({
     <div
       ref={containerRef}
       className={cn(
-        "sag-knowledge-universe absolute inset-0 z-[2] origin-center overflow-hidden transition-[opacity,transform] duration-200 ease-out",
+        "sag-knowledge-universe absolute inset-0 z-[2] origin-center overflow-hidden transition-[opacity,transform,filter] duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] will-change-[opacity,transform,filter]",
         interactive
-          ? "scale-100 opacity-100"
-          : "pointer-events-none scale-[0.985] opacity-0",
+          ? "scale-100 opacity-100 blur-0"
+          : "pointer-events-none scale-[0.76] opacity-0 blur-[10px]",
       )}
       aria-label={t("aria")}
       aria-hidden={!interactive}
@@ -3894,6 +3895,7 @@ export function KnowledgeUniverse({
         : undefined}
       data-universe-suspended={!interactive}
       data-universe-mode={interactive ? "explore" : "normal"}
+      data-universe-view={viewportSourceId ? "detail" : "overview"}
       data-universe-activation-origin={activationOrigin}
       data-universe-search-locked={activationOrigin === "search"}
       data-universe-engine={

@@ -3,6 +3,7 @@
 import * as React from "react";
 import dynamic from "next/dynamic";
 import { useReducedMotion } from "motion/react";
+import { createPortal } from "react-dom";
 import { ParticleGalaxy } from "@/components/features/particle-galaxy";
 import {
   readUniverseView,
@@ -57,8 +58,36 @@ export function SpaceBackdrop({
   const ambientMotionPaused = Boolean(reducedMotion) || pauseAmbientMotion;
   const backdropRef = React.useRef<HTMLDivElement>(null);
   const cursorMeteorRef = React.useRef<HTMLSpanElement>(null);
+  const cursorPortalRootRef = React.useRef<HTMLDivElement | null>(null);
   const universeDetailRef = React.useRef(false);
   const universeVariantRef = React.useRef(false);
+  const [cursorPortalRoot, setCursorPortalRoot] = React.useState<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    if (variant !== "universe" || reducedMotion) {
+      cursorPortalRootRef.current = null;
+      setCursorPortalRoot(null);
+      return;
+    }
+
+    // The graph owns the full viewport and intentionally stops pointer
+    // propagation on labels. Keep the cursor trail in a top-level overlay so
+    // it remains visible above the transparent WebGL canvas and still receives
+    // capture-phase pointer movement over every surface.
+    const root = document.createElement("div");
+    root.className = "sag-space-cursor-layer";
+    root.dataset.universeView = "overview";
+    root.setAttribute("aria-hidden", "true");
+    document.body.appendChild(root);
+    cursorPortalRootRef.current = root;
+    setCursorPortalRoot(root);
+
+    return () => {
+      if (cursorPortalRootRef.current === root) cursorPortalRootRef.current = null;
+      setCursorPortalRoot((current) => (current === root ? null : current));
+      root.remove();
+    };
+  }, [reducedMotion, variant]);
 
   React.useEffect(() => {
     const backdrop = backdropRef.current;
@@ -97,6 +126,9 @@ export function SpaceBackdrop({
         universeDetailRef.current = detail;
         backdrop.dataset.universeView = nextView;
       }
+      if (cursorPortalRootRef.current) {
+        cursorPortalRootRef.current.dataset.universeView = nextView;
+      }
       backdrop.dataset.ambientMotion = ambientMotionPaused || detail ? "paused" : "active";
       if (detail && cursorMeteorRef.current) {
         cursorMeteorRef.current.dataset.active = "false";
@@ -115,7 +147,7 @@ export function SpaceBackdrop({
     if (reducedMotion || !cursorMeteorRef.current) return;
 
     const meteor = cursorMeteorRef.current;
-    const field = meteor.closest<HTMLElement>(".bg-space-field");
+    const field = backdropRef.current?.closest<HTMLElement>(".bg-space-field");
     if (!field) return;
 
     let hideTimer: number | undefined;
@@ -164,24 +196,24 @@ export function SpaceBackdrop({
     };
 
     const handlePointerMove = (event: PointerEvent) => {
-      const target = event.target;
-      const insideExploreUniverse =
-        target instanceof Element
-        && target.closest("[data-universe-mode='explore']") !== null;
-      const isMeteorSurface = target === field || insideExploreUniverse;
+      const isInsideField =
+        event.clientX >= fieldBounds.left
+        && event.clientX <= fieldBounds.right
+        && event.clientY >= fieldBounds.top
+        && event.clientY <= fieldBounds.bottom;
 
       if (
         event.pointerType !== "mouse"
         || event.buttons !== 0
-        || !isMeteorSurface
+        || !isInsideField
         || (variant === "universe" && universeDetailRef.current)
       ) {
         hideMeteor();
         return;
       }
 
-      const x = event.clientX - fieldBounds.left;
-      const y = event.clientY - fieldBounds.top;
+      const x = cursorPortalRoot ? event.clientX : event.clientX - fieldBounds.left;
+      const y = cursorPortalRoot ? event.clientY : event.clientY - fieldBounds.top;
       if (!hasPreviousPoint) {
         previousX = x;
         previousY = y;
@@ -220,18 +252,27 @@ export function SpaceBackdrop({
     const resizeObserver = new ResizeObserver(measureField);
     resizeObserver.observe(field);
     window.addEventListener("resize", measureField, { passive: true });
-    field.addEventListener("pointermove", handlePointerMove, { passive: true });
+    // Capture before graph labels stop propagation. The loading shell and the
+    // explore graph then share one reliable cursor surface.
+    window.addEventListener("pointermove", handlePointerMove, {
+      capture: true,
+      passive: true,
+    });
     field.addEventListener("pointerleave", hideMeteor);
+    window.addEventListener("blur", hideMeteor);
+    document.addEventListener("visibilitychange", hideMeteor);
 
     return () => {
       resizeObserver.disconnect();
       window.removeEventListener("resize", measureField);
-      field.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointermove", handlePointerMove, true);
       field.removeEventListener("pointerleave", hideMeteor);
+      window.removeEventListener("blur", hideMeteor);
+      document.removeEventListener("visibilitychange", hideMeteor);
       if (animationFrame !== undefined) window.cancelAnimationFrame(animationFrame);
       if (hideTimer) window.clearTimeout(hideTimer);
     };
-  }, [reducedMotion, variant]);
+  }, [cursorPortalRoot, reducedMotion, variant]);
 
   return (
     <div
@@ -243,20 +284,24 @@ export function SpaceBackdrop({
       aria-hidden
     >
       <SpaceParticles
-        reducedMotion={ambientMotionPaused || variant === "universe"}
-        density={variant === "universe" ? 1.8 : 1}
+        // Keep one star-field implementation for loading, normal workspace,
+        // and exploration. The graph adds its source nebulae on top; it does
+        // not replace the shared background with a second particle system.
+        reducedMotion={ambientMotionPaused}
+        density={1}
       />
-      {!reducedMotion && (
-        <span ref={cursorMeteorRef} className="sag-space-cursor-meteor" data-active="false" />
-      )}
-      {variant === "shell" && (
-        <>
-          <span className="sag-space-galaxy-orbit">
-            <ParticleGalaxy reducedMotion={ambientMotionPaused} />
-          </span>
-          <span className="sag-space-dust" />
-        </>
-      )}
+      {!reducedMotion && (cursorPortalRoot
+        ? createPortal(
+          <span ref={cursorMeteorRef} className="sag-space-cursor-meteor" data-active="false" />,
+          cursorPortalRoot,
+        )
+        : <span ref={cursorMeteorRef} className="sag-space-cursor-meteor" data-active="false" />)}
+      <>
+        <span className="sag-space-galaxy-orbit">
+          <ParticleGalaxy reducedMotion={ambientMotionPaused} />
+        </span>
+        <span className="sag-space-dust" />
+      </>
       <span className="sag-space-meteor sag-space-meteor--one" />
       <span className="sag-space-meteor sag-space-meteor--two" />
       <span className="sag-space-meteor sag-space-meteor--three" />

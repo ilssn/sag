@@ -20,6 +20,10 @@ const petSource = readFileSync(
   new URL("./pet.tsx", import.meta.url),
   "utf8",
 );
+const appShellSource = readFileSync(
+  new URL("./app-shell.tsx", import.meta.url),
+  "utf8",
+);
 
 function sourceBetween(start: string, end: string) {
   const startIndex = source.indexOf(start);
@@ -41,6 +45,12 @@ describe("knowledge universe production interaction policy", () => {
     expect(source).toContain("data-universe-resident-node-budget={residentBudget.nodes}");
     expect(source).toContain("const EVENT_ENTITY_PROJECTION_LIMIT = 8");
     expect(source).toContain("const ENTITY_EXPANSION_EVENT_LIMIT = 4");
+  });
+
+  it("gives timeline events and their local entities a wider immersive stage", () => {
+    expect(source).toContain("const TIMELINE_EVENT_LATERAL_SPREAD = 4.25");
+    expect(source).toContain("const LOCAL_ENTITY_SPREAD_MIN = 92");
+    expect(source).toContain("const LOCAL_ENTITY_SPREAD_RANGE = 96");
   });
 
   it("puts every timeline event on the temporal axis, with no mode to opt out of", () => {
@@ -122,6 +132,9 @@ describe("knowledge universe production interaction policy", () => {
     );
     expect(handler).toContain("activatePartition(node as Universe3DNode)");
     expect(handler).toContain("lockNodeForReading(concreteNode)");
+    expect(handler).toContain("if (lockedKeyRef.current === concreteNode.id)");
+    expect(handler).toContain("clearSelection()");
+    expect(handler).toContain("dispatchUniverseDetail(");
     expect(source).toContain("graphRef.current?.lockNode(node.id)");
     expect(source).toContain("graphRef.current?.clearSelection()");
     expect(handler).not.toContain("expandNode(");
@@ -148,6 +161,7 @@ describe("knowledge universe production interaction policy", () => {
     expect(releaseReadingFocus).toContain("setSelectedKey(null)");
     expect(clearSelection).toContain("releaseReadingFocus()");
     expect(clearSelection).toContain("dispatchUniverseInteraction()");
+    expect(clearSelection).toContain("options?.dismissWorkspace !== false");
     expect(clearSelection).not.toMatch(/focusOverview\(|resetOverview\(|setData\(|loadSourceTimelinePage\(|api\./);
     expect(handler).not.toContain("commitWorkingSet(");
     expect(handler).not.toContain("setUniversePinnedNetwork(");
@@ -239,9 +253,34 @@ describe("knowledge universe production interaction policy", () => {
     expect(source).toContain("onClick={dispatchUniverseResume}");
     expect(source).toContain("onBackgroundClick={handleSceneBackgroundClick}");
     expect(petSource).toContain("dispatchUniverseContext({ active, section:");
-    expect(petSource).toContain("if (readUniverseContext().active) return");
     expect(petSource).toContain("UNIVERSE_INTERACTION_EVENT, closeForCanvasGesture");
     expect(miniWorkspaceSource).not.toContain("data-explore-context-status");
+  });
+
+  it("treats a node detail as a reversible preview and preserves it during wheel travel", () => {
+    const click = sourceBetween(
+      "const handleNodeClick = React.useCallback(",
+      "const moveTimelineManually = React.useCallback(",
+    );
+    const gesture = sourceBetween(
+      "const handleSceneInteraction = React.useCallback(",
+      "const handleSceneBackgroundClick = React.useCallback(",
+    );
+    const activation = sourceBetween(
+      "React.useEffect(() => {\n    const onActivate",
+      "const onFocus = (event: Event) =>",
+    );
+    expect(click).toContain("if (lockedKeyRef.current === concreteNode.id)");
+    expect(click).toContain("clearSelection()");
+    expect(gesture).toContain("dispatchUniverseInteraction()");
+    expect(activation).not.toContain("dispatchUniverseInteraction()");
+    expect(petSource).toContain("const [transientDetailPreview, setTransientDetailPreview]");
+    expect(petSource).toContain("setTransientDetailPreview(!readUniverseContext().active)");
+    expect(petSource).toContain("&& !transientDetailPreview");
+    expect(petSource).not.toContain("if (readUniverseContext().active) return");
+    expect(petSource).toContain("setTransientDetailPreview(false);\n      setOpen(false);");
+    expect(appShellSource).toContain("const revealDetail = () => enterExploreMode();");
+    expect(appShellSource).toContain('const revealAsk = () => enterExploreMode("answer");');
   });
 
   it("keeps autoplay bounded by the existing cached timeline", () => {
@@ -945,5 +984,13 @@ describe("knowledge universe production interaction policy", () => {
     expect(source).toContain("trimUniverseWorkingSet(\n        current,\n        budget,");
     expect(source).toContain("manifestVersionRef.current === manifest.version");
     expect(source).toContain("resetScene(epochRef.current + 1)");
+  });
+
+  it("stages exploration as a cinematic arrival and exposes overview breathing state", () => {
+    expect(source).toContain(
+      'data-universe-view={viewportSourceId ? "detail" : "overview"}',
+    );
+    expect(source).toContain("transition-[opacity,transform,filter] duration-700");
+    expect(source).toContain("scale-[0.76] opacity-0 blur-[10px]");
   });
 });

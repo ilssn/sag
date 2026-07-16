@@ -6,6 +6,14 @@ const source = readFileSync(
   new URL("./space-backdrop.tsx", import.meta.url),
   "utf8",
 );
+const particleSource = readFileSync(
+  new URL("./space-particles.tsx", import.meta.url),
+  "utf8",
+);
+const galaxySource = readFileSync(
+  new URL("./particle-galaxy.tsx", import.meta.url),
+  "utf8",
+);
 
 function sourceBetween(start: string, end: string) {
   const startIndex = source.indexOf(start);
@@ -16,15 +24,12 @@ function sourceBetween(start: string, end: string) {
 }
 
 describe("space backdrop interaction isolation", () => {
-  it("reuses the shell atmosphere without duplicating its galaxy inside the universe", () => {
+  it("reuses one shared atmosphere across the shell and universe", () => {
     expect(source).toContain('variant?: "shell" | "universe"');
     expect(source).toContain('data-space-variant={variant}');
-    expect(source).toContain('variant === "shell" && (');
     expect(source).toContain('<span className="sag-space-galaxy-orbit">');
     expect(source).toContain('<span className="sag-space-dust" />');
-    expect(source).toContain(
-      'reducedMotion={ambientMotionPaused || variant === "universe"}',
-    );
+    expect(source).toContain("reducedMotion={ambientMotionPaused}");
     expect(source).toContain("pauseAmbientMotion = false");
   });
 
@@ -56,18 +61,30 @@ describe("space backdrop interaction isolation", () => {
   });
 
   it("keeps a low-cost breathing field and drifting star canvas in the overview", () => {
-    expect(source).toContain('density={variant === "universe" ? 1.8 : 1}');
+    expect(source).toContain("density={1}");
+    expect(particleSource).toContain("const BASE_PARTICLE_COUNT = 264");
+    expect(galaxySource).toContain("const PARTICLE_ALPHA_SCALE = 1.65");
+    expect(galaxySource).toContain("createHaloParticles(random, 520)");
+    expect(galaxySource).toContain("createArmParticles(random, 4480)");
+    expect(galaxySource).toContain("createCoreParticles(random, 640)");
     const css = readFileSync(
       new URL("../../app/globals.css", import.meta.url),
       "utf8",
     );
     expect(css).toContain("sag-space-nebula-breathe");
     expect(css).toContain("sag-space-starfield-drift");
+    expect(css).toContain("sag-universe-overview-breathe");
+    expect(css).toContain(
+      '.sag-knowledge-universe[data-universe-mode="explore"][data-universe-view="overview"]',
+    );
     expect(css).toContain("hsl(45 100% 88% / 0.92)");
   });
 
   it("gates the cursor meteor for drags and source-detail exploration", () => {
     expect(source).toContain("event.buttons !== 0");
+    expect(source).toContain('window.addEventListener("pointermove", handlePointerMove,');
+    expect(source).toContain("capture: true");
+    expect(source).toContain("sag-space-cursor-layer");
     expect(source).toContain(
       'variant === "universe" && universeDetailRef.current',
     );
@@ -100,7 +117,7 @@ describe("space backdrop interaction isolation", () => {
     );
     const cleanup = sourceBetween(
       "return () => {\n      resizeObserver.disconnect();",
-      "}, [reducedMotion, variant]);",
+      "}, [cursorPortalRoot, reducedMotion, variant]);",
     );
 
     expect(source).toContain("let fieldBounds = field.getBoundingClientRect()");

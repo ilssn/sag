@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  advanceUniverseSourceExitGate,
   applyUniverseTemporalFlightWheel,
+  armUniverseSourceExitGate,
   brakeUniverseTemporalFlight,
+  createUniverseSourceExitGate,
   createUniverseTemporalFlightState,
   flyUniverseTemporalFlightTo,
   planUniverseTemporalFlightFollow,
@@ -54,6 +57,50 @@ describe("universe temporal flight", () => {
 
     expect(settled.depth).toBe(0);
     expect(settled.velocity).toBe(0);
+  });
+
+  it("shows the restored nebula before a fresh outward gesture exits the source", () => {
+    const reachedEntrance = armUniverseSourceExitGate(1_000);
+    const inertiaTail = advanceUniverseSourceExitGate(reachedEntrance, {
+      ...WHEEL,
+      deltaY: 120,
+      now: 1_120,
+    });
+    expect(inertiaTail.exitRequested).toBe(false);
+    expect(inertiaTail.gate.outwardPixels).toBe(0);
+
+    const deliberateExit = advanceUniverseSourceExitGate(inertiaTail.gate, {
+      ...WHEEL,
+      deltaY: 120,
+      now: 1_360,
+    });
+    expect(deliberateExit.exitRequested).toBe(true);
+    expect(deliberateExit.gate).toEqual(createUniverseSourceExitGate());
+  });
+
+  it("accumulates a trackpad retreat and cancels it when exploration resumes", () => {
+    let result = advanceUniverseSourceExitGate(
+      armUniverseSourceExitGate(1_000),
+      { ...WHEEL, deltaY: 18, now: 1_300 },
+    );
+    expect(result.exitRequested).toBe(false);
+    expect(result.gate.outwardPixels).toBe(18);
+
+    result = advanceUniverseSourceExitGate(result.gate, {
+      ...WHEEL,
+      deltaY: 22,
+      now: 1_360,
+    });
+    expect(result.exitRequested).toBe(false);
+    expect(result.gate.outwardPixels).toBe(40);
+
+    result = advanceUniverseSourceExitGate(result.gate, {
+      ...WHEEL,
+      deltaY: -12,
+      now: 1_400,
+    });
+    expect(result.exitRequested).toBe(false);
+    expect(result.gate).toEqual(createUniverseSourceExitGate());
   });
 
   it("walls at the oldest moment instead of overshooting the axis", () => {

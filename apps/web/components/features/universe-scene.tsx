@@ -35,14 +35,18 @@ import {
   UNIVERSE_TEMPORAL_AXIS_VERTICAL_ASPECT,
 } from "@/lib/universe-temporal-axis";
 import {
+  advanceUniverseSourceExitGate,
   applyUniverseTemporalFlightWheel,
+  armUniverseSourceExitGate,
   brakeUniverseTemporalFlight,
+  createUniverseSourceExitGate,
   createUniverseTemporalFlightState,
   flyUniverseTemporalFlightTo,
   planUniverseTemporalFlightFollow,
   stepUniverseTemporalFlight,
   UNIVERSE_FLIGHT_SETTLE_EPSILON,
   universeTemporalFlightPresence,
+  type UniverseSourceExitGate,
   type UniverseTemporalFlightState,
 } from "@/lib/universe-temporal-flight";
 import { UNIVERSE_SCENE_BUDGET } from "@/lib/universe-working-set";
@@ -209,7 +213,7 @@ interface UniverseSceneProps {
   onSourceLod: (sourceId: string, level: 0 | 1 | 2 | 3) => void;
   /** Enters a hovered source without requiring a click. */
   onSourceWheel?: (sourceId: string) => void;
-  onSelectionClear: () => void;
+  onSelectionClear: (options?: UniverseSelectionClearOptions) => void;
   onBackRequest?: () => void;
   onBackgroundClick?: () => void;
   actionLabels?: {
@@ -218,13 +222,18 @@ interface UniverseSceneProps {
   };
   onExploreMore?: (node: UniverseSceneNode) => void;
   onAskNode?: (node: UniverseSceneNode) => void;
-  /** Notifies the owner about a real pointer/wheel gesture, never scene animation. */
+  /** Notifies the owner about a dismissing pointer/keyboard gesture, never scene animation. */
   onUserInteraction?: () => void;
   onTimelineIntent: (
     direction: UniverseTimelineDirection,
   ) => Promise<UniverseTimelineIntentResult> | UniverseTimelineIntentResult;
   onTimelineSettled: (revision: number) => void;
   onUnavailable?: (reason: UniverseSceneUnavailableReason) => void;
+}
+
+export interface UniverseSelectionClearOptions {
+  /** Keeps the contextual mini workspace visible while releasing the scene lock. */
+  dismissWorkspace?: boolean;
 }
 
 interface UniverseSceneText {
@@ -328,6 +337,8 @@ interface NebulaParticle {
   phase: number;
   twinkle: number;
   core: boolean;
+  /** Stays as the camera-relative source beacon while other dust approaches. */
+  emitter: boolean;
   radial: number;
 }
 
@@ -345,7 +356,7 @@ interface SceneCallbacks {
   onViewChange: (value: UniverseSceneView) => void;
   onSourceLod: (sourceId: string, level: 0 | 1 | 2 | 3) => void;
   onSourceWheel?: (sourceId: string) => void;
-  onSelectionClear: () => void;
+  onSelectionClear: (options?: UniverseSelectionClearOptions) => void;
   onBackRequest?: () => void;
   onBackgroundClick?: () => void;
   onExploreMore?: (node: UniverseSceneNode) => void;
@@ -400,22 +411,30 @@ const HOVER_LABEL_SETTLE_MS = 72;
 const HOVER_CLEAR_GRACE_MS = 84;
 const MAX_PLACEMENT_MEMORY = 512;
 const NEBULA_BURST_MS = 1_400;
-// Keep the focused source luminous while retaining the bounded particle
-// budget. Detail uses a little more fill-rate only for the selected source;
-// overview particles keep the smaller cap and the same 3k ceiling.
+// Keep the focused source luminous while retaining a bounded per-device
+// particle budget. Detail gives the selected source most of that budget;
+// overview sources keep a proportional share of the same ceiling.
 // Inside a source the dust is the medium being explored: slightly brighter
 // than the overview, so diving in reads as entering the nebula, not leaving it.
-const NEBULA_DETAIL_ALPHA = 1.3;
-const NEBULA_DETAIL_DUST_POINT_SIZE_CSS = 26;
+const NEBULA_DETAIL_ALPHA = 1.5;
+// Keep source nebulae generous in the overview. The source marker is a portal
+// into a knowledge cloud, not a pin; a compact minimum avoids three tiny dots
+// when a source has a small radius in the manifest.
+const NEBULA_SOURCE_RADIUS_MIN = 88;
+const NEBULA_SOURCE_RADIUS_SCALE = 2.25;
+const NEBULA_SOURCE_FRAME_RATIO = 0.76;
+const NEBULA_SOURCE_CORRIDOR_SCALE = 2.35;
+const NEBULA_DETAIL_DUST_POINT_SIZE_CSS = 20;
 const NEBULA_CORRIDOR_DUST_POINT_SIZE_CSS = 5.5;
 const NEBULA_CORRIDOR_GLOW_POINT_SIZE_CSS = 9;
-const NEBULA_CORRIDOR_DUST_ALPHA = 0.16;
-const NEBULA_CORRIDOR_WALL_ALPHA = 0.03;
+const NEBULA_CORRIDOR_DUST_ALPHA = 0.5;
+const NEBULA_CORRIDOR_WALL_ALPHA = 0.16;
+const NEBULA_CORRIDOR_LOADED_ALPHA = 0.4;
 /**
  * Glow pockets are accents, not weather: the brand galaxy is built purely
  * from sharp grains, so oversized haze sprites read as noise smeared over it.
  */
-const NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP = 22;
+const NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP = 16;
 /** Sentinel z far outside any real layout: the loaded band dims nothing. */
 const NEBULA_CORRIDOR_BAND_OFF = 1e8;
 /** Ambient drift stays frozen this long after any camera gesture frame. */
@@ -466,9 +485,9 @@ const NEBULA_CORRIDOR_VERTICAL_ASPECT = UNIVERSE_TEMPORAL_AXIS_VERTICAL_ASPECT;
  * laterally it barely parallaxes under a gaze turn, so the nebula reads as a
  * vast illuminated surrounding instead of debris sweeping past the camera.
  */
-const NEBULA_WALL_SHARE = 0.62;
-const NEBULA_WALL_LATERAL_MIN = 2.2;
-const NEBULA_WALL_LATERAL_MAX = 5.2;
+const NEBULA_WALL_SHARE = 0.46;
+const NEBULA_WALL_LATERAL_MIN = 1.6;
+const NEBULA_WALL_LATERAL_MAX = 3.8;
 /**
  * Corridor dust is camera-anchored: it repeats modulo this span around the
  * flight depth, so density near the camera is constant no matter whether the
@@ -477,7 +496,7 @@ const NEBULA_WALL_LATERAL_MAX = 5.2;
  * bounded-window discipline applied to particles.
  */
 const NEBULA_CORRIDOR_WRAP_SPAN = 2400;
-const NEBULA_GLOW_POINT_SIZE_CSS_MOBILE = 18;
+const NEBULA_GLOW_POINT_SIZE_CSS_MOBILE = 14;
 const HIGHLIGHT_FLOW_FRAME_MS = 1000 / 30;
 const TIMELINE_WHEEL_LABEL_SELECTOR = "[data-universe-node-id]";
 const MINI_WORKSPACE_SELECTOR = "[data-mini-workspace='true']";
@@ -853,8 +872,11 @@ function makeNebulaMaterial(darkTheme: boolean) {
       uniform float uCorridorCenterZ;
       uniform float uCorridorVestibule;
       attribute vec3 aColor;
+      attribute vec3 aLocalPosition;
       attribute vec3 aCorridor;
       attribute float aCorridorWall;
+      attribute float aEmitter;
+      attribute float aSpin;
       attribute float aSize;
       attribute float aAlpha;
       attribute float aGlow;
@@ -877,9 +899,10 @@ function makeNebulaMaterial(darkTheme: boolean) {
           uDetailAlpha,
           smoothstep(0.18, 0.78, particleDetail)
         );
-        // Gold is the stable brand field in overview. Once the focused source
-        // takes over, its entry colour becomes the restrained secondary tint.
-        float sourceTint = 0.1 + 0.9 * smoothstep(0.22, 0.82, particleDetail);
+        // Every cloud carries the graph's two semantic lights from the first
+        // frame: event gold and the source/entity accent. Detail strengthens
+        // the accent but never repaints the whole nebula one flat colour.
+        float sourceTint = 0.5 + 0.5 * smoothstep(0.22, 0.82, particleDetail);
         vColor = mix(uBrandColor, aColor, sourceTint);
         vAlpha = aAlpha * mix(1.0, detailAlpha, sourceMatch);
         // Depth of field for the whole sky: while inside one source, every
@@ -890,21 +913,32 @@ function makeNebulaMaterial(darkTheme: boolean) {
         vShape = aShape;
         float wave = 0.5 + 0.5 * sin(uTime * (0.72 + aTwinkle * 1.38) + aPhase);
         float glint = pow(wave, mix(2.2, 7.0, aTwinkle));
-        float pulse = mix(1.0, 0.8 + glint * 0.5, uMotion * aTwinkle);
-        // Diving into a source stretches its galaxy into the exploration
-        // corridor: the dust that is still a cloud from outside is, inside,
-        // the source's unloaded history laid out along the counting axis.
-        // The vestibule holds it back: at flight depth 0 the nebula is intact
-        // (the hero pose); the stretch happens as the camera crosses into the
-        // axis, and reverses on the way back out.
+        float pulse = mix(1.0, 0.94 + glint * 0.16, uMotion * aTwinkle);
+        // One continuous source form owns the whole journey. The vestibule
+        // introduces depth gradually; a stable share of the spiral remains a
+        // camera-relative beacon while the rest becomes approaching dust.
         float diveMix = uCorridorVestibule > 0.0
           ? smoothstep(0.0, uCorridorVestibule * 0.85, uFlightDepth)
           : 1.0;
         float corridorMix = smoothstep(0.12, 0.88, particleDetail) * diveMix;
-        // Glow pockets belong to the intact source hero. Once they stretch
-        // into the corridor they collapse back into fine grains instead of
-        // becoming large, screen-space blobs.
-        vGlow = aGlow * (1.0 - smoothstep(0.08, 0.55, corridorMix));
+        float streamMix = corridorMix * (1.0 - aEmitter);
+        // The beacon retains its glow at every depth. Stream glow pockets
+        // collapse into fine grains before they approach the camera.
+        vGlow = aGlow * (
+          1.0 - smoothstep(0.08, 0.55, corridorMix) * (1.0 - aEmitter)
+        );
+        // A source-specific, very slow spin keeps the silhouette alive. uTime
+        // advances only while the scene is awake, so this costs no idle loop.
+        float spinAngle = uTime * aSpin;
+        float spinCos = cos(spinAngle);
+        float spinSin = sin(spinAngle);
+        vec3 sourceCenter = position - aLocalPosition;
+        vec3 spunLocal = vec3(
+          aLocalPosition.x * spinCos - aLocalPosition.y * spinSin,
+          aLocalPosition.x * spinSin + aLocalPosition.y * spinCos,
+          aLocalPosition.z
+        );
+        vec3 heroPosition = sourceCenter + spunLocal;
         // Camera-anchored wrap: corridor dust repeats modulo the span around
         // the flight depth, so the density near the camera never depends on
         // the source's size — the fixed-window discipline for particles.
@@ -915,7 +949,13 @@ function makeNebulaMaterial(darkTheme: boolean) {
         if (rel > span * 0.75) rel -= span;
         float wrappedDepth = uFlightDepth + rel;
         corridorTarget.z = uCorridorCenterZ - wrappedDepth;
-        vec3 animatedPosition = mix(position, corridorTarget, corridorMix);
+        // The original spiral follows the camera only for beacon grains. At
+        // partial dive it first grows a little, then settles at the same deep
+        // centre while stream grains continue travelling toward the viewer.
+        vec3 emitterTarget = heroPosition;
+        emitterTarget.z -= uFlightDepth;
+        vec3 journeyTarget = mix(corridorTarget, emitterTarget, aEmitter);
+        vec3 animatedPosition = mix(heroPosition, journeyTarget, corridorMix);
         // The axis has real ends: dust never spills in front of the entry
         // plane, and the last stretch dissolves into an unresolved horizon
         // instead of a visible wall — then ends for good.
@@ -941,21 +981,25 @@ function makeNebulaMaterial(darkTheme: boolean) {
           uCorridorNearZ + 30.0,
           animatedPosition.z
         ));
-        vAlpha *= mix(1.0, 0.16, corridorMix * loadedBand);
+        vAlpha *= mix(
+          1.0,
+          ${NEBULA_CORRIDOR_LOADED_ALPHA.toFixed(2)},
+          streamMix * loadedBand
+        );
         // The corridor's own light: glow pockets brighten into soft beacons
         // along the axis, and the far end dissolves instead of hard-stopping —
         // vast, with no visible wall.
         float glowParticle = step(0.001, vGlow);
         float originalGlowParticle = step(0.001, aGlow);
-        vAlpha *= mix(1.0, 0.04, corridorMix * originalGlowParticle);
-        vAlpha *= mix(1.0, axisFade, corridorMix);
+        vAlpha *= mix(1.0, 0.04, streamMix * originalGlowParticle);
+        vAlpha *= mix(1.0, axisFade, streamMix);
         // The explored graph is the foreground. Corridor dust remains only as
         // a restrained depth cue; distant wall grains recede almost entirely.
-        vAlpha *= mix(1.0, ${NEBULA_CORRIDOR_DUST_ALPHA.toFixed(2)}, corridorMix);
+        vAlpha *= mix(1.0, ${NEBULA_CORRIDOR_DUST_ALPHA.toFixed(2)}, streamMix);
         vAlpha *= mix(
           1.0,
           ${(NEBULA_CORRIDOR_WALL_ALPHA / NEBULA_CORRIDOR_DUST_ALPHA).toFixed(4)},
-          corridorMix * aCorridorWall
+          streamMix * aCorridorWall
         );
         // Ambient drift is a whisper, not a float: it breathes only while the
         // camera is idle and holds still under any gesture.
@@ -967,7 +1011,7 @@ function makeNebulaMaterial(darkTheme: boolean) {
         float glowScale = mix(1.0, mix(3.6, 4.8, vDetail), vGlow);
         // Detail walls are intentionally smaller than hero grains. This both
         // removes visual noise and sharply lowers point-sprite overdraw.
-        float corridorBoost = mix(1.0, mix(1.0, 0.62, aCorridorWall), corridorMix);
+        float corridorBoost = mix(1.0, mix(1.0, 0.62, aCorridorWall), streamMix);
         float rawPointSize = aSize * uPixelRatio * perspective * pulse
           * detailScale * glowScale * corridorBoost;
         float detailDustCap = mix(13.0, ${NEBULA_DETAIL_DUST_POINT_SIZE_CSS.toFixed(1)}, vDetail)
@@ -977,11 +1021,11 @@ function makeNebulaMaterial(darkTheme: boolean) {
           4.5,
           aCorridorWall
         ) * uPixelRatio;
-        detailDustCap = mix(detailDustCap, corridorDustCap, corridorMix);
+        detailDustCap = mix(detailDustCap, corridorDustCap, streamMix);
         float glowPointSizeCap = mix(
-          uPointSizeCap * (1.0 + 0.25 * corridorMix),
+          uPointSizeCap * (1.0 + 0.25 * streamMix),
           ${NEBULA_CORRIDOR_GLOW_POINT_SIZE_CSS.toFixed(1)} * uPixelRatio,
-          corridorMix
+          streamMix
         );
         float capSelect = glowParticle;
         float pointSizeCap = mix(
@@ -1104,6 +1148,7 @@ class UniverseForceSceneEngine {
   private flightOwnWindowChange = false;
   private flightFollowCooldownUntil = 0;
   private sourceNavigationPhase: "overview" | "origin" | "exploring" | "returning" = "overview";
+  private sourceExitGate: UniverseSourceExitGate = createUniverseSourceExitGate();
   private sourceReturnMotion: {
     sourceId: string;
     startedAt: number;
@@ -1517,6 +1562,7 @@ class UniverseForceSceneEngine {
     if (!nextFlight) {
       this.sourceNavigationPhase = "overview";
       this.host.dataset.universeSourceNavigation = "overview";
+      this.sourceExitGate = createUniverseSourceExitGate();
     }
     if (nextFlight && flightSourceChanged) {
       // A fresh browse session starts outside the first package band. Depth 0
@@ -1524,8 +1570,7 @@ class UniverseForceSceneEngine {
       this.flightState = createUniverseTemporalFlightState(0);
       this.appliedFlightDepth = this.flightState.depth;
       this.flightOwnWindowChange = false;
-      this.sourceNavigationPhase = "origin";
-      this.host.dataset.universeSourceNavigation = "origin";
+      this.markSourceOrigin();
     } else if (
       nextFlight
       && windowChanged
@@ -1557,8 +1602,12 @@ class UniverseForceSceneEngine {
       this.reportedViewSourceId = null;
       this.requestedSourceId = null;
       this.overviewRequested = true;
-      this.sourceNavigationPhase = nextFlight ? "origin" : "overview";
-      this.host.dataset.universeSourceNavigation = this.sourceNavigationPhase;
+      if (nextFlight) this.markSourceOrigin();
+      else {
+        this.sourceNavigationPhase = "overview";
+        this.host.dataset.universeSourceNavigation = "overview";
+        this.sourceExitGate = createUniverseSourceExitGate();
+      }
       this.lodLevels.clear();
       this.deepLodMilestones.clear();
       this.pendingLod = null;
@@ -2277,10 +2326,8 @@ class UniverseForceSceneEngine {
       this.appliedFlightDepth = depth;
       this.updateTemporalPresence();
       this.applyBrowseGaze();
-      this.sourceNavigationPhase = depth <= UNIVERSE_FLIGHT_SETTLE_EPSILON
-        ? "origin"
-        : "exploring";
-      this.host.dataset.universeSourceNavigation = this.sourceNavigationPhase;
+      if (depth <= UNIVERSE_FLIGHT_SETTLE_EPSILON) this.markSourceOrigin();
+      else this.markSourceExploring();
     }
     this.host.dataset.universeVisualMode = view.sourceId ? "detail" : "overview";
     this.host.dataset.universeDetailSource = view.sourceId ?? "";
@@ -2324,6 +2371,7 @@ class UniverseForceSceneEngine {
     this.sourceReturnMotion = null;
     this.sourceNavigationPhase = "overview";
     this.host.dataset.universeSourceNavigation = "overview";
+    this.sourceExitGate = createUniverseSourceExitGate();
     this.pendingLod = null;
     this.lodArmed = false;
     this.lodLevels.clear();
@@ -2355,7 +2403,10 @@ class UniverseForceSceneEngine {
     if (!sources.length) return;
     const bounds = new THREE.Box3();
     sources.forEach((node) => {
-      const radius = Math.max(30, node.sceneNode.radius * 1.12);
+      const radius = Math.max(
+        NEBULA_SOURCE_RADIUS_MIN,
+        node.sceneNode.radius * NEBULA_SOURCE_RADIUS_SCALE,
+      ) * NEBULA_SOURCE_FRAME_RATIO;
       bounds.expandByPoint(new THREE.Vector3(node.x - radius, node.y - radius, node.z - radius));
       bounds.expandByPoint(new THREE.Vector3(node.x + radius, node.y + radius, node.z + radius));
     });
@@ -2368,13 +2419,19 @@ class UniverseForceSceneEngine {
     // source sits closer to the canonical camera. Include each source's depth
     // offset so its full projected radius remains inside the initial frame.
     const distanceY = Math.max(...sources.map((node) => {
-      const radius = Math.max(30, node.sceneNode.radius * 1.12);
+      const radius = Math.max(
+        NEBULA_SOURCE_RADIUS_MIN,
+        node.sceneNode.radius * NEBULA_SOURCE_RADIUS_SCALE,
+      ) * NEBULA_SOURCE_FRAME_RATIO;
       const depthOffset = node.z - center.z;
       const extent = Math.abs(node.y - center.y) + radius;
       return depthOffset + extent / Math.max(0.01, halfFov);
     }));
     const distanceX = Math.max(...sources.map((node) => {
-      const radius = Math.max(30, node.sceneNode.radius * 1.12);
+      const radius = Math.max(
+        NEBULA_SOURCE_RADIUS_MIN,
+        node.sceneNode.radius * NEBULA_SOURCE_RADIUS_SCALE,
+      ) * NEBULA_SOURCE_FRAME_RATIO;
       const depthOffset = node.z - center.z;
       const extent = Math.abs(node.x - center.x) + radius;
       return depthOffset + extent / Math.max(0.01, halfFov * aspect);
@@ -2395,9 +2452,13 @@ class UniverseForceSceneEngine {
     const flight = this.flightConfig;
     if (!flight || flight.sourceId !== node.sourceId) return null;
     const entryZ = flight.centerZ - depth;
+    const nebulaRadius = Math.max(
+      NEBULA_SOURCE_RADIUS_MIN,
+      node.sceneNode.radius * NEBULA_SOURCE_RADIUS_SCALE,
+    );
     const heroStandoff = Math.min(
-      560,
-      Math.max(CORRIDOR_ENTRY_STANDOFF, node.sceneNode.radius * 1.45 * 1.9),
+      860,
+      Math.max(CORRIDOR_ENTRY_STANDOFF, nebulaRadius * 3.45),
     );
     return {
       target: new THREE.Vector3(
@@ -2413,9 +2474,16 @@ class UniverseForceSceneEngine {
     };
   }
 
+  private markSourceOrigin(now = performance.now()) {
+    this.sourceNavigationPhase = "origin";
+    this.host.dataset.universeSourceNavigation = "origin";
+    this.sourceExitGate = armUniverseSourceExitGate(now);
+  }
+
   private markSourceExploring() {
     if (!this.flightConfig) return;
     this.sourceReturnMotion = null;
+    this.sourceExitGate = createUniverseSourceExitGate();
     this.sourceNavigationPhase = "exploring";
     this.host.dataset.universeSourceNavigation = "exploring";
   }
@@ -2485,8 +2553,7 @@ class UniverseForceSceneEngine {
     if (progress < 1) return true;
 
     this.sourceReturnMotion = null;
-    this.sourceNavigationPhase = "origin";
-    this.host.dataset.universeSourceNavigation = "origin";
+    this.markSourceOrigin(now);
     this.host.dataset.universeFlightVelocity = "0.0";
     this.applyBrowseGaze();
     return false;
@@ -3929,7 +3996,7 @@ class UniverseForceSceneEngine {
     const configuredBudget = mobile
       ? this.policy.proxy_budget_mobile
       : this.policy.proxy_budget_desktop;
-    const budgetCap = mobile ? 2_000 : 6_000;
+    const budgetCap = mobile ? 4_000 : 12_000;
     const budget = Math.min(
       budgetCap,
       Math.max(0, Number.isFinite(configuredBudget) ? configuredBudget : 0),
@@ -3969,72 +4036,94 @@ class UniverseForceSceneEngine {
       const count = baseCount + Math.floor(
         (weightedBudget * weights[sourceIndex]) / Math.max(1, totalWeight),
       );
-      const radius = Math.max(40, source.sceneNode.radius * 1.45);
+      // A bounded spiral nebula, not a flat plate and not random point fog.
+      // Tight arm lanes make the silhouette readable from the overview; real
+      // z-thickness and restrained inter-arm dust keep the approach spatial.
+      const radius = Math.max(
+        NEBULA_SOURCE_RADIUS_MIN,
+        source.sceneNode.radius * NEBULA_SOURCE_RADIUS_SCALE,
+      );
       const rotation = new THREE.Euler(
-        (stableUnit(`${source.id}:rx`) - 0.5) * 0.7,
-        (stableUnit(`${source.id}:ry`) - 0.5) * 0.9,
+        (stableUnit(`${source.id}:rx`) - 0.5) * 0.34,
+        (stableUnit(`${source.id}:ry`) - 0.5) * 0.42,
         stableUnit(`${source.id}:rz`) * Math.PI,
       );
-      const armCount = 3 + Math.floor(stableUnit(`${source.id}:arm-count`) * 2);
+      const armCount = 2 + Math.floor(stableUnit(`${source.id}:arm-count`) * 2);
       const winding = Math.PI * (
-        2.7 + stableUnit(`${source.id}:arm-winding`) * 0.8
+        2.65 + stableUnit(`${source.id}:arm-winding`) * 0.7
       );
-      const ellipticity = 0.72 + stableUnit(`${source.id}:ellipticity`) * 0.12;
       for (let index = 0; index < count; index += 1) {
         const key = `${source.id}:dust:${index}`;
-        // Hero anatomy: half the grains pile into a blazing tight heart, the
-        // disc stays thin, and a wide sprinkle dusts the whole frame.
         const population = stableUnit(`${key}:population`);
-        const coreParticle = population < 0.5;
-        const haloParticle = population >= 0.88;
+        const coreParticle = population < 0.3;
+        const haloParticle = population >= 0.92;
+        const diffuseParticle = population >= 0.72 && !haloParticle;
+        const phase = stableUnit(`${key}:phase`) * Math.PI * 2;
         const radial = haloParticle
-          ? 1.35 + stableUnit(`${key}:halo`) * 1.65
+          ? 0.78 + Math.pow(stableUnit(`${key}:radius`), 0.8) * 0.38
           : Math.pow(
               stableUnit(`${key}:radius`),
-              coreParticle ? 2.55 : 0.7,
+              coreParticle ? 3.05 : diffuseParticle ? 0.74 : 0.64,
             );
         const armIndex = Math.min(
           armCount - 1,
           Math.floor(stableUnit(`${key}:arm-index`) * armCount),
         );
-        const armAngle = (armIndex / armCount) * Math.PI * 2 + radial * winding;
-        // Tight arm lanes are the silhouette: the brand galaxy reads as a
-        // galaxy because its arms have edges, not a uniform disc of scatter.
-        const armSpread = (stableUnit(`${key}:arm-spread`) - 0.5)
-          * (coreParticle ? 1.3 : 0.5)
-          * (1.08 - radial * 0.42);
-        const angle = armAngle + armSpread;
-        const planarRadius = radius * radial;
+        const laneSeed = stableUnit(`${key}:arm-lane`) * 2 - 1;
+        const laneWidth = coreParticle
+          ? 1.05
+          : haloParticle
+            ? Math.PI
+          : diffuseParticle
+            ? 1.15
+            : 0.17 + radial * 0.24;
+        const laneOffset = Math.sign(laneSeed)
+          * Math.pow(Math.abs(laneSeed), 1.75)
+          * laneWidth;
+        const angle = haloParticle
+          ? stableUnit(`${key}:halo-angle`) * Math.PI * 2
+          : (armIndex / armCount) * Math.PI * 2
+            + radial * winding
+            + laneOffset;
+        const planarRadius = radius * Math.min(1.16, radial);
+        const thickness = radius
+          * (coreParticle ? 0.28 : haloParticle ? 0.22 : diffuseParticle ? 0.18 : 0.14)
+          * (1 - radial * 0.32);
         const offset = new THREE.Vector3(
-          Math.cos(angle) * planarRadius * (
-            1.08 + stableUnit(`${key}:stretch`) * 0.12
-          ),
-          Math.sin(angle) * planarRadius * ellipticity,
-          (stableUnit(`${key}:depth`) - 0.5)
-            * radius
-            * (coreParticle ? 0.34 : 0.14)
-            * (1.16 - radial * 0.36),
+          Math.cos(angle) * planarRadius * 1.06,
+          Math.sin(angle) * planarRadius * 0.76,
+          (stableUnit(`${key}:depth`) * 2 - 1) * thickness
+            + Math.sin(angle * 1.8 + phase) * radius * 0.045 * (1 - radial),
         );
         offset.applyEuler(rotation);
         const twinkle = Math.pow(stableUnit(`${key}:twinkle`), 1.18);
         const glowSeed = stableUnit(`${key}:glow`);
-        // Sparse: light pockets punctuate the grain field, never blanket it.
-        const glowChance = coreParticle ? 0.05 : 0.02;
+        const emitterParticle = coreParticle
+          || stableUnit(`${key}:emitter`) < 0.2;
+        // Sparse light pockets punctuate fine grain; no oversized fog blobs.
+        const glowChance = coreParticle ? 0.018 : 0.006;
         particles.push({
           sourceId: source.sourceId,
           sourceIndex,
           offset,
           core: coreParticle,
+          emitter: emitterParticle,
           radial: Math.min(1, radial),
           alpha: haloParticle
-            ? 0.06 + stableUnit(`${key}:alpha`) * 0.16
+            ? 0.035 + stableUnit(`${key}:alpha`) * 0.1
+            : diffuseParticle
+            ? 0.08 + stableUnit(`${key}:alpha`) * 0.18
             : (coreParticle ? 0.5 : 0.26)
               + stableUnit(`${key}:alpha`) * (coreParticle ? 0.5 : 0.56),
           glow: glowSeed < glowChance
-            ? 0.58 + stableUnit(`${key}:glow-strength`) * 0.42
+            ? 0.46 + stableUnit(`${key}:glow-strength`) * 0.34
             : 0,
-          phase: stableUnit(`${key}:phase`) * Math.PI * 2,
+          phase,
           twinkle,
+          // Keep a small, deterministic share of the dense core as a
+          // camera-relative beacon while the remaining grains stream into the
+          // corridor during flight.
+          emitter: coreParticle && stableUnit(`${key}:emitter`) < 0.16,
         });
       }
     });
@@ -4048,6 +4137,7 @@ class UniverseForceSceneEngine {
     const sizes = new Float32Array(particles.length);
     const alphas = new Float32Array(particles.length);
     const glows = new Float32Array(particles.length);
+    const emitters = new Float32Array(particles.length);
     const sourceIndices = new Float32Array(particles.length);
     const shapes = new Float32Array(particles.length);
     const phases = new Float32Array(particles.length);
@@ -4059,17 +4149,22 @@ class UniverseForceSceneEngine {
     ]));
     const lateralBySource = new Map(sources.map((source) => [
       source.sourceId,
-      Math.max(72, source.sceneNode.radius) * 1.8,
+      Math.max(96, source.sceneNode.radius) * NEBULA_SOURCE_CORRIDOR_SCALE,
     ]));
     particles.forEach((particle, index) => {
-      // Keep the source's entry colour all the way through the nebula. A
-      // restrained white lift gives the core its readable glow without
-      // washing blue, violet, green, or copper sources into one gold cloud.
-      const color = this.sourceVisualColor(particle.sourceId);
+      // The cloud previews the graph before any card exists: gold grains are
+      // future event stars; accent grains are future entities. Because the
+      // same particles become the corridor, this semantic colour continuity
+      // survives the entire outside → inside → graph transition.
+      const eventGrain = stableUnit(`${particle.sourceId}:${index}:semantic`)
+        < (particle.core ? 0.48 : 0.36);
+      const color = eventGrain
+        ? NEBULA_BRAND_GOLD.clone()
+        : this.sourceVisualColor(particle.sourceId);
       const whiteMix = particle.core
-        ? 0.2 + (1 - particle.radial) * 0.28
+        ? 0.08 + (1 - particle.radial) * 0.18
         : stableUnit(`${particle.sourceId}:${index}:white`)
-          * (this.darkTheme ? 0.16 : 0.1);
+          * (this.darkTheme ? 0.07 : 0.05);
       color.lerp(WHITE, whiteMix);
       colors[index * 3] = color.r;
       colors[index * 3 + 1] = color.g;
@@ -4077,12 +4172,17 @@ class UniverseForceSceneEngine {
       // Brand grain: fine dust, a denser bright heart carried by size too.
       sizes[index] = 0.95
         + stableUnit(`${particle.sourceId}:${index}:size`) * 2.2
-        + (particle.twinkle > 0.86 ? 0.45 : 0)
+        + (particle.twinkle > 0.8 ? 0.6 : 0)
+        + (eventGrain ? 0.16 : 0)
         + (particle.core ? (1 - particle.radial) * 0.8 : 0);
       alphas[index] = particle.alpha;
       glows[index] = particle.glow;
+      emitters[index] = particle.emitter ? 1 : 0;
       sourceIndices[index] = particle.sourceIndex;
-      shapes[index] = particle.glow === 0 && particle.twinkle > 0.84 ? 1 : 0;
+      shapes[index] = particle.glow === 0
+        && (particle.twinkle > 0.9 || (eventGrain && particle.twinkle > 0.66))
+        ? 1
+        : 0;
       phases[index] = particle.phase;
       twinkles[index] = 0.18 + particle.twinkle * 0.82;
       // The corridor form: the same dust, laid out along ONE wrap span of the
@@ -4129,6 +4229,7 @@ class UniverseForceSceneEngine {
     geometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
     geometry.setAttribute("aAlpha", alphaAttribute);
     geometry.setAttribute("aGlow", new THREE.BufferAttribute(glows, 1));
+    geometry.setAttribute("aEmitter", new THREE.BufferAttribute(emitters, 1));
     geometry.setAttribute("aSourceIndex", new THREE.BufferAttribute(sourceIndices, 1));
     geometry.setAttribute("aShape", new THREE.BufferAttribute(shapes, 1));
     geometry.setAttribute("aPhase", new THREE.BufferAttribute(phases, 1));
@@ -5124,7 +5225,7 @@ class UniverseForceSceneEngine {
           ) / 0.84, 0, 1)
         : 1;
       const calculatedOpacity = layoutOpacity * entryReveal * dataOpacity;
-      const visibleOpacity = requiredFocusCard
+      let visibleOpacity = requiredFocusCard
         ? Math.max(0.72, calculatedOpacity)
         : calculatedOpacity;
       if (visibleOpacity <= 0.01) {
@@ -5136,6 +5237,30 @@ class UniverseForceSceneEngine {
       }
       const projected = new THREE.Vector3(node.x, node.y, node.z).project(camera);
       const screen = this.graph.graph2ScreenCoords(node.x, node.y, node.z);
+      // Approaching information resolves at the centre, stays readable in the
+      // middle field, then loses focus before crossing the viewport edge. A
+      // locked network is exempt because its actions must remain dependable.
+      const edgeDistance = Math.min(
+        screen.x,
+        width - screen.x,
+        screen.y,
+        height - screen.y,
+      );
+      const edgePresence = label.kind === "node" && !requiredFocusCard
+        ? THREE.MathUtils.smoothstep(edgeDistance, 64, 184)
+        : 1;
+      visibleOpacity *= edgePresence;
+      label.element.style.setProperty(
+        "--universe-card-edge-blur",
+        `${((1 - edgePresence) * 3.2).toFixed(2)}px`,
+      );
+      if (visibleOpacity <= 0.01) {
+        label.element.hidden = true;
+        label.element.style.display = "none";
+        label.element.style.pointerEvents = "none";
+        label.element.style.transform = "translate3d(-9999px, -9999px, 0)";
+        return;
+      }
       const nodeAnchorInFrame = projected.z > -1
         && projected.z < 1
         && screen.x > 0
@@ -5997,7 +6122,11 @@ class UniverseForceSceneEngine {
           nodeDepth - this.appliedFlightDepth,
           config.unitsPerEvent,
         );
-        scale = presence.scale;
+        // The graph is born from the same dust field: on entry, particles
+        // visibly condense into event stars and entity points. Reversing the
+        // flight runs the exact same scale/opacity curve back into dust.
+        const condensation = THREE.MathUtils.lerp(0.14, 1, dive);
+        scale = presence.scale * condensation;
         opacity = presence.opacity * dive;
       }
       if (
@@ -6084,6 +6213,14 @@ class UniverseForceSceneEngine {
     }
     this.host.dataset.universeFlightDepth = state.depth.toFixed(1);
     this.host.dataset.universeFlightVelocity = state.velocity.toFixed(1);
+    if (
+      !moving
+      && state.depth <= UNIVERSE_FLIGHT_SETTLE_EPSILON
+    ) {
+      // Depth zero is a real journey stop: restore the intact source nebula
+      // before accepting a separate outward gesture back to the overview.
+      this.markSourceOrigin(now);
+    }
     const follow = now >= this.flightFollowCooldownUntil
       ? planUniverseTemporalFlightFollow({
           depth: state.depth,
@@ -6154,11 +6291,10 @@ class UniverseForceSceneEngine {
     }
     const surface = this.timelineWheelSurface(event.target);
     if (!surface) return;
-    this.callbacks.onUserInteraction?.();
     if (this.lockedId || this.selectedId || this.keyboardFocusedId) {
-      // Dismiss reading focus first, but keep processing this exact wheel
-      // gesture so the camera never feels as though it swallowed an input.
-      this.callbacks.onSelectionClear();
+      // Release reading focus, but keep the contextual mini workspace open:
+      // wheel travel changes the scene rather than dismissing what was read.
+      this.callbacks.onSelectionClear({ dismissWorkspace: false });
       if (this.lockedId || this.selectedId || this.keyboardFocusedId) {
         this.clearSelection();
       }
@@ -6193,12 +6329,18 @@ class UniverseForceSceneEngine {
     event.stopPropagation();
     if (
       event.deltaY > 0
-      && this.sourceNavigationPhase === "origin"
       && this.appliedFlightDepth <= UNIVERSE_FLIGHT_SETTLE_EPSILON
     ) {
-      // The source entrance is a deliberate navigation boundary: one more
-      // outward wheel gesture returns to the multi-source overview.
-      this.callbacks.onBackRequest?.();
+      if (this.sourceNavigationPhase !== "origin") this.markSourceOrigin();
+      const exit = advanceUniverseSourceExitGate(this.sourceExitGate, {
+        deltaY: event.deltaY,
+        deltaMode: event.deltaMode,
+        viewportHeight: this.host.clientHeight,
+        reducedMotion: this.reducedMotion,
+        now: performance.now(),
+      });
+      this.sourceExitGate = exit.gate;
+      if (exit.exitRequested) this.callbacks.onBackRequest?.();
       return;
     }
     const nextFlightState = applyUniverseTemporalFlightWheel(this.flightState, {
@@ -6227,7 +6369,9 @@ class UniverseForceSceneEngine {
     // A camera gesture wants a steady sky: freeze the ambient drift instead of
     // igniting it, so the background never floats under the user's hand.
     this.cameraCalmUntil = performance.now() + NEBULA_GESTURE_CALM_MS;
-    this.markSourceExploring();
+    if (this.appliedFlightDepth > UNIVERSE_FLIGHT_SETTLE_EPSILON) {
+      this.markSourceExploring();
+    }
     this.lodArmed = true;
     this.startLoop(this.policy.lod_debounce_ms + 240);
   };

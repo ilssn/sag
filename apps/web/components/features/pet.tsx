@@ -282,6 +282,7 @@ export function Pet({
   const [panelAbove, setPanelAbove] = React.useState(true);
   const [open, setOpen] = React.useState(false);
   const [miniView, setMiniView] = React.useState<PetMiniView>("workspace");
+  const [transientDetailPreview, setTransientDetailPreview] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState<boolean>(
     APP_INITIALIZATION_DEFAULTS.petCollapsed,
   );
@@ -373,11 +374,13 @@ export function Pet({
       // until the user explicitly opens it or asks to inspect a node.
       exploreSourceRef.current = null;
       setOpen(false);
+      setTransientDetailPreview(false);
       setPetOverlay("none");
       return;
     }
 
     setOpen(false);
+    setTransientDetailPreview(false);
 
     // Exiting exploration removes a hovered child without always
     // producing pointerleave on the pet shell. Clear that latched state so
@@ -393,16 +396,26 @@ export function Pet({
 
   React.useEffect(() => {
     if (appMode !== "explore") return;
-    const reopenWorkspace = () => {
+    const reopenDetailPreview = () => {
+      // A graph-node click is a reversible reading preview. If no contextual
+      // search/answer session was already active, opening the detail must not
+      // create one merely because the underlying workspace has such a section.
+      setTransientDetailPreview(!readUniverseContext().active);
       setMiniView("workspace");
       setPetOverlay("none");
       setOpen(true);
     };
-    window.addEventListener(UNIVERSE_DETAIL_EVENT, reopenWorkspace);
-    window.addEventListener(UNIVERSE_ASK_EVENT, reopenWorkspace);
+    const reopenAnswerWorkspace = () => {
+      setTransientDetailPreview(false);
+      setMiniView("workspace");
+      setPetOverlay("none");
+      setOpen(true);
+    };
+    window.addEventListener(UNIVERSE_DETAIL_EVENT, reopenDetailPreview);
+    window.addEventListener(UNIVERSE_ASK_EVENT, reopenAnswerWorkspace);
     return () => {
-      window.removeEventListener(UNIVERSE_DETAIL_EVENT, reopenWorkspace);
-      window.removeEventListener(UNIVERSE_ASK_EVENT, reopenWorkspace);
+      window.removeEventListener(UNIVERSE_DETAIL_EVENT, reopenDetailPreview);
+      window.removeEventListener(UNIVERSE_ASK_EVENT, reopenAnswerWorkspace);
     };
   }, [appMode]);
 
@@ -413,24 +426,26 @@ export function Pet({
     const active = appMode === "explore"
       && open
       && miniView === "workspace"
+      && !transientDetailPreview
       && section !== null;
     dispatchUniverseContext({ active, section: active ? section : null });
     return () => {
       if (active) dispatchUniverseContext({ active: false, section: null });
     };
-  }, [appMode, miniView, open, workspaceSection]);
+  }, [appMode, miniView, open, transientDetailPreview, workspaceSection]);
 
   React.useEffect(() => {
     if (appMode !== "explore") return;
     const closeForCanvasGesture = () => {
-      // Search/answer owns a live result graph. Camera gestures should inspect
-      // that graph, not silently leave it; only an actual background click or
-      // the explicit bottom return control resumes the retained timeline.
-      if (readUniverseContext().active) return;
+      // This event is emitted only for a real pointer/wheel gesture on the
+      // graph surface. Yield the screen to that gesture without dispatching a
+      // context resume: answer/search graph updates themselves never emit it.
+      setTransientDetailPreview(false);
       setOpen(false);
       setPetOverlay("none");
     };
     const closeForResume = () => {
+      setTransientDetailPreview(false);
       setOpen(false);
       setPetOverlay("none");
     };
@@ -450,6 +465,7 @@ export function Pet({
       const changed = sourceId !== exploreSourceRef.current;
       if (changed) {
         exploreSourceRef.current = sourceId;
+        setTransientDetailPreview(false);
         setOpen(false);
         setPetOverlay("none");
       }
@@ -851,6 +867,7 @@ export function Pet({
     setCurious(false);
     setPetOverlay("none");
     setMiniView("workspace");
+    setTransientDetailPreview(false);
     setOpen(true);
     enterExploreMode(section);
   }
@@ -859,6 +876,7 @@ export function Pet({
     setCurious(false);
     setPetOverlay("none");
     setMiniView("assistant-settings");
+    setTransientDetailPreview(false);
     setOpen(true);
     enterExploreMode(workspaceSection);
   }
@@ -1211,7 +1229,10 @@ export function Pet({
             panelAbove={panelAbove}
             panelView={miniView}
             onPanelViewChange={setMiniView}
-            onClose={() => setOpen(false)}
+            onClose={() => {
+              setTransientDetailPreview(false);
+              setOpen(false);
+            }}
           />
         )}
 

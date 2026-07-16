@@ -118,7 +118,9 @@ describe("universe scene production invariants", () => {
     );
     expect(wheel).toContain("hoveredNode?.kind === \"source\"");
     expect(wheel).toContain("this.callbacks.onSourceWheel?.(hoveredNode.sourceId)");
-    expect(wheel).toContain("this.sourceNavigationPhase === \"origin\"");
+    expect(wheel).toContain("advanceUniverseSourceExitGate(this.sourceExitGate");
+    expect(wheel).toContain('this.sourceNavigationPhase !== "origin"');
+    expect(wheel).toContain("if (exit.exitRequested)");
     expect(wheel).toContain("this.callbacks.onBackRequest?.()");
     expect(wheel).toContain("event.ctrlKey || event.metaKey");
     expect(wheel).toContain('if (surface === "label") this.forwardTimelineWheelToCanvas(event)');
@@ -149,6 +151,9 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("this.controls.maxDistance = UNIVERSE_CAMERA_MAX_DISTANCE");
     expect(source).toContain("this.controls.zoomToCursor = true");
     expect(source).toContain("this.controls.enableZoom = options.interactive");
+    expect(cameraStart).toContain(
+      "this.appliedFlightDepth > UNIVERSE_FLIGHT_SETTLE_EPSILON",
+    );
     expect(cameraStart).toContain("this.lodArmed = true");
     expect(cameraChange).not.toContain("moveTimeline(");
 
@@ -470,7 +475,7 @@ describe("universe scene production invariants", () => {
     expect(labelInteraction).not.toMatch(/expandNode|requestExpansion|onTimelineIntent|fetch\(|api\./);
   });
 
-  it("keeps locked-card actions semantic and lets the same wheel gesture unlock and travel", () => {
+  it("keeps locked-card actions semantic and lets wheel travel unlock without dismissing context", () => {
     const labels = sourceBetween(
       "private rebuildLabels()",
       "private sortLabelsForLayout()",
@@ -500,9 +505,9 @@ describe("universe scene production invariants", () => {
     expect(labels).toContain("actions.hidden = !locked");
     expect(nodeInteraction).toContain("this.callbacks.onExploreMore?.(node.sceneNode)");
     expect(nodeInteraction).toContain("this.callbacks.onAskNode?.(node.sceneNode)");
-    expect(wheel).toContain("this.callbacks.onUserInteraction?.()");
-    expect(wheel).toContain("this.callbacks.onSelectionClear()");
-    expect(wheel.indexOf("this.callbacks.onSelectionClear()"))
+    expect(wheel).not.toContain("this.callbacks.onUserInteraction?.()");
+    expect(wheel).toContain("this.callbacks.onSelectionClear({ dismissWorkspace: false })");
+    expect(wheel.indexOf("this.callbacks.onSelectionClear({ dismissWorkspace: false })"))
       .toBeLessThan(wheel.indexOf("applyUniverseTemporalFlightWheel"));
     expect(labelLayout).not.toContain('"[data-universe-detail-panel=\'true\']"');
     expect(safeViewport).not.toContain('"[data-universe-detail-panel=\'true\']"');
@@ -757,8 +762,8 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("sprite.userData.sourceCore = true");
     expect(source).toContain("private sourceMarkerDetailFactor(");
     expect(source).toContain("return Math.max(0, 1 - detail)");
-    expect(source).toContain("const NEBULA_DETAIL_ALPHA = 1.3");
-    expect(source).toContain("const NEBULA_DETAIL_DUST_POINT_SIZE_CSS = 26");
+    expect(source).toContain("const NEBULA_DETAIL_ALPHA = 1.5");
+    expect(source).toContain("const NEBULA_DETAIL_DUST_POINT_SIZE_CSS = 20");
     expect(source).toContain("uDetail: { value: 0 }");
     expect(source).toContain("uDetailAlpha: { value: NEBULA_DETAIL_ALPHA }");
     expect(source).toContain("attribute float aGlow");
@@ -782,6 +787,19 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("this.host.dataset.universeNebulaPointSizeCap");
     expect(source).toContain("this.host.dataset.universeNebulaDetailFactor");
     expect(source).toContain("this.updateNebulaAlphas();");
+  });
+
+  it("frames large source nebulae as foreground worlds instead of tiny markers", () => {
+    const overviewFrame = sourceBetween(
+      "private frameOverview(duration: number, canonical: boolean)",
+      "private sourceHeroPose(node: ForceNode, depth: number)",
+    );
+
+    expect(source).toContain("const NEBULA_SOURCE_RADIUS_MIN = 88");
+    expect(source).toContain("const NEBULA_SOURCE_RADIUS_SCALE = 2.25");
+    expect(source).toContain("const NEBULA_SOURCE_FRAME_RATIO = 0.76");
+    expect(source).toContain("const NEBULA_SOURCE_CORRIDOR_SCALE = 2.35");
+    expect(overviewFrame.match(/\* NEBULA_SOURCE_FRAME_RATIO/g)).toHaveLength(3);
   });
 
   it("lets the browse session own the detail latch and calms the sky under gestures", () => {
@@ -827,14 +845,19 @@ describe("universe scene production invariants", () => {
     // blends galaxy → corridor with the existing detail mix, so diving into a
     // source needs no CPU reposition and no extra particle budget.
     expect(nebulaMaterial).toContain("attribute vec3 aCorridor");
+    expect(nebulaMaterial).toContain("attribute float aEmitter");
     expect(nebulaMaterial).toContain("vec3 corridorTarget = position + aCorridor");
     expect(nebulaMaterial).toContain(
-      "vec3 animatedPosition = mix(position, corridorTarget, corridorMix)",
+      "vec3 journeyTarget = mix(corridorTarget, emitterTarget, aEmitter)",
     );
+    expect(nebulaBuild).toContain('geometry.setAttribute("aEmitter"');
     // Dust yields inside the loaded window band, where real packages condensed.
     expect(nebulaMaterial).toContain("uniform float uCorridorNearZ");
     expect(nebulaMaterial).toContain("float loadedBand = smoothstep(");
-    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.16, corridorMix * loadedBand)");
+    expect(source).toContain("const NEBULA_CORRIDOR_LOADED_ALPHA = 0.4");
+    expect(nebulaMaterial).toContain(
+      "${NEBULA_CORRIDOR_LOADED_ALPHA.toFixed(2)}",
+    );
     // Corridor depth lives on the same counting grid as packages and flight.
     expect(nebulaBuild).toContain("UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT");
     expect(nebulaBuild).toContain('geometry.setAttribute("aCorridor"');
@@ -863,37 +886,38 @@ describe("universe scene production invariants", () => {
     // Glow pockets belong to the intact hero. Once the source stretches into
     // a corridor they collapse into fine grains and their alpha is suppressed,
     // so isolated screen-space blobs cannot compete with the graph.
+    expect(nebulaMaterial).toContain("vGlow = aGlow * (");
     expect(nebulaMaterial).toContain(
-      "vGlow = aGlow * (1.0 - smoothstep(0.08, 0.55, corridorMix))",
+      "smoothstep(0.08, 0.55, corridorMix) * (1.0 - aEmitter)",
     );
     expect(nebulaMaterial).toContain("float originalGlowParticle = step(0.001, aGlow)");
     expect(nebulaMaterial).toContain(
-      "vAlpha *= mix(1.0, 0.04, corridorMix * originalGlowParticle)",
+      "vAlpha *= mix(1.0, 0.04, streamMix * originalGlowParticle)",
     );
-    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, axisFade, corridorMix)");
+    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, axisFade, streamMix)");
     expect(nebulaMaterial).toContain("* detailScale * glowScale * corridorBoost");
 
-    // Most dust becomes restrained canyon walls: small grains and low alpha
-    // frame the graph without turning the source interior into visual noise.
-    expect(source).toContain("const NEBULA_WALL_SHARE = 0.62");
-    expect(source).toContain("const NEBULA_WALL_LATERAL_MIN = 2.2");
-    expect(source).toContain("const NEBULA_WALL_LATERAL_MAX = 5.2");
+    // A balanced mix of near dust and restrained canyon walls keeps the
+    // interior luminous without turning the graph into visual noise.
+    expect(source).toContain("const NEBULA_WALL_SHARE = 0.46");
+    expect(source).toContain("const NEBULA_WALL_LATERAL_MIN = 1.6");
+    expect(source).toContain("const NEBULA_WALL_LATERAL_MAX = 3.8");
     expect(source).toContain("const NEBULA_CORRIDOR_DUST_POINT_SIZE_CSS = 5.5");
     expect(source).toContain("const NEBULA_CORRIDOR_GLOW_POINT_SIZE_CSS = 9");
-    expect(source).toContain("const NEBULA_CORRIDOR_DUST_ALPHA = 0.16");
-    expect(source).toContain("const NEBULA_CORRIDOR_WALL_ALPHA = 0.03");
+    expect(source).toContain("const NEBULA_CORRIDOR_DUST_ALPHA = 0.5");
+    expect(source).toContain("const NEBULA_CORRIDOR_WALL_ALPHA = 0.16");
     expect(nebulaBuild).toContain("NEBULA_WALL_LATERAL_MIN");
     expect(nebulaBuild).toContain('geometry.setAttribute("aCorridorWall"');
     expect(nebulaMaterial).toContain(
-      "vAlpha *= mix(1.0, ${NEBULA_CORRIDOR_DUST_ALPHA.toFixed(2)}, corridorMix)",
+      "vAlpha *= mix(1.0, ${NEBULA_CORRIDOR_DUST_ALPHA.toFixed(2)}, streamMix)",
     );
     expect(nebulaMaterial).toContain(
       "${(NEBULA_CORRIDOR_WALL_ALPHA / NEBULA_CORRIDOR_DUST_ALPHA).toFixed(4)}",
     );
     expect(nebulaMaterial).toContain(
-      "float corridorBoost = mix(1.0, mix(1.0, 0.62, aCorridorWall), corridorMix)",
+      "float corridorBoost = mix(1.0, mix(1.0, 0.62, aCorridorWall), streamMix)",
     );
-    expect(nebulaMaterial).toContain("detailDustCap = mix(detailDustCap, corridorDustCap, corridorMix)");
+    expect(nebulaMaterial).toContain("detailDustCap = mix(detailDustCap, corridorDustCap, streamMix)");
     expect(nebulaMaterial).toContain("float capSelect = glowParticle;");
 
     // While inside one source the rest of the sky recedes deep enough that a
@@ -1037,13 +1061,13 @@ describe("universe scene production invariants", () => {
       "private updateNebulaPositions()",
     );
 
-    expect(nebula).toContain("const budgetCap = mobile ? 2_000 : 6_000");
+    expect(nebula).toContain("const budgetCap = mobile ? 4_000 : 12_000");
     expect(nebula).toContain("const budget = Math.min(");
     expect(nebula).toContain("this.host.dataset.universeNebulaBudgetCap");
     expect(nebula).toContain("this.host.dataset.universeNebulaBudget");
   });
 
-  it("keeps nebula grains on each source's entry colour", () => {
+  it("mixes brand-gold event grains with each source's accent colour", () => {
     const nebulaMaterial = sourceBetween(
       "function makeNebulaMaterial(darkTheme: boolean)",
       "class UniverseForceSceneEngine",
@@ -1053,24 +1077,29 @@ describe("universe scene production invariants", () => {
       "private updateNebulaPositions()",
     );
 
-    // Gold is the stable brand field; the marker, label, and dust all resolve
-    // through sourceVisualColor as a secondary tint when a source is entered.
+    // Gold is the stable event field; source-tinted grains preview the entities
+    // that will condense from the same cloud after entry.
     expect(source).toContain('export const UNIVERSE_BRAND_GOLD = "#d6ae63"');
     expect(nebulaMaterial).toContain("uniform vec3 uBrandColor");
     expect(nebulaMaterial).toContain("vColor = mix(uBrandColor, aColor, sourceTint)");
     expect(source).toContain("const SOURCE_PALETTE = [");
-    expect(nebula).toContain("const color = this.sourceVisualColor(particle.sourceId);");
+    expect(nebula).toContain("const eventGrain = stableUnit(");
+    expect(nebula).toContain("const color = eventGrain");
+    expect(nebula).toContain("? NEBULA_BRAND_GOLD.clone()");
+    expect(nebula).toContain(": this.sourceVisualColor(particle.sourceId)");
     expect(nebula).toContain("const whiteMix = particle.core");
     expect(nebula).toContain("color.lerp(WHITE, whiteMix);");
     expect(source).toContain("export function universeSourceAccent(sourceId: string");
-    expect(nebula).toContain("const glowChance = coreParticle ? 0.05 : 0.02");
-    expect(source).toContain("const NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP = 22");
-    // The hero anatomy stays intact: half the grains in a tight heart, a thin
-    // disc with arm lanes, and a wide whole-frame sprinkle.
-    expect(nebula).toContain("const coreParticle = population < 0.5");
-    expect(nebula).toContain("coreParticle ? 2.55 : 0.7");
-    expect(nebula).toContain("? 1.35 + stableUnit(`${key}:halo`) * 1.65");
-    expect(nebula).toContain("* (coreParticle ? 1.3 : 0.5)");
+    expect(nebula).toContain("const glowChance = coreParticle ? 0.018 : 0.006");
+    expect(source).toContain("const NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP = 16");
+    // The hero has a readable spiral silhouette with real z-thickness rather
+    // than a flat random disc or an oversized field of fog sprites.
+    expect(nebula).toContain("const coreParticle = population < 0.28");
+    expect(nebula).toContain("const diffuseParticle = population >= 0.86");
+    expect(nebula).toContain("const armCount = 3 +");
+    expect(nebula).toContain("const winding = Math.PI * (");
+    expect(nebula).toContain("const planarRadius = radius * Math.min(1.02, radial)");
+    expect(nebula).toContain("offset.applyEuler(rotation)");
     // Entity sprites and labels use the same source accent as their nebula.
     expect(source).toContain("private entityVisualColor(sourceId: string)");
     expect(source).toContain("this.sourceVisualColor(node.sourceId)");
@@ -1110,18 +1139,20 @@ describe("universe scene production invariants", () => {
       "float corridorMix = smoothstep(0.12, 0.88, particleDetail) * diveMix",
     );
     expect(presence).toContain("config.vestibuleDepth * 0.85");
+    expect(presence).toContain("const condensation = THREE.MathUtils.lerp(0.14, 1, dive)");
+    expect(presence).toContain("scale = presence.scale * condensation");
     expect(presence).toContain("opacity = presence.opacity * dive");
     expect(source).toContain(
       "material.uniforms.uCorridorVestibule.value = config",
     );
     expect(dataCommit).toContain("this.flightState = createUniverseTemporalFlightState(0)");
     expect(dataCommit).toContain("this.appliedFlightDepth = this.flightState.depth");
-    expect(dataCommit).toContain('this.sourceNavigationPhase = "origin"');
-    expect(dataCommit).toContain('this.host.dataset.universeSourceNavigation = "origin"');
+    expect(dataCommit).toContain("this.markSourceOrigin()");
     // The arrival stands back far enough for the hero framing.
     expect(focus).toContain("this.sourceHeroPose(node, this.appliedFlightDepth)");
     expect(heroPose).toContain("const entryZ = flight.centerZ - depth");
-    expect(heroPose).toContain("node.sceneNode.radius * 1.45 * 1.9");
+    expect(heroPose).toContain("node.sceneNode.radius * NEBULA_SOURCE_RADIUS_SCALE");
+    expect(heroPose).toContain("Math.max(CORRIDOR_ENTRY_STANDOFF, nebulaRadius * 3.45)");
     expect(heroPose).toContain("entryZ + heroStandoff");
   });
 
@@ -1167,7 +1198,7 @@ describe("universe scene production invariants", () => {
     expect(navigation).toContain("this.controls.target?.lerpVectors(");
     expect(navigation).toContain("this.syncNebulaCorridorUniforms()");
     expect(navigation).toContain("this.updateTemporalPresence()");
-    expect(navigation).toContain('this.sourceNavigationPhase = "origin"');
+    expect(navigation).toContain("this.markSourceOrigin(now)");
     expect(navigation).toContain("this.applyBrowseGaze()");
     expect(flight).toContain("if (this.sourceReturnMotion) return this.updateSourceReturnMotion(now)");
   });
