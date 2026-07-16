@@ -644,9 +644,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 className={cn(
                   "bg-space-field relative grid h-svh min-h-0 overflow-hidden",
                   windowed && "place-items-center p-4",
+                  // In explore mode the WebGL dust IS the sky: the CSS washes,
+                  // orbit rings and sparkles would be a second, detached
+                  // background painted behind the particles.
+                  appMode === "explore" && "bg-space-field--void",
                 )}
               >
-                <SpaceBackdrop />
+                {appMode !== "explore" && <SpaceBackdrop />}
                 <KnowledgeUniverse interactive={appMode === "explore"} />
                 {appMode === "explore" && (
                   <motion.div

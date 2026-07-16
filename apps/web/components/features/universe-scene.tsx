@@ -292,6 +292,8 @@ interface NebulaParticle {
   glow: number;
   phase: number;
   twinkle: number;
+  core: boolean;
+  radial: number;
 }
 
 interface SceneLabel {
@@ -739,6 +741,7 @@ function makeNebulaMaterial(darkTheme: boolean) {
       uniform vec3 uFogCamera;
       attribute vec3 aColor;
       attribute float aCorridorWall;
+      attribute float aSky;
       attribute float aSize;
       attribute float aAlpha;
       attribute float aGlow;
@@ -765,7 +768,8 @@ function makeNebulaMaterial(darkTheme: boolean) {
         vAlpha = aAlpha * mix(1.0, detailAlpha, sourceMatch);
         // Depth of field for the whole sky: while inside one source, every
         // other nebula recedes into the dark instead of competing for light.
-        vAlpha *= mix(1.0, 0.12, uDetail * (1.0 - sourceMatch));
+        // Free sky dust is the universal background and never recedes.
+        vAlpha *= mix(1.0, 0.12, uDetail * (1.0 - sourceMatch) * (1.0 - aSky));
         vDetail = smoothstep(0.08, 0.92, particleDetail);
         vGlow = aGlow;
         vShape = aShape;
@@ -776,11 +780,12 @@ function makeNebulaMaterial(darkTheme: boolean) {
         // camera: fly any distance in any direction and you are always inside
         // the nebula — perception is the anchor, not the source's geometry.
         float corridorMix = smoothstep(0.12, 0.88, particleDetail);
+        float wrapMix = max(corridorMix, aSky);
         vec3 wrapped = uFogCamera + mod(
           position - uFogCamera + vec3(${(NEBULA_FOG_WRAP_SIZE / 2).toFixed(1)}),
           vec3(${NEBULA_FOG_WRAP_SIZE.toFixed(1)})
         ) - vec3(${(NEBULA_FOG_WRAP_SIZE / 2).toFixed(1)});
-        vec3 animatedPosition = mix(position, wrapped, corridorMix);
+        vec3 animatedPosition = mix(position, wrapped, wrapMix);
         // The fog carries its own light: glow pockets brighten into soft
         // beacons drifting past, and haze motes envelop softly.
         float glowParticle = step(0.001, aGlow);
@@ -2274,7 +2279,7 @@ class UniverseForceSceneEngine {
       const aspect = Math.max(0.4, this.host.clientWidth / Math.max(1, this.host.clientHeight));
       const distanceY = size.y / Math.max(0.01, 2 * halfFov);
       const distanceX = size.x / Math.max(0.01, 2 * halfFov * aspect);
-      const distance = Math.max(178, distanceX, distanceY, size.z * 1.32) * 1.08;
+      const distance = Math.max(150, distanceX, distanceY, size.z * 1.32) * 0.9;
       this.moveCamera(center, distance, 620);
       return;
     }
@@ -3491,7 +3496,7 @@ class UniverseForceSceneEngine {
     const configuredBudget = mobile
       ? this.policy.proxy_budget_mobile
       : this.policy.proxy_budget_desktop;
-    const budgetCap = mobile ? 1_200 : 3_000;
+    const budgetCap = mobile ? 2_000 : 6_000;
     const budget = Math.min(
       budgetCap,
       Math.max(0, Number.isFinite(configuredBudget) ? configuredBudget : 0),
@@ -3521,17 +3526,40 @@ class UniverseForceSceneEngine {
         * (source.sourceId === browsedSourceId ? 4 : 1),
     );
     const totalWeight = weights.reduce((sum, value) => sum + value, 0);
+    // The particles ARE the sky: a share of the budget becomes free dust that
+    // wraps around the camera everywhere — the background in the overview and
+    // the connective tissue of the fog once inside a source. One continuum.
+    const skyCount = Math.min(mobile ? 480 : 1_400, Math.floor(budget * 0.24));
+    const sourceBudget = Math.max(0, budget - skyCount);
     const baseCount = Math.max(
       0,
-      Math.min(mobile ? 10 : 14, Math.floor(budget / Math.max(1, sources.length))),
+      Math.min(mobile ? 10 : 14, Math.floor(sourceBudget / Math.max(1, sources.length))),
     );
-    const weightedBudget = Math.max(0, budget - baseCount * sources.length);
+    const weightedBudget = Math.max(0, sourceBudget - baseCount * sources.length);
     const particles: NebulaParticle[] = [];
+    for (let index = 0; index < skyCount; index += 1) {
+      const key = `sky:dust:${index}`;
+      particles.push({
+        sourceId: "__sky__",
+        sourceIndex: -1,
+        offset: new THREE.Vector3(
+          (stableUnit(`${key}:x`) - 0.5) * NEBULA_FOG_WRAP_SIZE,
+          (stableUnit(`${key}:y`) - 0.5) * NEBULA_FOG_WRAP_SIZE,
+          (stableUnit(`${key}:z`) - 0.5) * NEBULA_FOG_WRAP_SIZE,
+        ),
+        alpha: 0.09 + stableUnit(`${key}:alpha`) * 0.26,
+        glow: 0,
+        phase: stableUnit(`${key}:phase`) * Math.PI * 2,
+        twinkle: Math.pow(stableUnit(`${key}:twinkle`), 1.18),
+        core: false,
+        radial: 1,
+      });
+    }
     sources.forEach((source, sourceIndex) => {
       const count = baseCount + Math.floor(
         (weightedBudget * weights[sourceIndex]) / Math.max(1, totalWeight),
       );
-      const radius = Math.max(28, source.sceneNode.radius);
+      const radius = Math.max(40, source.sceneNode.radius * 1.45);
       const rotation = new THREE.Euler(
         (stableUnit(`${source.id}:rx`) - 0.5) * 0.7,
         (stableUnit(`${source.id}:ry`) - 0.5) * 0.9,
@@ -3544,10 +3572,10 @@ class UniverseForceSceneEngine {
       const ellipticity = 0.72 + stableUnit(`${source.id}:ellipticity`) * 0.12;
       for (let index = 0; index < count; index += 1) {
         const key = `${source.id}:dust:${index}`;
-        const coreParticle = stableUnit(`${key}:core`) < 0.38;
+        const coreParticle = stableUnit(`${key}:core`) < 0.42;
         const radial = Math.pow(
           stableUnit(`${key}:radius`),
-          coreParticle ? 1.82 : 0.7,
+          coreParticle ? 2.4 : 0.7,
         );
         const armIndex = Math.min(
           armCount - 1,
@@ -3555,7 +3583,7 @@ class UniverseForceSceneEngine {
         );
         const armAngle = (armIndex / armCount) * Math.PI * 2 + radial * winding;
         const armSpread = (stableUnit(`${key}:arm-spread`) - 0.5)
-          * (coreParticle ? 1.3 : 0.72)
+          * (coreParticle ? 1.3 : 0.6)
           * (1.08 - radial * 0.42);
         const angle = armAngle + armSpread;
         const planarRadius = radius * radial;
@@ -3577,13 +3605,15 @@ class UniverseForceSceneEngine {
           sourceId: source.sourceId,
           sourceIndex,
           offset,
-          alpha: (coreParticle ? 0.32 : 0.24)
+          alpha: (coreParticle ? 0.4 : 0.24)
             + stableUnit(`${key}:alpha`) * (coreParticle ? 0.6 : 0.56),
           glow: glowSeed < glowChance
             ? 0.58 + stableUnit(`${key}:glow-strength`) * 0.42
             : 0,
           phase: stableUnit(`${key}:phase`) * Math.PI * 2,
           twinkle,
+          core: coreParticle,
+          radial,
         });
       }
     });
@@ -3592,6 +3622,7 @@ class UniverseForceSceneEngine {
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(particles.length * 3);
     const corridorWalls = new Float32Array(particles.length);
+    const skies = new Float32Array(particles.length);
     const colors = new Float32Array(particles.length * 3);
     const sizes = new Float32Array(particles.length);
     const alphas = new Float32Array(particles.length);
@@ -3601,16 +3632,29 @@ class UniverseForceSceneEngine {
     const phases = new Float32Array(particles.length);
     const twinkles = new Float32Array(particles.length);
     particles.forEach((particle, index) => {
-      const color = this.sourceVisualColor(particle.sourceId).lerp(
-        WHITE,
-        stableUnit(`${particle.sourceId}:${index}:white`) * (this.darkTheme ? 0.38 : 0.16),
-      );
+      // Hue stays the source's identity; only the luminosity shape follows the
+      // brand galaxy — a white-hot core melting into tinted dust. Free sky
+      // dust is near-neutral with a faint warm/cool shimmer.
+      const color = particle.sourceIndex < 0
+        ? new THREE.Color(
+            stableUnit(`${particle.sourceId}:${index}:tone`) > 0.5
+              ? "#ffe9c4"
+              : "#cfe0ff",
+          ).lerp(WHITE, 0.55)
+        : this.sourceVisualColor(particle.sourceId).lerp(
+            WHITE,
+            particle.core
+              ? 0.45 + (1 - particle.radial) * 0.45
+              : stableUnit(`${particle.sourceId}:${index}:white`)
+                * (this.darkTheme ? 0.38 : 0.16),
+          );
       colors[index * 3] = color.r;
       colors[index * 3 + 1] = color.g;
       colors[index * 3 + 2] = color.b;
-      sizes[index] = 1.3
-        + stableUnit(`${particle.sourceId}:${index}:size`) * 3.25
-        + (particle.twinkle > 0.86 ? 0.65 : 0);
+      sizes[index] = 0.85
+        + stableUnit(`${particle.sourceId}:${index}:size`) * 2.3
+        + (particle.twinkle > 0.86 ? 0.5 : 0)
+        + (particle.core ? (1 - particle.radial) * 0.9 : 0);
       alphas[index] = particle.alpha;
       glows[index] = particle.glow;
       sourceIndices[index] = particle.sourceIndex;
@@ -3623,6 +3667,7 @@ class UniverseForceSceneEngine {
       const haze = particle.glow === 0
         && Math.cbrt(stableUnit(`${key}:radius`)) > NEBULA_SPHERE_HAZE_SHARE;
       corridorWalls[index] = haze ? 1 : 0;
+      skies[index] = particle.sourceIndex < 0 ? 1 : 0;
     });
     const positionAttribute = new THREE.BufferAttribute(positions, 3)
       .setUsage(THREE.DynamicDrawUsage);
@@ -3630,6 +3675,7 @@ class UniverseForceSceneEngine {
       .setUsage(THREE.DynamicDrawUsage);
     geometry.setAttribute("position", positionAttribute);
     geometry.setAttribute("aCorridorWall", new THREE.BufferAttribute(corridorWalls, 1));
+    geometry.setAttribute("aSky", new THREE.BufferAttribute(skies, 1));
     geometry.setAttribute("aColor", new THREE.BufferAttribute(colors, 3));
     geometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
     geometry.setAttribute("aAlpha", alphaAttribute);
@@ -3732,6 +3778,12 @@ class UniverseForceSceneEngine {
         .map((node) => [node.sourceId, node]),
     );
     this.nebulaParticles.forEach((particle, index) => {
+      if (particle.sourceIndex < 0) {
+        // Free sky dust: its base position is arbitrary — the shader wraps it
+        // around the camera wherever the camera is.
+        position.setXYZ(index, particle.offset.x, particle.offset.y, particle.offset.z);
+        return;
+      }
       const source = sources.get(particle.sourceId);
       if (!source) return;
       position.setXYZ(
@@ -3779,6 +3831,10 @@ class UniverseForceSceneEngine {
     // handled continuously by shader uniforms above, avoiding repeated uploads
     // of the full alpha attribute while the camera moves into a nebula.
     this.nebulaParticles.forEach((particle, index) => {
+      if (particle.sourceIndex < 0) {
+        alpha.setX(index, particle.alpha);
+        return;
+      }
       let multiplier = 1;
       if (anchor?.kind === "source") {
         multiplier = anchor.sourceId === particle.sourceId ? 1.28 : 0.14;

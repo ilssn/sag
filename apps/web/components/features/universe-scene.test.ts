@@ -744,7 +744,13 @@ describe("universe scene production invariants", () => {
     // wraps them in a box around the camera, so any distance flown in any
     // direction stays inside the nebula — no CPU reposition, no extra budget.
     expect(nebulaMaterial).toContain("uniform vec3 uFogCamera");
-    expect(nebulaMaterial).toContain("vec3 animatedPosition = mix(position, wrapped, corridorMix)");
+    expect(nebulaMaterial).toContain("vec3 animatedPosition = mix(position, wrapped, wrapMix)");
+    // The particles ARE the sky: free dust always wraps around the camera —
+    // the overview background and the in-source fog are one continuum — and
+    // it neither recedes with other nebulae nor answers to context dimming.
+    expect(nebulaMaterial).toContain("float wrapMix = max(corridorMix, aSky)");
+    expect(nebulaBuild).toContain('geometry.setAttribute("aSky"');
+    expect(nebulaBuild).toContain('sourceId: "__sky__"');
     expect(source).toContain("const NEBULA_FOG_WRAP_SIZE = 1_700.0");
     expect(source).toContain("private syncNebulaCorridorUniforms()");
     expect(source).toContain("(material.uniforms.uFogCamera.value as THREE.Vector3).copy(camera.position)");
@@ -769,7 +775,7 @@ describe("universe scene production invariants", () => {
 
     // While inside one source the rest of the sky recedes, and the browsed
     // source claims a heavier share of the fixed particle budget.
-    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.12, uDetail * (1.0 - sourceMatch))");
+    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.12, uDetail * (1.0 - sourceMatch) * (1.0 - aSky))");
     expect(nebulaBuild).toContain("source.sourceId === browsedSourceId ? 4 : 1");
     expect(nebulaBuild).toContain("const browsedSourceId = this.flightConfig?.sourceId ?? null");
   });
@@ -911,7 +917,7 @@ describe("universe scene production invariants", () => {
       "private updateNebulaPositions()",
     );
 
-    expect(nebula).toContain("const budgetCap = mobile ? 1_200 : 3_000");
+    expect(nebula).toContain("const budgetCap = mobile ? 2_000 : 6_000");
     expect(nebula).toContain("const budget = Math.min(");
     expect(nebula).toContain("this.host.dataset.universeNebulaBudgetCap");
     expect(nebula).toContain("this.host.dataset.universeNebulaBudget");

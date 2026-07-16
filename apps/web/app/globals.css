@@ -157,6 +157,15 @@
     background-repeat: no-repeat;
   }
 
+  /* 粒子即天空：探索模式下关闭 CSS 绘制的洗色与轨道，只留底色。 */
+  .bg-space-field--void {
+    background-image: none;
+  }
+  .bg-space-field--void::before,
+  .bg-space-field--void::after {
+    display: none;
+  }
+
   .bg-space-field--deep,
   .dark .bg-space-field {
     --space-bg: hsl(240 8% 4%);
