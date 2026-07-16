@@ -1,18 +1,32 @@
 /**
  * The source-local temporal axis.
  *
- * Depth comes from an event's own timestamp normalized across its source's whole
- * time span, so one event holds one depth no matter which pages happen to be
- * cached or how the camera arrived. Callers must therefore pass bounds derived
- * from the source itself (its time_buckets), never from the visible window — the
- * invariant dies the moment the bounds move with the viewport.
+ * Depth tracks how many of the source's events precede an event, not how much
+ * clock time does. The source histogram supplies both, and clock time fails the
+ * only view that matters: at most 18 packages are ever on screen, they are
+ * adjacent in time, and real sources cluster — so a clock-time axis collapses the
+ * visible window into a clump and hides depth exactly where the user is looking.
+ * Counting instead spends depth where the events are: quiet stretches compress,
+ * busy ones open up, and travel costs the same per event everywhere.
+ *
+ * The histogram is source-wide (the backend aggregates it over every live event
+ * with no paging), so an event's depth cannot move when the cache does. Callers
+ * must never rebuild the axis from the visible window.
  */
 
-export interface UniverseTemporalAxisBounds {
-  /** Time at depth zero; normally the source's newest event. */
-  nearTimestamp: number;
-  /** Time at full depth; normally the source's oldest event. */
-  farTimestamp: number;
+export interface UniverseTemporalAxisBucket {
+  /** Epoch milliseconds. */
+  start: number;
+  end: number;
+  count: number;
+}
+
+export interface UniverseTemporalAxis {
+  /** Bucket edges, oldest first. One longer than the bucket list. */
+  readonly boundaries: readonly number[];
+  /** Events strictly older than each boundary. Same length as boundaries. */
+  readonly cumulative: readonly number[];
+  readonly total: number;
 }
 
 export interface UniverseTemporalAxisPolicy {
@@ -34,7 +48,7 @@ export interface UniverseTemporalAxisPolicy {
   /** Share of the lateral radius that varies per package. */
   lateralJitter: number;
   verticalAspect: number;
-  /** Shapes time distance without changing ordering or endpoints. */
+  /** Shapes depth without changing ordering or endpoints. 1 keeps travel even. */
   ageExponent: number;
 }
 
@@ -76,7 +90,7 @@ export const DEFAULT_UNIVERSE_TEMPORAL_AXIS_POLICY: UniverseTemporalAxisPolicy =
   farLateralSpread: 0.44,
   lateralJitter: 0.45,
   verticalAspect: 0.7,
-  ageExponent: 1.3,
+  ageExponent: 1,
 };
 
 function clamp01(value: number) {
@@ -125,24 +139,70 @@ export function universeTemporalRankProgress(rank: number, total: number) {
 }
 
 /**
- * Time-based progress works for either chronological direction. The fallback
- * should normally be rank progress and handles identical or invalid dates.
+ * Builds the counting axis from a source's histogram. Returns null when the
+ * source cannot carry an axis at all — no buckets, no events, or every event at
+ * one instant — which leaves callers on their rank fallback.
  */
-export function universeTemporalTimestampProgress(
+export function createUniverseTemporalAxis(
+  buckets: readonly UniverseTemporalAxisBucket[],
+): UniverseTemporalAxis | null {
+  if (buckets.length === 0) return null;
+  const boundaries: number[] = [];
+  const cumulative: number[] = [0];
+  let total = 0;
+
+  for (let index = 0; index < buckets.length; index += 1) {
+    const bucket = buckets[index];
+    if (!Number.isFinite(bucket.start) || !Number.isFinite(bucket.end)) return null;
+    if (index === 0) boundaries.push(bucket.start);
+    if (bucket.end < boundaries[boundaries.length - 1]) return null;
+    boundaries.push(bucket.end);
+    total += integer(bucket.count);
+    cumulative.push(total);
+  }
+
+  if (total <= 0) return null;
+  if (boundaries[boundaries.length - 1] <= boundaries[0]) return null;
+  return { boundaries, cumulative, total };
+}
+
+/** World length of the axis. Even spacing is the whole point of counting. */
+export function universeTemporalAxisDepth(
+  axis: UniverseTemporalAxis | null,
+  unitsPerEvent: number,
+) {
+  if (!axis) return 0;
+  return axis.total * Math.max(0, unitsPerEvent);
+}
+
+/**
+ * 0 is the source's newest moment, 1 its oldest. Progress is the share of the
+ * source's events older than the timestamp, interpolated linearly inside the
+ * bucket that contains it.
+ */
+export function universeTemporalAxisAgeProgress(
+  axis: UniverseTemporalAxis | null,
   timestamp: number,
-  nearTimestamp: number,
-  farTimestamp: number,
   fallback = 0,
 ) {
-  if (
-    !Number.isFinite(timestamp)
-    || !Number.isFinite(nearTimestamp)
-    || !Number.isFinite(farTimestamp)
-    || nearTimestamp === farTimestamp
-  ) return clamp01(fallback);
-  return clamp01(
-    (timestamp - nearTimestamp) / (farTimestamp - nearTimestamp),
-  );
+  if (!axis || !Number.isFinite(timestamp)) return clamp01(fallback);
+  const { boundaries, cumulative, total } = axis;
+  if (timestamp <= boundaries[0]) return 1;
+  if (timestamp >= boundaries[boundaries.length - 1]) return 0;
+
+  let index = 0;
+  while (
+    index < boundaries.length - 2
+    && timestamp >= boundaries[index + 1]
+  ) index += 1;
+
+  const start = boundaries[index];
+  const end = boundaries[index + 1];
+  const span = end - start;
+  const withinBucket = span > 0 ? (timestamp - start) / span : 0;
+  const older = cumulative[index]
+    + withinBucket * (cumulative[index + 1] - cumulative[index]);
+  return clamp01(1 - older / total);
 }
 
 export function resolveUniverseTemporalAxisPolicy(
@@ -208,22 +268,21 @@ export function resolveUniverseTemporalAxisPolicy(
 }
 
 /**
- * Projects event packages onto the source's time axis. An event and its entities
- * share one package offset, so temporal order reads as continuous depth, scale
- * and opacity rather than as per-item staggering.
+ * Projects event packages onto the counting axis. An event and its entities share
+ * one package offset, so temporal order reads as continuous depth, scale and
+ * opacity rather than as per-item staggering.
  */
 export function projectUniverseTemporalAxis(
   bundles: readonly UniverseTemporalBundleInput[],
-  bounds: UniverseTemporalAxisBounds,
+  axis: UniverseTemporalAxis | null,
   policyInput: UniverseTemporalAxisPolicyInput = {},
 ): UniverseTemporalBundleProjection[] {
   const policy = resolveUniverseTemporalAxisPolicy(policyInput);
 
   return bundles.map((bundle) => {
-    const ageProgress = universeTemporalTimestampProgress(
+    const ageProgress = universeTemporalAxisAgeProgress(
+      axis,
       bundle.timestamp ?? Number.NaN,
-      bounds.nearTimestamp,
-      bounds.farTimestamp,
       bundle.rankProgress ?? 0,
     );
     const curvedAge = Math.pow(ageProgress, policy.ageExponent);

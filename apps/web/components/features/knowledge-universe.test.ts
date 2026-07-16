@@ -39,7 +39,7 @@ describe("knowledge universe production interaction policy", () => {
     expect(source).toContain("timelineEventPlacementByKey");
     expect(source).toContain("projectUniverseTemporalAxis(");
     expect(source).toContain(
-      "temporalProjection.normalizedOffset.z * TEMPORAL_AXIS_DEPTH",
+      "temporalProjection.normalizedOffset.z * temporalAxisDepth",
     );
     // Depth is the layout, not a presentation mode that can be toggled off or
     // snapped back to a flat plane.
@@ -53,17 +53,21 @@ describe("knowledge universe production interaction policy", () => {
     expect(source).toContain("presentationOpacity:");
   });
 
-  it("derives temporal depth from the source's own span, not the cached window", () => {
-    // Bounds taken from the visible window would move an event's depth whenever
+  it("derives temporal depth from the source's own histogram, not the cached window", () => {
+    // An axis built from the visible window would move an event's depth whenever
     // paging changed what surrounds it — the axis would stop being an axis.
     expect(source).toContain("sourceById.get(browseSessionSourceId)?.time_buckets");
-    expect(source).toContain("nearTimestamp: Date.parse(browseTimeBuckets.at(-1)?.end");
-    expect(source).toContain("farTimestamp: Date.parse(browseTimeBuckets[0]?.start");
+    expect(source).toContain("createUniverseTemporalAxis(");
     expect(source).toContain("timestamp: temporalTimestampByBundleId.get(bundleId)");
     // Rank survives only as the fallback for an event with no usable time.
     expect(source).toContain("rankProgress: universeTemporalRankProgress(");
-    // Time scale must not ride on the source's visual radius.
-    expect(source).toContain("const TEMPORAL_AXIS_DEPTH =");
+    // Axis length is events × a fixed per-event slice, so the visible window
+    // spans the same depth whatever the source's size — and never rides on the
+    // source's visual radius.
+    expect(source).toContain("const TEMPORAL_AXIS_UNITS_PER_EVENT =");
+    expect(source).toContain("universeTemporalAxisDepth(");
+    // A source with no usable histogram keeps the spiral: no fake axis.
+    expect(source).toContain("temporalAxis\n        ? projectUniverseTemporalAxis(");
   });
 
   it("keeps concrete-node clicks presentation-only", () => {
