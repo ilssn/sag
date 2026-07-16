@@ -35,7 +35,7 @@ import {
   flyUniverseTemporalFlightTo,
   planUniverseTemporalFlightFollow,
   stepUniverseTemporalFlight,
-  universeTemporalFlightPresence,
+  universeStreamPresence,
   type UniverseTemporalFlightState,
 } from "@/lib/universe-temporal-flight";
 import { UNIVERSE_SCENE_BUDGET } from "@/lib/universe-working-set";
@@ -358,33 +358,10 @@ const NEBULA_DETAIL_DUST_POINT_SIZE_CSS = 26;
 const NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP = 44;
 /** Ambient drift stays frozen this long after any camera gesture frame. */
 const NEBULA_GESTURE_CALM_MS = 480;
-/**
- * Inside a source the gaze is fully free and FIRST-PERSON: dragging turns the
- * head (the view direction rotates around the camera), never the camera around
- * a point ahead — orbiting a forward pivot swings the position sideways and
- * renders the corridor as a crooked diagonal. The wheel flies where you look,
- * and sustained flight gently re-levels the gaze onto the corridor, so free
- * exploration always settles back into a clean view without any hard lock.
- */
-const BROWSE_LOOK_RAD_PER_PX = 0.0024;
-/** Pitch keepout around the poles so the head can never flip over. */
-const BROWSE_LOOK_MIN_PHI = 0.3;
-/** The camera trails its current shell by this much radius. */
-const SPHERE_VIEW_STANDOFF = 130;
-/** Lateral scatter of freshly spawned bundles around the flight line. */
-const STREAM_SPAWN_SPREAD_MIN = 46;
-const STREAM_SPAWN_SPREAD_MAX = 150;
-/** Browse fog wraps around the camera in a box of this size. */
-const NEBULA_FOG_WRAP_SIZE = 1_700.0;
-/** Pinch may not fling the camera out of the corridor's neighbourhood. */
-const BROWSE_MAX_DOLLY_DISTANCE = 1_600;
-const BROWSE_GAZE_PAN_SPEED = 0.4;
 const UNIVERSE_ROTATE_SPEED = 0.42;
 const UNIVERSE_PAN_SPEED = 0.52;
-/** Entry settles this far from the source's core, gazing through it. */
-const SPHERE_ENTRY_RADIUS = 380;
-const SPHERE_ENTRY_LOOK_AHEAD = 170;
-const SPHERE_ENTRY_MS = 920;
+/** Free sky dust wraps around the camera in a box of this size. */
+const NEBULA_FOG_WRAP_SIZE = 1_700.0;
 /** Below this flight speed (units/s) cards are fully expanded. */
 const FLIGHT_CARD_CALM_SPEED = 240;
 /** Above this flight speed cards have fully collapsed into star points. */
@@ -429,6 +406,37 @@ function stableUnit(value: string) {
     hash = Math.imul(hash, 16777619);
   }
   return (hash >>> 0) / 0xffffffff;
+}
+
+/**
+ * A deterministic position on a source's galaxy — the same spiral-arm math the
+ * dust uses, seeded by any identity. Events ARE particles of the nebula: a
+ * loaded package simply lights up where its dust has always been.
+ */
+function galaxyArmOffset(sourceId: string, seed: string, radius: number) {
+  const rotation = new THREE.Euler(
+    (stableUnit(`${sourceId}:rx`) - 0.5) * 0.7,
+    (stableUnit(`${sourceId}:ry`) - 0.5) * 0.9,
+    stableUnit(`${sourceId}:rz`) * Math.PI,
+  );
+  const armCount = 3 + Math.floor(stableUnit(`${sourceId}:arm-count`) * 2);
+  const winding = Math.PI * (2.7 + stableUnit(`${sourceId}:arm-winding`) * 0.8);
+  const ellipticity = 0.72 + stableUnit(`${sourceId}:ellipticity`) * 0.12;
+  const radial = 0.24 + Math.pow(stableUnit(`${seed}:radius`), 0.72) * 0.72;
+  const armIndex = Math.min(
+    armCount - 1,
+    Math.floor(stableUnit(`${seed}:arm-index`) * armCount),
+  );
+  const angle = (armIndex / armCount) * Math.PI * 2
+    + radial * winding
+    + (stableUnit(`${seed}:arm-spread`) - 0.5) * 0.5 * (1.08 - radial * 0.42);
+  const planarRadius = radius * radial;
+  const offset = new THREE.Vector3(
+    Math.cos(angle) * planarRadius * (1.08 + stableUnit(`${seed}:stretch`) * 0.12),
+    Math.sin(angle) * planarRadius * ellipticity,
+    (stableUnit(`${seed}:depth`) - 0.5) * radius * 0.24 * (1.16 - radial * 0.36),
+  );
+  return offset.applyEuler(rotation);
 }
 
 function stableDirection(key: string) {
@@ -780,7 +788,7 @@ function makeNebulaMaterial(darkTheme: boolean) {
         // camera: fly any distance in any direction and you are always inside
         // the nebula — perception is the anchor, not the source's geometry.
         float corridorMix = smoothstep(0.12, 0.88, particleDetail);
-        float wrapMix = max(corridorMix, aSky);
+        float wrapMix = aSky;
         vec3 wrapped = uFogCamera + mod(
           position - uFogCamera + vec3(${(NEBULA_FOG_WRAP_SIZE / 2).toFixed(1)}),
           vec3(${NEBULA_FOG_WRAP_SIZE.toFixed(1)})
@@ -944,13 +952,6 @@ class UniverseForceSceneEngine {
   private flightDepthRate = 0;
   /** 1 = cards fully expanded; eases toward 0 as flight speed rises. */
   private flightCardPresence = 1;
-  /** True while the browse gaze weighting is active. */
-  private browseGazeApplied = false;
-  private browseGazeTimer: number | null = null;
-  /** Active first-person look drag, if any. */
-  private lookPointerId: number | null = null;
-  private lookLastX = 0;
-  private lookLastY = 0;
   private sourceSignature = "";
   private labelLayer: HTMLDivElement;
   private labels: SceneLabel[] = [];
@@ -1189,8 +1190,6 @@ class UniverseForceSceneEngine {
     this.host.addEventListener("blur", this.handleCanvasBlur);
     this.host.addEventListener("keydown", this.handleKeyDown);
     window.addEventListener("pointermove", this.handleWindowPointerMove, { passive: true });
-    window.addEventListener("pointerup", this.handleWindowPointerUp, { passive: true });
-    window.addEventListener("pointercancel", this.handleWindowPointerUp, { passive: true });
     document.addEventListener("visibilitychange", this.handleVisibilityChange);
     this.resizeObserver = new ResizeObserver(this.handleResize);
     this.resizeObserver.observe(this.host);
@@ -1313,16 +1312,6 @@ class UniverseForceSceneEngine {
     const nextFlight = data.temporalFlight ?? null;
     const flightSourceChanged = nextFlight?.sourceId !== this.flightConfig?.sourceId;
     this.flightConfig = nextFlight;
-    // The gaze weighting belongs to one corridor: leaving or switching
-    // sources frees the camera immediately; the next entry dive re-applies it.
-    if (!nextFlight || flightSourceChanged) this.releaseBrowseGaze();
-    if (flightSourceChanged) {
-      // A fresh entry unfolds the stream anew along the new approach; stale
-      // anchors from an earlier visit would scatter events off the new path.
-      [...this.placementTargets.keys()]
-        .filter((key) => key.startsWith("timeline-bundle:"))
-        .forEach((key) => this.placementTargets.delete(key));
-    }
     if (nextFlight && flightSourceChanged) {
       // A fresh browse session starts at its window's newest package. The entry
       // camera framing is authoritative, so this reset applies no delta.
@@ -1504,50 +1493,34 @@ class UniverseForceSceneEngine {
       }
     });
     const timelineTarget = (node: UniverseSceneNode) => {
-      // Perception is decoupled from data: a bundle's world anchor is wherever
-      // the camera was HEADING when its stream position first materialized —
-      // ahead of the eye, at its stream distance — and it stays there for the
-      // session. Flying in any direction consumes the same stream.
+      // Events ARE nebula particles: a bundle lights up at the spiral-arm spot
+      // its identity has always owned. Deterministic forever — no session
+      // memory, no camera dependence; approaching the galaxy is approaching
+      // the events.
       const flight = this.flightConfig;
       if (
         flight
         && node.timelineBundleId
-        && node.timelineDepth !== undefined
         && node.sourceId === flight.sourceId
       ) {
-        const anchorKey = `timeline-bundle:${node.timelineBundleId}`;
-        let anchor = this.placementTargets.get(anchorKey);
-        if (!anchor) {
-          const camera = this.graph.camera();
-          const forward = camera.getWorldDirection(new THREE.Vector3()).normalize();
-          const ahead = Math.max(
-            SPHERE_VIEW_STANDOFF * 0.6,
-            node.timelineDepth - this.appliedFlightDepth,
-          );
-          const lateralA = new THREE.Vector3().crossVectors(
-            forward,
-            Math.abs(forward.y) > 0.92
-              ? new THREE.Vector3(1, 0, 0)
-              : new THREE.Vector3(0, 1, 0),
-          ).normalize();
-          const lateralB = new THREE.Vector3().crossVectors(forward, lateralA);
-          const swing = stableUnit(`${node.timelineBundleId}:spawn-angle`) * Math.PI * 2;
-          const spread = STREAM_SPAWN_SPREAD_MIN
-            + stableUnit(`${node.timelineBundleId}:spawn-radius`)
-              * (STREAM_SPAWN_SPREAD_MAX - STREAM_SPAWN_SPREAD_MIN);
-          anchor = camera.position.clone()
-            .addScaledVector(forward, ahead)
-            .addScaledVector(lateralA, Math.cos(swing) * spread)
-            .addScaledVector(lateralB, Math.sin(swing) * spread);
-          this.rememberPlacement(anchorKey, anchor);
-          anchor = this.placementTargets.get(anchorKey) ?? anchor;
-        }
+        const sourceScene = sourceScenes.get(node.sourceId);
+        const sourceNode = currentSources.get(node.sourceId)
+          ?? (sourceScene ? scenePosition(sourceScene) : new THREE.Vector3());
+        const galaxyRadius = Math.max(
+          40,
+          (sourceScene?.radius ?? 90) * 1.45,
+        );
+        const anchor = sourceNode.clone().add(galaxyArmOffset(
+          node.sourceId,
+          `${node.timelineBundleId}:star`,
+          galaxyRadius,
+        ));
         // Members keep their data-space offsets relative to the bundle's event,
         // so the factual network's local shape survives the re-anchoring.
         const eventBase = bundleEventBase.get(node.timelineBundleId);
         const position = scenePosition(node);
         return eventBase
-          ? anchor.clone().add(position.sub(eventBase))
+          ? anchor.clone().add(position.sub(eventBase).multiplyScalar(0.4))
           : anchor.clone();
       }
       const position = scenePosition(node);
@@ -2198,52 +2171,9 @@ class UniverseForceSceneEngine {
       this.rebuildLabels();
       this.applyHighlight();
     }
-    // Entering a browse session settles beside the source along the camera's
-    // own approach bearing, gazing through it: the stream's first batch then
-    // condenses ahead of that gaze. Every angle is a valid way in, because
-    // perception — not geometry — decides where the stream unfolds.
-    const flight = this.flightConfig;
-    if (flight && flight.sourceId === sourceId) {
-      const center = this.flightCenter(flight);
-      const camera = this.graph.camera();
-      const approach = camera.position.clone().sub(center);
-      if (approach.lengthSq() < 1) approach.set(0.24, 0.18, 1);
-      approach.normalize();
-      const position = center.clone().addScaledVector(approach, SPHERE_ENTRY_RADIUS);
-      const lookAt = center.clone().addScaledVector(
-        approach,
-        SPHERE_ENTRY_RADIUS - SPHERE_ENTRY_LOOK_AHEAD,
-      );
-      this.pointerActive = false;
-      this.lodArmed = false;
-      if (this.hoveredId) this.handleNodeHover(null, false, true);
-      const duration = this.reducedMotion ? 0 : SPHERE_ENTRY_MS;
-      this.wakeRendering(duration + 900);
-      this.host.dataset.universeCamera = [
-        position.x.toFixed(1),
-        position.y.toFixed(1),
-        position.z.toFixed(1),
-        lookAt.x.toFixed(1),
-        lookAt.y.toFixed(1),
-        lookAt.z.toFixed(1),
-      ].join(",");
-      this.graph.cameraPosition(
-        { x: position.x, y: position.y, z: position.z },
-        { x: lookAt.x, y: lookAt.y, z: lookAt.z },
-        duration,
-      );
-      this.startLoop(duration + 180);
-      // Lock the gaze cone only after the dive lands, so the approach itself
-      // may start from any bearing without snapping.
-      if (this.browseGazeTimer !== null) window.clearTimeout(this.browseGazeTimer);
-      this.browseGazeTimer = window.setTimeout(() => {
-        this.browseGazeTimer = null;
-        if (!this.paused && this.flightConfig?.sourceId === sourceId) {
-          this.applyBrowseGaze();
-        }
-      }, duration + 80);
-      return;
-    }
+    // Entering a browse session frames the whole galaxy from its far side:
+    // exploration happens from out here — the wheel scrubs which particles
+    // are lit, orbiting looks around it, pinch leans in to read.
     const concreteNodes = [...this.nodes.values()].filter(
       (candidate) =>
         candidate.kind !== "source"
@@ -2435,7 +2365,6 @@ class UniverseForceSceneEngine {
     if (this.lodTimer !== null) window.clearTimeout(this.lodTimer);
     if (this.initialFocusTimer !== null) window.clearTimeout(this.initialFocusTimer);
     if (this.sleepTimer !== null) window.clearTimeout(this.sleepTimer);
-    if (this.browseGazeTimer !== null) window.clearTimeout(this.browseGazeTimer);
     this.controls.removeEventListener("start", this.handleControlsStart);
     this.controls.removeEventListener("change", this.handleControlsChange);
     this.resizeObserver.disconnect();
@@ -2448,8 +2377,6 @@ class UniverseForceSceneEngine {
     this.host.removeEventListener("blur", this.handleCanvasBlur);
     this.host.removeEventListener("keydown", this.handleKeyDown);
     window.removeEventListener("pointermove", this.handleWindowPointerMove);
-    window.removeEventListener("pointerup", this.handleWindowPointerUp);
-    window.removeEventListener("pointercancel", this.handleWindowPointerUp);
     document.removeEventListener("visibilitychange", this.handleVisibilityChange);
     this.rendererCanvas.removeEventListener("webglcontextlost", this.handleWebglContextLost);
     this.clearNebula();
@@ -3694,71 +3621,6 @@ class UniverseForceSceneEngine {
     this.syncNebulaCorridorUniforms();
     this.updateNebulaMotionState();
     this.armNebulaAnimation();
-  }
-
-  private flightCenter(config: UniverseSceneTemporalFlight) {
-    return new THREE.Vector3(config.centerX, config.centerY, config.centerZ);
-  }
-
-
-  /**
-   * Weights the gaze while browsing: rotation stays fully free in every
-   * direction — the wheel flies where you look, so no orientation can break
-   * the flight's meaning — but the hand moves the sky more slowly.
-   */
-  private applyBrowseGaze() {
-    // First-person look takes over the primary drag; OrbitControls keeps pan
-    // and pinch. Orbiting a forward pivot is what made rotation feel crooked.
-    this.controls.enableRotate = false;
-    this.controls.panSpeed = BROWSE_GAZE_PAN_SPEED;
-    this.controls.maxDistance = BROWSE_MAX_DOLLY_DISTANCE;
-    this.browseGazeApplied = true;
-    this.host.dataset.universeBrowseGaze = "first-person";
-  }
-
-  private releaseBrowseGaze() {
-    if (this.browseGazeTimer !== null) {
-      window.clearTimeout(this.browseGazeTimer);
-      this.browseGazeTimer = null;
-    }
-    if (!this.browseGazeApplied) return;
-    this.controls.enableRotate = true;
-    this.controls.panSpeed = UNIVERSE_PAN_SPEED;
-    this.controls.maxDistance = UNIVERSE_CAMERA_MAX_DISTANCE;
-    this.lookPointerId = null;
-    this.browseGazeApplied = false;
-    this.host.dataset.universeBrowseGaze = "free";
-  }
-
-  /**
-   * Turns the head: rotates the orbit target around the camera position. The
-   * camera itself never translates, so the corridor cannot skew sideways —
-   * exactly a gaze, in every direction, with a keepout at the poles.
-   */
-  private lookAroundBy(dxPx: number, dyPx: number, now: number) {
-    const target = this.controls.target;
-    if (!target) return;
-    const camera = this.graph.camera();
-    const offset = target.clone().sub(camera.position);
-    const radius = offset.length();
-    if (!Number.isFinite(radius) || radius < 1e-3) return;
-    const spherical = new THREE.Spherical().setFromVector3(offset);
-    spherical.theta -= dxPx * BROWSE_LOOK_RAD_PER_PX;
-    spherical.phi = THREE.MathUtils.clamp(
-      spherical.phi - dyPx * BROWSE_LOOK_RAD_PER_PX,
-      BROWSE_LOOK_MIN_PHI,
-      Math.PI - BROWSE_LOOK_MIN_PHI,
-    );
-    spherical.makeSafe();
-    offset.setFromSpherical(spherical).setLength(radius);
-    target.copy(camera.position).add(offset);
-    this.cameraCalmUntil = now + NEBULA_GESTURE_CALM_MS;
-    this.wakeRendering(700);
-    this.startLoop(240);
-    this.updateVisualLayout(now);
-    this.updateNodeMorphScales(now);
-    this.updateLabels(now);
-    this.evaluateLod(now);
   }
 
   /** Keeps the browse fog centred on the camera while inside a source. */
@@ -5383,8 +5245,10 @@ class UniverseForceSceneEngine {
         && node.sourceId === config.sourceId
         && node.sceneNode.timelineDepth !== undefined
       ) {
-        const presence = universeTemporalFlightPresence(
-          node.sceneNode.timelineDepth - this.appliedFlightDepth,
+        const presence = universeStreamPresence(
+          node.sceneNode.timelineDepth,
+          config.windowNearDepth,
+          config.windowFarDepth,
           config.unitsPerEvent,
         );
         scale = presence.scale;
@@ -5429,39 +5293,22 @@ class UniverseForceSceneEngine {
       reducedMotion: this.reducedMotion,
     });
     const travel = state.depth - this.appliedFlightDepth;
-    const nextState = state;
     let appliedTravel = 0;
     if (travel !== 0) {
-      const camera = this.graph.camera();
-      // Forward is wherever the gaze points: scroll up flies there and the
-      // next batch of the stream condenses ahead; scroll down backs out the
-      // way you came. Turning only decides where "ahead" is.
-      const forward = camera.getWorldDirection(new THREE.Vector3()).normalize();
-      camera.position.addScaledVector(forward, travel);
-      if (this.controls.target) {
-        this.controls.target.addScaledVector(forward, travel);
-      }
+      // The wheel scrubs the stream, not the camera: which particles are lit
+      // shifts across the galaxy while the viewpoint stays the explorer's own.
+      // Presence is window-band based and refreshes when the window commits.
       this.appliedFlightDepth = state.depth;
       appliedTravel = travel;
-      this.flightDepthRate = nextState.velocity !== 0
-        ? nextState.velocity
+      this.flightDepthRate = state.velocity !== 0
+        ? state.velocity
         : travel / Math.max(1, elapsedMs) * 1000;
       this.wakeRendering(600);
-      this.syncNebulaCorridorUniforms();
-      this.updateTemporalPresence();
-      this.updateVisualLayout(now);
-      this.updateNodeMorphScales(now);
       this.updateLabels(now);
-      this.evaluateLod(now);
     } else {
       this.flightDepthRate = 0;
     }
-    // One source of truth: the flight's scalar depth is always the applied
-    // axis depth, so glide targets and follow thresholds share one space.
-    this.flightState = nextState.depth === this.appliedFlightDepth
-      && nextState === state
-      ? nextState
-      : { ...nextState, depth: this.appliedFlightDepth };
+    this.flightState = state;
     // Cards duck while the camera streaks past and re-expand once it settles.
     // Speed comes from actual travel, so wheel inertia and button glides
     // behave identically.
@@ -5579,29 +5426,10 @@ class UniverseForceSceneEngine {
     this.startLoop(900);
   };
 
-  private handlePointerDown = (event: PointerEvent) => {
+  private handlePointerDown = () => {
     if (this.paused || !this.interactive) return;
     // A deliberate grab owns the camera immediately and brakes the flight.
     this.flightState = brakeUniverseTemporalFlight(this.flightState);
-    if (this.lookPointerId !== null) {
-      // A second pointer means a pinch is starting: hand the gesture back.
-      this.lookPointerId = null;
-      return;
-    }
-    if (
-      this.browseGazeApplied
-      && event.isPrimary
-      && event.button === 0
-      && this.timelineWheelSurface(event.target) === "canvas"
-    ) {
-      this.lookPointerId = event.pointerId;
-      this.lookLastX = event.clientX;
-      this.lookLastY = event.clientY;
-    }
-  };
-
-  private handleWindowPointerUp = (event: PointerEvent) => {
-    if (event.pointerId === this.lookPointerId) this.lookPointerId = null;
   };
 
   private handleControlsStart = () => {
@@ -5673,14 +5501,6 @@ class UniverseForceSceneEngine {
 
   private handleWindowPointerMove = (event: PointerEvent) => {
     if (this.paused || !this.interactive) return;
-    if (event.pointerId === this.lookPointerId) {
-      const dx = event.clientX - this.lookLastX;
-      const dy = event.clientY - this.lookLastY;
-      this.lookLastX = event.clientX;
-      this.lookLastY = event.clientY;
-      if (dx !== 0 || dy !== 0) this.lookAroundBy(dx, dy, performance.now());
-      return;
-    }
     const target = event.target;
     if (!(target instanceof Node) || this.host.contains(target)) return;
     this.pointerActive = false;

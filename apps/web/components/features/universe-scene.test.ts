@@ -78,14 +78,14 @@ describe("universe scene production invariants", () => {
     );
     const wheel = sourceBetween(
       "private handleTimelineWheel = (event: WheelEvent) =>",
-      "private handlePointerDown = (event: PointerEvent) =>",
+      "private handlePointerDown = () =>",
     );
     const wheelRouting = sourceBetween(
       "private timelineWheelSurface(target: EventTarget | null)",
       "private handleTimelineWheel = (event: WheelEvent) =>",
     );
     const pointer = sourceBetween(
-      "private handlePointerDown = (event: PointerEvent) =>",
+      "private handlePointerDown = () =>",
       "private handleControlsStart = () =>",
     );
     const flight = sourceBetween(
@@ -132,10 +132,10 @@ describe("universe scene production invariants", () => {
     // applied to camera and orbit target together, so orbiting composes freely
     // and no pointer-vs-wheel gesture classifier is needed.
     expect(pointer).toContain("brakeUniverseTemporalFlight");
-    // All travel — wheel and glide alike — moves along the gaze, translating
-    // camera and orbit target together; the odometer is the stream position.
-    expect(flight).toContain("camera.position.addScaledVector(forward, travel)");
-    expect(flight).toContain("this.controls.target.addScaledVector(forward, travel)");
+    // The wheel scrubs the stream cursor only: which particles are lit moves
+    // across the galaxy while the camera stays the explorer's own.
+    expect(flight).not.toContain("camera.position");
+    expect(flight).not.toContain("getWorldDirection");
     expect(flight).toContain("planUniverseTemporalFlightFollow(");
     // The camera never waits for data: paging along is fire-and-forget.
     expect(flight).not.toContain("await ");
@@ -740,29 +740,24 @@ describe("universe scene production invariants", () => {
       "private updateNebulaPositions()",
     );
 
-    // The fog is the second form of the same particles: the vertex shader
-    // wraps them in a box around the camera, so any distance flown in any
-    // direction stays inside the nebula — no CPU reposition, no extra budget.
+    // The galaxy IS the content and keeps its shape while browsed; only the
+    // free sky dust wraps around the camera, carrying the background in every
+    // direction — one particle continuum from backdrop to stars.
     expect(nebulaMaterial).toContain("uniform vec3 uFogCamera");
     expect(nebulaMaterial).toContain("vec3 animatedPosition = mix(position, wrapped, wrapMix)");
-    // The particles ARE the sky: free dust always wraps around the camera —
-    // the overview background and the in-source fog are one continuum — and
-    // it neither recedes with other nebulae nor answers to context dimming.
-    expect(nebulaMaterial).toContain("float wrapMix = max(corridorMix, aSky)");
+    expect(nebulaMaterial).toContain("float wrapMix = aSky");
     expect(nebulaBuild).toContain('geometry.setAttribute("aSky"');
     expect(nebulaBuild).toContain('sourceId: "__sky__"');
     expect(source).toContain("const NEBULA_FOG_WRAP_SIZE = 1_700.0");
     expect(source).toContain("private syncNebulaCorridorUniforms()");
     expect(source).toContain("(material.uniforms.uFogCamera.value as THREE.Vector3).copy(camera.position)");
-    // The fog may never detach from the exploration: it follows the camera on
-    // every frame and every camera gesture, and a fresh source entry unfolds
-    // the stream anew instead of reusing anchors from an earlier path.
+    // The sky dust may never detach from the view: its wrap centre follows
+    // the camera on every frame and every camera gesture.
     const renderLoop = sourceBetween(
       "private loop = (now: number) =>",
       "private updateTemporalPresence()",
     );
     expect(renderLoop).toContain("this.syncNebulaCorridorUniforms()");
-    expect(source).toContain('key.startsWith("timeline-bundle:")');
 
     // The fog carries its own light: glow pockets brighten and swell, and a
     // share of the dust becomes the big soft enveloping haze.
@@ -780,55 +775,33 @@ describe("universe scene production invariants", () => {
     expect(nebulaBuild).toContain("const browsedSourceId = this.flightConfig?.sourceId ?? null");
   });
 
-  it("keeps the gaze free while flight follows it, weighted and spine-anchored", () => {
-    const focus = sourceBetween(
-      "focusSource(sourceId: string) {",
-      "focusResult() {",
+  it("lights events on the galaxy's own arms while the camera stays free", () => {
+    const flight = sourceBetween(
+      "private updateTemporalFlight(now: number)",
+      "private timelineWheelSurface(target: EventTarget | null)",
     );
     const dataCommit = sourceBetween(
       "setData(\n    data: UniverseSceneData",
       "\n  focusOverview() {",
     );
-    const flight = sourceBetween(
-      "private updateTemporalFlight(now: number)",
-      "private timelineWheelSurface(target: EventTarget | null)",
-    );
 
-    // Freedom without incoherence: no angle clamps anywhere, and rotation in
-    // a source is FIRST-PERSON — the target turns around the camera, never the
-    // camera around a forward pivot, so the corridor cannot skew sideways.
+    // Events ARE nebula particles: their anchors come from the same spiral-arm
+    // math as the dust, seeded by identity — deterministic forever, with no
+    // session memory and no camera dependence.
+    expect(source).toContain("function galaxyArmOffset(");
+    expect(dataCommit).toContain("galaxyArmOffset(");
+    expect(dataCommit).toContain("const eventBase = bundleEventBase.get(node.timelineBundleId)");
+    // No angle clamps, no first-person takeover, no gaze weighting: outside
+    // the galaxy the standard orbit is the right instrument.
     expect(source).not.toContain("minAzimuthAngle");
-    expect(source).not.toContain("maxPolarAngle");
-    expect(source).toContain("private applyBrowseGaze()");
-    expect(source).toContain("private releaseBrowseGaze()");
-    expect(source).toContain("this.controls.enableRotate = false");
-    expect(source).toContain("this.controls.enableRotate = true");
-    expect(source).toContain("private lookAroundBy(");
-    expect(source).toContain("target.copy(camera.position).add(offset)");
-    expect(source).toContain("BROWSE_LOOK_MIN_PHI");
-    expect(flight).toContain("camera.getWorldDirection");
-    // Perception is decoupled from data: any direction of travel consumes the
-    // stream equally — the odometer is clamped by the library's stream ends,
-    // and no geometric projection may gate it.
+    expect(source).not.toContain("lookAroundBy");
+    expect(source).not.toContain("browseGaze");
+    // The stream cursor still walls at the ends and leads with its rate.
     expect(flight).toContain("maxDepth: config.maxDepth");
-    expect(flight).not.toContain("depthPerTravel");
-    expect(flight).not.toContain("Number.POSITIVE_INFINITY");
-    expect(source).toContain("this.controls.maxDistance = BROWSE_MAX_DOLLY_DISTANCE");
-    // Fresh bundles spawn ahead of the gaze at their stream distance and stay
-    // put for the session; members keep their local factual shape.
-    expect(source).toContain("`timeline-bundle:${node.timelineBundleId}`");
-    expect(source).toContain("node.timelineDepth - this.appliedFlightDepth");
-    expect(source).toContain("STREAM_SPAWN_SPREAD_MIN");
-    expect(source).toContain("const eventBase = bundleEventBase.get(node.timelineBundleId)");
-    // Walls apply to the axis projection of free travel, and paging leads on
-    // the depth rate, never on raw speed.
-    expect(focus).toContain("this.applyBrowseGaze()");
-    expect(dataCommit).toContain(
-      "if (!nextFlight || flightSourceChanged) this.releaseBrowseGaze()",
-    );
+    expect(flight).toContain("velocity: this.flightDepthRate");
   });
 
-  it("dives into the corridor on entry and ducks cards while streaking past", () => {
+  it("frames the galaxy on entry and ducks cards while scrubbing fast", () => {
     const focus = sourceBetween(
       "focusSource(sourceId: string) {",
       "focusResult() {",
@@ -841,15 +814,23 @@ describe("universe scene production invariants", () => {
       "private updateLabels(now: number",
       "private miniPanelRect(",
     );
+    const presence = sourceBetween(
+      "private updateTemporalPresence()",
+      "private updateTemporalFlight(now: number)",
+    );
 
-    // Entering a browse session settles along the camera's own approach
-    // bearing, gazing through the source: every angle is a valid way in.
-    expect(focus).toContain("const approach = camera.position.clone().sub(center)");
-    expect(focus).toContain("SPHERE_ENTRY_RADIUS");
-    expect(focus).toContain("SPHERE_ENTRY_LOOK_AHEAD");
+    // Entry keeps the explorer outside: the default framing shows the whole
+    // galaxy; there is no dive pose and no camera teleport.
+    expect(focus).toContain("frames the whole galaxy");
+    expect(focus).not.toContain("cameraPosition(");
 
-    // Card discipline keys off real depth travel (wheel inertia and button
-    // glides alike) and eases asymmetrically: duck fast, recover after a beat.
+    // Presence is a pure window band: loaded = stars, behind = embers,
+    // ahead = dust — independent of where the camera orbits.
+    expect(presence).toContain("universeStreamPresence(");
+    expect(presence).toContain("config.windowNearDepth");
+    expect(presence).toContain("config.windowFarDepth");
+
+    // Card discipline keys off the stream scrub rate and eases asymmetrically.
     expect(flight).toContain("const instantSpeed = Math.abs(appliedTravel)");
     expect(flight).toContain("FLIGHT_CARD_COLLAPSE_MS");
     expect(flight).toContain("return moving || cardsSettling");

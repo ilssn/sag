@@ -75,7 +75,8 @@ const PRESENCE_AHEAD_FAR_EVENTS = 8;
 const PRESENCE_BEHIND_FULL_EVENTS = 0.75;
 const PRESENCE_BEHIND_GONE_EVENTS = 2.5;
 const PRESENCE_FAR_SCALE = 0.42;
-const PRESENCE_FAR_OPACITY = 0.16;
+/** Not-yet-loaded packages melt back into the nebula's dust. */
+const PRESENCE_DUST_OPACITY = 0.05;
 /**
  * Passed packages keep a faint ember instead of going black: looking back
  * shows the travelled road, and the warm event stars read as cooling embers.
@@ -243,40 +244,43 @@ function easedRange(value: number, from: number, to: number) {
 }
 
 /**
- * Camera-relative presence of a package on the axis: how large and how opaque
- * it renders given its depth distance from the camera, in world units
- * (positive = ahead of the camera, deeper into the past).
- *
- * Whatever the camera reaches is fully present — this replaces any static
- * age-based dimming, which under a moving camera would leave a reached package
- * forever small and dark. Ahead, atmospheric perspective thins packages toward
- * a floor (still visible: the corridor keeps promising more). Behind, passed
- * packages fade out quickly so the view is always about what is being reached.
+ * Window-band presence of a package in the stream: the loaded window is fully
+ * lit — those particles have "resolved into stars" — packages just behind it
+ * cool into embers (the travelled road stays faintly visible), and packages
+ * beyond it stay dust until the stream reaches them. Camera-independent: the
+ * explorer orbits and leans in freely without re-lighting the nebula.
  */
-export function universeTemporalFlightPresence(
-  deltaUnits: number,
+export function universeStreamPresence(
+  depth: number,
+  windowNearDepth: number,
+  windowFarDepth: number,
   unitsPerEvent: number,
 ): UniverseTemporalFlightPresence {
   const unit = Math.max(1, finite(unitsPerEvent, 1));
-  const events = finite(deltaUnits) / unit;
-  if (events < 0) {
-    const kept = 1 - easedRange(
-      -events,
+  const near = finite(windowNearDepth);
+  const far = Math.max(near, finite(windowFarDepth));
+  const position = finite(depth);
+  if (position < near) {
+    const cooled = easedRange(
+      (near - position) / unit,
       PRESENCE_BEHIND_FULL_EVENTS,
       PRESENCE_BEHIND_GONE_EVENTS,
     );
     return {
       scale: 1,
-      opacity: PRESENCE_BEHIND_EMBER + (1 - PRESENCE_BEHIND_EMBER) * kept,
+      opacity: 1 - (1 - PRESENCE_BEHIND_EMBER) * cooled,
     };
   }
-  const fade = easedRange(
-    events,
-    PRESENCE_AHEAD_FULL_EVENTS,
-    PRESENCE_AHEAD_FAR_EVENTS,
-  );
-  return {
-    scale: 1 - (1 - PRESENCE_FAR_SCALE) * fade,
-    opacity: 1 - (1 - PRESENCE_FAR_OPACITY) * fade,
-  };
+  if (position > far) {
+    const dust = easedRange(
+      (position - far) / unit,
+      PRESENCE_AHEAD_FULL_EVENTS,
+      PRESENCE_AHEAD_FAR_EVENTS,
+    );
+    return {
+      scale: 1 - (1 - PRESENCE_FAR_SCALE) * dust,
+      opacity: 1 - (1 - PRESENCE_DUST_OPACITY) * dust,
+    };
+  }
+  return { scale: 1, opacity: 1 };
 }

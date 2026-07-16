@@ -8,7 +8,7 @@ import {
   planUniverseTemporalFlightFollow,
   stepUniverseTemporalFlight,
   UNIVERSE_FLIGHT_UNITS_PER_WHEEL_PIXEL,
-  universeTemporalFlightPresence,
+  universeStreamPresence,
 } from "./universe-temporal-flight";
 
 const WHEEL = { deltaMode: 0, viewportHeight: 800 };
@@ -249,27 +249,27 @@ describe("universe temporal flight", () => {
     })).toBeNull();
   });
 
-  it("keeps whatever the camera reaches fully present, thinning only with distance", () => {
-    // At the camera plane and slightly ahead: fully there.
-    expect(universeTemporalFlightPresence(0, 60)).toEqual({ scale: 1, opacity: 1 });
-    expect(universeTemporalFlightPresence(60, 60)).toEqual({ scale: 1, opacity: 1 });
-    // Far ahead: atmospheric floor, never invisible — the corridor keeps
-    // promising more.
-    const far = universeTemporalFlightPresence(60 * 20, 60);
-    expect(far.scale).toBeCloseTo(0.42, 5);
-    expect(far.opacity).toBeCloseTo(0.16, 5);
-    // Between: monotonic thinning.
-    const mid = universeTemporalFlightPresence(60 * 4, 60);
-    expect(mid.opacity).toBeLessThan(1);
-    expect(mid.opacity).toBeGreaterThan(far.opacity);
-    expect(mid.scale).toBeLessThan(1);
-    expect(mid.scale).toBeGreaterThan(far.scale);
-    // Behind: passed packages fade fast but settle on a faint ember, so
-    // looking back shows the travelled road instead of pure black.
-    expect(universeTemporalFlightPresence(-30, 60).opacity).toBe(1);
-    expect(universeTemporalFlightPresence(-90, 60).opacity).toBeLessThan(1);
-    expect(universeTemporalFlightPresence(-60 * 3, 60).opacity).toBeCloseTo(0.1, 10);
-    expect(universeTemporalFlightPresence(-60 * 30, 60).opacity).toBeCloseTo(0.1, 10);
-    expect(universeTemporalFlightPresence(-60 * 3, 60).scale).toBe(1);
+  it("lights the loaded window as stars, cools embers behind, keeps dust ahead", () => {
+    const window = { near: 600, far: 960 };
+    // Inside the window: fully resolved stars.
+    expect(universeStreamPresence(600, window.near, window.far, 60))
+      .toEqual({ scale: 1, opacity: 1 });
+    expect(universeStreamPresence(780, window.near, window.far, 60))
+      .toEqual({ scale: 1, opacity: 1 });
+    expect(universeStreamPresence(960, window.near, window.far, 60))
+      .toEqual({ scale: 1, opacity: 1 });
+    // Behind (newer): passed packages cool into faint embers — the travelled
+    // road stays visible, never pure black.
+    expect(universeStreamPresence(590, window.near, window.far, 60).opacity).toBe(1);
+    const ember = universeStreamPresence(600 - 60 * 3, window.near, window.far, 60);
+    expect(ember.opacity).toBeCloseTo(0.1, 10);
+    expect(ember.scale).toBe(1);
+    // Ahead (older): not yet reached — those particles are still nebula dust.
+    const nearDust = universeStreamPresence(960 + 60 * 2, window.near, window.far, 60);
+    expect(nearDust.opacity).toBeLessThan(1);
+    const deepDust = universeStreamPresence(960 + 60 * 12, window.near, window.far, 60);
+    expect(deepDust.opacity).toBeCloseTo(0.05, 5);
+    expect(deepDust.scale).toBeCloseTo(0.42, 5);
+    expect(nearDust.opacity).toBeGreaterThan(deepDust.opacity);
   });
 });
