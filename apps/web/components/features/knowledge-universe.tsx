@@ -1681,9 +1681,11 @@ export function KnowledgeUniverse({
         : Math.max(relatedProgress, node.related_count);
       const expansionExhausted = expandedAnchorsRef.current.has(key)
         && !cursorsRef.current.has(key);
+      // Placeholder scale only: the scene re-anchors every browse package to
+      // its galaxy-arm seat. Keeping this compact protects camera framing and
+      // placement heuristics from a huge phantom layout.
       const shellRadius = temporalProjection
-        ? UNIVERSE_TEMPORAL_SPHERE_CORE_RADIUS
-          + (1 - temporalProjection.ageProgress) * temporalAxisDepth
+        ? 60 + (1 - temporalProjection.ageProgress) * 130
         : 0;
       const offset = timelinePlacement
         // An expansion-discovered event is placed but off the onion sphere:

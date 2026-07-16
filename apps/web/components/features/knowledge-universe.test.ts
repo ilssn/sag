@@ -38,9 +38,11 @@ describe("knowledge universe production interaction policy", () => {
   it("puts every timeline event on the temporal axis, with no mode to opt out of", () => {
     expect(source).toContain("timelineEventPlacementByKey");
     expect(source).toContain("projectUniverseTemporalAxis(");
-    // The onion sphere: bearing × shell radius, oldest shells at the core.
+    // React placement is a compact placeholder only: the scene re-anchors
+    // every browse package onto its galaxy-arm seat, so nothing here may grow
+    // with the source's event count.
     expect(source).toContain(
-      "+ (1 - temporalProjection.ageProgress) * temporalAxisDepth",
+      "? 60 + (1 - temporalProjection.ageProgress) * 130",
     );
     expect(source).toContain(
       "temporalProjection.radialDirection.x * shellRadius",

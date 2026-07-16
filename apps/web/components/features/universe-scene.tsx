@@ -1662,12 +1662,21 @@ class UniverseForceSceneEngine {
         presentationOpacityTo: presentationOpacity(node.presentationOpacity),
       };
     };
+    const seatAnchored = (node: UniverseSceneNode) => Boolean(
+      this.flightConfig
+      && node.timelineBundleId
+      && node.sourceId === this.flightConfig.sourceId,
+    );
     entrants.forEach((node) => {
       const index = entrantCountBySource.get(node.sourceId) ?? 0;
       entryOrderById.set(node.id, index);
       entrantCountBySource.set(node.sourceId, index + 1);
       const remembered = this.placementTargets.get(node.id);
-      const target = animateTimelineWindow
+      // Browse-session packages ALWAYS take their galaxy seat — including the
+      // very first, non-animated commit. The React-side placement is only a
+      // placeholder; framing or placing anything on it sends the camera far
+      // away from the galaxy.
+      const target = animateTimelineWindow || seatAnchored(node)
         ? timelineTarget(node)
         : remembered?.clone()
           ?? resolveIncrementalPosition(node, canonicalTarget(node), obstacles);
