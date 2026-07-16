@@ -34,6 +34,16 @@ const SPARKLES = [
   { x: 88, y: 15, size: 4, delay: -2.4, duration: 9.4 },
   { x: 93, y: 44, size: 6, delay: -8.8, duration: 13.6 },
   { x: 96, y: 88, size: 6, delay: -10.7, duration: 14.8 },
+  { x: 4, y: 36, size: 4, delay: -4.2, duration: 12.6 },
+  { x: 15, y: 11, size: 3, delay: -12.4, duration: 15.8 },
+  { x: 21, y: 91, size: 5, delay: -7.1, duration: 16.4 },
+  { x: 35, y: 18, size: 4, delay: -1.6, duration: 11.2 },
+  { x: 42, y: 71, size: 3, delay: -9.9, duration: 14.2 },
+  { x: 55, y: 34, size: 4, delay: -5.2, duration: 12.9 },
+  { x: 66, y: 76, size: 5, delay: -13.1, duration: 17.2 },
+  { x: 71, y: 93, size: 3, delay: -3.8, duration: 10.8 },
+  { x: 85, y: 38, size: 4, delay: -11.6, duration: 15.4 },
+  { x: 98, y: 63, size: 5, delay: -6.4, duration: 13.2 },
 ] as const;
 
 export function SpaceBackdrop({
@@ -48,16 +58,31 @@ export function SpaceBackdrop({
   const backdropRef = React.useRef<HTMLDivElement>(null);
   const cursorMeteorRef = React.useRef<HTMLSpanElement>(null);
   const universeDetailRef = React.useRef(false);
+  const universeVariantRef = React.useRef(false);
 
   React.useEffect(() => {
     const backdrop = backdropRef.current;
     if (!backdrop) return;
 
     if (variant !== "universe") {
+      universeVariantRef.current = false;
       universeDetailRef.current = false;
       backdrop.dataset.universeView = "fixed";
       backdrop.dataset.ambientMotion = ambientMotionPaused ? "paused" : "active";
       return;
+    }
+
+    // AppShell keeps the scene mounted while switching normal/explore modes.
+    // A source-detail view can therefore be the last global view we saw when
+    // the user re-enters explore. Treat every new universe mount as its clean
+    // overview entrance; the scene will publish detail again when it actually
+    // flies into a source.
+    const enteringUniverse = !universeVariantRef.current;
+    universeVariantRef.current = true;
+    if (enteringUniverse) {
+      universeDetailRef.current = false;
+      backdrop.dataset.universeView = "overview";
+      backdrop.dataset.ambientMotion = ambientMotionPaused ? "paused" : "active";
     }
 
     const syncView = (view: UniverseViewState) => {
@@ -81,7 +106,7 @@ export function SpaceBackdrop({
       syncView((event as CustomEvent<UniverseViewState>).detail);
     };
 
-    syncView(readUniverseView());
+    if (!enteringUniverse) syncView(readUniverseView());
     window.addEventListener(UNIVERSE_VIEW_EVENT, handleView);
     return () => window.removeEventListener(UNIVERSE_VIEW_EVENT, handleView);
   }, [ambientMotionPaused, variant]);

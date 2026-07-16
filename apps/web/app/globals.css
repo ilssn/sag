@@ -280,10 +280,45 @@
     transition: opacity 360ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
+  .sag-space-sparkles[data-space-variant="universe"]::before {
+    position: absolute;
+    inset: -18%;
+    z-index: 0;
+    content: "";
+    pointer-events: none;
+    background:
+      radial-gradient(
+        ellipse 42% 34% at 51% 47%,
+        hsl(198 46% 34% / 0.14),
+        transparent 70%
+      ),
+      radial-gradient(
+        ellipse 24% 20% at 51% 48%,
+        hsl(42 82% 56% / 0.08),
+        transparent 72%
+      );
+    filter: blur(18px);
+    opacity: 0.52;
+    transform: translate3d(-1%, 0, 0) scale(0.96);
+    animation: sag-space-nebula-breathe 18s ease-in-out infinite alternate;
+    will-change: transform, opacity;
+  }
+
+  .sag-space-sparkles[data-space-variant="universe"] .sag-space-particles {
+    animation: sag-space-starfield-drift 42s ease-in-out infinite alternate;
+    transform-origin: 50% 48%;
+    will-change: transform;
+  }
+
   .sag-space-sparkles[data-space-variant="universe"][data-universe-view="detail"] {
     /* A quieter star field gives the timeline room without flattening the
        scene into a black void. */
     opacity: 0.38;
+  }
+
+  .sag-space-sparkles[data-space-variant="universe"][data-universe-view="detail"]::before,
+  .sag-space-sparkles[data-space-variant="universe"][data-universe-view="detail"] .sag-space-particles {
+    animation-play-state: paused;
   }
 
   .sag-space-sparkles[data-space-variant="universe"][data-universe-view="detail"]
@@ -402,7 +437,13 @@
     z-index: 2;
     width: 86px;
     height: 1px;
-    background: linear-gradient(90deg, transparent, var(--space-sparkle));
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      var(--space-sparkle) 78%,
+      hsl(45 100% 88% / 0.92)
+    );
+    box-shadow: 0 0 8px hsl(45 96% 68% / 0.42);
     opacity: 0;
     transform: rotate(var(--meteor-angle)) translateX(-140px);
     transform-origin: right center;
@@ -453,6 +494,11 @@
 
   .sag-space-sparkles[data-ambient-motion="paused"]
     :is(.sag-space-dust, .sag-space-meteor, .sag-space-sparkle) {
+    animation-play-state: paused;
+  }
+
+  .sag-space-sparkles[data-ambient-motion="paused"]::before,
+  .sag-space-sparkles[data-ambient-motion="paused"] .sag-space-particles {
     animation-play-state: paused;
   }
 
@@ -507,6 +553,30 @@
     }
   }
 
+  @keyframes sag-space-nebula-breathe {
+    0% {
+      opacity: 0.32;
+      transform: translate3d(-1.2%, 0.8%, 0) scale(0.94);
+    }
+    48% {
+      opacity: 0.58;
+      transform: translate3d(0.6%, -0.4%, 0) scale(1.01);
+    }
+    100% {
+      opacity: 0.42;
+      transform: translate3d(1.1%, 0.5%, 0) scale(0.98);
+    }
+  }
+
+  @keyframes sag-space-starfield-drift {
+    0% {
+      transform: translate3d(-0.35%, 0.2%, 0) scale(1.005);
+    }
+    100% {
+      transform: translate3d(0.35%, -0.25%, 0) scale(1.012);
+    }
+  }
+
   @keyframes sag-space-orbit-drift {
     to {
       transform: translate(-2.4%, 1.6%) rotate(20deg);
@@ -533,10 +603,10 @@
       transform: rotate(var(--meteor-angle)) translateX(-140px);
     }
     84% {
-      opacity: 0.08;
+      opacity: 0.12;
     }
     87% {
-      opacity: 0.66;
+      opacity: 0.82;
     }
     91% {
       opacity: 0;
@@ -2748,6 +2818,11 @@
 
     .sag-space-sparkles[data-space-variant="universe"] {
       transition: none;
+    }
+
+    .sag-space-sparkles[data-space-variant="universe"]::before,
+    .sag-space-sparkles[data-space-variant="universe"] .sag-space-particles {
+      animation: none !important;
     }
   }
 

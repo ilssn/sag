@@ -48,6 +48,24 @@ describe("space backdrop interaction isolation", () => {
     expect(source).not.toContain("useTransform");
   });
 
+  it("resets the visual atmosphere when explore is entered again", () => {
+    expect(source).toContain("const universeVariantRef = React.useRef(false)");
+    expect(source).toContain("const enteringUniverse = !universeVariantRef.current");
+    expect(source).toContain('backdrop.dataset.universeView = "overview"');
+    expect(source).toContain('if (!enteringUniverse) syncView(readUniverseView())');
+  });
+
+  it("keeps a low-cost breathing field and drifting star canvas in the overview", () => {
+    expect(source).toContain('density={variant === "universe" ? 1.8 : 1}');
+    const css = readFileSync(
+      new URL("../../app/globals.css", import.meta.url),
+      "utf8",
+    );
+    expect(css).toContain("sag-space-nebula-breathe");
+    expect(css).toContain("sag-space-starfield-drift");
+    expect(css).toContain("hsl(45 100% 88% / 0.92)");
+  });
+
   it("gates the cursor meteor for drags and source-detail exploration", () => {
     expect(source).toContain("event.buttons !== 0");
     expect(source).toContain(
