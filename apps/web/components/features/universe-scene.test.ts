@@ -777,7 +777,7 @@ describe("universe scene production invariants", () => {
 
     // The corridor carries its own light and has no visible far wall: glow
     // pockets brighten and swell, and the last stretch dissolves.
-    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 1.45, corridorMix * glowParticle)");
+    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 1.2, corridorMix * glowParticle)");
     expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, axisFade, corridorMix)");
     expect(nebulaMaterial).toContain("* detailScale * glowScale * corridorBoost");
 
@@ -934,6 +934,26 @@ describe("universe scene production invariants", () => {
     expect(nebula).toContain("const budget = Math.min(");
     expect(nebula).toContain("this.host.dataset.universeNebulaBudgetCap");
     expect(nebula).toContain("this.host.dataset.universeNebulaBudget");
+  });
+
+  it("paints the brand sky: champagne grains, white-hot heart, sparse accents", () => {
+    const nebula = sourceBetween(
+      "private rebuildNebula()",
+      "private updateNebulaPositions()",
+    );
+
+    // The site's hero galaxy is pure sharp grain: champagne-gold dust with a
+    // per-source undertone, a white heart carried by density, a sprinkle of
+    // cool blue — and glow pockets as rare accents, never a fog blanket.
+    expect(source).toContain('const NEBULA_BRAND_CHAMPAGNE = new THREE.Color("#e3be82")');
+    expect(source).toContain('const NEBULA_BRAND_BLUE = new THREE.Color("#93b4e0")');
+    expect(nebula).toContain("NEBULA_BRAND_CHAMPAGNE,");
+    expect(nebula).toContain("color.lerp(NEBULA_BRAND_BLUE, 0.55)");
+    expect(nebula).toContain("? 0.5 + (1 - particle.radial) * 0.5");
+    expect(nebula).toContain("const glowChance = coreParticle ? 0.05 : 0.02");
+    expect(source).toContain("const NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP = 22");
+    // Tight arm lanes give the silhouette its edges.
+    expect(nebula).toContain("* (coreParticle ? 1.3 : 0.5)");
   });
 
   it("snaps the imperceptible detail-morph tail so stable scenes can sleep", () => {

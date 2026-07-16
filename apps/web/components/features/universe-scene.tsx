@@ -340,6 +340,14 @@ const ENTITY_COLOR = new THREE.Color("#75d8e8");
 const EVENT_LIGHT_COLOR = new THREE.Color("#b77b0b");
 const ENTITY_LIGHT_COLOR = new THREE.Color("#16879a");
 const WHITE = new THREE.Color("#ffffff");
+/**
+ * Brand galaxy palette: champagne-gold grains around a white-hot heart with
+ * scattered cool-blue accents — the site's hero look. Each source's own hue
+ * survives underneath as a tint, so nebulae stay distinguishable while the
+ * universe reads as one consistent brand sky.
+ */
+const NEBULA_BRAND_CHAMPAGNE = new THREE.Color("#e3be82");
+const NEBULA_BRAND_BLUE = new THREE.Color("#93b4e0");
 const DETAIL_MORPH_RESPONSE_MS = 92;
 const DETAIL_MORPH_SETTLE_EPSILON = 0.01;
 const HOVER_LABEL_SETTLE_MS = 72;
@@ -353,7 +361,11 @@ const NEBULA_BURST_MS = 1_400;
 // than the overview, so diving in reads as entering the nebula, not leaving it.
 const NEBULA_DETAIL_ALPHA = 1.3;
 const NEBULA_DETAIL_DUST_POINT_SIZE_CSS = 26;
-const NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP = 44;
+/**
+ * Glow pockets are accents, not weather: the brand galaxy is built purely
+ * from sharp grains, so oversized haze sprites read as noise smeared over it.
+ */
+const NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP = 22;
 /** Sentinel z far outside any real layout: the loaded band dims nothing. */
 const NEBULA_CORRIDOR_BAND_OFF = 1e8;
 /** Ambient drift stays frozen this long after any camera gesture frame. */
@@ -415,7 +427,7 @@ const NEBULA_WALL_LATERAL_MAX = 5.2;
  * bounded-window discipline applied to particles.
  */
 const NEBULA_CORRIDOR_WRAP_SPAN = 2400;
-const NEBULA_GLOW_POINT_SIZE_CSS_MOBILE = 34;
+const NEBULA_GLOW_POINT_SIZE_CSS_MOBILE = 18;
 const HIGHLIGHT_FLOW_FRAME_MS = 1000 / 30;
 const TIMELINE_WHEEL_LABEL_SELECTOR = "[data-universe-node-id]";
 const MAX_RENDER_PIXELS_DESKTOP = 2_400_000;
@@ -854,7 +866,7 @@ function makeNebulaMaterial(darkTheme: boolean) {
         // along the axis, and the far end dissolves instead of hard-stopping —
         // vast, with no visible wall.
         float glowParticle = step(0.001, aGlow);
-        vAlpha *= mix(1.0, 1.45, corridorMix * glowParticle);
+        vAlpha *= mix(1.0, 1.2, corridorMix * glowParticle);
         vAlpha *= mix(1.0, axisFade, corridorMix);
         // Canyon walls are a fine star field, not fog banks: full brightness,
         // grain-sized — their vastness is count and depth, not blur.
@@ -869,7 +881,7 @@ function makeNebulaMaterial(darkTheme: boolean) {
         float glowScale = mix(1.0, mix(3.6, 4.8, vDetail), aGlow);
         // Corridor beacons swell into soft volumetric pockets of light; wall
         // grains grow only slightly — crisp points, never blobs.
-        float corridorBoost = mix(1.0, mix(1.1, 1.6, glowParticle), corridorMix)
+        float corridorBoost = mix(1.0, mix(1.05, 1.25, glowParticle), corridorMix)
           * mix(1.0, 1.35, corridorMix * aCorridorWall);
         float rawPointSize = aSize * uPixelRatio * perspective * pulse
           * detailScale * glowScale * corridorBoost;
@@ -878,7 +890,7 @@ function makeNebulaMaterial(darkTheme: boolean) {
         float capSelect = glowParticle;
         float pointSizeCap = mix(
           detailDustCap,
-          uPointSizeCap * (1.0 + 0.7 * corridorMix),
+          uPointSizeCap * (1.0 + 0.25 * corridorMix),
           capSelect
         );
         gl_PointSize = min(max(1.15, rawPointSize), pointSizeCap);
@@ -904,10 +916,10 @@ function makeNebulaMaterial(darkTheme: boolean) {
           // The large cloud sprites take a cheap coherent branch: no rays and
           // no fractional pow across their much larger fragment footprint.
           float radial = clamp(1.0 - distanceFromCenter * 2.0, 0.0, 1.0);
-          // A broad low-frequency haze reads as a nebula at a distance, while
-          // the raised center keeps the source's thematic glow legible.
+          // A faint warm pocket of light — an accent between the grains,
+          // never a fog bank smeared over them.
           float haze = radial * mix(0.55, 0.95, radial);
-          shapeAlpha = haze * mix(0.18, 0.3, vDetail) * vGlow;
+          shapeAlpha = haze * mix(0.12, 0.2, vDetail) * vGlow;
         } else {
           float softDot = smoothstep(0.5, 0.04, distanceFromCenter);
           float rayX = smoothstep(0.09, 0.0, abs(centered.x))
@@ -2994,7 +3006,9 @@ class UniverseForceSceneEngine {
         colorWrite: false,
       });
       const hit = new THREE.Mesh(this.sourceHitGeometry, hitMaterial);
-      const hitRadius = node.sceneNode.root ? 8 : 6.5;
+      // Generous: exploring means landing the pointer on stars while they
+      // drift with presence and parallax — a near miss must still count.
+      const hitRadius = node.sceneNode.root ? 11 : 9.5;
       hit.scale.set(hitRadius, hitRadius, hitRadius);
       hit.userData.hitArea = true;
       hit.userData.eventHitArea = true;
@@ -3041,7 +3055,7 @@ class UniverseForceSceneEngine {
         colorWrite: false,
       });
       const hit = new THREE.Mesh(this.sourceHitGeometry, hitMaterial);
-      const hitRadius = node.sceneNode.root ? 5.5 : 4.5;
+      const hitRadius = node.sceneNode.root ? 8 : 7;
       hit.scale.set(hitRadius, hitRadius, hitRadius);
       hit.userData.hitArea = true;
       hit.userData.entityHitArea = true;
@@ -3574,8 +3588,10 @@ class UniverseForceSceneEngine {
           Math.floor(stableUnit(`${key}:arm-index`) * armCount),
         );
         const armAngle = (armIndex / armCount) * Math.PI * 2 + radial * winding;
+        // Tight arm lanes are the silhouette: the brand galaxy reads as a
+        // galaxy because its arms have edges, not a uniform disc of scatter.
         const armSpread = (stableUnit(`${key}:arm-spread`) - 0.5)
-          * (coreParticle ? 1.3 : 0.72)
+          * (coreParticle ? 1.3 : 0.5)
           * (1.08 - radial * 0.42);
         const angle = armAngle + armSpread;
         const planarRadius = radius * radial;
@@ -3592,7 +3608,8 @@ class UniverseForceSceneEngine {
         offset.applyEuler(rotation);
         const twinkle = Math.pow(stableUnit(`${key}:twinkle`), 1.18);
         const glowSeed = stableUnit(`${key}:glow`);
-        const glowChance = coreParticle ? 0.14 : 0.045;
+        // Sparse: light pockets punctuate the grain field, never blanket it.
+        const glowChance = coreParticle ? 0.05 : 0.02;
         particles.push({
           sourceId: source.sourceId,
           sourceIndex,
@@ -3600,9 +3617,9 @@ class UniverseForceSceneEngine {
           core: coreParticle,
           radial: Math.min(1, radial),
           alpha: haloParticle
-            ? 0.05 + stableUnit(`${key}:alpha`) * 0.13
-            : (coreParticle ? 0.4 : 0.24)
-              + stableUnit(`${key}:alpha`) * (coreParticle ? 0.6 : 0.56),
+            ? 0.06 + stableUnit(`${key}:alpha`) * 0.16
+            : (coreParticle ? 0.5 : 0.26)
+              + stableUnit(`${key}:alpha`) * (coreParticle ? 0.5 : 0.56),
           glow: glowSeed < glowChance
             ? 0.58 + stableUnit(`${key}:glow-strength`) * 0.42
             : 0,
@@ -3635,12 +3652,20 @@ class UniverseForceSceneEngine {
       Math.max(72, source.sceneNode.radius) * 1.8,
     ]));
     particles.forEach((particle, index) => {
-      // Hue stays the source's identity; the luminosity shape follows the
-      // brand galaxy — a white-hot heart melting into tinted dust.
+      // Brand sky: dust leans champagne with the source hue as an undertone,
+      // a sparse cool-blue accent sprinkle, and a white-hot heart carried by
+      // density — the same anatomy as the site's hero galaxy.
       const color = this.sourceVisualColor(particle.sourceId).lerp(
+        NEBULA_BRAND_CHAMPAGNE,
+        this.darkTheme ? 0.58 : 0.42,
+      );
+      if (stableUnit(`${particle.sourceId}:${index}:accent`) > 0.93) {
+        color.lerp(NEBULA_BRAND_BLUE, 0.55);
+      }
+      color.lerp(
         WHITE,
         particle.core
-          ? 0.45 + (1 - particle.radial) * 0.45
+          ? 0.5 + (1 - particle.radial) * 0.5
           : stableUnit(`${particle.sourceId}:${index}:white`)
             * (this.darkTheme ? 0.38 : 0.16),
       );
@@ -4625,17 +4650,17 @@ class UniverseForceSceneEngine {
       const baseLabelWidth = label.kind === "source"
         ? sourceBeaconSize
         : compact
-          ? mobile ? 108 : 124
+          ? mobile ? 108 : 132
         : mobile
           ? expanded ? 204 : 184
-          : expanded ? 244 : 216;
+          : expanded ? 252 : 232;
       const baseLabelHeight = label.kind === "source"
         ? sourceBeaconSize
         : compact
-          ? mobile ? 24 : 26
+          ? mobile ? 24 : 28
         : mobile
           ? expanded ? 82 : 70
-          : expanded ? 94 : 78;
+          : expanded ? 100 : 86;
       const labelScale = label.kind === "source"
         ? 1
         : nodeCardScale * currentNodePresentationCardScale(node);
