@@ -189,6 +189,14 @@ interface UniverseSceneProps {
   onViewChange: (value: UniverseSceneView) => void;
   onSourceLod: (sourceId: string, level: 0 | 1 | 2 | 3) => void;
   onSelectionClear: () => void;
+  actionLabels?: {
+    exploreMore: string;
+    askAi: string;
+  };
+  onExploreMore?: (node: UniverseSceneNode) => void;
+  onAskNode?: (node: UniverseSceneNode) => void;
+  /** Notifies the owner about a real pointer/wheel gesture, never scene animation. */
+  onUserInteraction?: () => void;
   onTimelineIntent: (
     direction: UniverseTimelineDirection,
   ) => Promise<UniverseTimelineIntentResult> | UniverseTimelineIntentResult;
@@ -211,6 +219,8 @@ interface UniverseSceneText {
   explorationProgress: (progress: number, total: number | string) => string;
   explorationComplete: (progress: number, total: number | string) => string;
   extractedEvent: string;
+  exploreMoreAction?: string;
+  askAiAction?: string;
 }
 
 interface ForceNode extends NodeObject {
@@ -300,7 +310,9 @@ interface NebulaParticle {
 interface SceneLabel {
   nodeId: string;
   kind: "source" | "node";
-  element: HTMLButtonElement;
+  element: HTMLElement;
+  primary?: HTMLButtonElement;
+  actionButtons?: HTMLButtonElement[];
 }
 
 interface SceneCallbacks {
@@ -309,6 +321,9 @@ interface SceneCallbacks {
   onViewChange: (value: UniverseSceneView) => void;
   onSourceLod: (sourceId: string, level: 0 | 1 | 2 | 3) => void;
   onSelectionClear: () => void;
+  onExploreMore?: (node: UniverseSceneNode) => void;
+  onAskNode?: (node: UniverseSceneNode) => void;
+  onUserInteraction?: () => void;
   onTimelineIntent: (
     direction: UniverseTimelineDirection,
   ) => Promise<UniverseTimelineIntentResult> | UniverseTimelineIntentResult;
@@ -342,22 +357,16 @@ interface ClusterForce {
 }
 
 const EVENT_COLOR = new THREE.Color("#ffd166");
-// Brand cool accent (site CSS #4f86ff family): entities are the blue voice
-// beside the gold events, matching the hero galaxy's accent stars.
-const ENTITY_COLOR = new THREE.Color("#7ea6ff");
 const EVENT_LIGHT_COLOR = new THREE.Color("#b77b0b");
-const ENTITY_LIGHT_COLOR = new THREE.Color("#2f5fd0");
 const WHITE = new THREE.Color("#ffffff");
+export const UNIVERSE_BRAND_GOLD = "#d6ae63";
+const NEBULA_BRAND_GOLD = new THREE.Color(UNIVERSE_BRAND_GOLD);
 /**
- * Brand galaxy palette, extracted from the site's own hero bundle: CSS gold
- * #d6ae63, a star ramp running pale gold → copper toward the outskirts
- * (vec3(1.0,.91,.70) … vec3(.66,.32,.14)), and cool-blue accent stars
- * (vec3(.61,.78,1.0)). No green anywhere — the perceived olive is gold on
- * near-black. Each source's own hue survives underneath as a tint.
+ * A source marker is the colour authority for its nebula. The particle field
+ * stores that entry hue and only moves a little toward white for the luminous
+ * core. The shader uses it as a secondary tint over the brand-gold overview,
+ * then hands the focused source its colour as the camera enters.
  */
-const NEBULA_BRAND_CHAMPAGNE = new THREE.Color("#d6ae63");
-const NEBULA_BRAND_COPPER = new THREE.Color("#a85224");
-const NEBULA_BRAND_BLUE = new THREE.Color("#9cc7ff");
 const DETAIL_MORPH_RESPONSE_MS = 92;
 const DETAIL_MORPH_SETTLE_EPSILON = 0.01;
 const HOVER_LABEL_SETTLE_MS = 72;
@@ -576,6 +585,17 @@ function sourceColor(sourceId: string) {
   );
 }
 
+function themedSourceColor(sourceId: string, darkTheme: boolean) {
+  const color = sourceColor(sourceId);
+  if (!darkTheme) color.offsetHSL(0, 0.04, -0.14);
+  return color;
+}
+
+/** Shared with the surrounding UI so every source accent resolves identically. */
+export function universeSourceAccent(sourceId: string, darkTheme = true) {
+  return `#${themedSourceColor(sourceId, darkTheme).getHexString()}`;
+}
+
 function endpointId(value: string | ForceNode) {
   return typeof value === "string" ? value : value.id;
 }
@@ -766,6 +786,7 @@ function makeNebulaMaterial(darkTheme: boolean) {
       uDetail: { value: 0 },
       uDetailAlpha: { value: NEBULA_DETAIL_ALPHA },
       uDetailSource: { value: -1 },
+      uBrandColor: { value: NEBULA_BRAND_GOLD.clone() },
       uPointSizeCap: { value: NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP },
       uTime: { value: 0 },
       uMotion: { value: 1 },
@@ -786,6 +807,7 @@ function makeNebulaMaterial(darkTheme: boolean) {
       uniform float uDetail;
       uniform float uDetailAlpha;
       uniform float uDetailSource;
+      uniform vec3 uBrandColor;
       uniform float uPointSizeCap;
       uniform float uTime;
       uniform float uMotion;
@@ -821,7 +843,10 @@ function makeNebulaMaterial(darkTheme: boolean) {
           uDetailAlpha,
           smoothstep(0.18, 0.78, particleDetail)
         );
-        vColor = aColor;
+        // Gold is the stable brand field in overview. Once the focused source
+        // takes over, its entry colour becomes the restrained secondary tint.
+        float sourceTint = 0.1 + 0.9 * smoothstep(0.22, 0.82, particleDetail);
+        vColor = mix(uBrandColor, aColor, sourceTint);
         vAlpha = aAlpha * mix(1.0, detailAlpha, sourceMatch);
         // Depth of field for the whole sky: while inside one source, every
         // other nebula recedes into the dark instead of competing for light —
@@ -981,6 +1006,9 @@ class UniverseForceSceneEngine {
     onViewChange: () => undefined,
     onSourceLod: () => undefined,
     onSelectionClear: () => undefined,
+    onExploreMore: () => undefined,
+    onAskNode: () => undefined,
+    onUserInteraction: () => undefined,
     onTimelineIntent: () => "blocked",
     onTimelineSettled: () => undefined,
     onUnavailable: () => undefined,
@@ -1317,7 +1345,9 @@ class UniverseForceSceneEngine {
       this.viewPreferences.showEventCards !== options.viewPreferences.showEventCards
       || this.viewPreferences.showEntityCards !== options.viewPreferences.showEntityCards;
     const leavingInteractiveMode = this.interactive && !options.interactive;
-    const localeChanged = this.text.locale !== options.text.locale;
+    const labelTextChanged = this.text.locale !== options.text.locale
+      || this.text.exploreMoreAction !== options.text.exploreMoreAction
+      || this.text.askAiAction !== options.text.askAiAction;
     this.darkTheme = options.darkTheme;
     this.interactive = options.interactive;
     this.reducedMotion = options.reducedMotion;
@@ -1350,7 +1380,7 @@ class UniverseForceSceneEngine {
       this.updateLinkVisuals();
     }
     if (motionChanged) this.syncHighlightFlowSprites();
-    if (this.dataReady && (cardPreferencesChanged || localeChanged)) this.rebuildLabels();
+    if (this.dataReady && (cardPreferencesChanged || labelTextChanged)) this.rebuildLabels();
     const keyboardCandidates = this.keyboardCandidates();
     if (
       this.keyboardFocusedId
@@ -2738,7 +2768,14 @@ class UniverseForceSceneEngine {
     this.host.dataset.universeTimelineRevision = String(this.timelineJourney.revision);
     this.host.dataset.universeTimelineBusy = String(busy);
     this.labels.forEach((label) => {
-      label.element.disabled = busy;
+      if (label.primary) label.primary.disabled = busy;
+      else if (label.element instanceof HTMLButtonElement) label.element.disabled = busy;
+      label.actionButtons?.forEach((button, index) => {
+        const node = this.nodes.get(label.nodeId);
+        button.disabled = busy || (
+          index === 0 && node?.sceneNode.canExploreMore === false
+        );
+      });
     });
   }
 
@@ -3039,9 +3076,10 @@ class UniverseForceSceneEngine {
       hit.userData.eventHitArea = true;
       group.add(hit);
     } else if (node.kind === "entity") {
+      const color = this.entityVisualColor(node.sourceId);
       const haloMaterial = new THREE.SpriteMaterial({
         map: this.entityTexture,
-        color: this.darkTheme ? ENTITY_COLOR : ENTITY_LIGHT_COLOR,
+        color,
         transparent: true,
         opacity: node.sceneNode.root ? 0.34 : 0.26,
         depthWrite: false,
@@ -3058,7 +3096,7 @@ class UniverseForceSceneEngine {
 
       const coreMaterial = new THREE.SpriteMaterial({
         map: this.entityCoreTexture,
-        color: this.darkTheme ? ENTITY_COLOR : ENTITY_LIGHT_COLOR,
+        color,
         transparent: true,
         opacity: node.sceneNode.root ? 0.96 : 0.84,
         depthTest: false,
@@ -3154,6 +3192,7 @@ class UniverseForceSceneEngine {
     this.lockedId = null;
     this.host.dataset.universeLockedId = "";
     if (!refresh) return;
+    if (this.dataReady) this.rebuildLabels();
     this.applyHighlight();
   }
 
@@ -3516,7 +3555,7 @@ class UniverseForceSceneEngine {
             node.kind === "event"
               ? this.darkTheme ? EVENT_COLOR : EVENT_LIGHT_COLOR
               : node.kind === "entity"
-                ? this.darkTheme ? ENTITY_COLOR : ENTITY_LIGHT_COLOR
+                ? this.entityVisualColor(node.sourceId)
                 : this.sourceVisualColor(node.sourceId),
           );
         }
@@ -3679,29 +3718,15 @@ class UniverseForceSceneEngine {
       Math.max(72, source.sceneNode.radius) * 1.8,
     ]));
     particles.forEach((particle, index) => {
-      // Brand sky: dust leans champagne with the source hue as an undertone,
-      // deepens to copper toward the outskirts, carries a sparse cool-blue
-      // accent sprinkle, and burns to a white heart by density — the exact
-      // anatomy of the site's hero galaxy ramp.
-      const color = this.sourceVisualColor(particle.sourceId).lerp(
-        NEBULA_BRAND_CHAMPAGNE,
-        this.darkTheme ? 0.62 : 0.46,
-      );
-      color.lerp(
-        NEBULA_BRAND_COPPER,
-        THREE.MathUtils.smoothstep(particle.radial, 0.55, 1)
-          * (this.darkTheme ? 0.5 : 0.35),
-      );
-      if (stableUnit(`${particle.sourceId}:${index}:accent`) > 0.93) {
-        color.lerp(NEBULA_BRAND_BLUE, 0.6);
-      }
-      color.lerp(
-        WHITE,
-        particle.core
-          ? 0.5 + (1 - particle.radial) * 0.5
-          : stableUnit(`${particle.sourceId}:${index}:white`)
-            * (this.darkTheme ? 0.38 : 0.16),
-      );
+      // Keep the source's entry colour all the way through the nebula. A
+      // restrained white lift gives the core its readable glow without
+      // washing blue, violet, green, or copper sources into one gold cloud.
+      const color = this.sourceVisualColor(particle.sourceId);
+      const whiteMix = particle.core
+        ? 0.2 + (1 - particle.radial) * 0.28
+        : stableUnit(`${particle.sourceId}:${index}:white`)
+          * (this.darkTheme ? 0.16 : 0.1);
+      color.lerp(WHITE, whiteMix);
       colors[index * 3] = color.r;
       colors[index * 3 + 1] = color.g;
       colors[index * 3 + 2] = color.b;
@@ -3984,9 +4009,16 @@ class UniverseForceSceneEngine {
   }
 
   private sourceVisualColor(sourceId: string) {
-    const color = sourceColor(sourceId);
-    if (!this.darkTheme) color.offsetHSL(0, 0.04, -0.14);
-    return color;
+    return themedSourceColor(sourceId, this.darkTheme);
+  }
+
+  private entityVisualColor(sourceId: string) {
+    // Entity sprites share the source hue; a tiny white lift keeps the small
+    // core legible without reintroducing a second, unrelated entity palette.
+    return this.sourceVisualColor(sourceId).lerp(
+      WHITE,
+      this.darkTheme ? 0.12 : 0.08,
+    );
   }
 
   private restingLinkOpacity() {
@@ -4324,7 +4356,7 @@ class UniverseForceSceneEngine {
     sources.forEach((node) => {
       const labelKey = `source:${node.id}`;
       const retained = existingLabels.get(labelKey);
-      const element = retained?.element ?? document.createElement("button");
+      const element = retained?.primary ?? document.createElement("button");
       if (retained) {
         reusedLabelCount += 1;
         existingLabels.delete(labelKey);
@@ -4356,19 +4388,31 @@ class UniverseForceSceneEngine {
       meta.textContent = node.sceneNode.statsReady
         ? this.text.sourceStats(node.sceneNode.eventCount, node.sceneNode.entityCount)
         : this.text.sourceStatsBuilding(node.sceneNode.eventCount);
-      nextLabels.push({ nodeId: node.id, kind: "source", element });
+      nextLabels.push({
+        nodeId: node.id,
+        kind: "source",
+        element,
+        primary: element,
+        actionButtons: [],
+      });
     });
     activeNodes.forEach((node) => {
       const nodeKind = node.kind === "event" ? "event" : "entity";
       const labelKey = `node:${node.id}`;
       const retained = existingLabels.get(labelKey);
-      const element = retained?.element ?? document.createElement("button");
+      const element = retained?.element ?? document.createElement("div");
+      const primary = retained?.primary ?? document.createElement("button");
+      const actionButtons = retained?.actionButtons ?? [
+        document.createElement("button"),
+        document.createElement("button"),
+      ];
       if (retained) {
         reusedLabelCount += 1;
         existingLabels.delete(labelKey);
       } else {
-        element.type = "button";
         element.className = "sag-universe-node-label";
+        primary.type = "button";
+        primary.className = "sag-universe-node-label__primary";
         const eyebrow = document.createElement("span");
         eyebrow.className = "sag-universe-node-label__eyebrow";
         const marker = document.createElement("span");
@@ -4377,47 +4421,72 @@ class UniverseForceSceneEngine {
         const exploreHint = document.createElement("span");
         exploreHint.className = "sag-universe-node-label__explore";
         exploreHint.dataset.universeNodeExploreHint = "true";
-        element.append(
+        primary.append(
           eyebrow,
           document.createElement("strong"),
           document.createElement("p"),
           exploreHint,
         );
-        this.bindLabelInteraction(element, node);
+        const actions = document.createElement("div");
+        actions.className = "sag-universe-node-label__actions";
+        actions.dataset.universeNodeActions = "true";
+        actionButtons.forEach((button, index) => {
+          button.type = "button";
+          button.className = "sag-universe-node-label__action";
+          button.dataset.universeNodeAction = index === 0 ? "explore-more" : "ask-ai";
+        });
+        actions.append(...actionButtons);
+        element.append(primary, actions);
+        this.bindNodeLabelInteraction(element, primary, actionButtons, node);
         this.labelLayer.appendChild(element);
       }
       element.dataset.universeNodeId = node.id;
-      element.disabled = this.timelineIsBusy();
+      primary.disabled = this.timelineIsBusy();
+      actionButtons.forEach((button, index) => {
+        button.disabled = this.timelineIsBusy() || (
+          index === 0 && node.sceneNode.canExploreMore === false
+        );
+      });
       element.dataset.kind = node.kind;
+      if (node.kind === "entity") {
+        element.style.setProperty(
+          "--universe-node-accent",
+          `#${this.sourceVisualColor(node.sourceId).getHexString()}`,
+        );
+      } else {
+        element.style.removeProperty("--universe-node-accent");
+      }
+      const locked = node.id === this.lockedId;
+      element.dataset.locked = String(locked);
       element.dataset.expanded = String(
-        node.kind === "event" && node.id === focusId && !transientHover,
+        locked || (node.kind === "event" && node.id === focusId && !transientHover),
       );
-      element.dataset.compact = String(node.kind === "entity");
-      element.setAttribute(
+      element.dataset.compact = String(node.kind === "entity" && !locked);
+      primary.setAttribute(
         "aria-label",
         this.text.exploreNode(nodeKind, node.sceneNode.label),
       );
-      const eyebrowText = element.querySelector(
+      const eyebrowText = primary.querySelector(
         ".sag-universe-node-label__eyebrow > span:last-child",
       ) as HTMLElement;
       eyebrowText.textContent = `${this.text.kind(nodeKind)} · ${node.sceneNode.category}`;
-      const title = element.querySelector("strong") as HTMLElement;
+      const title = primary.querySelector("strong") as HTMLElement;
       title.textContent = node.sceneNode.label;
       title.removeAttribute("title");
-      const summary = element.querySelector("p") as HTMLElement;
+      const summary = primary.querySelector("p") as HTMLElement;
       const summaryText = node.sceneNode.description || (node.kind === "entity"
         ? this.text.relatedEvents(node.sceneNode.relatedCount, node.sceneNode.category)
         : node.sceneNode.category || this.text.extractedEvent);
       summary.textContent = summaryText;
       summary.removeAttribute("title");
-      let exploreHint = element.querySelector<HTMLElement>(
+      let exploreHint = primary.querySelector<HTMLElement>(
         "[data-universe-node-explore-hint]",
       );
       if (!exploreHint) {
         exploreHint = document.createElement("span");
         exploreHint.className = "sag-universe-node-label__explore";
         exploreHint.dataset.universeNodeExploreHint = "true";
-        element.appendChild(exploreHint);
+        primary.appendChild(exploreHint);
       }
       const relatedProgress = Math.max(0, node.sceneNode.relatedProgress ?? 0);
       const relatedTotal = node.sceneNode.relatedCountKnown
@@ -4432,7 +4501,21 @@ class UniverseForceSceneEngine {
         : typeof relatedTotal === "number" && relatedProgress >= relatedTotal
           ? this.text.explorationComplete(relatedProgress, relatedTotal)
           : this.text.explorationProgress(relatedProgress, relatedTotal);
-      nextLabels.push({ nodeId: node.id, kind: "node", element });
+      const actions = element.querySelector<HTMLElement>("[data-universe-node-actions]");
+      if (actions) actions.hidden = !locked;
+      const exploreMoreAction = this.text.exploreMoreAction ?? "Explore more";
+      const askAiAction = this.text.askAiAction ?? "Ask AI";
+      actionButtons[0].textContent = exploreMoreAction;
+      actionButtons[0].setAttribute("aria-label", exploreMoreAction);
+      actionButtons[1].textContent = askAiAction;
+      actionButtons[1].setAttribute("aria-label", askAiAction);
+      nextLabels.push({
+        nodeId: node.id,
+        kind: "node",
+        element,
+        primary,
+        actionButtons,
+      });
     });
     existingLabels.forEach((label) => label.element.remove());
     this.labels = nextLabels;
@@ -4495,6 +4578,53 @@ class UniverseForceSceneEngine {
     });
   }
 
+  private bindNodeLabelInteraction(
+    container: HTMLElement,
+    primary: HTMLButtonElement,
+    actionButtons: HTMLButtonElement[],
+    node: ForceNode,
+  ) {
+    primary.tabIndex = -1;
+    const stopPointerPropagation = (event: PointerEvent) => event.stopPropagation();
+    const holdCanvasFocus = (event: PointerEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    const focusNode = (event: PointerEvent) => {
+      this.pointerActive = true;
+      this.pointerX = event.clientX;
+      this.pointerY = event.clientY;
+      this.handleNodeHover(node, true);
+    };
+    primary.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (this.timelineIsBusy()) return;
+      this.clearKeyboardFocus(false);
+      this.callbacks.onNodeClick(node.sceneNode);
+    });
+    primary.addEventListener("pointerdown", holdCanvasFocus);
+    primary.addEventListener("pointerup", stopPointerPropagation);
+    primary.addEventListener("pointercancel", stopPointerPropagation);
+    actionButtons.forEach((button, index) => {
+      button.addEventListener("pointerdown", stopPointerPropagation);
+      button.addEventListener("pointerup", stopPointerPropagation);
+      button.addEventListener("pointercancel", stopPointerPropagation);
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (this.timelineIsBusy() || node.id !== this.lockedId) return;
+        this.clearKeyboardFocus(false);
+        if (index === 0) this.callbacks.onExploreMore?.(node.sceneNode);
+        else this.callbacks.onAskNode?.(node.sceneNode);
+      });
+    });
+    container.addEventListener("pointerenter", focusNode);
+    container.addEventListener("pointermove", focusNode, { passive: true });
+    container.addEventListener("pointerleave", () => {
+      if (!this.rebuildingLabels) this.handleNodeHover(null);
+    });
+  }
+
   private updateLabels(now: number, force = false) {
     if (!force && now - this.lastLabelAt < 32) return;
     this.lastLabelAt = now;
@@ -4516,9 +4646,9 @@ class UniverseForceSceneEngine {
       8,
       hostRect,
     );
-    const inspectorRect = this.relativeOverlayRect(
-      "[data-universe-inspector='true']",
-      8,
+    const detailPanelRect = this.relativeOverlayRect(
+      "[data-universe-detail-panel='true']",
+      10,
       hostRect,
     );
     const placed: Array<{ left: number; top: number; right: number; bottom: number }> = [];
@@ -4674,17 +4804,26 @@ class UniverseForceSceneEngine {
         ?? this.keyboardFocusedId
         ?? this.hoveredId
       );
-      const expanded = node.kind === "event"
+      const locked = label.kind === "node" && node.id === this.lockedId;
+      const expanded = locked || (node.kind === "event"
         && node.id === labelFocusId
-        && !transientHover;
-      const compact = label.kind === "node" && node.kind === "entity";
+        && !transientHover);
+      const compact = label.kind === "node" && node.kind === "entity" && !locked;
+      label.element.dataset.locked = String(locked);
+      label.element.dataset.expanded = String(expanded);
       label.element.dataset.compact = String(compact);
+      const actions = label.kind === "node"
+        ? label.element.querySelector<HTMLElement>("[data-universe-node-actions]")
+        : null;
+      if (actions) actions.hidden = !locked;
       const sourceBeaconSize = mobile ? 44 : 48;
       const sourceInfoWidth = mobile ? 138 : 154;
       const sourceInfoHeight = mobile ? 40 : 44;
       const sourceInfoGap = 8;
       const baseLabelWidth = label.kind === "source"
         ? sourceBeaconSize
+        : locked
+          ? mobile ? 224 : 264
         : compact
           ? mobile ? 108 : 132
         : mobile
@@ -4692,6 +4831,8 @@ class UniverseForceSceneEngine {
           : expanded ? 252 : 232;
       const baseLabelHeight = label.kind === "source"
         ? sourceBeaconSize
+        : locked
+          ? mobile ? 112 : 126
         : compact
           ? mobile ? 24 : 28
         : mobile
@@ -4802,7 +4943,12 @@ class UniverseForceSceneEngine {
           || rect.right > width - 10
           || rect.top < 58
           || rect.bottom > height - 42;
-        const overlapsPanel = [panelRect, summaryRect, progressRect, inspectorRect].some((overlay) => overlay
+        const overlapsPanel = [
+          panelRect,
+          detailPanelRect,
+          summaryRect,
+          progressRect,
+        ].some((overlay) => overlay
           ? rect.left < overlay.right
             && rect.right > overlay.left
             && rect.top < overlay.bottom
@@ -4972,8 +5118,11 @@ class UniverseForceSceneEngine {
     let right = width - 72;
     let top = 68;
     let bottom = height - 54;
-    const panel = this.miniPanelRect();
-    if (panel) {
+    const panels = [
+      this.miniPanelRect(),
+      this.relativeOverlayRect("[data-universe-detail-panel='true']", 10),
+    ].filter((panel): panel is NonNullable<typeof panel> => panel !== null);
+    panels.forEach((panel) => {
       const panelCenterX = (panel.left + panel.right) / 2;
       if (panelCenterX < width / 2) left = Math.max(left, panel.right + 18);
       else right = Math.min(right, panel.left - 18);
@@ -4982,7 +5131,7 @@ class UniverseForceSceneEngine {
         if (panelCenterY < height / 2) top = Math.max(top, panel.bottom + 16);
         else bottom = Math.min(bottom, panel.top - 16);
       }
-    }
+    });
     if (right - left < width * 0.28) {
       left = 24;
       right = width - 72;
@@ -5597,6 +5746,7 @@ class UniverseForceSceneEngine {
   private timelineWheelSurface(target: EventTarget | null): "canvas" | "label" | null {
     if (target === this.rendererCanvas) return "canvas";
     if (!(target instanceof Element) || !this.host.contains(target)) return null;
+    if (target.closest("[data-universe-detail-panel='true']")) return null;
     const label = target.closest<HTMLElement>(TIMELINE_WHEEL_LABEL_SELECTOR);
     return label && this.labelLayer.contains(label) ? "label" : null;
   }
@@ -5634,6 +5784,15 @@ class UniverseForceSceneEngine {
     }
     const surface = this.timelineWheelSurface(event.target);
     if (!surface) return;
+    this.callbacks.onUserInteraction?.();
+    if (this.lockedId || this.selectedId || this.keyboardFocusedId) {
+      // Dismiss reading focus first, but keep processing this exact wheel
+      // gesture so the camera never feels as though it swallowed an input.
+      this.callbacks.onSelectionClear();
+      if (this.lockedId || this.selectedId || this.keyboardFocusedId) {
+        this.clearSelection();
+      }
+    }
     const flightActive = this.timelineJourney.enabled && this.flightConfig !== null;
     if (!flightActive || event.ctrlKey || event.metaKey) {
       // Overview zoom and pinch belong to OrbitControls. Its listener lives on
@@ -5656,8 +5815,10 @@ class UniverseForceSceneEngine {
     this.startLoop(900);
   };
 
-  private handlePointerDown = () => {
+  private handlePointerDown = (event: PointerEvent) => {
     if (this.paused || !this.interactive) return;
+    if (!this.timelineWheelSurface(event.target)) return;
+    this.callbacks.onUserInteraction?.();
     // A deliberate grab owns the camera immediately and brakes the flight.
     this.flightState = brakeUniverseTemporalFlight(this.flightState);
   };
@@ -5871,6 +6032,7 @@ class UniverseForceSceneEngine {
     if (direction !== null) {
       event.preventDefault();
       event.stopPropagation();
+      this.callbacks.onUserInteraction?.();
       const candidates = this.keyboardCandidates();
       const nextId = nextUniverseKeyboardNodeId(
         candidates.map((candidate) => candidate.id),
@@ -5981,6 +6143,10 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
       onViewChange,
       onSourceLod,
       onSelectionClear,
+      actionLabels,
+      onExploreMore,
+      onAskNode,
+      onUserInteraction,
       onTimelineIntent,
       onTimelineSettled,
       onUnavailable,
@@ -6011,7 +6177,9 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
       explorationProgress: (progress, total) => t("explorationProgress", { progress, total }),
       explorationComplete: (progress, total) => t("explorationComplete", { progress, total }),
       extractedEvent: t("extractedEvent"),
-    }), [locale, t]);
+      exploreMoreAction: actionLabels?.exploreMore,
+      askAiAction: actionLabels?.askAi,
+    }), [actionLabels?.askAi, actionLabels?.exploreMore, locale, t]);
     const keyboardInstructionsId = React.useId();
     const hostRef = React.useRef<HTMLDivElement>(null);
     const keyboardStatusRef = React.useRef<HTMLSpanElement>(null);
@@ -6031,6 +6199,9 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
       onViewChange,
       onSourceLod,
       onSelectionClear,
+      onExploreMore,
+      onAskNode,
+      onUserInteraction,
       onTimelineIntent,
       onTimelineSettled,
       onUnavailable,
@@ -6051,6 +6222,9 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
       onViewChange,
       onSourceLod,
       onSelectionClear,
+      onExploreMore,
+      onAskNode,
+      onUserInteraction,
       onTimelineIntent,
       onTimelineSettled,
       onUnavailable,
@@ -6104,6 +6278,9 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
             onViewChange: current.onViewChange,
             onSourceLod: current.onSourceLod,
             onSelectionClear: current.onSelectionClear,
+            onExploreMore: current.onExploreMore,
+            onAskNode: current.onAskNode,
+            onUserInteraction: current.onUserInteraction ?? (() => undefined),
             onTimelineIntent: current.onTimelineIntent,
             onTimelineSettled: current.onTimelineSettled,
             onUnavailable: notifyUnavailable,
@@ -6155,18 +6332,24 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
         onViewChange,
         onSourceLod,
         onSelectionClear,
+        onExploreMore,
+        onAskNode,
+        onUserInteraction: onUserInteraction ?? (() => undefined),
         onTimelineIntent,
         onTimelineSettled,
         onUnavailable: notifyUnavailable,
       });
     }, [
       notifyUnavailable,
+      onAskNode,
+      onExploreMore,
       onHover,
       onNodeClick,
       onSelectionClear,
       onSourceLod,
       onTimelineIntent,
       onTimelineSettled,
+      onUserInteraction,
       onViewChange,
     ]);
 

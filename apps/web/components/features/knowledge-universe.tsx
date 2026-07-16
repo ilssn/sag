@@ -5,22 +5,21 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useLocale, useTranslations } from "next-intl";
 import { useTheme } from "next-themes";
 import {
+  ArrowDownUp,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   CircleDot,
   Focus,
-  GitBranch,
-  Info,
   Loader2,
   LockKeyhole,
   LocateFixed,
-  MessageCircleQuestion,
   Orbit,
+  Pause,
+  Play,
   RefreshCw,
   RotateCcw,
   Sparkles,
-  X,
 } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
@@ -35,10 +34,11 @@ import type {
 import {
   UNIVERSE_ACTIVATE_EVENT,
   UNIVERSE_FOCUS_EVENT,
+  dispatchUniverseDetail,
+  dispatchUniverseInteraction,
   UNIVERSE_RESET_EVENT,
   UNIVERSE_SOURCE_FOCUS_EVENT,
   dispatchUniverseAsk,
-  dispatchUniverseDetail,
   dispatchUniversePatch,
   dispatchUniversePatchReset,
   dispatchUniverseView,
@@ -84,6 +84,11 @@ import {
   universeTemporalAxisDepth,
 } from "@/lib/universe-temporal-axis";
 import { planUniverseTimelinePrefetch } from "@/lib/universe-timeline-prefetch";
+import {
+  planUniverseTimelinePlayback,
+  toggleUniverseTimelinePlaybackOrder,
+  type UniverseTimelinePlaybackOrder,
+} from "@/lib/universe-timeline-playback";
 import { detectUniverseWebGLCapability } from "@/lib/universe-webgl-capability";
 import {
   effectiveUniverseBudget,
@@ -95,6 +100,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   UniverseScene,
+  universeSourceAccent,
   type UniverseSceneData,
   type UniverseSceneHandle,
   type UniverseSceneLink,
@@ -104,6 +110,10 @@ import {
   type UniverseTimelineJourney,
   type UniverseSceneView,
 } from "@/components/features/universe-scene";
+import {
+  UniverseNodeDetailPanel,
+  type UniverseNodeDetailPanelText,
+} from "@/components/features/universe-node-detail-panel";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -287,13 +297,6 @@ function synchronizeTimelineWindowWithDeque(
     cacheStartOffset,
     rewindStartOffset,
   };
-}
-
-function nextUniverseLockedNodeId(
-  currentLockedId: string | null,
-  clickedId: string,
-) {
-  return currentLockedId === clickedId ? null : clickedId;
 }
 
 function universeExpansionCacheKey(
@@ -520,14 +523,16 @@ function LoadProgressRow({
         data-total={total}
       >
         <div
+          data-tone={tone}
           className={cn(
             "h-full rounded-full transition-[width,filter] duration-500 ease-out",
-            tone === "entity"
-              ? "bg-[#7ea6ff] shadow-[0_0_10px_rgb(79_134_255_/_0.48)]"
-              : "bg-amber-300 shadow-[0_0_10px_rgb(252_211_77_/_0.42)]",
             metric.loading && "brightness-110",
           )}
-          style={{ width: `${progress}%` }}
+          style={{
+            width: `${progress}%`,
+            backgroundColor: "var(--universe-source-accent)",
+            boxShadow: "0 0 10px color-mix(in srgb, var(--universe-source-accent), transparent 48%)",
+          }}
         />
       </div>
     </div>
@@ -559,7 +564,10 @@ function UniverseLoadProgressPanel({
       data-load-state={progress.allDone ? "complete" : progress.loading ? "loading" : "idle"}
       role="status"
       aria-live="polite"
-      className="pointer-events-none w-[min(15rem,calc(100vw-1.5rem))] rounded-md border border-border/65 bg-background/76 p-3 shadow-soft backdrop-blur-xl sm:w-60"
+      className="pointer-events-none w-[min(15rem,calc(100vw-1.5rem))] rounded-md border bg-background/76 p-3 shadow-soft backdrop-blur-xl sm:w-60"
+      style={{
+        borderColor: "color-mix(in srgb, var(--universe-source-accent), transparent 62%)",
+      }}
       initial={reducedMotion ? false : { opacity: 0, y: -6, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -4, scale: 0.985 }}
@@ -578,11 +586,26 @@ function UniverseLoadProgressPanel({
           </p>
         </div>
         {progress.allDone ? (
-          <CheckCircle2 className="size-3.5 shrink-0 text-emerald-400" aria-hidden="true" />
+          <CheckCircle2
+            className="size-3.5 shrink-0"
+            style={{ color: "var(--universe-source-accent)" }}
+            aria-hidden="true"
+          />
         ) : progress.loading ? (
-          <Loader2 className="size-3.5 shrink-0 animate-spin text-[#7ea6ff]" aria-hidden="true" />
+          <Loader2
+            className="size-3.5 shrink-0 animate-spin"
+            style={{ color: "var(--universe-source-accent)" }}
+            aria-hidden="true"
+          />
         ) : (
-          <span className="size-1.5 shrink-0 rounded-full bg-foreground/25" aria-hidden="true" />
+          <span
+            className="size-1.5 shrink-0 rounded-full"
+            style={{
+              backgroundColor: "var(--universe-source-accent)",
+              boxShadow: "0 0 7px color-mix(in srgb, var(--universe-source-accent), transparent 40%)",
+            }}
+            aria-hidden="true"
+          />
         )}
       </div>
       <div className="space-y-2.5">
@@ -693,6 +716,7 @@ export function KnowledgeUniverse({
   const snapshotReloadTimerRef = React.useRef<number | null>(null);
   const snapshotReloadAttemptsRef = React.useRef(new Map<string, number>());
   const timelineSettleTimerRef = React.useRef<number | null>(null);
+  const timelinePlaybackTimerRef = React.useRef<number | null>(null);
   const sourceSessionRef = React.useRef<SourceBrowseSession | null>(null);
   const timelineJourneyCommitRef = React.useRef<{
     session: SourceBrowseSession;
@@ -730,6 +754,10 @@ export function KnowledgeUniverse({
   const [viewportSourceId, setViewportSourceId] = React.useState<string | null>(null);
   const [selectedKey, setSelectedKeyState] = React.useState<string | null>(null);
   const [lockedKey, setLockedKeyState] = React.useState<string | null>(null);
+  const [timelinePlaying, setTimelinePlaying] = React.useState(false);
+  const [timelinePlaybackOrder, setTimelinePlaybackOrder] =
+    React.useState<UniverseTimelinePlaybackOrder>("reverse");
+  const [documentHidden, setDocumentHidden] = React.useState(false);
   const [sourceHits, setSourceHits] = React.useState<
     NonNullable<UniverseActivation["source_hits"]>
   >([]);
@@ -997,6 +1025,14 @@ export function KnowledgeUniverse({
   const viewportSource = viewportSourceId
     ? sourceById.get(viewportSourceId) ?? null
     : null;
+  // The focused source owns the secondary accent across the shell. Fall back
+  // to the active partition during the entry flight so controls switch before
+  // the scene reports its settled detail state.
+  const activeSourceId = viewportSourceId ?? browseSessionSourceId ?? activePartition;
+  const activeSourceAccent = activeSourceId
+    ? universeSourceAccent(activeSourceId, darkTheme)
+    : null;
+  const showReturnHomeControl = Boolean(browseSessionSourceId);
   const viewportLoadProgress: SourceLoadProgress | null = (() => {
     if (!viewportSource) return null;
     const session = sourceSessionRef.current?.sourceId === viewportSource.source_id
@@ -1927,32 +1963,87 @@ export function KnowledgeUniverse({
       publishUniverseEntityCategories(entityCategories);
     }
   }, [entityCategories]);
-  const inspectorNode = selectedConcreteNode;
-  const inspectorProgress = inspectorNode
+  const detailNode = selectedConcreteNode;
+  const detailProgress = detailNode
     ? universeAnchorProgress(
         working,
-        inspectorNode.kind,
-        inspectorNode.rawId,
-        inspectorNode.sourceId,
+        detailNode.kind,
+        detailNode.rawId,
+        detailNode.sourceId,
       )
     : 0;
-  const inspectorTotal = inspectorNode
-    ? Math.max(inspectorProgress, inspectorNode.relatedCount)
+  const detailTotal = detailNode
+    ? Math.max(detailProgress, detailNode.relatedCount)
     : 0;
-  const inspectorTotalKnown = Boolean(inspectorNode?.relatedCountKnown);
-  const inspectorRemaining = inspectorTotalKnown
-    ? Math.max(0, inspectorTotal - inspectorProgress)
+  const detailTotalKnown = Boolean(detailNode?.relatedCountKnown);
+  const detailRemaining = detailTotalKnown
+    ? Math.max(0, detailTotal - detailProgress)
     : null;
-  const inspectorAnchorKey = inspectorNode
-    ? universeNodeKey(inspectorNode.kind, inspectorNode.rawId, inspectorNode.sourceId)
+  const detailAnchorKey = detailNode
+    ? universeNodeKey(detailNode.kind, detailNode.rawId, detailNode.sourceId)
     : null;
-  const inspectorExhausted = Boolean(
-    inspectorAnchorKey
-    && expandedAnchorsRef.current.has(inspectorAnchorKey)
-    && !cursorsRef.current.has(inspectorAnchorKey)
+  const detailExhausted = Boolean(
+    detailAnchorKey
+    && expandedAnchorsRef.current.has(detailAnchorKey)
+    && !cursorsRef.current.has(detailAnchorKey)
   );
-  const inspectorCanExpand = !inspectorExhausted
-    && (!inspectorTotalKnown || (inspectorRemaining ?? 0) > 0);
+  const detailCanExpand = !detailExhausted
+    && (!detailTotalKnown || (detailRemaining ?? 0) > 0);
+  const visibleTimelineEventNodes = React.useMemo(() => {
+    const deque = sourceSessionRef.current?.timeline.deque;
+    if (!deque || !timelineWindow) return [];
+    const visibleBundleIds = new Set(timelineWindow.visibleBundleIds);
+    const graphNodeById = new Map(graphData.nodes.map((node) => [node.id, node]));
+    return deque.bundles
+      .filter((bundle) => visibleBundleIds.has(bundle.bundle_id))
+      .map((bundle) => graphNodeById.get(universeNodeKey(
+        "event",
+        bundle.event.id,
+        bundle.event.source_id,
+      )))
+      .filter((node): node is UniverseConcrete3DNode => Boolean(
+        node && node.kind === "event",
+      ));
+  }, [graphData.nodes, timelineWindow]);
+  const selectedTimelineEventIndex = detailNode?.kind === "event"
+    ? visibleTimelineEventNodes.findIndex((node) => node.id === detailNode.id)
+    : -1;
+  const previousTimelineEvent = selectedTimelineEventIndex > 0
+    ? visibleTimelineEventNodes[selectedTimelineEventIndex - 1]
+    : null;
+  const nextTimelineEvent = selectedTimelineEventIndex >= 0
+    && selectedTimelineEventIndex < visibleTimelineEventNodes.length - 1
+    ? visibleTimelineEventNodes[selectedTimelineEventIndex + 1]
+    : null;
+  const detailStartTime = React.useMemo(() => {
+    if (detailNode?.kind !== "event") return null;
+    if (!timelineWindow) return null;
+    const deque = sourceSessionRef.current?.timeline.deque;
+    return deque?.bundles.find((bundle) =>
+      bundle.event.id === detailNode.rawId
+      && bundle.event.source_id === detailNode.sourceId)?.event.start_time ?? null;
+  }, [detailNode, timelineWindow]);
+  const detailPanelText = React.useMemo<UniverseNodeDetailPanelText>(() => ({
+    panelLabel: t("detailPanel.aria"),
+    event: t("detailPanel.event"),
+    entity: t("detailPanel.entity"),
+    details: t("detailPanel.details"),
+    sourceEvidence: t("detailPanel.sourceEvidence"),
+    sourceDocument: t("detailPanel.sourceDocument"),
+    sourceSection: t("detailPanel.sourceSection"),
+    relatedProgress: t("detailPanel.relatedProgress"),
+    exploreMore: t("detailPanel.exploreMore"),
+    askAi: t("detailPanel.askAi"),
+    previousEvent: t("detailPanel.previousEvent"),
+    nextEvent: t("detailPanel.nextEvent"),
+    close: t("detailPanel.close"),
+    loading: t("detailPanel.loading"),
+    loadFailed: t("detailPanel.loadFailed"),
+    retry: t("detailPanel.retry"),
+    noDetails: t("detailPanel.noDetails"),
+    noEvidence: t("detailPanel.noEvidence"),
+    unknownSource: t("detailPanel.localKnowledge"),
+  }), [t]);
 
   const requestExpansion = React.useCallback(
     (
@@ -3080,35 +3171,34 @@ export function KnowledgeUniverse({
     [],
   );
 
+  const lockNodeForReading = React.useCallback(
+    (node: UniverseConcrete3DNode) => {
+      setTimelinePlaying(false);
+      // Locking is presentation-only. The detail panel reads through the node
+      // detail endpoint and expansion stays behind the explicit action.
+      if (timelineRequestRef.current?.cause !== "source-entry") {
+        timelineRequestRef.current?.controller.abort();
+      }
+      setLockedKey(node.id);
+      setSelectedKey(node.id);
+      graphRef.current?.lockNode(node.id);
+    },
+    [setLockedKey, setSelectedKey],
+  );
+
   const handleNodeClick = React.useCallback(
     (node: UniverseSceneNode) => {
+      setTimelinePlaying(false);
       if (node.kind === "source") {
         activatePartition(node as Universe3DNode);
         return;
       }
-      const exact = node as Universe3DNode & { kind: "event" | "entity" };
-      const nextLockedId = nextUniverseLockedNodeId(
-        lockedKeyRef.current,
-        exact.id,
-      );
-      if (!nextLockedId) {
-        graphRef.current?.clearSelection();
-        setLockedKey(null);
-        setSelectedKey(null);
-        return;
-      }
-
-      // A node click is a presentation-only action. Explicit expansion remains
-      // available from the inspector, while locking cancels any in-flight
-      // automatic timeline request before it can mutate the working set.
-      if (timelineRequestRef.current?.cause !== "source-entry") {
-        timelineRequestRef.current?.controller.abort();
-      }
-      setLockedKey(nextLockedId);
-      setSelectedKey(nextLockedId);
-      graphRef.current?.lockNode(nextLockedId);
+      // A deliberate card activation is the explicit affordance that brings
+      // the contextual pet workspace back after a canvas gesture closed it.
+      dispatchUniverseDetail(node.kind, node.rawId, node.sourceId);
+      lockNodeForReading(node as UniverseConcrete3DNode);
     },
-    [activatePartition, setLockedKey, setSelectedKey],
+    [activatePartition, lockNodeForReading],
   );
 
   const clearSelection = React.useCallback(() => {
@@ -3116,6 +3206,113 @@ export function KnowledgeUniverse({
     setLockedKey(null);
     setSelectedKey(null);
   }, [setLockedKey, setSelectedKey]);
+
+  const moveTimelineManually = React.useCallback((direction: "next" | "previous") => {
+    setTimelinePlaying(false);
+    dispatchUniverseInteraction();
+    if (lockedKeyRef.current) clearSelection();
+    window.requestAnimationFrame(() => {
+      void graphRef.current?.moveTimeline(direction);
+    });
+  }, [clearSelection]);
+
+  const returnToTimelineOrigin = React.useCallback(() => {
+    setTimelinePlaying(false);
+    clearSelection();
+    const sourceId = sourceSessionRef.current?.sourceId;
+    if (sourceId) graphRef.current?.focusSource(sourceId);
+    else graphRef.current?.focusOverview();
+  }, [clearSelection]);
+
+  const handleSceneInteraction = React.useCallback(() => {
+    setTimelinePlaying(false);
+    dispatchUniverseInteraction();
+  }, []);
+
+  const handleExploreMore = React.useCallback((node: UniverseSceneNode) => {
+    if (node.kind === "source") return;
+    void expandNode(node as UniverseConcrete3DNode);
+  }, [expandNode]);
+
+  const handleAskNode = React.useCallback((node: UniverseSceneNode) => {
+    if (node.kind === "source") return;
+    dispatchUniverseAsk(node as UniverseConcrete3DNode);
+  }, []);
+
+  const timelinePlaybackPlan = React.useMemo(() => planUniverseTimelinePlayback({
+    enabled: timelinePlaying && interactive && timelineJourney.enabled,
+    order: timelinePlaybackOrder,
+    hasOlder: timelineJourney.hasNext,
+    hasNewer: timelineJourney.hasPrevious,
+    documentHidden,
+    reducedMotion: Boolean(reducedMotion),
+    locked: Boolean(lockedKey),
+    loading: timelineJourney.phase === "loading",
+    transitioning: timelineJourney.phase === "transitioning",
+  }), [
+    documentHidden,
+    interactive,
+    lockedKey,
+    reducedMotion,
+    timelineJourney,
+    timelinePlaybackOrder,
+    timelinePlaying,
+  ]);
+
+  React.useEffect(() => {
+    if (timelinePlaybackTimerRef.current !== null) {
+      window.clearTimeout(timelinePlaybackTimerRef.current);
+      timelinePlaybackTimerRef.current = null;
+    }
+    if (timelinePlaybackPlan.status === "paused") {
+      if (
+        timelinePlaying
+        && ["boundary", "document-hidden", "locked", "reduced-motion"]
+          .includes(timelinePlaybackPlan.reason)
+      ) {
+        setTimelinePlaying(false);
+        if (timelinePlaybackPlan.reason === "boundary") {
+          setMoreHint(t("controls.playbackComplete"));
+        }
+      }
+      return;
+    }
+    timelinePlaybackTimerRef.current = window.setTimeout(() => {
+      timelinePlaybackTimerRef.current = null;
+      void Promise.resolve(
+        graphRef.current?.moveTimeline(timelinePlaybackPlan.sceneDirection),
+      ).then((result) => {
+        if (result === "advanced") return;
+        setTimelinePlaying(false);
+        if (result === "complete" || result === "blocked") {
+          setMoreHint(t("controls.playbackComplete"));
+        }
+      }).catch(() => {
+        setTimelinePlaying(false);
+      });
+    }, timelinePlaybackPlan.delayMs);
+    return () => {
+      if (timelinePlaybackTimerRef.current !== null) {
+        window.clearTimeout(timelinePlaybackTimerRef.current);
+        timelinePlaybackTimerRef.current = null;
+      }
+    };
+  }, [t, timelinePlaybackPlan, timelinePlaying]);
+
+  const toggleTimelinePlayback = React.useCallback(() => {
+    if (timelinePlaying) {
+      setTimelinePlaying(false);
+      return;
+    }
+    if (lockedKeyRef.current) clearSelection();
+    setTimelinePlaying(true);
+  }, [clearSelection, timelinePlaying]);
+
+  const toggleTimelineOrder = React.useCallback(() => {
+    setTimelinePlaying(false);
+    setTimelinePlaybackOrder((current) =>
+      toggleUniverseTimelinePlaybackOrder(current));
+  }, []);
 
   const handleSceneUnavailable = React.useCallback((reason: UniverseSceneUnavailableReason) => {
     // Rendering failure must not invalidate the already loaded cache/window.
@@ -3136,6 +3333,7 @@ export function KnowledgeUniverse({
   }, []);
 
   const resetUniversePresentation = React.useCallback(() => {
+    setTimelinePlaying(false);
     graphRef.current?.resetOverview();
     viewportSourceRef.current = null;
     setViewportSourceId(null);
@@ -3145,6 +3343,7 @@ export function KnowledgeUniverse({
   }, [setLockedKey, setSelectedKey]);
 
   const returnToUniverseHome = React.useCallback(() => {
+    setTimelinePlaying(false);
     // The galaxy overview is a navigation boundary, not a camera shortcut.
     // Leave the current source session and reveal the complete knowledge universe.
     resetScene(epochRef.current + 1);
@@ -3159,9 +3358,9 @@ export function KnowledgeUniverse({
   }, [clearSelection, graphData.nodes, lockedKey, selectedKey]);
 
   // Transient hover is rendered entirely inside the scene. Promoting it into
-  // React state mounted the inspector and re-rendered this large controller on
+  // React state mounted the reading panel and re-rendered this large controller on
   // every hover transition, which made a lightweight highlight feel like a
-  // mode change. Click/keyboard selection still owns the persistent inspector.
+  // mode change. Click/keyboard selection still owns the persistent detail view.
   const handleSceneHover = React.useCallback(() => undefined, []);
 
   React.useEffect(() => {
@@ -3217,11 +3416,15 @@ export function KnowledgeUniverse({
 
   React.useEffect(() => {
     const onVisibility = () => {
+      const hidden = document.visibilityState !== "visible";
+      setDocumentHidden(hidden);
+      if (hidden) setTimelinePlaying(false);
       const graph = graphRef.current;
       if (!graph) return;
-      if (interactive && document.visibilityState === "visible") graph.resume();
+      if (interactive && !hidden) graph.resume();
       else graph.pause();
     };
+    onVisibility();
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [interactive]);
@@ -3240,6 +3443,10 @@ export function KnowledgeUniverse({
       snapshotReloadAttemptsRef.current.clear();
       clearCameraSchedule();
       clearTimelineSettle();
+      if (timelinePlaybackTimerRef.current !== null) {
+        window.clearTimeout(timelinePlaybackTimerRef.current);
+        timelinePlaybackTimerRef.current = null;
+      }
     },
     [clearCameraSchedule, clearTimelineSettle],
   );
@@ -3301,6 +3508,9 @@ export function KnowledgeUniverse({
       )}
       aria-label={t("aria")}
       aria-hidden={!interactive}
+      style={activeSourceAccent
+        ? { "--universe-source-accent": activeSourceAccent } as React.CSSProperties
+        : undefined}
       data-universe-suspended={!interactive}
       data-universe-mode={interactive ? "explore" : "normal"}
       data-universe-activation-origin={activationOrigin}
@@ -3339,6 +3549,13 @@ export function KnowledgeUniverse({
             onViewChange={handleSceneViewChange}
             onSourceLod={handleSourceLod}
             onSelectionClear={clearSelection}
+            actionLabels={{
+              exploreMore: t("detailPanel.exploreMore"),
+              askAi: t("detailPanel.askAi"),
+            }}
+            onExploreMore={handleExploreMore}
+            onAskNode={handleAskNode}
+            onUserInteraction={handleSceneInteraction}
             onUnavailable={handleSceneUnavailable}
           />
         </div>
@@ -3389,25 +3606,32 @@ export function KnowledgeUniverse({
 
       <div className="pointer-events-none absolute left-3 top-3 z-20 flex max-w-[calc(100vw-1.5rem)] flex-col items-start gap-2 sm:left-5 sm:top-5">
         <div className="flex max-w-full items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            className="group pointer-events-auto size-9 shrink-0 border-[#4f86ff]/15 bg-background/72 text-muted-foreground shadow-soft backdrop-blur-md hover:border-[#7ea6ff]/35 hover:bg-[#4f86ff]/[0.08] hover:text-foreground"
-            data-universe-home-control="true"
-            aria-label={t("controls.home")}
-            title={t("controls.homeHint")}
-            onClick={returnToUniverseHome}
-            disabled={!browseSessionSourceId && !working.nodes.length}
-          >
-            <span className="relative grid size-4 place-items-center" aria-hidden="true">
-              <Orbit className="size-4 text-[#7ea6ff]/85 transition-colors group-hover:text-[#a3c0ff]" />
-              <span className="absolute size-1 rounded-full bg-amber-200 shadow-[0_0_7px_rgb(253_230_138_/_0.9)]" />
-            </span>
-          </Button>
+          {showReturnHomeControl && (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="group pointer-events-auto size-9 shrink-0 bg-background/72 text-muted-foreground shadow-soft backdrop-blur-md hover:text-foreground"
+              data-universe-home-control="true"
+              aria-label={t("controls.home")}
+              title={t("controls.homeHint")}
+              onClick={returnToUniverseHome}
+              disabled={!browseSessionSourceId && !working.nodes.length}
+            >
+              <span className="relative grid size-4 place-items-center" aria-hidden="true">
+                <Orbit className="size-4 transition-colors" />
+                <span className="absolute size-1 rounded-full bg-amber-200 shadow-[0_0_7px_rgb(253_230_138_/_0.9)]" />
+              </span>
+            </Button>
+          )}
           <div
             data-universe-summary="true"
-            className="flex max-w-[calc(100vw-7.25rem)] items-center gap-2 overflow-hidden rounded-md border border-border/60 bg-background/62 px-2.5 py-2 text-[11px] text-muted-foreground shadow-soft backdrop-blur-md sm:gap-3 sm:px-3"
+            className={cn(
+              "flex items-center gap-2 overflow-hidden rounded-md border border-border/60 bg-background/62 px-2.5 py-2 text-[11px] text-muted-foreground shadow-soft backdrop-blur-md sm:gap-3 sm:px-3",
+              showReturnHomeControl
+                ? "max-w-[calc(100vw-7.25rem)]"
+                : "max-w-[calc(100vw-1.5rem)]",
+            )}
           >
           <AnimatePresence initial={false} mode="wait">
             {viewportSource ? (
@@ -3422,7 +3646,13 @@ export function KnowledgeUniverse({
                   ease: [0.22, 1, 0.36, 1],
                 }}
               >
-                <span className="size-1.5 shrink-0 rounded-full bg-[#7ea6ff] shadow-[0_0_10px_rgb(79_134_255_/_0.65)]" />
+                <span
+                  className="size-1.5 shrink-0 rounded-full"
+                  style={{
+                    backgroundColor: "var(--universe-source-accent)",
+                    boxShadow: "0 0 10px color-mix(in srgb, var(--universe-source-accent), transparent 34%)",
+                  }}
+                />
                 <span
                   className="min-w-0 max-w-72 truncate font-medium text-foreground/90"
                   title={viewportSource.label}
@@ -3547,139 +3777,51 @@ export function KnowledgeUniverse({
         <div className={cn(
           "pointer-events-none absolute bottom-5 left-1/2 z-10 max-w-md -translate-x-1/2 rounded-md border border-border/60 bg-background/72 px-3 py-2 text-[11px] text-muted-foreground shadow-soft backdrop-blur-md",
           timelineJourney.enabled && "bottom-20",
-          inspectorNode && viewportSource && "bottom-44",
         )} role="status" aria-live="polite">
           {error || moreHint}
         </div>
       )}
 
-      {interactive && inspectorNode && viewportSource && (
-        <TooltipProvider delayDuration={180}>
-          <div
-            data-universe-inspector="true"
-            className="absolute bottom-48 left-4 z-20 w-[min(360px,calc(100vw-5.5rem))] rounded-md border border-border/70 bg-background/90 p-3 shadow-soft backdrop-blur-xl sm:bottom-5 sm:left-6"
-          >
-            <div className="flex items-center gap-2.5">
-              <span
-                className={cn(
-                  "size-2 shrink-0 rounded-full",
-                  inspectorNode.kind === "entity"
-                    ? "bg-[#7ea6ff] shadow-[0_0_10px_rgb(79_134_255_/_0.75)]"
-                    : "bg-amber-300 shadow-[0_0_10px_rgb(252_211_77_/_0.75)]",
-                )}
-              />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-medium">
-                  {t("inspector.lockedNetwork")}
-                  <span className="sr-only">：{inspectorNode.label}</span>
-                </p>
-                <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
-                  {t("inspector.blankToUnlock")}
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-0.5">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="size-7"
-                      onClick={() => dispatchUniverseDetail(
-                        inspectorNode.kind,
-                        inspectorNode.rawId,
-                        inspectorNode.sourceId,
-                      )}
-                      aria-label={t("inspector.viewSource")}
-                    >
-                      <Info className="size-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{t("inspector.viewSource")}</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="size-7"
-                      onClick={() => dispatchUniverseAsk(inspectorNode)}
-                      aria-label={t("inspector.ask")}
-                    >
-                      <MessageCircleQuestion className="size-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{t("inspector.ask")}</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="size-7"
-                      onClick={clearSelection}
-                      aria-label={t("inspector.clear")}
-                    >
-                      <X className="size-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{t("inspector.clear")}</TooltipContent>
-                </Tooltip>
-              </div>
-            </div>
-            <div className="mt-2 flex items-center gap-2 text-[10px] text-muted-foreground">
-              <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted/70">
-                <div
-                  className={cn(
-                    "h-full rounded-full transition-[width] duration-300",
-                    inspectorNode.kind === "entity" ? "bg-[#4f86ff]/75" : "bg-amber-400/75",
-                  )}
-                  style={{
-                    width: `${inspectorTotalKnown && inspectorTotal > 0
-                      ? Math.min(100, Math.max(3, inspectorProgress / inspectorTotal * 100))
-                      : inspectorProgress > 0 ? 35 : 0}%`,
-                  }}
-                />
-              </div>
-              <span className="shrink-0 tabular-nums">
-                {inspectorProgress} / {inspectorTotalKnown ? inspectorTotal : "?"}
-              </span>
-            </div>
-            <div className="mt-2 flex min-h-7 items-center justify-between gap-3">
-              <p className="min-w-0 truncate text-[10px] text-muted-foreground">
-                {expandingKey === inspectorNode.id
-                  ? t("inspector.expanding")
-                  : inspectorCanExpand
-                    ? inspectorTotalKnown
-                      ? t("inspector.remaining", { count: inspectorRemaining ?? 0 })
-                      : t("inspector.clickExplore")
-                    : inspectorExhausted && (inspectorRemaining ?? 0) > 0
-                      ? t("inspector.rangeStart")
-                    : inspectorTotal > 0
-                      ? t("inspector.allVisible")
-                      : t("inspector.none")}
-              </p>
-              {inspectorCanExpand && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-7 shrink-0 gap-1.5 border-border/70 bg-background/70 px-2.5 text-[10px] shadow-none"
-                  onClick={() => void expandNode(inspectorNode)}
-                  disabled={expandingKey === inspectorNode.id}
-                >
-                  {expandingKey === inspectorNode.id
-                    ? <Loader2 className="size-3 animate-spin" />
-                    : <GitBranch className="size-3" />}
-                  {t("inspector.exploreMore")}
-                </Button>
-              )}
-            </div>
-          </div>
-        </TooltipProvider>
-      )}
+      <AnimatePresence initial={false}>
+        {interactive && detailNode && (
+          <UniverseNodeDetailPanel
+            key={`${detailNode.kind}:${detailNode.sourceId}:${detailNode.rawId}`}
+            node={{
+              kind: detailNode.kind,
+              rawId: detailNode.rawId,
+              sourceId: detailNode.sourceId,
+              label: detailNode.label,
+              description: detailNode.description,
+              category: detailNode.category,
+              startTime: detailStartTime,
+              relatedProgress: detailProgress,
+              relatedTotal: detailTotalKnown ? detailTotal : null,
+            }}
+            locale={locale}
+            text={detailPanelText}
+            onClose={clearSelection}
+            onExploreMore={() => void expandNode(detailNode)}
+            onAsk={() => dispatchUniverseAsk(detailNode)}
+            onPreviousEvent={previousTimelineEvent
+              ? () => lockNodeForReading(previousTimelineEvent)
+              : undefined}
+            onNextEvent={nextTimelineEvent
+              ? () => lockNodeForReading(nextTimelineEvent)
+              : undefined}
+            previousEventAvailable={Boolean(previousTimelineEvent)}
+            nextEventAvailable={Boolean(nextTimelineEvent)}
+            eventPositionLabel={selectedTimelineEventIndex >= 0
+              ? t("detailPanel.eventPosition", {
+                  current: selectedTimelineEventIndex + 1,
+                  total: visibleTimelineEventNodes.length,
+                })
+              : undefined}
+            canExploreMore={detailCanExpand}
+            exploreMoreLoading={expandingKey === detailNode.id}
+            className="sm:bottom-5 sm:left-5 sm:top-44"
+          />
+        )}
+      </AnimatePresence>
 
       {(loading || webglAvailable === null) && (
         <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center">
@@ -3695,12 +3837,26 @@ export function KnowledgeUniverse({
           >
             <IconControl
               label={t("controls.previousTimePage")}
-              onClick={() => void graphRef.current?.moveTimeline("previous")}
+              onClick={() => moveTimelineManually("previous")}
               disabled={!timelineJourney.hasPrevious
                 || timelineJourney.phase === "loading"
                 || timelineJourney.phase === "transitioning"}
             >
               <ChevronLeft className="size-3.5" />
+            </IconControl>
+            <IconControl
+              label={t(timelinePlaying
+                ? "controls.pauseTimeline"
+                : "controls.playTimeline")}
+              onClick={toggleTimelinePlayback}
+              disabled={Boolean(reducedMotion)
+                || (timelinePlaybackOrder === "reverse"
+                  ? !timelineJourney.hasNext
+                  : !timelineJourney.hasPrevious)}
+            >
+              {timelinePlaying
+                ? <Pause className="size-3.5" />
+                : <Play className="size-3.5" />}
             </IconControl>
             <span className="min-w-32 px-2 text-center text-[10px] tabular-nums text-muted-foreground">
               {t(timelineJourney.phase === "complete"
@@ -3711,13 +3867,37 @@ export function KnowledgeUniverse({
             </span>
             <IconControl
               label={t("controls.nextTimePage")}
-              onClick={() => void graphRef.current?.moveTimeline("next")}
+              onClick={() => moveTimelineManually("next")}
               disabled={!timelineJourney.hasNext
                 || timelineJourney.phase === "loading"
                 || timelineJourney.phase === "transitioning"}
             >
               <ChevronRight className="size-3.5" />
             </IconControl>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 rounded-full border-border/70 bg-background/75 px-2.5 text-[10px] text-muted-foreground shadow-soft backdrop-blur-md hover:bg-background hover:text-foreground"
+                  aria-label={t(timelinePlaybackOrder === "reverse"
+                    ? "controls.orderOlder"
+                    : "controls.orderNewer")}
+                  onClick={toggleTimelineOrder}
+                >
+                  <ArrowDownUp className="size-3" />
+                  {t(timelinePlaybackOrder === "reverse"
+                    ? "controls.reverse"
+                    : "controls.chronological")}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {t(timelinePlaybackOrder === "reverse"
+                  ? "controls.orderOlder"
+                  : "controls.orderNewer")}
+              </TooltipContent>
+            </Tooltip>
           </div>
         </TooltipProvider>
       )}
@@ -3735,7 +3915,11 @@ export function KnowledgeUniverse({
             >
               <LocateFixed className="size-3.5" />
             </IconControl>
-            <IconControl label={t("controls.overview")} onClick={focusOverview} disabled={!manifest}>
+            <IconControl
+              label={t("controls.origin")}
+              onClick={returnToTimelineOrigin}
+              disabled={!manifest}
+            >
               <Focus className="size-3.5" />
             </IconControl>
             <IconControl

@@ -49,6 +49,10 @@ import { usePetPresence } from "@/lib/pet-preferences";
 import {
   UNIVERSE_ASK_EVENT,
   UNIVERSE_DETAIL_EVENT,
+  UNIVERSE_INTERACTION_EVENT,
+  UNIVERSE_RESET_EVENT,
+  UNIVERSE_SOURCE_FOCUS_EVENT,
+  UNIVERSE_VIEW_EVENT,
 } from "@/lib/universe-events";
 import { cn } from "@/lib/utils";
 import type { WorkspaceSection } from "@/lib/workspace";
@@ -303,6 +307,7 @@ export function Pet({
   const wasStreamingRef = React.useRef(activity.streaming);
   const activeRunKeyRef = React.useRef<string | null>(activity.runKey);
   const notifiedRunKeysRef = React.useRef(new Set<string>());
+  const exploreSourceRef = React.useRef<string | null>(null);
   const pointerFrameRef = React.useRef<number | null>(null);
   const pointerRef = React.useRef({ x: 0, y: 0 });
   const elRef = React.useRef<HTMLDivElement>(null);
@@ -361,11 +366,16 @@ export function Pet({
   }, [ambient, character]);
 
   React.useEffect(() => {
-    setOpen(appMode === "explore");
     if (appMode === "explore") {
+      // Exploration owns the canvas. Keep the mini workspace out of the way
+      // until the user explicitly opens it or asks to inspect a node.
+      exploreSourceRef.current = null;
+      setOpen(false);
       setPetOverlay("none");
       return;
     }
+
+    setOpen(false);
 
     // Exiting exploration removes a hovered child without always
     // producing pointerleave on the pet shell. Clear that latched state so
@@ -383,6 +393,7 @@ export function Pet({
     if (appMode !== "explore") return;
     const reopenWorkspace = () => {
       setMiniView("workspace");
+      setPetOverlay("none");
       setOpen(true);
     };
     window.addEventListener(UNIVERSE_DETAIL_EVENT, reopenWorkspace);
@@ -390,6 +401,37 @@ export function Pet({
     return () => {
       window.removeEventListener(UNIVERSE_DETAIL_EVENT, reopenWorkspace);
       window.removeEventListener(UNIVERSE_ASK_EVENT, reopenWorkspace);
+    };
+  }, [appMode]);
+
+  React.useEffect(() => {
+    if (appMode !== "explore") return;
+    const closeForCanvasGesture = () => {
+      setOpen(false);
+      setPetOverlay("none");
+    };
+    const closeOnSourceChange = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        mode?: string;
+        source_id?: string | null;
+      }>).detail;
+      const sourceId = detail?.source_id ?? null;
+      const changed = sourceId !== exploreSourceRef.current;
+      if (changed) {
+        exploreSourceRef.current = sourceId;
+        setOpen(false);
+        setPetOverlay("none");
+      }
+    };
+    window.addEventListener(UNIVERSE_INTERACTION_EVENT, closeForCanvasGesture);
+    window.addEventListener(UNIVERSE_RESET_EVENT, closeForCanvasGesture);
+    window.addEventListener(UNIVERSE_SOURCE_FOCUS_EVENT, closeOnSourceChange);
+    window.addEventListener(UNIVERSE_VIEW_EVENT, closeOnSourceChange);
+    return () => {
+      window.removeEventListener(UNIVERSE_INTERACTION_EVENT, closeForCanvasGesture);
+      window.removeEventListener(UNIVERSE_RESET_EVENT, closeForCanvasGesture);
+      window.removeEventListener(UNIVERSE_SOURCE_FOCUS_EVENT, closeOnSourceChange);
+      window.removeEventListener(UNIVERSE_VIEW_EVENT, closeOnSourceChange);
     };
   }, [appMode]);
 

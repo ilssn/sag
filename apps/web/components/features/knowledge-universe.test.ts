@@ -12,6 +12,10 @@ const source = readFileSync(
   new URL("./knowledge-universe.tsx", import.meta.url),
   "utf8",
 );
+const detailPanelSource = readFileSync(
+  new URL("./universe-node-detail-panel.tsx", import.meta.url),
+  "utf8",
+);
 
 function sourceBetween(start: string, end: string) {
   const startIndex = source.indexOf(start);
@@ -112,9 +116,10 @@ describe("knowledge universe production interaction policy", () => {
       "const handleNodeClick = React.useCallback(",
       "const clearSelection = React.useCallback(",
     );
-    expect(handler).toContain("nextUniverseLockedNodeId(");
-    expect(handler).toContain("graphRef.current?.lockNode(nextLockedId)");
-    expect(handler).toContain("graphRef.current?.clearSelection()");
+    expect(handler).toContain("activatePartition(node as Universe3DNode)");
+    expect(handler).toContain("lockNodeForReading(node as UniverseConcrete3DNode)");
+    expect(source).toContain("graphRef.current?.lockNode(node.id)");
+    expect(source).toContain("graphRef.current?.clearSelection()");
     expect(handler).not.toContain("expandNode(");
     expect(handler).not.toContain("loadSourceTimelinePage(");
     expect(handler).not.toContain("api.");
@@ -123,7 +128,7 @@ describe("knowledge universe production interaction policy", () => {
   it("clears a canvas lock without changing graph data or the camera", () => {
     const clearSelection = sourceBetween(
       "const clearSelection = React.useCallback(",
-      "const handleSceneUnavailable = React.useCallback(",
+      "const moveTimelineManually = React.useCallback(",
     );
     const handler = sourceBetween(
       "const handleNodeClick = React.useCallback(",
@@ -140,8 +145,8 @@ describe("knowledge universe production interaction policy", () => {
     expect(clearSelection).not.toContain("setUniversePinnedNetwork(");
   });
 
-  it("keeps transient hover inside the scene instead of mounting a second inspector", () => {
-    expect(source).toContain("const inspectorNode = selectedConcreteNode;");
+  it("keeps transient hover inside the scene instead of mounting a second reading panel", () => {
+    expect(source).toContain("const detailNode = selectedConcreteNode;");
     expect(source).toContain("const handleSceneHover = React.useCallback(() => undefined, [])");
     expect(source).not.toContain("hoveredConcreteKey");
     expect(source).not.toContain("hoveredConcreteNode");
@@ -156,20 +161,44 @@ describe("knowledge universe production interaction policy", () => {
       "const handleNodeClick = React.useCallback(",
       "const clearSelection = React.useCallback(",
     );
-    const inspector = sourceBetween(
-      "{interactive && inspectorNode && viewportSource && (",
-      "{(loading || webglAvailable === null) && (",
-    );
-
     expect(graphProjection).toContain("relatedProgressByKey");
     expect(graphProjection).toContain("relatedProgress,");
     expect(graphProjection).toContain("canExploreMore:");
-    expect(handler).toContain("graphRef.current?.lockNode(nextLockedId)");
+    expect(handler).toContain("lockNodeForReading(node as UniverseConcrete3DNode)");
     expect(handler).not.toMatch(/expandNode\(|requestExpansion\(|loadSourceTimelinePage\(|api\./);
-    expect(source).toContain("const inspectorNode = selectedConcreteNode;");
-    expect(inspector).toContain("dispatchUniverseDetail(");
-    expect(inspector).toContain("dispatchUniverseAsk(inspectorNode)");
-    expect(inspector).toContain("onClick={() => void expandNode(inspectorNode)}");
+    expect(source).toContain("const detailNode = selectedConcreteNode;");
+    expect(source).toContain("onAsk={() => dispatchUniverseAsk(detailNode)}");
+    expect(source).toContain("onExploreMore={() => void expandNode(detailNode)}");
+  });
+
+  it("uses one left reading panel without the legacy lower-left inspector", () => {
+    expect(source).toContain("<UniverseNodeDetailPanel");
+    expect(detailPanelSource).toContain('data-universe-detail-panel="true"');
+    expect(source).not.toContain('data-universe-inspector="true"');
+    expect(detailPanelSource).toContain("api.universeNode");
+    expect(source).toContain("onAsk={() => dispatchUniverseAsk(detailNode)}");
+    expect(source).toContain("previousEventAvailable={Boolean(previousTimelineEvent)}");
+    expect(source).toContain("nextEventAvailable={Boolean(nextTimelineEvent)}");
+  });
+
+  it("keeps autoplay bounded by the existing cached timeline", () => {
+    expect(source).toContain("planUniverseTimelinePlayback({");
+    expect(source).toContain("hasOlder: timelineJourney.hasNext");
+    expect(source).toContain("hasNewer: timelineJourney.hasPrevious");
+    expect(source).toContain("graphRef.current?.moveTimeline(timelinePlaybackPlan.sceneDirection)");
+    expect(source).toContain("toggleUniverseTimelinePlaybackOrder(current)");
+    expect(source).toContain('setTimelinePlaying(false)');
+    expect(source).not.toContain("setInterval(() => graphRef.current?.moveTimeline");
+  });
+
+  it("exposes locked-card actions and a non-destructive origin control", () => {
+    expect(source).toContain("actionLabels={{");
+    expect(source).toContain("onExploreMore={handleExploreMore}");
+    expect(source).toContain("onAskNode={handleAskNode}");
+    expect(source).toContain("onUserInteraction={handleSceneInteraction}");
+    expect(source).toContain("const returnToTimelineOrigin = React.useCallback(");
+    expect(source).toContain("graphRef.current?.focusSource(sourceId)");
+    expect(source).toContain('label={t("controls.origin")}');
   });
 
   it("provides a themed left-top return to the galaxy overview", () => {
@@ -183,16 +212,26 @@ describe("knowledge universe production interaction policy", () => {
     );
 
     expect(summary).toContain('data-universe-home-control="true"');
+    expect(summary).toContain("{showReturnHomeControl && (");
     expect(summary).toContain('aria-label={t("controls.home")}');
     expect(summary).toContain('title={t("controls.homeHint")}');
     expect(summary).toContain("<Orbit");
     expect(summary).toContain("bg-amber-200");
+    expect(summary).toContain("var(--universe-source-accent)");
     expect(summary).not.toContain("<House");
     expect(summary).toContain("onClick={returnToUniverseHome}");
     expect(summary).toContain("pointer-events-auto");
     expect(home).toContain("resetScene(epochRef.current + 1)");
     expect(source).toContain("viewportSourceRef.current = null");
     expect(source).toContain("setViewportSourceId(null)");
+    expect(source).toContain("const showReturnHomeControl = Boolean(browseSessionSourceId)");
+  });
+
+  it("routes the active source accent through shell progress and entity affordances", () => {
+    expect(source).toContain("universeSourceAccent(activeSourceId, darkTheme)");
+    expect(source).toContain('"--universe-source-accent": activeSourceAccent');
+    expect(source).toContain('backgroundColor: "var(--universe-source-accent)"');
+    expect(source).toContain('data-tone={tone}');
   });
 
   it("blocks timeline paging while a node is locked", () => {
@@ -210,8 +249,8 @@ describe("knowledge universe production interaction policy", () => {
     expect(source).toContain("timelineRequestRef.current?.controller.abort()");
   });
 
-  it("keeps expansion behind the explicit inspector action", () => {
-    expect(source).toContain("onClick={() => void expandNode(inspectorNode)}");
+  it("keeps expansion behind the explicit detail action", () => {
+    expect(source).toContain("onExploreMore={() => void expandNode(detailNode)}");
   });
 
   it("keeps one source session with cache, visible window and working set", () => {
@@ -684,8 +723,8 @@ describe("knowledge universe production interaction policy", () => {
       "const handleNodeClick = React.useCallback(",
       "const clearSelection = React.useCallback(",
     );
-    expect(click).toContain("graphRef.current?.lockNode(nextLockedId)");
-    expect(click).toContain("graphRef.current?.clearSelection()");
+    expect(click).toContain("lockNodeForReading(node as UniverseConcrete3DNode)");
+    expect(source).toContain("graphRef.current?.clearSelection()");
     expect(click).not.toContain("workingRef.current");
     expect(click).not.toContain("setUniversePinnedNetwork(");
     expect(source).not.toContain("function universeLockNetwork(");
@@ -722,16 +761,16 @@ describe("knowledge universe production interaction policy", () => {
     );
     expect(pruning).not.toContain("universeAnchorProgress(");
     expect(source).not.toContain("residentProgress >= exactNode.relatedCount");
-    expect(source).toContain("expandedAnchorsRef.current.has(inspectorAnchorKey)");
-    expect(source).toContain("!cursorsRef.current.has(inspectorAnchorKey)");
+    expect(source).toContain("expandedAnchorsRef.current.has(detailAnchorKey)");
+    expect(source).toContain("!cursorsRef.current.has(detailAnchorKey)");
     expect(source).toContain("committedCount < totalCount");
   });
 
   it("keeps time buttons aligned with the wheel journey", () => {
     expect(source).toContain("timelineJourney={timelineJourney}");
     expect(source).toContain("onTimelineIntent={handleTimelineIntent}");
-    expect(source).toContain('graphRef.current?.moveTimeline("previous")');
-    expect(source).toContain('graphRef.current?.moveTimeline("next")');
+    expect(source).toContain('onClick={() => moveTimelineManually("previous")}');
+    expect(source).toContain('onClick={() => moveTimelineManually("next")}');
     expect(source).toContain('data-universe-timeline-controls="true"');
     // No camera gesture may reach back and rearrange the layout: the axis is not
     // a presentation the camera can restore.
@@ -767,8 +806,8 @@ describe("knowledge universe production interaction policy", () => {
     expect(controls).toContain("timelineControlsVisible && (");
     expect(controls).not.toMatch(/timelineJourney\.has(?:Previous|Next)\s*&&\s*\(/);
 
-    expect(controls).toContain('graphRef.current?.moveTimeline("previous")');
-    expect(controls).toContain('graphRef.current?.moveTimeline("next")');
+    expect(controls).toContain('onClick={() => moveTimelineManually("previous")}');
+    expect(controls).toContain('onClick={() => moveTimelineManually("next")}');
     expect(controls).toContain("disabled={!timelineJourney.hasPrevious");
     expect(controls).toContain("disabled={!timelineJourney.hasNext");
     expect(controls.match(/timelineJourney\.phase === "loading"/g)).toHaveLength(2);

@@ -77,6 +77,7 @@ import { QuickModelSetupDialog } from "@/components/features/quick-model-setup-d
 import { SearchProvider } from "@/components/features/search/search-provider";
 import { SpaceBackdrop } from "@/components/features/space-backdrop";
 import { SiteHeader } from "@/components/features/site-header";
+import { ThemeToggle } from "@/components/features/theme-toggle";
 import { UniverseViewSettingsDrawer } from "@/components/features/universe-view-settings-drawer";
 import { Button } from "@/components/ui/button";
 import {
@@ -661,6 +662,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     className="fixed right-4 top-3 z-[45] flex items-center gap-2"
                     data-explore-controls="true"
                   >
+                    <ThemeToggle
+                      className="size-8 border border-border/60 bg-background/80 shadow-soft backdrop-blur-md hover:border-amber-300/40 hover:bg-amber-300/10 hover:text-amber-200"
+                    />
                     <UniverseViewSettingsDrawer
                       trigger={(
                         <Button

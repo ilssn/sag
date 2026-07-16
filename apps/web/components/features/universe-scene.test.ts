@@ -78,14 +78,14 @@ describe("universe scene production invariants", () => {
     );
     const wheel = sourceBetween(
       "private handleTimelineWheel = (event: WheelEvent) =>",
-      "private handlePointerDown = () =>",
+      "private handlePointerDown = (event: PointerEvent) =>",
     );
     const wheelRouting = sourceBetween(
       "private timelineWheelSurface(target: EventTarget | null)",
       "private handleTimelineWheel = (event: WheelEvent) =>",
     );
     const pointer = sourceBetween(
-      "private handlePointerDown = () =>",
+      "private handlePointerDown = (event: PointerEvent) =>",
       "private handleControlsStart = () =>",
     );
     const flight = sourceBetween(
@@ -283,7 +283,7 @@ describe("universe scene production invariants", () => {
       "private handleKeyDown = (event: KeyboardEvent)",
       "private updatePixelRatio()",
     );
-    expect(diagnostics).toContain("label.element.disabled = busy");
+    expect(diagnostics).toContain("label.primary.disabled = busy");
     expect(labelInteraction).toContain("if (this.timelineIsBusy()) return");
     expect(keyboard).toContain('this.timelineIsBusy() && event.key !== "Escape"');
     expect(keyboard).toContain('event.key.startsWith("Arrow")');
@@ -367,7 +367,7 @@ describe("universe scene production invariants", () => {
     expect(labels).toContain("const transientHover =");
     expect(labels).toContain('(node.sceneNode.state === "active" || focusCardIds.has(node.id))');
     expect(labels).toContain("&& (!focusId || focusCardIds.has(node.id))");
-    expect(labels).toContain('element.dataset.compact = String(node.kind === "entity")');
+    expect(labels).toContain('element.dataset.compact = String(node.kind === "entity" && !locked)');
     expect(labels).toContain('node.kind === "event" && node.id === focusId');
     expect(labels).toContain("total: totalLimit");
     expect(labels).toContain("const eventCandidateLimit = hasConcreteFocus");
@@ -382,7 +382,7 @@ describe("universe scene production invariants", () => {
     expect(labels).toContain("const nextLabels: SceneLabel[] = []");
     expect(labels).toContain("existingLabels.forEach((label) => label.element.remove())");
     expect(labels).not.toContain("this.labelLayer.replaceChildren()");
-    expect(layout).toContain('const expanded = node.kind === "event"');
+    expect(layout).toContain('const expanded = locked || (node.kind === "event"');
     expect(layout).toContain("&& node.id === labelFocusId");
     expect(layout).toContain("const requiredFocusCard =");
     expect(layout).toContain("Boolean(focusCardIds?.has(node.id))");
@@ -411,7 +411,7 @@ describe("universe scene production invariants", () => {
       "\n  setSelection(selectedId: string | null)",
     );
     expect(options).toContain("const cardPreferencesChanged =");
-    expect(options).toContain("if (this.dataReady && (cardPreferencesChanged || localeChanged)) this.rebuildLabels()");
+    expect(options).toContain("if (this.dataReady && (cardPreferencesChanged || labelTextChanged)) this.rebuildLabels()");
     expect(options).not.toContain("graphData(");
   });
 
@@ -444,6 +444,44 @@ describe("universe scene production invariants", () => {
     expect(labelInteraction).toContain("this.handleNodeHover(node, true)");
     expect(labelInteraction).toContain("this.callbacks.onNodeClick(node.sceneNode)");
     expect(labelInteraction).not.toMatch(/expandNode|requestExpansion|onTimelineIntent|fetch\(|api\./);
+  });
+
+  it("keeps locked-card actions semantic and lets the same wheel gesture unlock and travel", () => {
+    const labels = sourceBetween(
+      "private rebuildLabels()",
+      "private sortLabelsForLayout()",
+    );
+    const nodeInteraction = sourceBetween(
+      "private bindNodeLabelInteraction(",
+      "private updateLabels(now: number",
+    );
+    const wheel = sourceBetween(
+      "private handleTimelineWheel = (event: WheelEvent) =>",
+      "private handlePointerDown = (event: PointerEvent) =>",
+    );
+    const labelLayout = sourceBetween(
+      "private updateLabels(now: number",
+      "private miniPanelRect(",
+    );
+    const safeViewport = sourceBetween(
+      "private safeViewportCenter()",
+      "private moveCamera(",
+    );
+
+    expect(labels).toContain('const element = retained?.element ?? document.createElement("div")');
+    expect(labels).toContain('const primary = retained?.primary ?? document.createElement("button")');
+    expect(labels).toContain("element.append(primary, actions)");
+    expect(labels).not.toContain("primary.append(primary, actions)");
+    expect(labels).toContain('button.dataset.universeNodeAction = index === 0 ? "explore-more" : "ask-ai"');
+    expect(labels).toContain("actions.hidden = !locked");
+    expect(nodeInteraction).toContain("this.callbacks.onExploreMore?.(node.sceneNode)");
+    expect(nodeInteraction).toContain("this.callbacks.onAskNode?.(node.sceneNode)");
+    expect(wheel).toContain("this.callbacks.onUserInteraction?.()");
+    expect(wheel).toContain("this.callbacks.onSelectionClear()");
+    expect(wheel.indexOf("this.callbacks.onSelectionClear()"))
+      .toBeLessThan(wheel.indexOf("applyUniverseTemporalFlightWheel"));
+    expect(labelLayout).toContain('"[data-universe-detail-panel=\'true\']"');
+    expect(safeViewport).toContain('"[data-universe-detail-panel=\'true\']"');
   });
 
   it("dismisses a locked network atomically on blank canvas without reloading or moving it", () => {
@@ -573,9 +611,11 @@ describe("universe scene production invariants", () => {
     expect(nodeObject).toContain("sprite.userData.entityCore = true");
     expect(nodeObject).toContain("hit.userData.entityHitArea = true");
     expect(nodeObject).toContain("const coreSize = node.sceneNode.root ? 5.2 : 4");
+    expect(nodeObject).toContain("const color = this.entityVisualColor(node.sourceId)");
     expect(nodeObject).toContain("sprite.renderOrder = 2");
     expect(source).toContain(": node.sceneNode.root ? 10 : 8");
     expect(source).toContain("this.host.dataset.universeEntityGlyphCount");
+    expect(source).toContain('"--universe-node-accent"');
   });
 
   it("shows every factual edge by default and only dims context on focus", () => {
@@ -936,33 +976,37 @@ describe("universe scene production invariants", () => {
     expect(nebula).toContain("this.host.dataset.universeNebulaBudget");
   });
 
-  it("paints the brand sky: champagne grains, white-hot heart, sparse accents", () => {
+  it("keeps nebula grains on each source's entry colour", () => {
+    const nebulaMaterial = sourceBetween(
+      "function makeNebulaMaterial(darkTheme: boolean)",
+      "class UniverseForceSceneEngine",
+    );
     const nebula = sourceBetween(
       "private rebuildNebula()",
       "private updateNebulaPositions()",
     );
 
-    // The site's hero galaxy is pure sharp grain: gold #d6ae63 dust with a
-    // per-source undertone, copper outskirts, a white heart carried by
-    // density, a sprinkle of cool blue — and glow pockets as rare accents,
-    // never a fog blanket. The site uses no green anywhere.
-    expect(source).toContain('const NEBULA_BRAND_CHAMPAGNE = new THREE.Color("#d6ae63")');
-    expect(source).toContain('const NEBULA_BRAND_COPPER = new THREE.Color("#a85224")');
-    expect(source).toContain('const NEBULA_BRAND_BLUE = new THREE.Color("#9cc7ff")');
-    expect(nebula).toContain("NEBULA_BRAND_CHAMPAGNE,");
-    expect(nebula).toContain("NEBULA_BRAND_COPPER,");
-    expect(nebula).toContain("color.lerp(NEBULA_BRAND_BLUE, 0.6)");
-    expect(nebula).toContain("? 0.5 + (1 - particle.radial) * 0.5");
+    // Gold is the stable brand field; the marker, label, and dust all resolve
+    // through sourceVisualColor as a secondary tint when a source is entered.
+    expect(source).toContain('export const UNIVERSE_BRAND_GOLD = "#d6ae63"');
+    expect(nebulaMaterial).toContain("uniform vec3 uBrandColor");
+    expect(nebulaMaterial).toContain("vColor = mix(uBrandColor, aColor, sourceTint)");
+    expect(source).toContain("const SOURCE_PALETTE = [");
+    expect(nebula).toContain("const color = this.sourceVisualColor(particle.sourceId);");
+    expect(nebula).toContain("const whiteMix = particle.core");
+    expect(nebula).toContain("color.lerp(WHITE, whiteMix);");
+    expect(source).toContain("export function universeSourceAccent(sourceId: string");
     expect(nebula).toContain("const glowChance = coreParticle ? 0.05 : 0.02");
     expect(source).toContain("const NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP = 22");
-    // Hero anatomy: half the grains in a blazing tight heart, a thin disc
-    // with tight arm lanes, and a wide whole-frame sprinkle.
+    // The hero anatomy stays intact: half the grains in a tight heart, a thin
+    // disc with arm lanes, and a wide whole-frame sprinkle.
     expect(nebula).toContain("const coreParticle = population < 0.5");
     expect(nebula).toContain("coreParticle ? 2.55 : 0.7");
     expect(nebula).toContain("? 1.35 + stableUnit(`${key}:halo`) * 1.65");
     expect(nebula).toContain("* (coreParticle ? 1.3 : 0.5)");
-    // Entities speak the brand's cool blue, not cyan.
-    expect(source).toContain('const ENTITY_COLOR = new THREE.Color("#7ea6ff")');
+    // Entity sprites and labels use the same source accent as their nebula.
+    expect(source).toContain("private entityVisualColor(sourceId: string)");
+    expect(source).toContain("this.sourceVisualColor(node.sourceId)");
   });
 
   it("arrives at a nebula-only initial state and explores through the vestibule", () => {

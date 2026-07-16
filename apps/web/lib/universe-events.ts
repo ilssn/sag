@@ -13,6 +13,7 @@ export const UNIVERSE_FOCUS_EVENT = "sag:universe-focus";
 export const UNIVERSE_SOURCE_FOCUS_EVENT = "sag:universe-source-focus";
 export const UNIVERSE_DETAIL_EVENT = "sag:universe-detail";
 export const UNIVERSE_ASK_EVENT = "sag:universe-ask";
+export const UNIVERSE_INTERACTION_EVENT = "sag:universe-interaction";
 export const UNIVERSE_PATCH_EVENT = "sag:universe-patch";
 export const UNIVERSE_PATCH_RESET_EVENT = "sag:universe-patch-reset";
 export const UNIVERSE_VIEW_EVENT = "sag:universe-view";
@@ -78,6 +79,12 @@ export function dispatchUniverseView(view: UniverseViewState) {
     window.dispatchEvent(new CustomEvent<UniverseViewState>(UNIVERSE_VIEW_EVENT, { detail: next }));
   }
   return next;
+}
+
+/** Signals a real canvas gesture so contextual overlays can yield the map. */
+export function dispatchUniverseInteraction() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(UNIVERSE_INTERACTION_EVENT));
 }
 
 export function dispatchUniverseActivation(

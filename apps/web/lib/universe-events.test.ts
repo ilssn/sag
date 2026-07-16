@@ -3,10 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SearchResponse } from "./types";
 import {
   activationFromSearch,
+  dispatchUniverseInteraction,
   dispatchUniversePatchReset,
   dispatchUniverseSourceFocus,
   dispatchUniverseView,
   readUniverseView,
+  UNIVERSE_INTERACTION_EVENT,
   UNIVERSE_PATCH_RESET_EVENT,
   UNIVERSE_SOURCE_FOCUS_EVENT,
 } from "./universe-events";
@@ -113,6 +115,19 @@ describe("universe view state", () => {
     dispatchUniverseSourceFocus("source-b");
 
     expect(sourceId).toBe("source-b");
+  });
+
+  it("signals real canvas gestures so contextual overlays can close", () => {
+    const target = new EventTarget();
+    vi.stubGlobal("window", target);
+    let gestures = 0;
+    target.addEventListener(UNIVERSE_INTERACTION_EVENT, () => {
+      gestures += 1;
+    });
+
+    dispatchUniverseInteraction();
+
+    expect(gestures).toBe(1);
   });
 
   it("invalidates snapshot-bound detail patches without changing graph state", () => {
