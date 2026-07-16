@@ -763,6 +763,42 @@ describe("universe scene production invariants", () => {
     expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, aCorridorFade, corridorMix)");
     expect(nebulaMaterial).toContain("* detailScale * glowScale * corridorBoost");
     expect(nebulaBuild).toContain('geometry.setAttribute("aCorridorFade"');
+
+    // Most dust becomes the distant canyon walls: far out laterally, grown
+    // broad and soft, so a gaze turn barely parallaxes the surrounding nebula.
+    expect(source).toContain("const NEBULA_WALL_SHARE = 0.62");
+    expect(nebulaBuild).toContain("NEBULA_WALL_LATERAL_MIN");
+    expect(nebulaBuild).toContain('geometry.setAttribute("aCorridorWall"');
+    expect(nebulaMaterial).toContain("mix(1.0, 2.4, corridorMix * aCorridorWall)");
+    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.6, corridorMix * aCorridorWall)");
+  });
+
+  it("clamps browsing rotation to a forward gaze cone that cannot flip the nebula", () => {
+    const focus = sourceBetween(
+      "focusSource(sourceId: string) {",
+      "focusResult() {",
+    );
+    const dataCommit = sourceBetween(
+      "setData(\n    data: UniverseSceneData",
+      "\n  focusOverview() {",
+    );
+
+    // Inside a source the wheel's "deeper" must stay roughly ahead: rotation
+    // is a bounded human glance, applied after the entry dive lands and
+    // released the moment the session leaves or switches sources.
+    expect(source).toContain("const BROWSE_GAZE_AZIMUTH_RAD = 0.55");
+    expect(source).toContain("const BROWSE_GAZE_POLAR_RAD = 0.42");
+    expect(source).toContain("private applyBrowseGaze()");
+    expect(source).toContain("private releaseBrowseGaze()");
+    expect(source).toContain(
+      "this.controls.minAzimuthAngle = -BROWSE_GAZE_AZIMUTH_RAD",
+    );
+    expect(source).toContain("this.controls.rotateSpeed = BROWSE_GAZE_ROTATE_SPEED");
+    expect(source).toContain("this.controls.rotateSpeed = UNIVERSE_ROTATE_SPEED");
+    expect(focus).toContain("this.applyBrowseGaze()");
+    expect(dataCommit).toContain(
+      "if (!nextFlight || flightSourceChanged) this.releaseBrowseGaze()",
+    );
   });
 
   it("dives into the corridor on entry and ducks cards while streaking past", () => {

@@ -319,6 +319,10 @@ interface GraphControls {
   panSpeed?: number;
   minDistance?: number;
   maxDistance?: number;
+  minAzimuthAngle?: number;
+  maxAzimuthAngle?: number;
+  minPolarAngle?: number;
+  maxPolarAngle?: number;
   target?: THREE.Vector3;
   addEventListener: (name: string, callback: () => void) => void;
   removeEventListener: (name: string, callback: () => void) => void;
@@ -352,6 +356,16 @@ const NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP = 44;
 const NEBULA_CORRIDOR_BAND_OFF = 1e8;
 /** Ambient drift stays frozen this long after any camera gesture frame. */
 const NEBULA_GESTURE_CALM_MS = 480;
+/**
+ * Inside a source, rotation is a bounded human gaze, not an orbit: you can
+ * glance around the corridor but never flip the nebula over — the wheel's
+ * "deeper" must always stay roughly ahead. Angles are radians around the
+ * corridor's axis-aligned entry bearing.
+ */
+const BROWSE_GAZE_AZIMUTH_RAD = 0.55;
+const BROWSE_GAZE_POLAR_RAD = 0.42;
+const BROWSE_GAZE_ROTATE_SPEED = 0.3;
+const UNIVERSE_ROTATE_SPEED = 0.42;
 /** Corridor entry pose: dive standoff behind the entrance plane… */
 const CORRIDOR_ENTRY_STANDOFF = 280;
 /** …looking this far down the axis into the past… */
@@ -371,6 +385,14 @@ const FLIGHT_CARD_RECOVER_MS = 300;
 const NEBULA_CORRIDOR_NEAR_SPREAD = 0.18;
 const NEBULA_CORRIDOR_FAR_SPREAD = 0.44;
 const NEBULA_CORRIDOR_VERTICAL_ASPECT = 0.7;
+/**
+ * Most corridor dust becomes the distant canyon walls: pushed far out
+ * laterally it barely parallaxes under a gaze turn, so the nebula reads as a
+ * vast illuminated surrounding instead of debris sweeping past the camera.
+ */
+const NEBULA_WALL_SHARE = 0.62;
+const NEBULA_WALL_LATERAL_MIN = 4.5;
+const NEBULA_WALL_LATERAL_MAX = 9;
 const NEBULA_GLOW_POINT_SIZE_CSS_MOBILE = 34;
 const HIGHLIGHT_FLOW_FRAME_MS = 1000 / 30;
 const TIMELINE_WHEEL_LABEL_SELECTOR = "[data-universe-node-id]";
@@ -718,6 +740,7 @@ function makeNebulaMaterial(darkTheme: boolean) {
       attribute vec3 aColor;
       attribute vec3 aCorridor;
       attribute float aCorridorFade;
+      attribute float aCorridorWall;
       attribute float aSize;
       attribute float aAlpha;
       attribute float aGlow;
@@ -771,6 +794,8 @@ function makeNebulaMaterial(darkTheme: boolean) {
         float glowParticle = step(0.001, aGlow);
         vAlpha *= mix(1.0, 1.3, corridorMix * glowParticle);
         vAlpha *= mix(1.0, aCorridorFade, corridorMix);
+        // Distant canyon walls stay soft: their vastness is size, not glare.
+        vAlpha *= mix(1.0, 0.6, corridorMix * aCorridorWall);
         // Ambient drift is a whisper, not a float: it breathes only while the
         // camera is idle and holds still under any gesture.
         animatedPosition.x += sin(uTime * 0.28 + aPhase) * 0.16 * uMotion * aTwinkle;
@@ -779,16 +804,19 @@ function makeNebulaMaterial(darkTheme: boolean) {
         float perspective = clamp(360.0 / max(1.0, -mvPosition.z), 0.42, 2.2);
         float detailScale = mix(1.0, 1.28, vDetail);
         float glowScale = mix(1.0, mix(3.6, 4.8, vDetail), aGlow);
-        // Corridor beacons swell into soft volumetric pockets of light.
-        float corridorBoost = mix(1.0, mix(1.1, 1.6, glowParticle), corridorMix);
+        // Corridor beacons swell into soft volumetric pockets of light, and
+        // the far walls grow into broad luminous banks.
+        float corridorBoost = mix(1.0, mix(1.1, 1.6, glowParticle), corridorMix)
+          * mix(1.0, 2.4, corridorMix * aCorridorWall);
         float rawPointSize = aSize * uPixelRatio * perspective * pulse
           * detailScale * glowScale * corridorBoost;
         float detailDustCap = mix(13.0, ${NEBULA_DETAIL_DUST_POINT_SIZE_CSS.toFixed(1)}, vDetail)
           * uPixelRatio;
+        float capSelect = max(glowParticle, aCorridorWall * corridorMix);
         float pointSizeCap = mix(
           detailDustCap,
           uPointSizeCap * (1.0 + 0.55 * corridorMix),
-          glowParticle
+          capSelect
         );
         gl_PointSize = min(max(1.15, rawPointSize), pointSizeCap);
         vPulse = mix(0.92, 1.2, glint);
@@ -919,6 +947,9 @@ class UniverseForceSceneEngine {
   private flightSpeed = 0;
   /** 1 = cards fully expanded; eases toward 0 as flight speed rises. */
   private flightCardPresence = 1;
+  /** True while rotation is clamped to the corridor's forward gaze cone. */
+  private browseGazeApplied = false;
+  private browseGazeTimer: number | null = null;
   private sourceSignature = "";
   private labelLayer: HTMLDivElement;
   private labels: SceneLabel[] = [];
@@ -1099,7 +1130,7 @@ class UniverseForceSceneEngine {
     this.controls = this.graph.controls() as GraphControls;
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.085;
-    this.controls.rotateSpeed = 0.42;
+    this.controls.rotateSpeed = UNIVERSE_ROTATE_SPEED;
     this.controls.zoomSpeed = 0.72;
     this.controls.zoomToCursor = true;
     this.controls.panSpeed = 0.52;
@@ -1279,6 +1310,9 @@ class UniverseForceSceneEngine {
     const nextFlight = data.temporalFlight ?? null;
     const flightSourceChanged = nextFlight?.sourceId !== this.flightConfig?.sourceId;
     this.flightConfig = nextFlight;
+    // The gaze cone belongs to one corridor: leaving or switching sources
+    // frees the camera immediately; the next entry dive re-applies it.
+    if (!nextFlight || flightSourceChanged) this.releaseBrowseGaze();
     if (nextFlight && flightSourceChanged) {
       // A fresh browse session starts at its window's newest package. The entry
       // camera framing is authoritative, so this reset applies no delta.
@@ -2136,6 +2170,15 @@ class UniverseForceSceneEngine {
         duration,
       );
       this.startLoop(duration + 180);
+      // Lock the gaze cone only after the dive lands, so the approach itself
+      // may start from any bearing without snapping.
+      if (this.browseGazeTimer !== null) window.clearTimeout(this.browseGazeTimer);
+      this.browseGazeTimer = window.setTimeout(() => {
+        this.browseGazeTimer = null;
+        if (!this.paused && this.flightConfig?.sourceId === sourceId) {
+          this.applyBrowseGaze();
+        }
+      }, duration + 80);
       return;
     }
     const concreteNodes = [...this.nodes.values()].filter(
@@ -2331,6 +2374,7 @@ class UniverseForceSceneEngine {
     if (this.lodTimer !== null) window.clearTimeout(this.lodTimer);
     if (this.initialFocusTimer !== null) window.clearTimeout(this.initialFocusTimer);
     if (this.sleepTimer !== null) window.clearTimeout(this.sleepTimer);
+    if (this.browseGazeTimer !== null) window.clearTimeout(this.browseGazeTimer);
     this.controls.removeEventListener("start", this.handleControlsStart);
     this.controls.removeEventListener("change", this.handleControlsChange);
     this.resizeObserver.disconnect();
@@ -3487,6 +3531,7 @@ class UniverseForceSceneEngine {
     const positions = new Float32Array(particles.length * 3);
     const corridors = new Float32Array(particles.length * 3);
     const corridorFades = new Float32Array(particles.length);
+    const corridorWalls = new Float32Array(particles.length);
     const colors = new Float32Array(particles.length * 3);
     const sizes = new Float32Array(particles.length);
     const alphas = new Float32Array(particles.length);
@@ -3528,11 +3573,21 @@ class UniverseForceSceneEngine {
       const axisDepth = axisDepthBySource.get(particle.sourceId) ?? 0;
       const depth = stableUnit(`${key}:depth`) * axisDepth;
       const progress = axisDepth > 0 ? depth / axisDepth : 0;
+      // Two shells: sparse wisps you fly through, and the far canyon walls —
+      // big, soft and distant, so a gaze turn barely moves them.
+      const wall = particle.glow === 0
+        && stableUnit(`${key}:shell`) < NEBULA_WALL_SHARE;
+      const lateralScale = wall
+        ? NEBULA_WALL_LATERAL_MIN
+          + stableUnit(`${key}:wall-radius`)
+            * (NEBULA_WALL_LATERAL_MAX - NEBULA_WALL_LATERAL_MIN)
+        : 0.35 + stableUnit(`${key}:radius`) * 0.85;
       const lateral = (NEBULA_CORRIDOR_NEAR_SPREAD
         + (NEBULA_CORRIDOR_FAR_SPREAD - NEBULA_CORRIDOR_NEAR_SPREAD) * progress)
         * (lateralBySource.get(particle.sourceId) ?? 130)
-        * (0.35 + stableUnit(`${key}:radius`) * 0.85);
+        * lateralScale;
       const angle = stableUnit(`${key}:angle`) * Math.PI * 2;
+      corridorWalls[index] = wall ? 1 : 0;
       corridors[index * 3] = Math.cos(angle) * lateral - particle.offset.x;
       corridors[index * 3 + 1] = Math.sin(angle) * lateral
         * NEBULA_CORRIDOR_VERTICAL_ASPECT - particle.offset.y;
@@ -3550,6 +3605,7 @@ class UniverseForceSceneEngine {
     geometry.setAttribute("position", positionAttribute);
     geometry.setAttribute("aCorridor", new THREE.BufferAttribute(corridors, 3));
     geometry.setAttribute("aCorridorFade", new THREE.BufferAttribute(corridorFades, 1));
+    geometry.setAttribute("aCorridorWall", new THREE.BufferAttribute(corridorWalls, 1));
     geometry.setAttribute("aColor", new THREE.BufferAttribute(colors, 3));
     geometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
     geometry.setAttribute("aAlpha", alphaAttribute);
@@ -3568,6 +3624,36 @@ class UniverseForceSceneEngine {
     this.syncNebulaCorridorUniforms();
     this.updateNebulaMotionState();
     this.armNebulaAnimation();
+  }
+
+  /**
+   * Clamps rotation to a forward gaze cone while browsing: a bounded glance
+   * around the corridor, never an orbit that flips the nebula over. The axis
+   * is world-aligned, so azimuth 0 already faces down the corridor.
+   */
+  private applyBrowseGaze() {
+    this.controls.minAzimuthAngle = -BROWSE_GAZE_AZIMUTH_RAD;
+    this.controls.maxAzimuthAngle = BROWSE_GAZE_AZIMUTH_RAD;
+    this.controls.minPolarAngle = Math.PI / 2 - BROWSE_GAZE_POLAR_RAD;
+    this.controls.maxPolarAngle = Math.PI / 2 + BROWSE_GAZE_POLAR_RAD;
+    this.controls.rotateSpeed = BROWSE_GAZE_ROTATE_SPEED;
+    this.browseGazeApplied = true;
+    this.host.dataset.universeBrowseGaze = "locked";
+  }
+
+  private releaseBrowseGaze() {
+    if (this.browseGazeTimer !== null) {
+      window.clearTimeout(this.browseGazeTimer);
+      this.browseGazeTimer = null;
+    }
+    if (!this.browseGazeApplied) return;
+    this.controls.minAzimuthAngle = Number.NEGATIVE_INFINITY;
+    this.controls.maxAzimuthAngle = Number.POSITIVE_INFINITY;
+    this.controls.minPolarAngle = 0;
+    this.controls.maxPolarAngle = Math.PI;
+    this.controls.rotateSpeed = UNIVERSE_ROTATE_SPEED;
+    this.browseGazeApplied = false;
+    this.host.dataset.universeBrowseGaze = "free";
   }
 
   /**
