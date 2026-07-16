@@ -172,6 +172,17 @@
     --space-cursor-meteor-tail: hsl(210 24% 88% / 0.48);
   }
 
+  /* 探索模式：天空整个交给 WebGL——CSS 的斜向光带、轨道弧、闪星全部退场，
+     只留纯色深空底。静态贴片跟 3D 旋转不同步，会被读成"深处在漂移"。 */
+  .bg-space-field--void {
+    background-image: none;
+  }
+
+  .bg-space-field--void::before,
+  .bg-space-field--void::after {
+    content: none;
+  }
+
   .bg-space-field::before {
     position: absolute;
     right: -18vw;

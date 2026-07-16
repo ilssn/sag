@@ -376,8 +376,14 @@ const UNIVERSE_ROTATE_SPEED = 0.42;
 const UNIVERSE_PAN_SPEED = 0.52;
 /** Corridor entry pose: dive standoff behind the entrance plane… */
 const CORRIDOR_ENTRY_STANDOFF = 280;
-/** …looking this far down the axis into the past… */
-const CORRIDOR_ENTRY_LOOK_AHEAD = 150;
+/**
+ * …looking this far down the axis into the past. This is also the orbit
+ * pivot: dragging swings the camera around a point DEEP in the corridor, so
+ * the deep field stays pinned while the near corridor tilts with the angle —
+ * pivoting around a near point would do the opposite and sweep the depths
+ * across the screen.
+ */
+const CORRIDOR_ENTRY_LOOK_AHEAD = 520;
 /** …from a slight diagonal so the dust and lateral spread read in parallax. */
 const CORRIDOR_ENTRY_LATERAL_X = 38;
 const CORRIDOR_ENTRY_LATERAL_Y = 24;
@@ -399,8 +405,16 @@ const NEBULA_CORRIDOR_VERTICAL_ASPECT = 0.7;
  * vast illuminated surrounding instead of debris sweeping past the camera.
  */
 const NEBULA_WALL_SHARE = 0.62;
-const NEBULA_WALL_LATERAL_MIN = 4.5;
-const NEBULA_WALL_LATERAL_MAX = 9;
+const NEBULA_WALL_LATERAL_MIN = 2.2;
+const NEBULA_WALL_LATERAL_MAX = 5.2;
+/**
+ * Corridor dust is camera-anchored: it repeats modulo this span around the
+ * flight depth, so density near the camera is constant no matter whether the
+ * source holds 12 events or 5,000. Spreading a fixed budget over the whole
+ * axis would dilute a 586-event source to near-invisibility — this is the
+ * bounded-window discipline applied to particles.
+ */
+const NEBULA_CORRIDOR_WRAP_SPAN = 2400;
 const NEBULA_GLOW_POINT_SIZE_CSS_MOBILE = 34;
 const HIGHLIGHT_FLOW_FRAME_MS = 1000 / 30;
 const TIMELINE_WHEEL_LABEL_SELECTOR = "[data-universe-node-id]";
@@ -737,6 +751,12 @@ function makeNebulaMaterial(darkTheme: boolean) {
       // inside it yield to the real packages that condensed there.
       uCorridorNearZ: { value: NEBULA_CORRIDOR_BAND_OFF },
       uCorridorFarZ: { value: NEBULA_CORRIDOR_BAND_OFF },
+      // Camera-anchored dust wrap: current flight depth, the wrap span, the
+      // full axis depth and the entry plane's world z of the browsed source.
+      uFlightDepth: { value: 0 },
+      uCorridorSpan: { value: NEBULA_CORRIDOR_WRAP_SPAN },
+      uCorridorAxisDepth: { value: 0 },
+      uCorridorCenterZ: { value: 0 },
     },
     vertexShader: `
       uniform float uPixelRatio;
@@ -748,9 +768,12 @@ function makeNebulaMaterial(darkTheme: boolean) {
       uniform float uMotion;
       uniform float uCorridorNearZ;
       uniform float uCorridorFarZ;
+      uniform float uFlightDepth;
+      uniform float uCorridorSpan;
+      uniform float uCorridorAxisDepth;
+      uniform float uCorridorCenterZ;
       attribute vec3 aColor;
       attribute vec3 aCorridor;
-      attribute float aCorridorFade;
       attribute float aCorridorWall;
       attribute float aSize;
       attribute float aAlpha;
@@ -777,8 +800,9 @@ function makeNebulaMaterial(darkTheme: boolean) {
         vColor = aColor;
         vAlpha = aAlpha * mix(1.0, detailAlpha, sourceMatch);
         // Depth of field for the whole sky: while inside one source, every
-        // other nebula recedes into the dark instead of competing for light.
-        vAlpha *= mix(1.0, 0.3, uDetail * (1.0 - sourceMatch));
+        // other nebula recedes into the dark instead of competing for light —
+        // deep enough that their white-hot cores cannot smudge the corridor.
+        vAlpha *= mix(1.0, 0.12, uDetail * (1.0 - sourceMatch));
         vDetail = smoothstep(0.08, 0.92, particleDetail);
         vGlow = aGlow;
         vShape = aShape;
@@ -789,7 +813,31 @@ function makeNebulaMaterial(darkTheme: boolean) {
         // corridor: the dust that is still a cloud from outside is, inside,
         // the source's unloaded history laid out along the counting axis.
         float corridorMix = smoothstep(0.12, 0.88, particleDetail);
-        vec3 animatedPosition = position + aCorridor * corridorMix;
+        // Camera-anchored wrap: corridor dust repeats modulo the span around
+        // the flight depth, so the density near the camera never depends on
+        // the source's size — the fixed-window discipline for particles.
+        vec3 corridorTarget = position + aCorridor;
+        float span = max(1.0, uCorridorSpan);
+        float depthAlongAxis = uCorridorCenterZ - corridorTarget.z;
+        float rel = mod(depthAlongAxis - uFlightDepth, span);
+        if (rel > span * 0.75) rel -= span;
+        float wrappedDepth = uFlightDepth + rel;
+        corridorTarget.z = uCorridorCenterZ - wrappedDepth;
+        vec3 animatedPosition = mix(position, corridorTarget, corridorMix);
+        // The axis has real ends: dust never spills in front of the entry
+        // plane, and the last stretch dissolves into an unresolved horizon
+        // instead of a visible wall — then ends for good.
+        float entryFade = smoothstep(-220.0, -40.0, wrappedDepth);
+        float endProgress = uCorridorAxisDepth > 0.0
+          ? wrappedDepth / uCorridorAxisDepth
+          : 0.0;
+        float horizonFade = 1.0 - smoothstep(0.82, 1.0, endProgress) * 0.8;
+        float overEnd = smoothstep(0.0, 200.0, wrappedDepth - uCorridorAxisDepth);
+        // Atmospheric haze with distance ahead keeps the vastness readable
+        // without ever going fully dark.
+        float aheadUnits = wrappedDepth - uFlightDepth;
+        float depthHaze = 1.0 - smoothstep(900.0, 1800.0, aheadUnits) * 0.55;
+        float axisFade = entryFade * horizonFade * (1.0 - overEnd) * depthHaze;
         // Where the loaded window already condensed into real packages, the
         // corridor dust steps aside instead of double-exposing them.
         float loadedBand = smoothstep(
@@ -807,9 +855,10 @@ function makeNebulaMaterial(darkTheme: boolean) {
         // vast, with no visible wall.
         float glowParticle = step(0.001, aGlow);
         vAlpha *= mix(1.0, 1.45, corridorMix * glowParticle);
-        vAlpha *= mix(1.0, aCorridorFade, corridorMix);
-        // Distant canyon walls stay soft: their vastness is size, not glare.
-        vAlpha *= mix(1.0, 0.72, corridorMix * aCorridorWall);
+        vAlpha *= mix(1.0, axisFade, corridorMix);
+        // Canyon walls are a fine star field, not fog banks: full brightness,
+        // grain-sized — their vastness is count and depth, not blur.
+        vAlpha *= mix(1.0, 0.95, corridorMix * aCorridorWall);
         // Ambient drift is a whisper, not a float: it breathes only while the
         // camera is idle and holds still under any gesture.
         animatedPosition.x += sin(uTime * 0.28 + aPhase) * 0.16 * uMotion * aTwinkle;
@@ -818,15 +867,15 @@ function makeNebulaMaterial(darkTheme: boolean) {
         float perspective = clamp(360.0 / max(1.0, -mvPosition.z), 0.42, 2.2);
         float detailScale = mix(1.0, 1.28, vDetail);
         float glowScale = mix(1.0, mix(3.6, 4.8, vDetail), aGlow);
-        // Corridor beacons swell into soft volumetric pockets of light, and
-        // the far walls grow into broad luminous banks.
+        // Corridor beacons swell into soft volumetric pockets of light; wall
+        // grains grow only slightly — crisp points, never blobs.
         float corridorBoost = mix(1.0, mix(1.1, 1.6, glowParticle), corridorMix)
-          * mix(1.0, 2.8, corridorMix * aCorridorWall);
+          * mix(1.0, 1.35, corridorMix * aCorridorWall);
         float rawPointSize = aSize * uPixelRatio * perspective * pulse
           * detailScale * glowScale * corridorBoost;
         float detailDustCap = mix(13.0, ${NEBULA_DETAIL_DUST_POINT_SIZE_CSS.toFixed(1)}, vDetail)
           * uPixelRatio;
-        float capSelect = max(glowParticle, aCorridorWall * corridorMix);
+        float capSelect = glowParticle;
         float pointSizeCap = mix(
           detailDustCap,
           uPointSizeCap * (1.0 + 0.7 * corridorMix),
@@ -3264,8 +3313,11 @@ class UniverseForceSceneEngine {
     const object = node.object;
     if (!object) return;
     const entryScale = 0.28 + easeOutCubic(entryOpacity) * 0.72;
+    // A transient hover is a glance, not a commitment: the network answers
+    // with a whisper of scale. Only a locked focus earns the firm pop —
+    // reading is the point, and jumping stars under the cursor break it.
     const emphasisScale = emphasized
-      ? node.id === this.transientHoverFocusId() ? 1.06 : 1.18
+      ? this.transientHoverFocusId() ? 1.04 : 1.12
       : 1;
     object.scale.setScalar(
       emphasisScale
@@ -3380,7 +3432,7 @@ class UniverseForceSceneEngine {
       const entryScale = 0.28 + easeOutCubic(entryOpacity) * 0.72;
       const dataScale = currentNodePresentationScale(node);
       const emphasisScale = node.visuallyEmphasized
-        ? node.id === this.transientHoverFocusId() ? 1.06 : 1.18
+        ? this.transientHoverFocusId() ? 1.04 : 1.12
         : 1;
       node.object.scale.setScalar(
         emphasisScale
@@ -3482,7 +3534,7 @@ class UniverseForceSceneEngine {
     );
     const weights = sources.map((source) =>
       Math.max(1, Math.log2(source.sceneNode.eventCount + source.sceneNode.entityCount + 2))
-        * (source.sourceId === browsedSourceId ? 4 : 1),
+        * (source.sourceId === browsedSourceId ? 6 : 1),
     );
     const totalWeight = weights.reduce((sum, value) => sum + value, 0);
     const baseCount = Math.max(
@@ -3564,7 +3616,6 @@ class UniverseForceSceneEngine {
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(particles.length * 3);
     const corridors = new Float32Array(particles.length * 3);
-    const corridorFades = new Float32Array(particles.length);
     const corridorWalls = new Float32Array(particles.length);
     const colors = new Float32Array(particles.length * 3);
     const sizes = new Float32Array(particles.length);
@@ -3607,15 +3658,17 @@ class UniverseForceSceneEngine {
       shapes[index] = particle.glow === 0 && particle.twinkle > 0.84 ? 1 : 0;
       phases[index] = particle.phase;
       twinkles[index] = 0.18 + particle.twinkle * 0.82;
-      // The corridor form: the same dust, laid out along the counting axis as
-      // the source's not-yet-loaded events. Uniform density per unit length is
-      // exactly the counting axis' promise (one event per slice, everywhere).
+      // The corridor form: the same dust, laid out along ONE wrap span of the
+      // counting axis. The shader repeats it modulo the span around the
+      // flight depth, so a fixed budget gives the same density beside the
+      // camera whether the source holds 12 events or 5,000.
       const key = `${particle.sourceId}:corridor:${index}`;
       const axisDepth = axisDepthBySource.get(particle.sourceId) ?? 0;
-      const depth = stableUnit(`${key}:depth`) * axisDepth;
-      const progress = axisDepth > 0 ? depth / axisDepth : 0;
-      // Two shells: sparse wisps you fly through, and the far canyon walls —
-      // big, soft and distant, so a gaze turn barely moves them.
+      const depth = stableUnit(`${key}:depth`)
+        * Math.min(Math.max(1, axisDepth), NEBULA_CORRIDOR_WRAP_SPAN);
+      // Two shells: sparse wisps you fly through, and the canyon walls — a
+      // fine star field framing the corridor, far enough to barely parallax
+      // under a gaze turn but near enough to live inside the field of view.
       const wall = particle.glow === 0
         && stableUnit(`${key}:shell`) < NEBULA_WALL_SHARE;
       const lateralScale = wall
@@ -3623,8 +3676,12 @@ class UniverseForceSceneEngine {
           + stableUnit(`${key}:wall-radius`)
             * (NEBULA_WALL_LATERAL_MAX - NEBULA_WALL_LATERAL_MIN)
         : 0.35 + stableUnit(`${key}:radius`) * 0.85;
+      // A stable per-particle radius seed: under the camera wrap a particle's
+      // distance keeps changing, so the cross-section is a textured tube, not
+      // a cone that could saw-tooth at the wrap boundary.
       const lateral = (NEBULA_CORRIDOR_NEAR_SPREAD
-        + (NEBULA_CORRIDOR_FAR_SPREAD - NEBULA_CORRIDOR_NEAR_SPREAD) * progress)
+        + (NEBULA_CORRIDOR_FAR_SPREAD - NEBULA_CORRIDOR_NEAR_SPREAD)
+          * stableUnit(`${key}:spread`))
         * (lateralBySource.get(particle.sourceId) ?? 130)
         * lateralScale;
       const angle = stableUnit(`${key}:angle`) * Math.PI * 2;
@@ -3633,11 +3690,6 @@ class UniverseForceSceneEngine {
       corridors[index * 3 + 1] = Math.sin(angle) * lateral
         * NEBULA_CORRIDOR_VERTICAL_ASPECT - particle.offset.y;
       corridors[index * 3 + 2] = -depth - particle.offset.z;
-      // The last stretch of the axis dissolves into darkness instead of
-      // ending at a visible wall: vastness reads as an unresolved horizon.
-      corridorFades[index] = progress <= 0.82
-        ? 1
-        : 1 - ((progress - 0.82) / 0.18) * 0.8;
     });
     const positionAttribute = new THREE.BufferAttribute(positions, 3)
       .setUsage(THREE.DynamicDrawUsage);
@@ -3645,7 +3697,6 @@ class UniverseForceSceneEngine {
       .setUsage(THREE.DynamicDrawUsage);
     geometry.setAttribute("position", positionAttribute);
     geometry.setAttribute("aCorridor", new THREE.BufferAttribute(corridors, 3));
-    geometry.setAttribute("aCorridorFade", new THREE.BufferAttribute(corridorFades, 1));
     geometry.setAttribute("aCorridorWall", new THREE.BufferAttribute(corridorWalls, 1));
     geometry.setAttribute("aColor", new THREE.BufferAttribute(colors, 3));
     geometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
@@ -3713,6 +3764,13 @@ class UniverseForceSceneEngine {
     material.uniforms.uCorridorFarZ.value = config
       ? config.centerZ - config.windowFarDepth
       : NEBULA_CORRIDOR_BAND_OFF;
+    // The dust wrap re-anchors to wherever the camera is on the axis, so it
+    // must ride the flight depth every frame it changes.
+    material.uniforms.uFlightDepth.value = config ? this.appliedFlightDepth : 0;
+    material.uniforms.uCorridorAxisDepth.value = config
+      ? Math.max(0, config.maxDepth)
+      : 0;
+    material.uniforms.uCorridorCenterZ.value = config ? config.centerZ : 0;
   }
 
   private updateNebulaPositions() {
@@ -4493,9 +4551,14 @@ class UniverseForceSceneEngine {
       const belongsToFocusNetwork = !labelFocusId
         ? true
         : Boolean(focusCardIds?.has(node.id));
+      // A transient hover must not reflow the board: unrelated cards dim but
+      // keep their place, so the eye can keep reading. Only a locked focus
+      // (a click — a commitment) clears the stage to its network.
       const layoutOpacity = label.kind === "source"
         ? sourceReveal
-        : belongsToLabelSource && belongsToFocusNetwork ? nodeCardReveal : 0;
+        : belongsToLabelSource && belongsToFocusNetwork
+          ? nodeCardReveal
+          : belongsToLabelSource && transientHover ? nodeCardReveal * 0.35 : 0;
       // Ember-level presence keeps the star but never a ghost card: remap so
       // cards are gone by the time a package has clearly been passed.
       const presenceForCards = THREE.MathUtils.clamp(
@@ -5398,6 +5461,7 @@ class UniverseForceSceneEngine {
       const camera = this.graph.camera();
       camera.position.z -= delta;
       if (this.controls.target) this.controls.target.z -= delta;
+      this.syncNebulaCorridorUniforms();
       this.wakeRendering(600);
       this.updateTemporalPresence();
       this.updateVisualLayout(now);

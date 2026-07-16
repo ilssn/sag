@@ -68,14 +68,19 @@ export interface UniverseTemporalFlightPresence {
 export const UNIVERSE_FLIGHT_UNITS_PER_WHEEL_PIXEL = 0.9;
 /** How far ahead (in seconds of current velocity) the window follow leads. */
 export const UNIVERSE_FLIGHT_FOLLOW_LEAD_S = 0.5;
-/** Atmosphere ahead of the camera: full presence within, gone beyond. */
-const PRESENCE_AHEAD_FULL_EVENTS = 1.5;
-const PRESENCE_AHEAD_FAR_EVENTS = 8;
+/**
+ * Atmosphere ahead of the camera: full presence within, thinning beyond. The
+ * full zone must cover most of the loaded window (12 events a page): reading
+ * events is the whole point of exploring, so the stage the camera is flying
+ * into stays legible and only the far promise thins out.
+ */
+const PRESENCE_AHEAD_FULL_EVENTS = 6;
+const PRESENCE_AHEAD_FAR_EVENTS = 14;
 /** Atmosphere behind the camera: passed packages fade out fast. */
 const PRESENCE_BEHIND_FULL_EVENTS = 0.75;
 const PRESENCE_BEHIND_GONE_EVENTS = 2.5;
-const PRESENCE_FAR_SCALE = 0.42;
-const PRESENCE_FAR_OPACITY = 0.16;
+const PRESENCE_FAR_SCALE = 0.5;
+const PRESENCE_FAR_OPACITY = 0.25;
 /**
  * Passed packages keep a faint ember instead of going black: looking back
  * shows the travelled road, and the warm event stars read as cooling embers.

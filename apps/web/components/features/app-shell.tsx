@@ -643,10 +643,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <div
                 className={cn(
                   "bg-space-field relative grid h-svh min-h-0 overflow-hidden",
+                  // Explore owns the whole sky in WebGL: the CSS washes, orbit
+                  // arcs and sparkles are a second, static universe that stays
+                  // put while the 3D one rotates — that mismatch reads as the
+                  // depths drifting. One universe at a time.
+                  appMode === "explore" && "bg-space-field--void",
                   windowed && "place-items-center p-4",
                 )}
               >
-                <SpaceBackdrop />
+                {appMode !== "explore" && <SpaceBackdrop />}
                 <KnowledgeUniverse interactive={appMode === "explore"} />
                 {appMode === "explore" && (
                   <motion.div

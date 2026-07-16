@@ -234,16 +234,18 @@ describe("universe temporal flight", () => {
   });
 
   it("keeps whatever the camera reaches fully present, thinning only with distance", () => {
-    // At the camera plane and slightly ahead: fully there.
+    // At the camera plane and through most of the loaded window: fully there.
+    // Reading events is the point — the stage ahead must stay legible.
     expect(universeTemporalFlightPresence(0, 60)).toEqual({ scale: 1, opacity: 1 });
     expect(universeTemporalFlightPresence(60, 60)).toEqual({ scale: 1, opacity: 1 });
+    expect(universeTemporalFlightPresence(60 * 5, 60)).toEqual({ scale: 1, opacity: 1 });
     // Far ahead: atmospheric floor, never invisible — the corridor keeps
     // promising more.
     const far = universeTemporalFlightPresence(60 * 20, 60);
-    expect(far.scale).toBeCloseTo(0.42, 5);
-    expect(far.opacity).toBeCloseTo(0.16, 5);
+    expect(far.scale).toBeCloseTo(0.5, 5);
+    expect(far.opacity).toBeCloseTo(0.25, 5);
     // Between: monotonic thinning.
-    const mid = universeTemporalFlightPresence(60 * 4, 60);
+    const mid = universeTemporalFlightPresence(60 * 10, 60);
     expect(mid.opacity).toBeLessThan(1);
     expect(mid.opacity).toBeGreaterThan(far.opacity);
     expect(mid.scale).toBeLessThan(1);

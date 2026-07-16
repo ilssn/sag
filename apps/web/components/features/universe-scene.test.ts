@@ -742,8 +742,9 @@ describe("universe scene production invariants", () => {
     // blends galaxy → corridor with the existing detail mix, so diving into a
     // source needs no CPU reposition and no extra particle budget.
     expect(nebulaMaterial).toContain("attribute vec3 aCorridor");
+    expect(nebulaMaterial).toContain("vec3 corridorTarget = position + aCorridor");
     expect(nebulaMaterial).toContain(
-      "vec3 animatedPosition = position + aCorridor * corridorMix",
+      "vec3 animatedPosition = mix(position, corridorTarget, corridorMix)",
     );
     // Dust yields inside the loaded window band, where real packages condensed.
     expect(nebulaMaterial).toContain("uniform float uCorridorNearZ");
@@ -756,26 +757,47 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("material.uniforms.uCorridorNearZ.value = config");
     expect(source).toContain("const NEBULA_CORRIDOR_BAND_OFF = 1e8");
 
+    // Corridor dust is camera-anchored: it wraps modulo a fixed span around
+    // the flight depth, so density beside the camera never depends on source
+    // size — a 586-event book gets the same dust as a 12-event note. The axis
+    // still has real ends: an entry-plane fade, a dissolving horizon, and a
+    // hard stop past the last event.
+    expect(source).toContain("const NEBULA_CORRIDOR_WRAP_SPAN = 2400");
+    expect(nebulaBuild).toContain(
+      "Math.min(Math.max(1, axisDepth), NEBULA_CORRIDOR_WRAP_SPAN)",
+    );
+    expect(nebulaMaterial).toContain("uniform float uFlightDepth");
+    expect(nebulaMaterial).toContain("float rel = mod(depthAlongAxis - uFlightDepth, span)");
+    expect(nebulaMaterial).toContain("float wrappedDepth = uFlightDepth + rel");
+    expect(nebulaMaterial).toContain("float entryFade = smoothstep(-220.0, -40.0, wrappedDepth)");
+    expect(nebulaMaterial).toContain("float horizonFade = 1.0 - smoothstep(0.82, 1.0, endProgress) * 0.8");
+    expect(source).toContain(
+      "material.uniforms.uFlightDepth.value = config ? this.appliedFlightDepth : 0",
+    );
+
     // The corridor carries its own light and has no visible far wall: glow
     // pockets brighten and swell, and the last stretch dissolves.
-    expect(nebulaMaterial).toContain("attribute float aCorridorFade");
     expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 1.45, corridorMix * glowParticle)");
-    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, aCorridorFade, corridorMix)");
+    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, axisFade, corridorMix)");
     expect(nebulaMaterial).toContain("* detailScale * glowScale * corridorBoost");
-    expect(nebulaBuild).toContain('geometry.setAttribute("aCorridorFade"');
 
-    // Most dust becomes the distant canyon walls: far out laterally, grown
-    // broad and soft, so a gaze turn barely parallaxes the surrounding nebula.
+    // Most dust becomes the canyon walls: a fine star field framing the
+    // corridor — bright, grain-sized (dust cap, no glow cap), and near enough
+    // to actually live inside the field of view.
     expect(source).toContain("const NEBULA_WALL_SHARE = 0.62");
+    expect(source).toContain("const NEBULA_WALL_LATERAL_MIN = 2.2");
+    expect(source).toContain("const NEBULA_WALL_LATERAL_MAX = 5.2");
     expect(nebulaBuild).toContain("NEBULA_WALL_LATERAL_MIN");
     expect(nebulaBuild).toContain('geometry.setAttribute("aCorridorWall"');
-    expect(nebulaMaterial).toContain("mix(1.0, 2.8, corridorMix * aCorridorWall)");
-    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.72, corridorMix * aCorridorWall)");
+    expect(nebulaMaterial).toContain("mix(1.0, 1.35, corridorMix * aCorridorWall)");
+    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.95, corridorMix * aCorridorWall)");
+    expect(nebulaMaterial).toContain("float capSelect = glowParticle;");
 
-    // While inside one source the rest of the sky recedes, and the browsed
-    // source claims a heavier share of the fixed particle budget.
-    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.3, uDetail * (1.0 - sourceMatch))");
-    expect(nebulaBuild).toContain("source.sourceId === browsedSourceId ? 4 : 1");
+    // While inside one source the rest of the sky recedes deep enough that a
+    // white-hot core cannot smudge the corridor, and the browsed source claims
+    // a heavier share of the fixed particle budget.
+    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.12, uDetail * (1.0 - sourceMatch))");
+    expect(nebulaBuild).toContain("source.sourceId === browsedSourceId ? 6 : 1");
     expect(nebulaBuild).toContain("const browsedSourceId = this.flightConfig?.sourceId ?? null");
   });
 
@@ -794,6 +816,10 @@ describe("universe scene production invariants", () => {
     // released the moment the session leaves or switches sources.
     expect(source).toContain("const BROWSE_GAZE_AZIMUTH_RAD = 0.3");
     expect(source).toContain("const BROWSE_GAZE_POLAR_RAD = 0.22");
+    // The orbit pivot sits DEEP in the corridor: dragging tilts the near
+    // corridor around the depths, instead of sweeping the depths around a
+    // near point — the deep field must hold still under rotation.
+    expect(source).toContain("const CORRIDOR_ENTRY_LOOK_AHEAD = 520");
     expect(source).toContain("private applyBrowseGaze()");
     expect(source).toContain("private releaseBrowseGaze()");
     expect(source).toContain(
@@ -837,6 +863,14 @@ describe("universe scene production invariants", () => {
     );
     // Passed packages keep an ember star but never a ghost card.
     expect(labels).toContain("((node.temporalPresenceOpacity ?? 1) - 0.18) / 0.82");
+
+    // Reading is the point: a transient hover dims unrelated cards in place
+    // (no reflow, no board jump) — only a locked focus clears the stage — and
+    // the network answers a glance with a whisper of scale, not a pop.
+    expect(labels).toContain(
+      "belongsToLabelSource && transientHover ? nodeCardReveal * 0.35 : 0",
+    );
+    expect(source).toContain("? this.transientHoverFocusId() ? 1.04 : 1.12");
   });
 
   it("debounces pointer label rebuilds and restores defaults", () => {
