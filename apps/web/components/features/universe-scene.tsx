@@ -765,7 +765,7 @@ function makeNebulaMaterial(darkTheme: boolean) {
         vAlpha = aAlpha * mix(1.0, detailAlpha, sourceMatch);
         // Depth of field for the whole sky: while inside one source, every
         // other nebula recedes into the dark instead of competing for light.
-        vAlpha *= mix(1.0, 0.3, uDetail * (1.0 - sourceMatch));
+        vAlpha *= mix(1.0, 0.12, uDetail * (1.0 - sourceMatch));
         vDetail = smoothstep(0.08, 0.92, particleDetail);
         vGlow = aGlow;
         vShape = aShape;
@@ -1311,6 +1311,13 @@ class UniverseForceSceneEngine {
     // The gaze weighting belongs to one corridor: leaving or switching
     // sources frees the camera immediately; the next entry dive re-applies it.
     if (!nextFlight || flightSourceChanged) this.releaseBrowseGaze();
+    if (flightSourceChanged) {
+      // A fresh entry unfolds the stream anew along the new approach; stale
+      // anchors from an earlier visit would scatter events off the new path.
+      [...this.placementTargets.keys()]
+        .filter((key) => key.startsWith("timeline-bundle:"))
+        .forEach((key) => this.placementTargets.delete(key));
+    }
     if (nextFlight && flightSourceChanged) {
       // A fresh browse session starts at its window's newest package. The entry
       // camera framing is authoritative, so this reset applies no delta.
@@ -5281,6 +5288,9 @@ class UniverseForceSceneEngine {
     }
     const entering = this.updateNodeEntries(now);
     const timelineMoving = this.updateTimelineMotions(now);
+    // The browse fog is wherever the camera is — entry dives, look turns and
+    // pans included — or the mist visibly detaches from the exploration.
+    this.syncNebulaCorridorUniforms();
     const flightMoving = this.updateTemporalFlight(now);
     this.updateVisualLayout(now);
     const nebulaAnimating = this.updateNebulaAnimation(now);
@@ -5553,6 +5563,7 @@ class UniverseForceSceneEngine {
     const now = performance.now();
     this.lastControlsChangeAt = now;
     this.cameraCalmUntil = now + NEBULA_GESTURE_CALM_MS;
+    this.syncNebulaCorridorUniforms();
     this.updateVisualLayout(now);
     this.updateNodeMorphScales(now);
     this.updateLabels(now);

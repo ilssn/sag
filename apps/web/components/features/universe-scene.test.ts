@@ -748,6 +748,15 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("const NEBULA_FOG_WRAP_SIZE = 1_700.0");
     expect(source).toContain("private syncNebulaCorridorUniforms()");
     expect(source).toContain("(material.uniforms.uFogCamera.value as THREE.Vector3).copy(camera.position)");
+    // The fog may never detach from the exploration: it follows the camera on
+    // every frame and every camera gesture, and a fresh source entry unfolds
+    // the stream anew instead of reusing anchors from an earlier path.
+    const renderLoop = sourceBetween(
+      "private loop = (now: number) =>",
+      "private updateTemporalPresence()",
+    );
+    expect(renderLoop).toContain("this.syncNebulaCorridorUniforms()");
+    expect(source).toContain('key.startsWith("timeline-bundle:")');
 
     // The fog carries its own light: glow pockets brighten and swell, and a
     // share of the dust becomes the big soft enveloping haze.
@@ -760,7 +769,7 @@ describe("universe scene production invariants", () => {
 
     // While inside one source the rest of the sky recedes, and the browsed
     // source claims a heavier share of the fixed particle budget.
-    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.3, uDetail * (1.0 - sourceMatch))");
+    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.12, uDetail * (1.0 - sourceMatch))");
     expect(nebulaBuild).toContain("source.sourceId === browsedSourceId ? 4 : 1");
     expect(nebulaBuild).toContain("const browsedSourceId = this.flightConfig?.sourceId ?? null");
   });
