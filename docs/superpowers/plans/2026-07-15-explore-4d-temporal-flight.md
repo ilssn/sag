@@ -198,7 +198,7 @@
 
 原设想：现状预取由「页意图」触发。新模型下改为由相机在时间轴上的位置与速度驱动：飞行前方低水位时预取。`planUniverseTimelinePrefetch`(`lib/universe-timeline-prefetch.ts:102-236`) 的「至多预取一页、优先用户当前方向、避免来回震荡」决策逻辑原样可用，只需把输入从「页意图方向」换成「相机飞行方向」。
 
-- [ ] **Step 5: 飞行途中的数据等待反馈**（MVP 遗留：进出场仍是旧动画——新页从注视点长出、旧页横向飞出，与飞行相机观感不匹配，应改为就地凝现/淡出；1.6s 看门狗未删）
+- [x] **Step 5: 飞行途中的数据等待反馈** —— 由 v3 兑现：进出场改为就地凝现/原地溶解（飞行态 `condenseInPlace`/`dissolveInPlace`），星云走廊在前方表达「有东西正在具象化」；1.6s 看门狗保留但只清挂起意图（snapToStable=false），无可见回滚可言。
 
 现状缓存未命中时 3D 场景零反馈，只有屏幕底部一行 11px 小字（`knowledge-universe.tsx:3534-3541`），1.6s 看门狗(`universe-scene.tsx:2629-2636`) 还会静默回滚整个意图。
 
@@ -210,38 +210,47 @@
 
 ---
 
-### 阶段 3：远景星云 = 时间密度
+## 重规划 v3（2026-07-16，真实数据裁决：轴的键从时间戳改为序数）
 
-**文件：**
-- 修改：`apps/web/components/features/universe-scene.tsx`（`rebuildNebula`）
+**触发**：首次真实数据验收即命中退化分支。书籍类源（ARTICLE）的抽取管线给每个事件写 `start_time = source_created_time`（zleap-sag `modules/extract/parser.py::_extract_times`），整本书 218 个事件同一毫秒 → 后端直方图退化为单个 start==end 桶（`engine_manager.py:1548-1556`）→ 前端 `createUniverseTemporalAxis` 依约返回 null → 飞行整链失活，滚轮退回缩放，滚动不再涌现事件。v2 契约「axis 造不出来的源退化为按钮翻页」把**主要数据形态（书）**判给了退化路径。更糟的裁决：书籍的 canonical 序 `(event_time DESC, id DESC)` 在全同时间戳下就是 **UUID 随机序**——不只轴没了，探索顺序本身是乱的。
 
-**接口：**
-- 消费：`partition.time_buckets`（`lib/types.ts:420` 已有类型声明，当前全 `apps/web` 零消费）
-- 产出：飞行前方的时间密度预览
+**判决：计数轴不能以时间戳为查询键；「后端零改动」约束就此推翻（v1 阶段 1 已预留此决定点）。**
 
-- [ ] **Step 1: 星云消费 `time_buckets`**
+决定，从数据层向上：
 
-现状 `rebuildNebula`(`:3186-3336`) 的粒子分配权重是 `log2(eventCount + entityCount + 2)`(`:3214-3227`)——表达的是「该源内容总量」，与时间无关。
+1. **canonical 探索序由后端定义**：`ORDER BY coalesce(start_time, created_time) DESC, rank ASC, id ASC`。`SourceEvent.rank` 是抽取器按原文顺序分配的源内全局连续序（extractor「按原文顺序重新排序并分配全局 rank」，索引 `idx_source_rank` 已有），恰好是书籍的叙事序：同刻事件（书）按叙事顺序探索——进入源 = 从第一章起飞，飞行 = 读下去；异刻事件（日记/推送）纯时间倒序不变。v2 的「同桶同刻塌缩」天花板随之消灭。
+2. **timeline slice 每个 bundle 下发 `ordinal`（快照内 0 = 最新端）、slice 级 `total_events`（快照内总数）**。快照语义（as_of + revision 双重钉死）保证 ordinal 会话内不漂移；浏览中新入库的事件对本会话不可见，本来如此。keyset 游标升级为 (event_time, rank, id) 三元组，旧游标拒收（游标是会话级不落盘，无迁移负担）。`schema_version` 2→3。
+3. **前端轴 = `{total}`，深度 = ordinal × `TEMPORAL_AXIS_UNITS_PER_EVENT`**。`universe-temporal-axis.ts` 删除 CDF/桶机制，投影输入换 ordinal；**每个源都有轴**（total ≥ 1），螺旋回退只剩 expansion bundles（离题探索，维持既有行为）。搜索/任意锚点入场由全局序数天然对齐，不再有窗口相对 rank 兜底。
+4. **近大远小改为相机相对**。v2 的静态 age 亮度/缩放在相机会动之后语义破产：窗口滑到 ordinal≈100 时全窗事件按绝对 age≈0.5 永远半暗半小。投影层只管摆位（z + 横向散布），呈现因子（node/star/card scale、opacity、link opacity）改由场景每帧按「节点深度 − 飞行深度」计算：身后快速淡出，眼前全亮，前方大气透视渐隐——这才是「探索中涌现」的光学语言。
+5. **翻页进出场改为就地凝现/淡出**（v2 阶段 2 Step 5 的兑现）：浏览态入场节点在其轴位原地 0→1 凝现（不再从注视点出生、不再有横移弧线），退场原地淡出。1.6s 看门狗保留但仅清挂起意图（snapToStable=false 原语义），无可见回滚。
+6. **星云 = 走廊里尚未加载的事件**：每源粒子构建期同时算两套偏移——总览星系形态（现状）+ 走廊形态（深度 = stableUnit × 轴长，横向按走廊半径曲线）——顶点着色器用现有 `uDetail`/`uDetailSource` 按源混合：飞进一个源，它的星系拉成时间走廊。已加载窗口带内的粒子由 uniform 带状压暗，真实节点凝现处星云让位，「那里有东西正在具象化」不再是空话。粒子预算与「不逐帧全量重传」范式不变。
+7. **跟随裕量随速度**：`planUniverseTemporalFlightFollow` 增加速度输入，前向 margin 加 |v|×提前量（不受 span/3 钳制，钳制只保护静止防 ping-pong），快速飞行连锁翻页——「源源不断」由数据管线兜底，而不是赌动画节奏。
 
-改为让粒子沿该源的时间轴分布，密度由 `time_buckets[].count` 决定。后端已按源把 `[min_time, max_time]` 等分成 8 桶（上限 24，`engine_manager.py:1481,1490`）并精确统计每桶事件数，随 manifest 下发。
+**保留/边界**：`time_buckets` 留在 manifest（后续星云可叠加真实时间密度），轴不再消费；书籍源底部时间标签仍是单一导入日期，改「第 x–y · 共 N 条」进 backlog；移动端手势缺位不变（桌面滚轮先行，按钮兜底）。
 
-已知局限，需在实现时评估：桶是**等时间宽度**而非等事件数，时间分布高度不均的源会出现很空的桶；桶数上限 24，若沿轴飞行需要更细的分箱，需后端放开 `bucket_count`——这会打破「后端零改动」约束，届时单独提出。
+### 阶段 2.5：序数轴（后端数据面 → 前端数据面）
 
-- [ ] **Step 2: 保持现有星云基建不动**
+- [x] **Step 1: 后端 canonical 序 + ordinal/total_events**：`engine_manager.universe_timeline` 改排序与三元组 keyset；页首序数一次 COUNT、页内连续递增；`UniverseTimelineBundleInfo.ordinal` / `UniverseTimelineInfo.total_events`；service/schema 透传，schema_version→3，校验 ordinal 严格递增且 < total_events。pytest：同刻三连组按 rank 稳定 tie-break、全同时间戳源纯 rank 分页、ordinal 跨页连续、newer/older 双向一致、total_events 恒等。
+- [x] **Step 2: 前端数据面**：types schema 3 + `ordinal`/`total_events`；deque/admission 契约校验（递增、非负、< total）；`UniverseWorkingBundle.ordinal` 携带；会话 `timeline.totalEvents` 记账。
+- [x] **Step 3: 轴序数化**：`universe-temporal-axis.ts` 重写为 `{total}` + ordinal 投影（视觉策略曲线保留）；`knowledge-universe.tsx` 以 working bundle ordinal 投影、flight 配置 maxDepth=(total−1)×60、windowNear/Far=可见序数极值×60；删除 rankProgress 与 time_buckets 消费。
+- [x] **Step 4: 门禁**（tsc / vitest / eslint / next build / pytest -k universe）。
 
-`makeNebulaMaterial`(`:642-760`) 的 shader、逐粒子 `BufferAttribute`(`:3286-3327`)、仅在 context 变化时整体重传的 `updateNebulaAlphas`(`:3359-3409`) 这套「GPU 端做视觉状态、不逐帧全量重传」的范式已在生产验证，原样保留，只改粒子的位置分配逻辑。
+### 阶段 3（修订）：呈现与手感——距离景深 · 就地凝现 · 速度裕量
 
-粒子预算维持 `universe_proxy_budget_*`（桌面 3000 / 移动 1200）硬上限不变。
+- [x] **Step 1: 距离景深**：投影呈现因子归一（摆位保留），场景每帧按 |节点z − 飞行平面z| 计算大气因子乘入现有 scale/opacity 管线（`updateNodeMorphScales`/`setObjectOpacity`/`updateLinkVisuals`），身后 ~2 事件距离淡出、前方 ~8 事件距离渐隐至 0.22。
+- [x] **Step 2: 就地凝现/淡出**：`timelineMotionFor` 在浏览态 from=to、无弧线，opacity/scale 原地 ramp；退场同理。
+- [x] **Step 3: 速度裕量**：follow планner 增加 velocity 输入 + 单测（快速前飞提前多页、静止不 ping-pong）。
+- [x] **Step 4: 门禁**（tsc 0 · vitest 357/37 · eslint 0 · next build 0）；**视觉验收待用户**（滚动源源不断涌现、跟手、无跳变）。
 
-- [ ] **Step 3: 验证阶段 3**
+### 阶段 4（修订）：星云走廊 = 未加载事件
 
-`npx tsc --noEmit && npx vitest run` 全绿。**视觉验证**：飞行时能在抵达之前就看见前方的事件密度；密集时段星云浓、稀疏时段星云淡；星云与近景节点的凝现过渡不突兀。
+- [x] **Step 1: 双形态偏移**：`rebuildNebula` 为每粒子加走廊偏移 attribute（深度 stableUnit×轴长、横向走廊半径、轴长由 `sceneNode.eventCount` 推出并入签名）；`makeNebulaMaterial` 顶点按 `uDetail`×`uDetailSource` 混合两套偏移。
+- [x] **Step 2: 已加载带压暗**：uniform 传窗口深度带（世界 z），带内粒子 alpha 压暗；随飞行连续更新，零 CPU 重传。
+- [x] **Step 3: 门禁**（同上，走廊全在 GPU 混合，无逐帧重传）；**视觉验收待用户**（星系↔走廊过渡、凝现让位、预算不变）。
 
----
+### 阶段 5：文档对齐
 
-### 阶段 4：文档对齐
-
-- [ ] **Step 1: 重写 `docs/architecture/knowledge-universe.md` 的相关章节**
+- [x] **Step 1: 重写 `docs/architecture/knowledge-universe.md` 的相关章节**
 
 本次改造的起因之一就是代码与该文档在滚轮语义上背离（文档 5 处写「滚轮只做平滑缩放，不触发时间加载」，代码却在滚轮上挂了翻页 + 网络）。改造后交互契约彻底变化，必须同步：
 - 产品语义（`:20-40`）：翻页 → 飞行
@@ -249,10 +258,10 @@
 - 生产验证门禁（`:275-310`）：更新为飞行模型的验收项
 - 增量过渡规则（`:197-253`）：相机不再静止
 
-- [ ] **Step 2: 把该文档加进 `docs/README.md` 索引**
+- [x] **Step 2: 把该文档加进 `docs/README.md` 索引**
 
 `docs/README.md:10-16` 列了 `architecture.md`/`agent-mcp-graph.md`/`agent-runtime.md`/`connectors.md`，唯独漏了 `architecture/knowledge-universe.md`——对后续读者是个发现性缺口。
 
-- [ ] **Step 3: 更新 `CHANGELOG.md`**
+- [x] **Step 3: 更新 `CHANGELOG.md`**
 
 `Unreleased` 段当前完全没提探索模式（对比它涉及的代码量，这本身是个过程缺口）。

@@ -8,6 +8,7 @@ import {
   planUniverseTemporalFlightFollow,
   stepUniverseTemporalFlight,
   UNIVERSE_FLIGHT_UNITS_PER_WHEEL_PIXEL,
+  universeTemporalFlightPresence,
 } from "./universe-temporal-flight";
 
 const WHEEL = { deltaMode: 0, viewportHeight: 800 };
@@ -195,5 +196,60 @@ describe("universe temporal flight", () => {
     // Margin clamps to a third of the span, so the middle stays quiet.
     expect(planUniverseTemporalFlightFollow({ ...narrow, depth: 130 })).toBeNull();
     expect(planUniverseTemporalFlightFollow({ ...narrow, depth: 155 })).toBe("next");
+  });
+
+  it("leads the page with velocity so fast flight never outruns its data", () => {
+    const window = {
+      windowNearDepth: 600,
+      windowFarDepth: 960,
+      marginUnits: 90,
+      busy: false,
+      hasNext: true,
+      hasPrevious: true,
+    };
+
+    // Mid-window is quiet at rest, but flying fast toward the old edge pages
+    // now: 900 units/s × 0.35 s lead crosses the far threshold from anywhere
+    // in this window.
+    expect(planUniverseTemporalFlightFollow({ ...window, depth: 780 })).toBeNull();
+    expect(planUniverseTemporalFlightFollow({
+      ...window,
+      depth: 780,
+      velocity: 900,
+    })).toBe("next");
+    // The lead is direction-gated: speed toward the newer edge trips previous,
+    // and a camera short of both led thresholds stays quiet even at speed.
+    expect(planUniverseTemporalFlightFollow({
+      ...window,
+      depth: 780,
+      velocity: -900,
+    })).toBe("previous");
+    expect(planUniverseTemporalFlightFollow({
+      ...window,
+      depth: 540,
+      velocity: 900,
+    })).toBeNull();
+  });
+
+  it("keeps whatever the camera reaches fully present, thinning only with distance", () => {
+    // At the camera plane and slightly ahead: fully there.
+    expect(universeTemporalFlightPresence(0, 60)).toEqual({ scale: 1, opacity: 1 });
+    expect(universeTemporalFlightPresence(60, 60)).toEqual({ scale: 1, opacity: 1 });
+    // Far ahead: atmospheric floor, never invisible — the corridor keeps
+    // promising more.
+    const far = universeTemporalFlightPresence(60 * 20, 60);
+    expect(far.scale).toBeCloseTo(0.42, 5);
+    expect(far.opacity).toBeCloseTo(0.16, 5);
+    // Between: monotonic thinning.
+    const mid = universeTemporalFlightPresence(60 * 4, 60);
+    expect(mid.opacity).toBeLessThan(1);
+    expect(mid.opacity).toBeGreaterThan(far.opacity);
+    expect(mid.scale).toBeLessThan(1);
+    expect(mid.scale).toBeGreaterThan(far.scale);
+    // Behind: passed packages fade out quickly but keep their size while going.
+    expect(universeTemporalFlightPresence(-30, 60).opacity).toBe(1);
+    expect(universeTemporalFlightPresence(-90, 60).opacity).toBeLessThan(1);
+    expect(universeTemporalFlightPresence(-60 * 3, 60).opacity).toBe(0);
+    expect(universeTemporalFlightPresence(-60 * 3, 60).scale).toBe(1);
   });
 });

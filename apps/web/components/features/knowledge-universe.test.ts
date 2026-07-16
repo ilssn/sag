@@ -48,25 +48,33 @@ describe("knowledge universe production interaction policy", () => {
     // Expansion-discovered events are placed but carry no temporal projection,
     // so the deterministic spiral stays as their fallback.
     expect(source).toContain("stableRootEventOffset(");
-    expect(source).toContain("presentationScale:");
-    expect(source).toContain("presentationCardScale:");
-    expect(source).toContain("presentationOpacity:");
+    // Presence along the axis (scale/opacity) is the camera's story, computed
+    // per frame by the scene from flight depth — never baked statically into a
+    // node by absolute age, which would leave a reached package dim and small.
+    expect(source).not.toContain("presentationScale:");
+    expect(source).not.toContain("presentationCardScale:");
+    expect(source).not.toContain("presentationOpacity:");
   });
 
-  it("derives temporal depth from the source's own histogram, not the cached window", () => {
+  it("derives temporal depth from the snapshot's exploration ordinals, not the cached window", () => {
     // An axis built from the visible window would move an event's depth whenever
     // paging changed what surrounds it — the axis would stop being an axis.
-    expect(source).toContain("sourceById.get(browseSessionSourceId)?.time_buckets");
-    expect(source).toContain("createUniverseTemporalAxis(");
-    expect(source).toContain("timestamp: temporalTimestampByBundleId.get(bundleId)");
-    // Rank survives only as the fallback for an event with no usable time.
-    expect(source).toContain("rankProgress: universeTemporalRankProgress(");
+    // The ordinal is the backend's snapshot-stable exploration position, so an
+    // imported book (every event at one instant) explores in narrative order.
+    expect(source).toContain("createUniverseTemporalAxis(browseSession.timeline.totalEvents ?? 0)");
+    expect(source).toContain("state.totalEvents = page.total_events");
+    expect(source).toContain("temporalOrdinalByBundleId");
+    expect(source).toContain("Number.isInteger(workingBundle.ordinal)");
+    // Clock time no longer keys the axis anywhere: no histogram, no timestamp
+    // lookup, no window-relative rank fallback.
+    expect(source).not.toContain("time_buckets");
+    expect(source).not.toContain("universeTemporalRankProgress");
+    expect(source).not.toContain("temporalTimestampByBundleId");
     // Axis length is events × a fixed per-event slice, so the visible window
     // spans the same depth whatever the source's size — and never rides on the
     // source's visual radius.
     expect(source).toContain("const TEMPORAL_AXIS_UNITS_PER_EVENT =");
     expect(source).toContain("universeTemporalAxisDepth(");
-    // A source with no usable histogram keeps the spiral: no fake axis.
     expect(source).toContain("temporalAxis\n        ? projectUniverseTemporalAxis(");
   });
 

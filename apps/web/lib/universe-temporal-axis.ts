@@ -1,45 +1,37 @@
 /**
- * The source-local temporal axis.
+ * The source-local counting axis.
  *
- * Depth tracks how many of the source's events precede an event, not how much
- * clock time does. The source histogram supplies both, and clock time fails the
- * only view that matters: at most 18 packages are ever on screen, they are
- * adjacent in time, and real sources cluster — so a clock-time axis collapses the
- * visible window into a clump and hides depth exactly where the user is looking.
- * Counting instead spends depth where the events are: quiet stretches compress,
- * busy ones open up, and travel costs the same per event everywhere.
+ * Depth is the event's position in the source's canonical exploration order —
+ * the backend's snapshot-stable `ordinal` (0 = newest end) — not clock time.
+ * Clock time failed the only data shape that matters here: an imported book
+ * stamps every event with one instant, which collapses a timestamp axis to a
+ * point (and its histogram to a single degenerate bucket). Counting spends
+ * depth where the events are for every source: travel costs the same per event
+ * everywhere, and a book's axis is simply its narrative order.
  *
- * The histogram is source-wide (the backend aggregates it over every live event
- * with no paging), so an event's depth cannot move when the cache does. Callers
- * must never rebuild the axis from the visible window.
+ * The ordinal is snapshot-scoped (the timeline session pins as_of + revision),
+ * so an event's depth cannot move because the cache paged. Callers must never
+ * rebuild the axis from the visible window.
+ *
+ * Visual depth-cueing (scale/opacity by distance) deliberately does NOT live
+ * here: with the camera flying along the axis, presence is a function of the
+ * camera's position, so the scene computes it per frame. This module only
+ * places packages.
  */
 
-export interface UniverseTemporalAxisBucket {
-  /** Epoch milliseconds. */
-  start: number;
-  end: number;
-  count: number;
-}
-
 export interface UniverseTemporalAxis {
-  /** Bucket edges, oldest first. One longer than the bucket list. */
-  readonly boundaries: readonly number[];
-  /** Events strictly older than each boundary. Same length as boundaries. */
-  readonly cumulative: readonly number[];
+  /** Snapshot-stable number of events in the source's exploration order. */
   readonly total: number;
 }
 
+/**
+ * World length of one event's slice of its source's counting axis. Shared by
+ * package placement, flight margins and the nebula corridor, so one wheel
+ * notch always flies the same share of events everywhere.
+ */
+export const UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT = 60;
+
 export interface UniverseTemporalAxisPolicy {
-  nearNodeScale: number;
-  farNodeScale: number;
-  nearEventStarScale: number;
-  farEventStarScale: number;
-  nearCardScale: number;
-  farCardScale: number;
-  nearOpacity: number;
-  farOpacity: number;
-  nearLinkOpacity: number;
-  farLinkOpacity: number;
   /** Normalized travel distance along the axis. */
   depthSpan: number;
   /** Normalized lateral radius at the near and far ends of the axis. */
@@ -56,10 +48,8 @@ export type UniverseTemporalAxisPolicyInput = Partial<UniverseTemporalAxisPolicy
 
 export interface UniverseTemporalBundleInput {
   bundleId: string;
-  /** Event time in epoch milliseconds. */
-  timestamp?: number;
-  /** Position within the visible window; used only when timestamp is unusable. */
-  rankProgress?: number;
+  /** Snapshot-stable exploration ordinal; 0 = the newest end of the source. */
+  ordinal: number;
 }
 
 export interface UniverseTemporalBundleProjection {
@@ -67,24 +57,9 @@ export interface UniverseTemporalBundleProjection {
   ageProgress: number;
   /** Add this normalized package offset to the scene's source-centred layout. */
   normalizedOffset: { x: number; y: number; z: number };
-  nodeScale: number;
-  eventStarScale: number;
-  cardScale: number;
-  opacity: number;
-  linkOpacity: number;
 }
 
 export const DEFAULT_UNIVERSE_TEMPORAL_AXIS_POLICY: UniverseTemporalAxisPolicy = {
-  nearNodeScale: 1.08,
-  farNodeScale: 0.38,
-  nearEventStarScale: 1.18,
-  farEventStarScale: 0.3,
-  nearCardScale: 1,
-  farCardScale: 0.44,
-  nearOpacity: 1,
-  farOpacity: 0.24,
-  nearLinkOpacity: 0.58,
-  farLinkOpacity: 0.12,
   depthSpan: 1,
   nearLateralSpread: 0.18,
   farLateralSpread: 0.44,
@@ -106,14 +81,6 @@ function positive(value: number | undefined, fallback: number) {
   return Number.isFinite(value) ? Math.max(Number.EPSILON, value as number) : fallback;
 }
 
-function opacity(value: number | undefined, fallback: number) {
-  return Number.isFinite(value) ? clamp01(value as number) : fallback;
-}
-
-function integer(value: number) {
-  return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
-}
-
 function lerp(from: number, to: number, progress: number) {
   return from + (to - from) * progress;
 }
@@ -131,126 +98,52 @@ function stableUnit(value: string) {
   return (hash >>> 0) / 4294967295;
 }
 
-/** Rank 0 is active/near; the last rank is the far time boundary. */
-export function universeTemporalRankProgress(rank: number, total: number) {
-  const count = integer(total);
-  if (count <= 1) return 0;
-  return clamp01(rank / (count - 1));
+/**
+ * Builds the counting axis for a source. Returns null when there is nothing to
+ * explore at all (no events), which leaves callers on their spiral fallback.
+ */
+export function createUniverseTemporalAxis(
+  totalEvents: number,
+): UniverseTemporalAxis | null {
+  if (!Number.isFinite(totalEvents)) return null;
+  const total = Math.floor(totalEvents);
+  if (total < 1) return null;
+  return { total };
 }
 
 /**
- * Builds the counting axis from a source's histogram. Returns null when the
- * source cannot carry an axis at all — no buckets, no events, or every event at
- * one instant — which leaves callers on their rank fallback.
+ * World length of the axis. Even spacing is the whole point of counting: the
+ * newest event sits at depth 0, the oldest at (total - 1) × unitsPerEvent.
  */
-export function createUniverseTemporalAxis(
-  buckets: readonly UniverseTemporalAxisBucket[],
-): UniverseTemporalAxis | null {
-  if (buckets.length === 0) return null;
-  const boundaries: number[] = [];
-  const cumulative: number[] = [0];
-  let total = 0;
-
-  for (let index = 0; index < buckets.length; index += 1) {
-    const bucket = buckets[index];
-    if (!Number.isFinite(bucket.start) || !Number.isFinite(bucket.end)) return null;
-    if (index === 0) boundaries.push(bucket.start);
-    if (bucket.end < boundaries[boundaries.length - 1]) return null;
-    boundaries.push(bucket.end);
-    total += integer(bucket.count);
-    cumulative.push(total);
-  }
-
-  if (total <= 0) return null;
-  if (boundaries[boundaries.length - 1] <= boundaries[0]) return null;
-  return { boundaries, cumulative, total };
-}
-
-/** World length of the axis. Even spacing is the whole point of counting. */
 export function universeTemporalAxisDepth(
   axis: UniverseTemporalAxis | null,
   unitsPerEvent: number,
 ) {
   if (!axis) return 0;
-  return axis.total * Math.max(0, unitsPerEvent);
+  return Math.max(0, axis.total - 1) * Math.max(0, unitsPerEvent);
 }
 
-/**
- * 0 is the source's newest moment, 1 its oldest. Progress is the share of the
- * source's events older than the timestamp, interpolated linearly inside the
- * bucket that contains it.
- */
+/** 0 is the source's newest end, 1 its oldest; linear in exploration order. */
 export function universeTemporalAxisAgeProgress(
   axis: UniverseTemporalAxis | null,
-  timestamp: number,
-  fallback = 0,
+  ordinal: number,
 ) {
-  if (!axis || !Number.isFinite(timestamp)) return clamp01(fallback);
-  const { boundaries, cumulative, total } = axis;
-  if (timestamp <= boundaries[0]) return 1;
-  if (timestamp >= boundaries[boundaries.length - 1]) return 0;
-
-  let index = 0;
-  while (
-    index < boundaries.length - 2
-    && timestamp >= boundaries[index + 1]
-  ) index += 1;
-
-  const start = boundaries[index];
-  const end = boundaries[index + 1];
-  const span = end - start;
-  const withinBucket = span > 0 ? (timestamp - start) / span : 0;
-  const older = cumulative[index]
-    + withinBucket * (cumulative[index + 1] - cumulative[index]);
-  return clamp01(1 - older / total);
+  if (!axis || axis.total <= 1) return 0;
+  if (!Number.isFinite(ordinal)) return 0;
+  return clamp01(ordinal / (axis.total - 1));
 }
 
 export function resolveUniverseTemporalAxisPolicy(
   input: UniverseTemporalAxisPolicyInput = {},
 ): UniverseTemporalAxisPolicy {
   const defaults = DEFAULT_UNIVERSE_TEMPORAL_AXIS_POLICY;
-
-  const nearNodeScale = positive(input.nearNodeScale, defaults.nearNodeScale);
-  const nearEventStarScale = positive(
-    input.nearEventStarScale,
-    defaults.nearEventStarScale,
-  );
-  const nearCardScale = positive(input.nearCardScale, defaults.nearCardScale);
-  const nearOpacity = opacity(input.nearOpacity, defaults.nearOpacity);
-  const nearLinkOpacity = opacity(input.nearLinkOpacity, defaults.nearLinkOpacity);
   const nearLateralSpread = nonNegative(
     input.nearLateralSpread,
     defaults.nearLateralSpread,
   );
-
-  // Age may only shrink and dim a package, and may only fan it wider. Clamping
-  // here keeps every caller's overrides monotonic along the axis.
+  // The corridor may only fan wider with age, so depth still reads as travel
+  // even when a caller overrides the spread.
   return {
-    nearNodeScale,
-    farNodeScale: Math.min(
-      nearNodeScale,
-      positive(input.farNodeScale, defaults.farNodeScale),
-    ),
-    nearEventStarScale,
-    farEventStarScale: Math.min(
-      nearEventStarScale,
-      positive(input.farEventStarScale, defaults.farEventStarScale),
-    ),
-    nearCardScale,
-    farCardScale: Math.min(
-      nearCardScale,
-      positive(input.farCardScale, defaults.farCardScale),
-    ),
-    nearOpacity,
-    farOpacity: Math.min(
-      nearOpacity,
-      opacity(input.farOpacity, defaults.farOpacity),
-    ),
-    nearLinkOpacity,
-    farLinkOpacity: Math.min(
-      nearLinkOpacity,
-      opacity(input.farLinkOpacity, defaults.farLinkOpacity),
-    ),
     depthSpan: nonNegative(input.depthSpan, defaults.depthSpan),
     nearLateralSpread,
     farLateralSpread: Math.max(
@@ -268,9 +161,9 @@ export function resolveUniverseTemporalAxisPolicy(
 }
 
 /**
- * Projects event packages onto the counting axis. An event and its entities share
- * one package offset, so temporal order reads as continuous depth, scale and
- * opacity rather than as per-item staggering.
+ * Projects event packages onto the counting axis. An event and its entities
+ * share one package offset, so exploration order reads as continuous depth
+ * rather than as per-item staggering.
  */
 export function projectUniverseTemporalAxis(
   bundles: readonly UniverseTemporalBundleInput[],
@@ -280,14 +173,10 @@ export function projectUniverseTemporalAxis(
   const policy = resolveUniverseTemporalAxisPolicy(policyInput);
 
   return bundles.map((bundle) => {
-    const ageProgress = universeTemporalAxisAgeProgress(
-      axis,
-      bundle.timestamp ?? Number.NaN,
-      bundle.rankProgress ?? 0,
-    );
+    const ageProgress = universeTemporalAxisAgeProgress(axis, bundle.ordinal);
     const curvedAge = Math.pow(ageProgress, policy.ageExponent);
-    // Every package keeps a lateral radius, jittered per package. Packages that
-    // share a moment sit at the same depth and would otherwise stack on one point.
+    // Every package keeps a lateral radius, jittered per package, so packages
+    // never stack onto the axis line itself.
     const radius = lerp(
       policy.nearLateralSpread,
       policy.farLateralSpread,
@@ -305,19 +194,6 @@ export function projectUniverseTemporalAxis(
         y: canonicalNumber(Math.sin(angle) * radius * policy.verticalAspect),
         z: canonicalNumber(-policy.depthSpan * curvedAge),
       },
-      nodeScale: lerp(policy.nearNodeScale, policy.farNodeScale, curvedAge),
-      eventStarScale: lerp(
-        policy.nearEventStarScale,
-        policy.farEventStarScale,
-        curvedAge,
-      ),
-      cardScale: lerp(policy.nearCardScale, policy.farCardScale, curvedAge),
-      opacity: lerp(policy.nearOpacity, policy.farOpacity, curvedAge),
-      linkOpacity: lerp(
-        policy.nearLinkOpacity,
-        policy.farLinkOpacity,
-        curvedAge,
-      ),
     };
   });
 }

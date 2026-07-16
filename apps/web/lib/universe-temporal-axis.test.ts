@@ -6,112 +6,78 @@ import {
   resolveUniverseTemporalAxisPolicy,
   universeTemporalAxisAgeProgress,
   universeTemporalAxisDepth,
-  universeTemporalRankProgress,
 } from "./universe-temporal-axis";
 
-/**
- * Ten events over 400ms of clock. Nine of them land in the newest quarter; the
- * middle half is empty. The shape a real source has, exaggerated.
- */
-const CLUSTERED = createUniverseTemporalAxis([
-  { start: 0, end: 100, count: 1 },
-  { start: 100, end: 200, count: 0 },
-  { start: 200, end: 300, count: 0 },
-  { start: 300, end: 400, count: 9 },
-]);
-
-/** Ten events spread evenly, for projection tests that don't care about shape. */
-const EVEN = createUniverseTemporalAxis([{ start: 0, end: 1_000, count: 10 }]);
+/** Ten events in exploration order; the shape every source now shares. */
+const TEN = createUniverseTemporalAxis(10);
 
 describe("universe temporal axis", () => {
-  it("normalizes rank in either chronological direction", () => {
-    expect([0, 1, 2, 3].map((rank) =>
-      universeTemporalRankProgress(rank, 4))).toEqual([
-      0,
-      1 / 3,
-      2 / 3,
-      1,
-    ]);
+  it("spends the same depth on every event, whatever its clock time was", () => {
+    // ordinal → age is linear: the axis is the exploration order itself. An
+    // imported book (every event at one instant) gets exactly the same axis as
+    // a two-year diary with the same event count.
+    expect(universeTemporalAxisAgeProgress(TEN, 0)).toBe(0);
+    expect(universeTemporalAxisAgeProgress(TEN, 9)).toBe(1);
+    expect(universeTemporalAxisAgeProgress(TEN, 3)).toBeCloseTo(3 / 9, 10);
   });
 
-  it("spends depth on events, not on empty stretches of clock time", () => {
-    // Half the clock carries no events at all and collapses to a single point.
-    expect(universeTemporalAxisAgeProgress(CLUSTERED, 100)).toBe(0.9);
-    expect(universeTemporalAxisAgeProgress(CLUSTERED, 200)).toBe(0.9);
-    expect(universeTemporalAxisAgeProgress(CLUSTERED, 300)).toBe(0.9);
-    // The busy quarter of the clock owns 90% of the axis. On a clock-time axis it
-    // would have owned 25% and crushed nine events into it.
-    expect(universeTemporalAxisAgeProgress(CLUSTERED, 350)).toBeCloseTo(0.45, 10);
-    // Endpoints pin to the source's newest and oldest moments.
-    expect(universeTemporalAxisAgeProgress(CLUSTERED, 400)).toBe(0);
-    expect(universeTemporalAxisAgeProgress(CLUSTERED, 0)).toBe(1);
-  });
-
-  it("clamps timestamps outside the source's own span", () => {
-    expect(universeTemporalAxisAgeProgress(CLUSTERED, -5_000)).toBe(1);
-    expect(universeTemporalAxisAgeProgress(CLUSTERED, 5_000)).toBe(0);
+  it("clamps ordinals outside the snapshot's own range", () => {
+    expect(universeTemporalAxisAgeProgress(TEN, -5)).toBe(0);
+    expect(universeTemporalAxisAgeProgress(TEN, 50)).toBe(1);
+    expect(universeTemporalAxisAgeProgress(TEN, Number.NaN)).toBe(0);
   });
 
   it("gives every event the same slice of the axis", () => {
     // The visible window is at most 18 packages, so a per-event length is what
     // decides whether depth is legible — not the source's size or time span.
-    expect(universeTemporalAxisDepth(EVEN, 60)).toBe(600);
-    expect(universeTemporalAxisDepth(CLUSTERED, 60)).toBe(600);
+    expect(universeTemporalAxisDepth(TEN, 60)).toBe(540);
+    expect(universeTemporalAxisDepth(createUniverseTemporalAxis(2), 60)).toBe(60);
     expect(universeTemporalAxisDepth(null, 60)).toBe(0);
   });
 
-  it("refuses to build an axis a source cannot carry", () => {
-    expect(createUniverseTemporalAxis([])).toBeNull();
-    // No events.
-    expect(createUniverseTemporalAxis([{ start: 0, end: 100, count: 0 }])).toBeNull();
-    // Every event at one instant: the backend's degenerate single-bucket case.
-    expect(createUniverseTemporalAxis([{ start: 5, end: 5, count: 3 }])).toBeNull();
-    // Unparsed dates arrive as NaN.
-    expect(createUniverseTemporalAxis([
-      { start: Number.NaN, end: 100, count: 3 },
-    ])).toBeNull();
-    // A null axis leaves every caller on its fallback.
-    expect(universeTemporalAxisAgeProgress(null, 50, 0.25)).toBe(0.25);
+  it("places an event at exactly ordinal × unit along the axis", () => {
+    // depth = age × axisDepth must land on the counting grid, or the flight's
+    // per-event margins and the window follow thresholds drift apart.
+    const axisDepth = universeTemporalAxisDepth(TEN, 60);
+    const [projection] = projectUniverseTemporalAxis(
+      [{ bundleId: "x", ordinal: 4 }],
+      TEN,
+    );
+    expect(projection.normalizedOffset.z * axisDepth).toBeCloseTo(-240, 10);
+    expect(projection.normalizedOffset.z).toBeCloseTo(-4 / 9, 10);
   });
 
-  it("makes near packages larger and far packages smaller without hiding them", () => {
-    const [near, middle, far] = projectUniverseTemporalAxis([
-      { bundleId: "near", timestamp: 1_000 },
-      { bundleId: "middle", timestamp: 500 },
-      { bundleId: "far", timestamp: 0 },
-    ], EVEN);
-
-    expect(near.nodeScale).toBeGreaterThan(middle.nodeScale);
-    expect(middle.nodeScale).toBeGreaterThan(far.nodeScale);
-    expect(near.eventStarScale).toBeGreaterThan(middle.eventStarScale);
-    expect(middle.eventStarScale).toBeGreaterThan(far.eventStarScale);
-    expect(near.cardScale).toBeGreaterThan(far.cardScale);
-    expect(near.opacity).toBeGreaterThan(far.opacity);
-    expect(far.opacity).toBeGreaterThan(0);
-    expect(near.normalizedOffset.z).toBe(0);
-    expect(far.normalizedOffset.z).toBe(-1);
+  it("refuses to build an axis only when there is nothing to explore", () => {
+    expect(createUniverseTemporalAxis(0)).toBeNull();
+    expect(createUniverseTemporalAxis(-3)).toBeNull();
+    expect(createUniverseTemporalAxis(Number.NaN)).toBeNull();
+    // A single event still carries an axis: depth 0, nowhere to fly, but the
+    // wheel keeps its in-source meaning instead of falling back to zoom.
+    expect(createUniverseTemporalAxis(1)).toEqual({ total: 1 });
+    expect(universeTemporalAxisAgeProgress(createUniverseTemporalAxis(1), 0)).toBe(0);
+    expect(universeTemporalAxisAgeProgress(null, 5)).toBe(0);
   });
 
   it("keeps a package's projection identical no matter what else is in the batch", () => {
     const alone = projectUniverseTemporalAxis(
-      [{ bundleId: "x", timestamp: 250 }],
-      EVEN,
+      [{ bundleId: "x", ordinal: 7 }],
+      TEN,
     );
     const crowded = projectUniverseTemporalAxis([
-      { bundleId: "a", timestamp: 900 },
-      { bundleId: "x", timestamp: 250 },
-      { bundleId: "b", timestamp: 100 },
-    ], EVEN);
+      { bundleId: "a", ordinal: 1 },
+      { bundleId: "x", ordinal: 7 },
+      { bundleId: "b", ordinal: 9 },
+    ], TEN);
 
     expect(crowded.find((projection) => projection.bundleId === "x"))
       .toEqual(alone[0]);
   });
 
-  it("separates packages that share a moment instead of stacking them", () => {
+  it("separates packages without letting them leave the axis line's spine", () => {
     const [a, b] = projectUniverseTemporalAxis([
-      { bundleId: "a", timestamp: 500 },
-      { bundleId: "b", timestamp: 500 },
-    ], EVEN);
+      { bundleId: "a", ordinal: 5 },
+      { bundleId: "b", ordinal: 5 },
+    ], TEN);
 
     expect(a.normalizedOffset.z).toBe(b.normalizedOffset.z);
     expect(a.normalizedOffset).not.toEqual(b.normalizedOffset);
@@ -124,12 +90,12 @@ describe("universe temporal axis", () => {
 
   it("derives the lateral angle from package identity alone", () => {
     const [near] = projectUniverseTemporalAxis(
-      [{ bundleId: "x", timestamp: 900 }],
-      EVEN,
+      [{ bundleId: "x", ordinal: 1 }],
+      TEN,
     );
     const [far] = projectUniverseTemporalAxis(
-      [{ bundleId: "x", timestamp: 100 }],
-      EVEN,
+      [{ bundleId: "x", ordinal: 9 }],
+      TEN,
     );
 
     // Age may only push a package further out along its own bearing. If x and y
@@ -140,37 +106,23 @@ describe("universe temporal axis", () => {
     expect(radialGrowth).toBeGreaterThan(1);
   });
 
-  it("falls back to rank progress when an event has no usable time", () => {
-    const [missing, timed] = projectUniverseTemporalAxis([
-      { bundleId: "missing", rankProgress: 1 },
-      { bundleId: "timed", timestamp: 1_000, rankProgress: 0.5 },
-    ], EVEN);
-
-    expect(missing.ageProgress).toBe(1);
-    expect(timed.ageProgress).toBe(0);
-  });
-
   it("keeps travel even by default and leaves the curve as a knob", () => {
     // An exponent bends depth away from the count it is supposed to track, so
     // even spacing is the default the axis ships with.
     expect(resolveUniverseTemporalAxisPolicy().ageExponent).toBe(1);
     const [half] = projectUniverseTemporalAxis(
-      [{ bundleId: "x", timestamp: 500 }],
-      EVEN,
+      [{ bundleId: "x", ordinal: 4.5 }],
+      TEN,
     );
     expect(half.normalizedOffset.z).toBeCloseTo(-0.5, 10);
   });
 
   it("keeps overrides monotonic along the axis", () => {
     const policy = resolveUniverseTemporalAxisPolicy({
-      farNodeScale: 9,
-      farOpacity: 1,
       farLateralSpread: 0,
       ageExponent: 0,
     });
 
-    expect(policy.farNodeScale).toBe(policy.nearNodeScale);
-    expect(policy.farOpacity).toBe(policy.nearOpacity);
     expect(policy.farLateralSpread).toBe(policy.nearLateralSpread);
     expect(policy.ageExponent).toBeGreaterThan(0);
   });

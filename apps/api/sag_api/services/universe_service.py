@@ -827,6 +827,7 @@ async def universe_timeline(
     bundles = [
         {
             "bundle_id": f"{source.id}:{bundle.bundle_id}",
+            "ordinal": bundle.ordinal,
             "event": {**bundle.event, "source_id": source.id},
             "nodes": [{**node, "source_id": source.id} for node in bundle.nodes],
             "relations": [{**relation, "source_id": source.id} for relation in bundle.relations],
@@ -851,6 +852,7 @@ async def universe_timeline(
         "request_cursor": cursor,
         "page_id": page_id,
         "bundles": bundles,
+        "total_events": page.total_events,
         "page": {
             "returned_bundles": len(page.bundles),
             "returned_unique_nodes": len(returned_node_keys),

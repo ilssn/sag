@@ -49,13 +49,33 @@ export interface UniverseTemporalFlightFollowInput {
   windowFarDepth: number;
   /** How close to a window edge the camera may fly before paging. */
   marginUnits: number;
+  /**
+   * Signed flight velocity in units/s; positive flies older. Fast flight pages
+   * ahead of arrival so data lands before the camera does.
+   */
+  velocity?: number;
   busy: boolean;
   hasNext: boolean;
   hasPrevious: boolean;
 }
 
+export interface UniverseTemporalFlightPresence {
+  scale: number;
+  opacity: number;
+}
+
 /** One 120px wheel notch flies roughly this share of two packages. */
 export const UNIVERSE_FLIGHT_UNITS_PER_WHEEL_PIXEL = 0.9;
+/** How far ahead (in seconds of current velocity) the window follow leads. */
+export const UNIVERSE_FLIGHT_FOLLOW_LEAD_S = 0.35;
+/** Atmosphere ahead of the camera: full presence within, gone beyond. */
+const PRESENCE_AHEAD_FULL_EVENTS = 1.5;
+const PRESENCE_AHEAD_FAR_EVENTS = 8;
+/** Atmosphere behind the camera: passed packages fade out fast. */
+const PRESENCE_BEHIND_FULL_EVENTS = 0.75;
+const PRESENCE_BEHIND_GONE_EVENTS = 2.5;
+const PRESENCE_FAR_SCALE = 0.42;
+const PRESENCE_FAR_OPACITY = 0.16;
 /** Coasting velocity halves this often. */
 export const UNIVERSE_FLIGHT_VELOCITY_HALF_LIFE_MS = 160;
 /** Glides cover half their remaining distance this often. */
@@ -189,9 +209,61 @@ export function planUniverseTemporalFlightFollow(
   const span = Math.max(0, input.windowFarDepth - input.windowNearDepth);
   // A margin wider than a third of the window would let both edges trigger.
   const margin = Math.max(0, Math.min(finite(input.marginUnits), span / 3));
-  if (input.hasNext && input.depth > input.windowFarDepth - margin) return "next";
-  if (input.hasPrevious && input.depth < input.windowNearDepth - margin) {
+  // The lead is velocity-gated, so only the edge being flown toward moves its
+  // threshold: at rest both leads vanish and the static hysteresis holds.
+  const lead = finite(input.velocity ?? 0) * UNIVERSE_FLIGHT_FOLLOW_LEAD_S;
+  const forwardLead = Math.max(0, lead);
+  const backwardLead = Math.max(0, -lead);
+  if (
+    input.hasNext
+    && input.depth > input.windowFarDepth - margin - forwardLead
+  ) return "next";
+  if (
+    input.hasPrevious
+    && input.depth < input.windowNearDepth - margin + backwardLead
+  ) {
     return "previous";
   }
   return null;
+}
+
+function easedRange(value: number, from: number, to: number) {
+  const t = Math.max(0, Math.min(1, (value - from) / (to - from)));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * Camera-relative presence of a package on the axis: how large and how opaque
+ * it renders given its depth distance from the camera, in world units
+ * (positive = ahead of the camera, deeper into the past).
+ *
+ * Whatever the camera reaches is fully present — this replaces any static
+ * age-based dimming, which under a moving camera would leave a reached package
+ * forever small and dark. Ahead, atmospheric perspective thins packages toward
+ * a floor (still visible: the corridor keeps promising more). Behind, passed
+ * packages fade out quickly so the view is always about what is being reached.
+ */
+export function universeTemporalFlightPresence(
+  deltaUnits: number,
+  unitsPerEvent: number,
+): UniverseTemporalFlightPresence {
+  const unit = Math.max(1, finite(unitsPerEvent, 1));
+  const events = finite(deltaUnits) / unit;
+  if (events < 0) {
+    const kept = 1 - easedRange(
+      -events,
+      PRESENCE_BEHIND_FULL_EVENTS,
+      PRESENCE_BEHIND_GONE_EVENTS,
+    );
+    return { scale: 1, opacity: kept };
+  }
+  const fade = easedRange(
+    events,
+    PRESENCE_AHEAD_FULL_EVENTS,
+    PRESENCE_AHEAD_FAR_EVENTS,
+  );
+  return {
+    scale: 1 - (1 - PRESENCE_FAR_SCALE) * fade,
+    opacity: 1 - (1 - PRESENCE_FAR_OPACITY) * fade,
+  };
 }

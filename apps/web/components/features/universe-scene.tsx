@@ -28,6 +28,7 @@ import {
   universeVisualDetailProgress,
 } from "@/lib/universe-presentation";
 import { planUniverseSceneDelta } from "@/lib/universe-scene-transition";
+import { UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT } from "@/lib/universe-temporal-axis";
 import {
   applyUniverseTemporalFlightWheel,
   brakeUniverseTemporalFlight,
@@ -35,6 +36,7 @@ import {
   flyUniverseTemporalFlightTo,
   planUniverseTemporalFlightFollow,
   stepUniverseTemporalFlight,
+  universeTemporalFlightPresence,
   type UniverseTemporalFlightState,
 } from "@/lib/universe-temporal-flight";
 import { UNIVERSE_SCENE_BUDGET } from "@/lib/universe-working-set";
@@ -236,6 +238,10 @@ interface ForceNode extends NodeObject {
   presentationScale?: number;
   presentationCardScale?: number;
   presentationOpacity?: number;
+  /** Camera-relative presence along the flight axis, refreshed per frame. */
+  temporalPresenceScale?: number;
+  temporalPresenceOpacity?: number;
+  renderedTemporalPresence?: number;
   timelineOpacity?: number;
   timelineScale?: number;
   timelineRetiring?: boolean;
@@ -340,6 +346,12 @@ const NEBULA_BURST_MS = 1_400;
 const NEBULA_DETAIL_ALPHA = 0.9;
 const NEBULA_DETAIL_DUST_POINT_SIZE_CSS = 18;
 const NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP = 44;
+/** Sentinel z far outside any real layout: the loaded band dims nothing. */
+const NEBULA_CORRIDOR_BAND_OFF = 1e8;
+/** Corridor lateral spread mirrors the package axis policy. */
+const NEBULA_CORRIDOR_NEAR_SPREAD = 0.18;
+const NEBULA_CORRIDOR_FAR_SPREAD = 0.44;
+const NEBULA_CORRIDOR_VERTICAL_ASPECT = 0.7;
 const NEBULA_GLOW_POINT_SIZE_CSS_MOBILE = 34;
 const HIGHLIGHT_FLOW_FRAME_MS = 1000 / 30;
 const TIMELINE_WHEEL_LABEL_SELECTOR = "[data-universe-node-id]";
@@ -669,6 +681,10 @@ function makeNebulaMaterial(darkTheme: boolean) {
       uPointSizeCap: { value: NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP },
       uTime: { value: 0 },
       uMotion: { value: 1 },
+      // Loaded-window band on the browsed source's axis, in world z. Particles
+      // inside it yield to the real packages that condensed there.
+      uCorridorNearZ: { value: NEBULA_CORRIDOR_BAND_OFF },
+      uCorridorFarZ: { value: NEBULA_CORRIDOR_BAND_OFF },
     },
     vertexShader: `
       uniform float uPixelRatio;
@@ -678,7 +694,10 @@ function makeNebulaMaterial(darkTheme: boolean) {
       uniform float uPointSizeCap;
       uniform float uTime;
       uniform float uMotion;
+      uniform float uCorridorNearZ;
+      uniform float uCorridorFarZ;
       attribute vec3 aColor;
+      attribute vec3 aCorridor;
       attribute float aSize;
       attribute float aAlpha;
       attribute float aGlow;
@@ -709,7 +728,23 @@ function makeNebulaMaterial(darkTheme: boolean) {
         float wave = 0.5 + 0.5 * sin(uTime * (0.72 + aTwinkle * 1.38) + aPhase);
         float glint = pow(wave, mix(2.2, 7.0, aTwinkle));
         float pulse = mix(1.0, 0.8 + glint * 0.5, uMotion * aTwinkle);
-        vec3 animatedPosition = position;
+        // Diving into a source stretches its galaxy into the exploration
+        // corridor: the dust that is still a cloud from outside is, inside,
+        // the source's unloaded history laid out along the counting axis.
+        float corridorMix = smoothstep(0.12, 0.88, particleDetail);
+        vec3 animatedPosition = position + aCorridor * corridorMix;
+        // Where the loaded window already condensed into real packages, the
+        // corridor dust steps aside instead of double-exposing them.
+        float loadedBand = smoothstep(
+          uCorridorFarZ - 30.0,
+          uCorridorFarZ + 30.0,
+          animatedPosition.z
+        ) * (1.0 - smoothstep(
+          uCorridorNearZ - 30.0,
+          uCorridorNearZ + 30.0,
+          animatedPosition.z
+        ));
+        vAlpha *= mix(1.0, 0.16, corridorMix * loadedBand);
         animatedPosition.x += sin(uTime * 0.28 + aPhase) * 0.36 * uMotion * aTwinkle;
         animatedPosition.y += cos(uTime * 0.24 + aPhase) * 0.28 * uMotion * aTwinkle;
         vec4 mvPosition = modelViewMatrix * vec4(animatedPosition, 1.0);
@@ -1424,10 +1459,14 @@ class UniverseForceSceneEngine {
         ) < 0.001
       ) return undefined;
       const motionGroupId = node.timelineBundleId ?? node.id;
-      // Every event and its entities share the exact camera-centre birth point.
-      // Their distinct destinations then unfold the factual network as one
-      // coherent page instead of unrelated dots appearing around the source.
-      const from = existingPosition?.clone() ?? timelineTransitionOrigin.clone();
+      // Under flight the camera is already where the data lands: entrants
+      // condense in place at their axis position (no birth point to travel
+      // from, no arc), which keeps a moving camera's world stationary.
+      const condenseInPlace = this.flightConfig !== null;
+      const from = existingPosition?.clone()
+        ?? (condenseInPlace
+          ? destination.clone()
+          : timelineTransitionOrigin.clone());
       const travel = destination.clone().sub(from);
       const travelDirection = travel.lengthSq() > 0.0001
         ? travel.clone().normalize()
@@ -1435,7 +1474,11 @@ class UniverseForceSceneEngine {
       const arc = stableDirection(`${motionGroupId}:timeline-entry-arc`);
       arc.addScaledVector(travelDirection, -arc.dot(travelDirection));
       if (arc.lengthSq() < 0.0001) arc.set(-travelDirection.y, travelDirection.x, 0.18);
-      arc.normalize().multiplyScalar(Math.min(12, 3 + travel.length() * 0.055));
+      arc.normalize().multiplyScalar(
+        travel.lengthSq() < 0.0001
+          ? 0
+          : Math.min(12, 3 + travel.length() * 0.055),
+      );
       return {
         kind: existingPosition ? "shift" : "enter",
         // A timeline window is one visual batch. Temporal depth and scale carry
@@ -1447,7 +1490,7 @@ class UniverseForceSceneEngine {
         arc,
         opacityFrom: previousVisual?.opacity ?? 0,
         opacityTo: 1,
-        scaleFrom: previousVisual?.scale ?? 0.12,
+        scaleFrom: previousVisual?.scale ?? (condenseInPlace ? 0.4 : 0.12),
         scaleTo: 1,
         presentationScaleFrom: previousVisual?.presentationScale
           ?? presentationScale(node.presentationScale),
@@ -1691,29 +1734,38 @@ class UniverseForceSceneEngine {
       const collapseTarget = timelineTransitionOrigin.clone().add(
         stableDirection(`${motionGroupId}:timeline-collapse`).multiplyScalar(2.4),
       );
+      // Under flight a retired package dissolves where it stands: the camera
+      // is moving, so any scripted fly-out would read as the world lurching.
+      const dissolveInPlace = this.flightConfig !== null;
       node.timelineMotion = {
         kind: "exit",
         startedAt: entryNow,
         duration: TIMELINE_EXIT_MIN_MS
           + stableUnit(`${node.id}:timeline-exit-duration`) * TIMELINE_EXIT_VARIANCE_MS,
         from,
-        to: windowDirection === "previous"
-          ? collapseTarget
-          : from.clone()
-              .addScaledVector(exitCameraRight, side * worldHeight * exitAspect * 0.58)
-              .addScaledVector(
-                exitCameraUp,
-                (stableUnit(`${node.id}:timeline-exit-rise`) - 0.5) * worldHeight * 0.1,
-              ),
-        arc: exitCameraUp.clone().multiplyScalar(
-          (stableUnit(`${motionGroupId}:timeline-exit-arc`) - 0.5) * worldHeight * 0.07,
-        ),
+        to: dissolveInPlace
+          ? from.clone()
+          : windowDirection === "previous"
+            ? collapseTarget
+            : from.clone()
+                .addScaledVector(exitCameraRight, side * worldHeight * exitAspect * 0.58)
+                .addScaledVector(
+                  exitCameraUp,
+                  (stableUnit(`${node.id}:timeline-exit-rise`) - 0.5) * worldHeight * 0.1,
+                ),
+        arc: dissolveInPlace
+          ? new THREE.Vector3()
+          : exitCameraUp.clone().multiplyScalar(
+              (stableUnit(`${motionGroupId}:timeline-exit-arc`) - 0.5) * worldHeight * 0.07,
+            ),
         opacityFrom: currentOpacity,
         opacityTo: 0,
         scaleFrom: currentScale,
-        scaleTo: windowDirection === "previous"
-          ? 0.12
-          : Math.max(0.08, currentScale * 0.42),
+        scaleTo: dissolveInPlace
+          ? Math.max(0.3, currentScale * 0.6)
+          : windowDirection === "previous"
+            ? 0.12
+            : Math.max(0.08, currentScale * 0.42),
         presentationScaleFrom: currentNodePresentationScale(node),
         presentationScaleTo: currentNodePresentationScale(node),
         presentationCardScaleFrom: currentNodePresentationCardScale(node),
@@ -1865,8 +1917,10 @@ class UniverseForceSceneEngine {
     this.host.dataset.universeEntityGlyphCount = String(
       [...nextNodes.values()].filter((node) => node.kind === "entity").length,
     );
+    this.updateTemporalPresence();
     this.updateVisualLayout(performance.now(), true, false);
     this.rebuildNebula();
+    this.syncNebulaCorridorUniforms();
     this.rebuildLabels();
     this.applyHighlight();
     if (this.timelineMotionPhase === "entering" && timelineMovingCount === 0) {
@@ -3047,18 +3101,23 @@ class UniverseForceSceneEngine {
     const entryOpacity = (node.entryOpacity ?? 1) * (node.timelineOpacity ?? 1);
     const dataScale = currentNodePresentationScale(node);
     const dataOpacity = currentNodePresentationOpacity(node);
+    const presenceScale = node.temporalPresenceScale ?? 1;
+    const presenceOpacity = node.temporalPresenceOpacity ?? 1;
+    const presenceKey = presenceScale * 4096 + presenceOpacity;
     if (
       node.visualOpacity === opacity
       && node.visuallyEmphasized === emphasized
       && node.renderedEntryOpacity === entryOpacity
       && node.renderedPresentationScale === dataScale
       && node.renderedPresentationOpacity === dataOpacity
+      && node.renderedTemporalPresence === presenceKey
     ) return;
     node.visualOpacity = opacity;
     node.visuallyEmphasized = emphasized;
     node.renderedEntryOpacity = entryOpacity;
     node.renderedPresentationScale = dataScale;
     node.renderedPresentationOpacity = dataOpacity;
+    node.renderedTemporalPresence = presenceKey;
     const object = node.object;
     if (!object) return;
     const entryScale = 0.28 + easeOutCubic(entryOpacity) * 0.72;
@@ -3070,12 +3129,13 @@ class UniverseForceSceneEngine {
         * entryScale
         * (node.timelineScale ?? 1)
         * this.nodeMorphScale(node)
-        * dataScale,
+        * dataScale
+        * presenceScale,
     );
     object.traverse((child) => {
       if (child.userData.hitArea) {
         if (node.kind !== "source") {
-          child.visible = entryOpacity * dataOpacity > 0.16;
+          child.visible = entryOpacity * dataOpacity * presenceOpacity > 0.16;
         }
         return;
       }
@@ -3099,8 +3159,11 @@ class UniverseForceSceneEngine {
         material.opacity = entryOpacity <= 0.001
           ? 0
           : Math.max(
-              child.userData.sourceAura ? 0 : 0.035 * entryOpacity * dataOpacity,
-              base * opacity * entryOpacity * detailFactor * dataOpacity,
+              child.userData.sourceAura
+                ? 0
+                : 0.035 * entryOpacity * dataOpacity * presenceOpacity,
+              base * opacity * entryOpacity * detailFactor
+                * dataOpacity * presenceOpacity,
             );
       });
     });
@@ -3181,7 +3244,8 @@ class UniverseForceSceneEngine {
           * entryScale
           * (node.timelineScale ?? 1)
           * this.nodeMorphScale(node)
-          * dataScale,
+          * dataScale
+          * (node.temporalPresenceScale ?? 1),
       );
       node.renderedPresentationScale = dataScale;
     });
@@ -3344,6 +3408,7 @@ class UniverseForceSceneEngine {
     this.nebulaParticles = particles;
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(particles.length * 3);
+    const corridors = new Float32Array(particles.length * 3);
     const colors = new Float32Array(particles.length * 3);
     const sizes = new Float32Array(particles.length);
     const alphas = new Float32Array(particles.length);
@@ -3352,6 +3417,15 @@ class UniverseForceSceneEngine {
     const shapes = new Float32Array(particles.length);
     const phases = new Float32Array(particles.length);
     const twinkles = new Float32Array(particles.length);
+    const axisDepthBySource = new Map(sources.map((source) => [
+      source.sourceId,
+      Math.max(0, source.sceneNode.eventCount - 1)
+        * UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT,
+    ]));
+    const lateralBySource = new Map(sources.map((source) => [
+      source.sourceId,
+      Math.max(72, source.sceneNode.radius) * 1.8,
+    ]));
     particles.forEach((particle, index) => {
       const color = this.sourceVisualColor(particle.sourceId).lerp(
         WHITE,
@@ -3369,12 +3443,29 @@ class UniverseForceSceneEngine {
       shapes[index] = particle.glow === 0 && particle.twinkle > 0.84 ? 1 : 0;
       phases[index] = particle.phase;
       twinkles[index] = 0.18 + particle.twinkle * 0.82;
+      // The corridor form: the same dust, laid out along the counting axis as
+      // the source's not-yet-loaded events. Uniform density per unit length is
+      // exactly the counting axis' promise (one event per slice, everywhere).
+      const key = `${particle.sourceId}:corridor:${index}`;
+      const axisDepth = axisDepthBySource.get(particle.sourceId) ?? 0;
+      const depth = stableUnit(`${key}:depth`) * axisDepth;
+      const progress = axisDepth > 0 ? depth / axisDepth : 0;
+      const lateral = (NEBULA_CORRIDOR_NEAR_SPREAD
+        + (NEBULA_CORRIDOR_FAR_SPREAD - NEBULA_CORRIDOR_NEAR_SPREAD) * progress)
+        * (lateralBySource.get(particle.sourceId) ?? 130)
+        * (0.35 + stableUnit(`${key}:radius`) * 0.85);
+      const angle = stableUnit(`${key}:angle`) * Math.PI * 2;
+      corridors[index * 3] = Math.cos(angle) * lateral - particle.offset.x;
+      corridors[index * 3 + 1] = Math.sin(angle) * lateral
+        * NEBULA_CORRIDOR_VERTICAL_ASPECT - particle.offset.y;
+      corridors[index * 3 + 2] = -depth - particle.offset.z;
     });
     const positionAttribute = new THREE.BufferAttribute(positions, 3)
       .setUsage(THREE.DynamicDrawUsage);
     const alphaAttribute = new THREE.BufferAttribute(alphas, 1)
       .setUsage(THREE.DynamicDrawUsage);
     geometry.setAttribute("position", positionAttribute);
+    geometry.setAttribute("aCorridor", new THREE.BufferAttribute(corridors, 3));
     geometry.setAttribute("aColor", new THREE.BufferAttribute(colors, 3));
     geometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
     geometry.setAttribute("aAlpha", alphaAttribute);
@@ -3390,8 +3481,25 @@ class UniverseForceSceneEngine {
     this.updatePixelRatio();
     this.updateNebulaPositions();
     this.updateNebulaAlphas(true);
+    this.syncNebulaCorridorUniforms();
     this.updateNebulaMotionState();
     this.armNebulaAnimation();
+  }
+
+  /**
+   * Points the corridor's loaded-window band at the browsed source's visible
+   * depth range so dust yields exactly where real packages condensed.
+   */
+  private syncNebulaCorridorUniforms() {
+    const material = this.nebulaPoints?.material as THREE.ShaderMaterial | undefined;
+    if (!material) return;
+    const config = this.flightConfig;
+    material.uniforms.uCorridorNearZ.value = config
+      ? config.centerZ - config.windowNearDepth
+      : NEBULA_CORRIDOR_BAND_OFF;
+    material.uniforms.uCorridorFarZ.value = config
+      ? config.centerZ - config.windowFarDepth
+      : NEBULA_CORRIDOR_BAND_OFF;
   }
 
   private updateNebulaPositions() {
@@ -3565,10 +3673,15 @@ class UniverseForceSceneEngine {
     const source = this.nodes.get(link.sourceId);
     const target = this.nodes.get(link.targetId);
     const dataOpacity = presentationOpacity(link.sceneLink.presentationOpacity);
+    // A link is only as present as its dimmer endpoint on the flight axis.
+    const presenceOpacity = Math.min(
+      source?.temporalPresenceOpacity ?? 1,
+      target?.temporalPresenceOpacity ?? 1,
+    );
     const timelineOpacity = Math.min(
       (source?.entryOpacity ?? 1) * (source?.timelineOpacity ?? 1),
       (target?.entryOpacity ?? 1) * (target?.timelineOpacity ?? 1),
-    ) * dataOpacity;
+    ) * dataOpacity * presenceOpacity;
     if (!link.visible) {
       return { color: this.darkTheme ? "#5b747a" : "#70898e", opacity: 0 };
     }
@@ -4167,7 +4280,8 @@ class UniverseForceSceneEngine {
       const layoutOpacity = label.kind === "source"
         ? sourceReveal
         : belongsToLabelSource && belongsToFocusNetwork ? nodeCardReveal : 0;
-      const dataOpacity = currentNodePresentationOpacity(node);
+      const dataOpacity = currentNodePresentationOpacity(node)
+        * (label.kind === "node" ? node.temporalPresenceOpacity ?? 1 : 1);
       const entryReveal = label.kind === "node"
         ? THREE.MathUtils.clamp((
             (node.entryOpacity ?? 1) * (node.timelineOpacity ?? 1) - 0.16
@@ -4946,6 +5060,43 @@ class UniverseForceSceneEngine {
   };
 
   /**
+   * Camera-relative presence along the flight axis. Whatever the camera
+   * reaches is fully present; ahead thins atmospherically toward a visible
+   * floor, behind fades out. This is the moving-camera replacement for static
+   * age-based dimming, which would leave a reached package forever dark.
+   */
+  private updateTemporalPresence() {
+    const config = this.flightConfig;
+    let linksDirty = false;
+    this.nodes.forEach((node) => {
+      let scale = 1;
+      let opacity = 1;
+      if (config && node.kind !== "source" && node.sourceId === config.sourceId) {
+        const nodeDepth = config.centerZ - node.z;
+        const presence = universeTemporalFlightPresence(
+          nodeDepth - this.appliedFlightDepth,
+          config.unitsPerEvent,
+        );
+        scale = presence.scale;
+        opacity = presence.opacity;
+      }
+      if (
+        Math.abs((node.temporalPresenceScale ?? 1) - scale) < 0.004
+        && Math.abs((node.temporalPresenceOpacity ?? 1) - opacity) < 0.004
+      ) return;
+      node.temporalPresenceScale = scale;
+      node.temporalPresenceOpacity = opacity;
+      linksDirty = true;
+      this.setObjectOpacity(
+        node,
+        node.visualOpacity ?? 1,
+        node.visuallyEmphasized ?? false,
+      );
+    });
+    if (linksDirty) this.updateLinkVisuals();
+  }
+
+  /**
    * Advances the flight each frame: integrates the state, translates camera and
    * orbit target together by the depth delta, and pages the window when the
    * camera nears its edge. The camera never waits for data — a page that isn't
@@ -4972,6 +5123,7 @@ class UniverseForceSceneEngine {
       camera.position.z -= delta;
       if (this.controls.target) this.controls.target.z -= delta;
       this.wakeRendering(600);
+      this.updateTemporalPresence();
       this.updateVisualLayout(now);
       this.updateNodeMorphScales(now);
       this.updateLabels(now);
@@ -4985,6 +5137,9 @@ class UniverseForceSceneEngine {
           windowNearDepth: config.windowNearDepth,
           windowFarDepth: config.windowFarDepth,
           marginUnits: config.unitsPerEvent * 1.5,
+          // Fast flight pages ahead of arrival: the corridor must keep
+          // condensing in front of the camera, not behind it.
+          velocity: state.velocity,
           busy: this.timelineIsBusy(),
           hasNext: this.timelineJourney.hasNext,
           hasPrevious: this.timelineJourney.hasPrevious,

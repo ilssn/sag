@@ -10,6 +10,7 @@
 ## 当前文档（as-built）
 
 - [**架构（as-built）**](architecture.md) —— 当前已实现的系统：分层、数据模型、Agent Runtime、信源 MCP。**先读这篇。**
+- [**知识宇宙**](architecture/knowledge-universe.md) —— 3D 探索视图：计数轴时间飞行、虚拟时间窗、快照分页与场景预算。
 - [**Agent · MCP · 搜索图谱**](architecture/agent-mcp-graph.md) —— 当前三条能力链路的边界、契约与实现位置。
 - [**Agent Runtime**](architecture/agent-runtime.md) —— extract-ready 的 `sag_agent` Core：公共 API、生命周期、事件契约、工具审批与宿主适配。
 - [连接器框架](architecture/connectors.md) —— 采集抽象：file_upload / web，统一接入协议。

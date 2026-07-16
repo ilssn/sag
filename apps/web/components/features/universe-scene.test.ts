@@ -195,9 +195,11 @@ describe("universe scene production invariants", () => {
     expect(dataCommit).toContain("node.timelineRetiring = true");
     expect(dataCommit).toContain('windowDirection === "previous"');
     expect(dataCommit).toContain("const timelineTransitionOrigin =");
-    expect(dataCommit).toContain(
-      "const from = existingPosition?.clone() ?? timelineTransitionOrigin.clone()",
-    );
+    // Under flight, pages condense and dissolve where they stand; the birth-at-
+    // lookat and fly-out choreography remains only for non-flight transitions.
+    expect(dataCommit).toContain("const condenseInPlace = this.flightConfig !== null");
+    expect(dataCommit).toContain("const dissolveInPlace = this.flightConfig !== null");
+    expect(dataCommit).toContain("? destination.clone()");
     expect(dataCommit).toContain("collapseTarget");
     expect(dataCommit).toContain("if (topologyChanged) {");
     expect(dataCommit).toContain('this.timelineMotionPhase = "entering"');
@@ -535,10 +537,19 @@ describe("universe scene production invariants", () => {
       "const dataOpacity = currentNodePresentationOpacity(node)",
     );
     expect(objectVisual).toContain("* dataScale");
-    expect(objectVisual).toContain("* detailFactor * dataOpacity");
     expect(morphScale).toContain("* dataScale");
 
+    // Camera-relative presence must reach every visual layer a package owns:
+    // mesh scale and opacity, the DOM card, and both link endpoints. Missing
+    // one layer leaves stars dim while their cards glow, or vice versa.
+    expect(objectVisual).toContain("const presenceScale = node.temporalPresenceScale ?? 1");
+    expect(objectVisual).toContain("* dataOpacity * presenceOpacity");
+    expect(objectVisual).toContain("* presenceScale");
+    expect(objectVisual).toContain("node.renderedTemporalPresence === presenceKey");
+    expect(morphScale).toContain("* (node.temporalPresenceScale ?? 1)");
+
     expect(labels).toContain("* dataOpacity");
+    expect(labels).toContain("node.temporalPresenceOpacity ?? 1");
     expect(labels).toContain(
       "currentNodePresentationCardScale(node)",
     );
@@ -546,7 +557,8 @@ describe("universe scene production invariants", () => {
     expect(linkStyle).toContain(
       "presentationOpacity(link.sceneLink.presentationOpacity)",
     );
-    expect(linkStyle).toContain(") * dataOpacity");
+    expect(linkStyle).toContain(") * dataOpacity * presenceOpacity");
+    expect(linkStyle).toContain("source?.temporalPresenceOpacity ?? 1");
   });
 
   it("renders every entity as a layered, minimum-size interactive glyph", () => {
@@ -685,6 +697,35 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("this.host.dataset.universeNebulaPointSizeCap");
     expect(source).toContain("this.host.dataset.universeNebulaDetailFactor");
     expect(source).toContain("this.updateNebulaAlphas();");
+  });
+
+  it("stretches a browsed source's nebula into its exploration corridor on the GPU", () => {
+    const nebulaMaterial = sourceBetween(
+      "function makeNebulaMaterial(darkTheme: boolean)",
+      "class UniverseForceSceneEngine",
+    );
+    const nebulaBuild = sourceBetween(
+      "private rebuildNebula()",
+      "private updateNebulaPositions()",
+    );
+
+    // The corridor is the second form of the same particles: the vertex shader
+    // blends galaxy → corridor with the existing detail mix, so diving into a
+    // source needs no CPU reposition and no extra particle budget.
+    expect(nebulaMaterial).toContain("attribute vec3 aCorridor");
+    expect(nebulaMaterial).toContain(
+      "vec3 animatedPosition = position + aCorridor * corridorMix",
+    );
+    // Dust yields inside the loaded window band, where real packages condensed.
+    expect(nebulaMaterial).toContain("uniform float uCorridorNearZ");
+    expect(nebulaMaterial).toContain("float loadedBand = smoothstep(");
+    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.16, corridorMix * loadedBand)");
+    // Corridor depth lives on the same counting grid as packages and flight.
+    expect(nebulaBuild).toContain("UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT");
+    expect(nebulaBuild).toContain('geometry.setAttribute("aCorridor"');
+    expect(source).toContain("private syncNebulaCorridorUniforms()");
+    expect(source).toContain("material.uniforms.uCorridorNearZ.value = config");
+    expect(source).toContain("const NEBULA_CORRIDOR_BAND_OFF = 1e8");
   });
 
   it("debounces pointer label rebuilds and restores defaults", () => {

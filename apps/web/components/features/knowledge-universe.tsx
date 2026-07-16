@@ -79,8 +79,8 @@ import {
 import {
   createUniverseTemporalAxis,
   projectUniverseTemporalAxis,
+  UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT,
   universeTemporalAxisDepth,
-  universeTemporalRankProgress,
 } from "@/lib/universe-temporal-axis";
 import { planUniverseTimelinePrefetch } from "@/lib/universe-timeline-prefetch";
 import { detectUniverseWebGLCapability } from "@/lib/universe-webgl-capability";
@@ -137,6 +137,11 @@ interface SourceTimelinePageState {
   snapshotId: string | null;
   sourceRevision: string | null;
   asOf: string | null;
+  /**
+   * Snapshot-stable event total: the counting axis' length. Set by the first
+   * page and constant for the lifetime of the snapshot.
+   */
+  totalEvents: number | null;
   /** Stable network page size for the lifetime of one source snapshot. */
   queryPageSize: number | null;
   preferredDirection: UniverseTimelineDirection;
@@ -188,12 +193,12 @@ const PARTITION_RENDER_LIMIT = { desktop: 160, mobile: 64 } as const;
 const EVENT_ENTITY_PROJECTION_LIMIT = 8;
 const ENTITY_EXPANSION_EVENT_LIMIT = 4;
 const EMPTY_TIMELINE_BUNDLE_IDS: string[] = [];
-// World length of one event's slice of its source's time axis. The axis length
-// is event count × this, so the handful of visible packages always spans the
-// same distance whatever the source's size or time span. Deliberately
-// independent of the source's visual radius: tying depth to the radius gives
-// every source a different scale for the same stretch of history.
-const TEMPORAL_AXIS_UNITS_PER_EVENT = 60;
+// World length of one event's slice of its source's counting axis. The axis
+// length is event count × this, so the handful of visible packages always
+// spans the same distance whatever the source's size. Deliberately independent
+// of the source's visual radius, and shared with the scene so the nebula
+// corridor and the flight margins live on the same grid.
+const TEMPORAL_AXIS_UNITS_PER_EVENT = UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT;
 
 function emptySourceTimelinePageState(
   visibleEventBundles: number,
@@ -204,6 +209,7 @@ function emptySourceTimelinePageState(
     snapshotId: null,
     sourceRevision: null,
     asOf: null,
+    totalEvents: null,
     queryPageSize: null,
     preferredDirection: "older",
     loading: false,
@@ -1528,34 +1534,26 @@ export function KnowledgeUniverse({
     const timelineBrowseActive = Boolean(browseSessionSourceId);
     const projectedBundleIds = new Set(projectedWorking.bundle_order);
     const temporalBundleByEventKey = new Map<string, string>();
-    const temporalTimestampByBundleId = new Map<string, number>();
+    const temporalOrdinalByBundleId = new Map<string, number>();
     visibleTimelineBundleIds.forEach((bundleId) => {
-      working.bundles[bundleId]?.node_keys.forEach((key) => {
+      const workingBundle = working.bundles[bundleId];
+      workingBundle?.node_keys.forEach((key) => {
         const workingNode = workingNodeByKey.get(key);
         if (workingNode?.kind !== "event") return;
         temporalBundleByEventKey.set(key, bundleId);
-        if (temporalTimestampByBundleId.has(bundleId)) return;
-        const startedAt = workingNode.start_time
-          ? Date.parse(workingNode.start_time)
-          : Number.NaN;
-        if (Number.isFinite(startedAt)) {
-          temporalTimestampByBundleId.set(bundleId, startedAt);
+        if (Number.isInteger(workingBundle.ordinal)) {
+          temporalOrdinalByBundleId.set(bundleId, workingBundle.ordinal as number);
         }
       });
     });
-    // The axis comes from the source's own histogram, never from the visible
-    // window: an event's depth may not move because the cache did. A source
-    // whose histogram cannot carry an axis keeps the deterministic spiral.
+    // The axis is the source's snapshot-stable exploration order, never the
+    // visible window: an event's depth may not move because the cache did.
+    // Every browsed source carries an axis; the spiral remains only for
+    // expansion bundles, which explore off the timeline on purpose.
+    const browseSession = sourceSessionRef.current;
     const temporalAxis = browseSessionSourceId
-      ? createUniverseTemporalAxis(
-          (sourceById.get(browseSessionSourceId)?.time_buckets ?? []).map(
-            (bucket) => ({
-              start: Date.parse(bucket.start),
-              end: Date.parse(bucket.end),
-              count: bucket.count,
-            }),
-          ),
-        )
+      && browseSession?.sourceId === browseSessionSourceId
+      ? createUniverseTemporalAxis(browseSession.timeline.totalEvents ?? 0)
       : null;
     const temporalAxisDepth = universeTemporalAxisDepth(
       temporalAxis,
@@ -1564,16 +1562,10 @@ export function KnowledgeUniverse({
     const temporalProjectionByBundleId = new Map(
       (temporalAxis
         ? projectUniverseTemporalAxis(
-            visibleTimelineBundleIds.map((bundleId, index) => ({
-              bundleId,
-              timestamp: temporalTimestampByBundleId.get(bundleId),
-              // Rank only stands in for an event that carries no usable time.
-              // Index 0 is the newest visible package, matching age 0 = newest.
-              rankProgress: universeTemporalRankProgress(
-                index,
-                visibleTimelineBundleIds.length,
-              ),
-            })),
+            visibleTimelineBundleIds.flatMap((bundleId) => {
+              const ordinal = temporalOrdinalByBundleId.get(bundleId);
+              return ordinal === undefined ? [] : [{ bundleId, ordinal }];
+            }),
             temporalAxis,
           )
         : []
@@ -1740,11 +1732,9 @@ export function KnowledgeUniverse({
         statsReady: true,
         state: node.state ?? "active",
         root: isVisualRoot(node),
-        presentationScale: node.kind === "event"
-          ? temporalProjection?.eventStarScale
-          : temporalProjection?.nodeScale,
-        presentationCardScale: temporalProjection?.cardScale,
-        presentationOpacity: temporalProjection?.opacity,
+        // Depth presence (scale/opacity along the axis) is the camera's story
+        // now: the scene computes it per frame from the flight depth, so a
+        // package the camera reaches is always fully present.
         timelineBundleId: temporalBundleId,
         ...position,
       });
@@ -1816,18 +1806,12 @@ export function KnowledgeUniverse({
         universeNodeKey(targetKind, relation.to_id, relation.source_id),
       );
       if (!source || !target) return;
-      const temporalBundleId = temporalBundleByEventKey.get(
-        universeNodeKey("event", relation.from_id, relation.source_id),
-      );
       links.push({
         id: `${relation.source_id}:${relation.kind}:${relation.from_id}:${relation.to_id}`,
         source,
         target,
         weight: relation.weight,
         virtual: false,
-        presentationOpacity: temporalBundleId
-          ? temporalProjectionByBundleId.get(temporalBundleId)?.linkOpacity
-          : undefined,
       });
     });
     const journeyCommit = timelineJourneyCommitRef.current;
@@ -2476,6 +2460,7 @@ export function KnowledgeUniverse({
           state.snapshotId = page.snapshot_id;
           state.sourceRevision = page.source_revision;
           state.asOf = page.as_of;
+          state.totalEvents = page.total_events;
           state.queryPageSize ??= pageBundleLimit;
           state.deque = dequeAdmission.deque;
           state.pausedReason = null;
