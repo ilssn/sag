@@ -1801,7 +1801,7 @@ class EngineManager:
         from zleap.sag.db import get_session_factory
         from zleap.sag.db.models import SourceEvent
 
-        bounded_limit = max(1, min(int(limit), 6))
+        bounded_limit = max(1, min(int(limit), 24))
         bounded_entities = max(4, min(int(entity_limit), 8))
         if direction not in {"older", "newer"}:
             raise ValueError("invalid universe timeline direction")

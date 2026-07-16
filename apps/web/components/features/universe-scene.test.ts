@@ -132,8 +132,10 @@ describe("universe scene production invariants", () => {
     // applied to camera and orbit target together, so orbiting composes freely
     // and no pointer-vs-wheel gesture classifier is needed.
     expect(pointer).toContain("brakeUniverseTemporalFlight");
-    expect(flight).toContain("camera.position.z -= delta");
-    expect(flight).toContain("this.controls.target.z -= delta");
+    // Glides ride the axis; free wheel flight goes where the gaze points.
+    expect(flight).toContain("camera.position.z -= glideDelta");
+    expect(flight).toContain("this.controls.target.z -= glideDelta");
+    expect(flight).toContain("camera.position.addScaledVector(forward, allowed)");
     expect(flight).toContain("planUniverseTemporalFlightFollow(");
     // The camera never waits for data: paging along is fire-and-forget.
     expect(flight).not.toContain("await ");
@@ -779,7 +781,7 @@ describe("universe scene production invariants", () => {
     expect(nebulaBuild).toContain("const browsedSourceId = this.flightConfig?.sourceId ?? null");
   });
 
-  it("clamps browsing rotation to a forward gaze cone that cannot flip the nebula", () => {
+  it("keeps the gaze free while flight follows it, weighted and spine-anchored", () => {
     const focus = sourceBetween(
       "focusSource(sourceId: string) {",
       "focusResult() {",
@@ -788,19 +790,27 @@ describe("universe scene production invariants", () => {
       "setData(\n    data: UniverseSceneData",
       "\n  focusOverview() {",
     );
+    const flight = sourceBetween(
+      "private updateTemporalFlight(now: number)",
+      "private timelineWheelSurface(target: EventTarget | null)",
+    );
 
-    // Inside a source the wheel's "deeper" must stay roughly ahead: rotation
-    // is a bounded human glance, applied after the entry dive lands and
-    // released the moment the session leaves or switches sources.
-    expect(source).toContain("const BROWSE_GAZE_AZIMUTH_RAD = 0.42");
-    expect(source).toContain("const BROWSE_GAZE_POLAR_RAD = 0.3");
+    // Freedom without incoherence: no angle clamps anywhere — the wheel flies
+    // along the gaze, so every orientation keeps its meaning. Browsing only
+    // weights the hand, and a soft spine magnet bounds lateral wander.
+    expect(source).not.toContain("minAzimuthAngle");
+    expect(source).not.toContain("maxPolarAngle");
     expect(source).toContain("private applyBrowseGaze()");
     expect(source).toContain("private releaseBrowseGaze()");
-    expect(source).toContain(
-      "this.controls.minAzimuthAngle = -BROWSE_GAZE_AZIMUTH_RAD",
-    );
     expect(source).toContain("this.controls.rotateSpeed = BROWSE_GAZE_ROTATE_SPEED");
     expect(source).toContain("this.controls.rotateSpeed = UNIVERSE_ROTATE_SPEED");
+    expect(flight).toContain("camera.getWorldDirection");
+    expect(flight).toContain("const depthPerTravel = -forward.z");
+    // Walls apply to the axis projection of free travel, and paging leads on
+    // the depth rate, never on raw speed.
+    expect(flight).toContain("nextState = brakeUniverseTemporalFlight(state)");
+    expect(flight).toContain("this.flightDepthRate = nextState.velocity * depthPerTravel");
+    expect(flight).toContain("const spine = this.flightSpine");
     expect(focus).toContain("this.applyBrowseGaze()");
     expect(dataCommit).toContain(
       "if (!nextFlight || flightSourceChanged) this.releaseBrowseGaze()",
@@ -829,7 +839,7 @@ describe("universe scene production invariants", () => {
 
     // Card discipline keys off real depth travel (wheel inertia and button
     // glides alike) and eases asymmetrically: duck fast, recover after a beat.
-    expect(flight).toContain("const instantSpeed = Math.abs(delta)");
+    expect(flight).toContain("const instantSpeed = Math.abs(appliedTravel)");
     expect(flight).toContain("FLIGHT_CARD_COLLAPSE_MS");
     expect(flight).toContain("return moving || cardsSettling");
     expect(labels).toContain(

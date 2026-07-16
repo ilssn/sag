@@ -143,7 +143,7 @@ class Settings(BaseSettings):
     # ── 知识宇宙 ──────────────────────────────────────────────────────────
     # 服务端统一下发景深门与场景预算，前端不再散落硬编码阈值。
     universe_manifest_source_limit: int = Field(default=256, ge=16, le=2048)
-    universe_timeline_event_page_size: int = Field(default=6, ge=2, le=6)
+    universe_timeline_event_page_size: int = Field(default=12, ge=2, le=24)
     # 时间线只返回事件的一屏事实投影；完整邻域由显式探索分页加载。
     universe_event_entity_limit: int = Field(default=8, ge=4, le=8)
     universe_lod_orbit_px: int = Field(default=72, ge=24, le=240)

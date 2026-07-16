@@ -319,10 +319,6 @@ interface GraphControls {
   panSpeed?: number;
   minDistance?: number;
   maxDistance?: number;
-  minAzimuthAngle?: number;
-  maxAzimuthAngle?: number;
-  minPolarAngle?: number;
-  maxPolarAngle?: number;
   target?: THREE.Vector3;
   addEventListener: (name: string, callback: () => void) => void;
   removeEventListener: (name: string, callback: () => void) => void;
@@ -357,13 +353,10 @@ const NEBULA_CORRIDOR_BAND_OFF = 1e8;
 /** Ambient drift stays frozen this long after any camera gesture frame. */
 const NEBULA_GESTURE_CALM_MS = 480;
 /**
- * Inside a source, rotation is a bounded human gaze, not an orbit: you can
- * glance around the corridor but never flip the nebula over — the wheel's
- * "deeper" must always stay roughly ahead. Angles are radians around the
- * corridor's axis-aligned entry bearing.
+ * Inside a source the gaze is fully free — the wheel flies where you look, so
+ * every orientation stays self-consistent — but rotation and pan carry more
+ * weight than in the overview, keeping the sky steady under the hand.
  */
-const BROWSE_GAZE_AZIMUTH_RAD = 0.42;
-const BROWSE_GAZE_POLAR_RAD = 0.3;
 const BROWSE_GAZE_ROTATE_SPEED = 0.26;
 const BROWSE_GAZE_PAN_SPEED = 0.4;
 const UNIVERSE_ROTATE_SPEED = 0.42;
@@ -409,6 +402,9 @@ const UNIVERSE_CAMERA_MAX_DISTANCE = 50_000;
 const CAMERA_DAMPING_QUIET_MS = 120;
 const CAMERA_DAMPING_RECHECK_MS = 240;
 const TIMELINE_EXIT_MIN_MS = 460;
+/** In-place condensation reads faster than the staged fly-in choreography. */
+const TIMELINE_CONDENSE_MS = 320;
+const TIMELINE_DISSOLVE_MS = 300;
 const TIMELINE_EXIT_VARIANCE_MS = 90;
 const TIMELINE_ENTRY_MS = 560;
 const SOURCE_PALETTE = [
@@ -948,13 +944,17 @@ class UniverseForceSceneEngine {
   private nebulaAnimationUntil = 0;
   /** While in the future, the ambient nebula drift holds still (camera gestures). */
   private cameraCalmUntil = 0;
-  /** Low-passed flight speed in units/s, fed by actual per-frame depth travel. */
+  /** Low-passed flight speed in units/s, fed by actual per-frame travel. */
   private flightSpeed = 0;
+  /** Signed axis-depth rate in units/s; drives the follow's paging lead. */
+  private flightDepthRate = 0;
   /** 1 = cards fully expanded; eases toward 0 as flight speed rises. */
   private flightCardPresence = 1;
-  /** True while rotation is clamped to the corridor's forward gaze cone. */
+  /** True while the browse gaze weighting is active. */
   private browseGazeApplied = false;
   private browseGazeTimer: number | null = null;
+  /** Corridor spine (source centre) that free flight softly recenters onto. */
+  private flightSpine: { x: number; y: number } | null = null;
   private sourceSignature = "";
   private labelLayer: HTMLDivElement;
   private labels: SceneLabel[] = [];
@@ -1315,9 +1315,17 @@ class UniverseForceSceneEngine {
     const nextFlight = data.temporalFlight ?? null;
     const flightSourceChanged = nextFlight?.sourceId !== this.flightConfig?.sourceId;
     this.flightConfig = nextFlight;
-    // The gaze cone belongs to one corridor: leaving or switching sources
-    // frees the camera immediately; the next entry dive re-applies it.
+    // The gaze weighting belongs to one corridor: leaving or switching
+    // sources frees the camera immediately; the next entry dive re-applies it.
     if (!nextFlight || flightSourceChanged) this.releaseBrowseGaze();
+    const spineSource = nextFlight
+      ? [...this.nodes.values()].find(
+          (node) => node.kind === "source" && node.sourceId === nextFlight.sourceId,
+        )
+      : undefined;
+    this.flightSpine = spineSource
+      ? { x: spineSource.x, y: spineSource.y }
+      : null;
     if (nextFlight && flightSourceChanged) {
       // A fresh browse session starts at its window's newest package. The entry
       // camera framing is authoritative, so this reset applies no delta.
@@ -1559,7 +1567,7 @@ class UniverseForceSceneEngine {
         // A timeline window is one visual batch. Temporal depth and scale carry
         // chronology; per-node start delays would read as incremental popping.
         startedAt: entryNow,
-        duration: TIMELINE_ENTRY_MS,
+        duration: condenseInPlace ? TIMELINE_CONDENSE_MS : TIMELINE_ENTRY_MS,
         from,
         to: destination.clone(),
         arc,
@@ -1815,8 +1823,10 @@ class UniverseForceSceneEngine {
       node.timelineMotion = {
         kind: "exit",
         startedAt: entryNow,
-        duration: TIMELINE_EXIT_MIN_MS
-          + stableUnit(`${node.id}:timeline-exit-duration`) * TIMELINE_EXIT_VARIANCE_MS,
+        duration: dissolveInPlace
+          ? TIMELINE_DISSOLVE_MS
+          : TIMELINE_EXIT_MIN_MS
+            + stableUnit(`${node.id}:timeline-exit-duration`) * TIMELINE_EXIT_VARIANCE_MS,
         from,
         to: dissolveInPlace
           ? from.clone()
@@ -3636,19 +3646,15 @@ class UniverseForceSceneEngine {
   }
 
   /**
-   * Clamps rotation to a forward gaze cone while browsing: a bounded glance
-   * around the corridor, never an orbit that flips the nebula over. The axis
-   * is world-aligned, so azimuth 0 already faces down the corridor.
+   * Weights the gaze while browsing: rotation stays fully free in every
+   * direction — the wheel flies where you look, so no orientation can break
+   * the flight's meaning — but the hand moves the sky more slowly.
    */
   private applyBrowseGaze() {
-    this.controls.minAzimuthAngle = -BROWSE_GAZE_AZIMUTH_RAD;
-    this.controls.maxAzimuthAngle = BROWSE_GAZE_AZIMUTH_RAD;
-    this.controls.minPolarAngle = Math.PI / 2 - BROWSE_GAZE_POLAR_RAD;
-    this.controls.maxPolarAngle = Math.PI / 2 + BROWSE_GAZE_POLAR_RAD;
     this.controls.rotateSpeed = BROWSE_GAZE_ROTATE_SPEED;
     this.controls.panSpeed = BROWSE_GAZE_PAN_SPEED;
     this.browseGazeApplied = true;
-    this.host.dataset.universeBrowseGaze = "locked";
+    this.host.dataset.universeBrowseGaze = "weighted";
   }
 
   private releaseBrowseGaze() {
@@ -3657,10 +3663,6 @@ class UniverseForceSceneEngine {
       this.browseGazeTimer = null;
     }
     if (!this.browseGazeApplied) return;
-    this.controls.minAzimuthAngle = Number.NEGATIVE_INFINITY;
-    this.controls.maxAzimuthAngle = Number.POSITIVE_INFINITY;
-    this.controls.minPolarAngle = 0;
-    this.controls.maxPolarAngle = Math.PI;
     this.controls.rotateSpeed = UNIVERSE_ROTATE_SPEED;
     this.controls.panSpeed = UNIVERSE_PAN_SPEED;
     this.browseGazeApplied = false;
@@ -4541,9 +4543,14 @@ class UniverseForceSceneEngine {
         : mobile
           ? expanded ? 82 : 70
           : expanded ? 94 : 78;
+      // Depth hierarchy against fatigue: the card being reached is the
+      // largest and clearest; farther cards step down with their presence.
+      const cardDepthScale = label.kind === "source"
+        ? 1
+        : 0.5 + 0.6 * (node.temporalPresenceScale ?? 1);
       const labelScale = label.kind === "source"
         ? 1
-        : nodeCardScale * currentNodePresentationCardScale(node);
+        : nodeCardScale * currentNodePresentationCardScale(node) * cardDepthScale;
       const labelWidth = baseLabelWidth * labelScale;
       const labelHeight = baseLabelHeight * labelScale;
       const labelGap = 3 + labelScale * 7;
@@ -5312,29 +5319,86 @@ class UniverseForceSceneEngine {
     }
     const elapsedMs = this.lastFlightStepAt > 0 ? now - this.lastFlightStepAt : 16;
     this.lastFlightStepAt = now;
+    // Gliding (buttons/search) stays on-axis and the library clamps its walls;
+    // free wheel flight integrates pure travel and the walls apply to the
+    // derived axis depth below, because oblique travel spends only part of its
+    // distance on depth.
+    const gliding = this.flightState.targetDepth !== null;
     const { state, moving } = stepUniverseTemporalFlight(this.flightState, {
       elapsedMs,
-      maxDepth: config.maxDepth,
+      maxDepth: gliding ? config.maxDepth : Number.POSITIVE_INFINITY,
       reducedMotion: this.reducedMotion,
     });
-    this.flightState = state;
-    const delta = state.depth - this.appliedFlightDepth;
-    if (delta !== 0) {
-      this.appliedFlightDepth = state.depth;
+    const travel = state.depth - this.appliedFlightDepth;
+    let nextState = state;
+    let appliedTravel = 0;
+    if (travel !== 0) {
       const camera = this.graph.camera();
-      camera.position.z -= delta;
-      if (this.controls.target) this.controls.target.z -= delta;
+      if (gliding) {
+        // Button glides ride the axis exactly as before.
+        const glideDepth = THREE.MathUtils.clamp(state.depth, 0, config.maxDepth);
+        const glideDelta = glideDepth - this.appliedFlightDepth;
+        camera.position.z -= glideDelta;
+        if (this.controls.target) this.controls.target.z -= glideDelta;
+        this.appliedFlightDepth = glideDepth;
+        appliedTravel = glideDelta;
+        this.flightDepthRate = glideDelta / Math.max(1, elapsedMs) * 1000;
+      } else {
+        // Free flight: the wheel flies where the gaze points, so every
+        // orientation stays self-consistent — turn left and scroll, and you
+        // fly left. Paging keys on the axis projection of that motion.
+        const forward = camera.getWorldDirection(new THREE.Vector3()).normalize();
+        const depthPerTravel = -forward.z;
+        let allowed = travel;
+        if (Math.abs(depthPerTravel) > 1e-4) {
+          const proposedDepth = this.appliedFlightDepth + depthPerTravel * travel;
+          const clampedDepth = THREE.MathUtils.clamp(proposedDepth, 0, config.maxDepth);
+          if (clampedDepth !== proposedDepth) {
+            allowed = (clampedDepth - this.appliedFlightDepth) / depthPerTravel;
+            nextState = brakeUniverseTemporalFlight(state);
+          }
+          this.appliedFlightDepth = clampedDepth;
+        }
+        camera.position.addScaledVector(forward, allowed);
+        if (this.controls.target) {
+          this.controls.target.addScaledVector(forward, allowed);
+        }
+        appliedTravel = allowed;
+        this.flightDepthRate = nextState.velocity * depthPerTravel;
+        // A soft spine magnet keeps free wander near the corridor without a
+        // wall: lateral offset eases back only while actually flying.
+        const spine = this.flightSpine;
+        if (spine) {
+          const pull = 1 - Math.exp(-elapsedMs / 2600);
+          const dx = (spine.x - camera.position.x) * pull;
+          const dy = (spine.y - camera.position.y) * pull;
+          camera.position.x += dx;
+          camera.position.y += dy;
+          if (this.controls.target) {
+            this.controls.target.x += dx;
+            this.controls.target.y += dy;
+          }
+        }
+      }
       this.wakeRendering(600);
       this.updateTemporalPresence();
       this.updateVisualLayout(now);
       this.updateNodeMorphScales(now);
       this.updateLabels(now);
       this.evaluateLod(now);
+    } else {
+      this.flightDepthRate = 0;
     }
+    // One source of truth: the flight's scalar depth is always the applied
+    // axis depth, so glide targets and follow thresholds share one space.
+    this.flightState = nextState.depth === this.appliedFlightDepth
+      && nextState === state
+      ? nextState
+      : { ...nextState, depth: this.appliedFlightDepth };
     // Cards duck while the camera streaks past and re-expand once it settles.
-    // Speed comes from actual depth travel, so wheel inertia and button glides
+    // Speed comes from actual travel, so wheel inertia and button glides
     // behave identically.
-    const instantSpeed = Math.abs(delta) / Math.max(1, elapsedMs) * 1000;
+    const instantSpeed = Math.abs(appliedTravel) / Math.max(1, elapsedMs) * 1000;
     this.flightSpeed += (instantSpeed - this.flightSpeed)
       * (1 - Math.exp(-elapsedMs / 140));
     const cardTarget = 1 - THREE.MathUtils.smoothstep(
@@ -5356,19 +5420,20 @@ class UniverseForceSceneEngine {
     if (cardsSettling) {
       this.flightCardPresence = nextCardPresence;
       this.host.dataset.universeFlightCardPresence = nextCardPresence.toFixed(2);
-      if (delta === 0) this.updateLabels(now);
+      if (appliedTravel === 0) this.updateLabels(now);
     }
-    this.host.dataset.universeFlightDepth = state.depth.toFixed(1);
-    this.host.dataset.universeFlightVelocity = state.velocity.toFixed(1);
+    this.host.dataset.universeFlightDepth = this.appliedFlightDepth.toFixed(1);
+    this.host.dataset.universeFlightVelocity = this.flightState.velocity.toFixed(1);
     const follow = now >= this.flightFollowCooldownUntil
       ? planUniverseTemporalFlightFollow({
-          depth: state.depth,
+          depth: this.appliedFlightDepth,
           windowNearDepth: config.windowNearDepth,
           windowFarDepth: config.windowFarDepth,
           marginUnits: config.unitsPerEvent * 1.5,
           // Fast flight pages ahead of arrival: the corridor must keep
-          // condensing in front of the camera, not behind it.
-          velocity: state.velocity,
+          // condensing in front of the camera, not behind it. The lead uses
+          // the axis-depth rate, so sideways flight never over-pages.
+          velocity: this.flightDepthRate,
           busy: this.timelineIsBusy(),
           hasNext: this.timelineJourney.hasNext,
           hasPrevious: this.timelineJourney.hasPrevious,
