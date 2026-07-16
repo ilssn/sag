@@ -39,6 +39,7 @@ function timelinePage(secondEntityCount = 1): UniverseTimelineSlice {
   const bundles: UniverseTimelineSlice["bundles"] = [
     {
       bundle_id: "bundle-1",
+      ordinal: 0,
       event: event("event-1"),
       nodes: [firstEntity],
       relations: [{
@@ -60,6 +61,7 @@ function timelinePage(secondEntityCount = 1): UniverseTimelineSlice {
     },
     {
       bundle_id: "bundle-2",
+      ordinal: 1,
       event: event("event-2", secondEntities.length),
       nodes: secondEntities,
       relations: secondEntities.map((entity) => ({
@@ -85,7 +87,7 @@ function timelinePage(secondEntityCount = 1): UniverseTimelineSlice {
       .map((node) => `${node.kind}:${node.id}`),
   ).size;
   return {
-    schema_version: 2,
+    schema_version: 3,
     epoch: 12,
     source_id: "source-a",
     source_revision: "revision-1",
@@ -94,6 +96,7 @@ function timelinePage(secondEntityCount = 1): UniverseTimelineSlice {
     request_cursor: null,
     page_id: "page-1",
     bundles,
+    total_events: 12,
     page: {
       returned_bundles: bundles.length,
       returned_unique_nodes: uniqueNodes,

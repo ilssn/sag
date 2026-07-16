@@ -12,6 +12,10 @@ const source = readFileSync(
   new URL("./knowledge-universe.tsx", import.meta.url),
   "utf8",
 );
+const miniWorkspaceSource = readFileSync(
+  new URL("./pet-mini-workspace.tsx", import.meta.url),
+  "utf8",
+);
 
 function sourceBetween(start: string, end: string) {
   const startIndex = source.indexOf(start);
@@ -35,25 +39,87 @@ describe("knowledge universe production interaction policy", () => {
     expect(source).toContain("const ENTITY_EXPANSION_EVENT_LIMIT = 4");
   });
 
-  it("keeps stable layout flat and gives journey a temporal depth projection", () => {
+  it("puts every timeline event on the temporal axis, with no mode to opt out of", () => {
     expect(source).toContain("timelineEventPlacementByKey");
-    expect(source).toContain("projectUniverseTemporalBatch(");
-    expect(source).toContain('displayModeState.mode === "journey"');
-    expect(source).toContain("temporalProjection.normalizedOffset.z * radius");
+    expect(source).toContain("projectUniverseTemporalAxis(");
+    expect(source).toContain(
+      "temporalProjection.normalizedOffset.z * temporalAxisDepth",
+    );
+    // Depth is the layout, not a presentation mode that can be toggled off or
+    // snapped back to a flat plane.
+    expect(source).not.toContain("displayModeState");
+    expect(source).not.toContain("universe-display-mode");
+    // Expansion-discovered events are placed but carry no temporal projection,
+    // so the deterministic spiral stays as their fallback.
     expect(source).toContain("stableRootEventOffset(");
-    expect(source).toContain("presentationScale:");
-    expect(source).toContain("presentationCardScale:");
-    expect(source).toContain("presentationOpacity:");
+    // Presence along the axis (scale/opacity) is the camera's story, computed
+    // per frame by the scene from flight depth — never baked statically into a
+    // node by absolute age, which would leave a reached package dim and small.
+    expect(source).not.toContain("presentationScale:");
+    expect(source).not.toContain("presentationCardScale:");
+    expect(source).not.toContain("presentationOpacity:");
+  });
+
+  it("derives temporal depth from the snapshot's exploration ordinals, not the cached window", () => {
+    // An axis built from the visible window would move an event's depth whenever
+    // paging changed what surrounds it — the axis would stop being an axis.
+    // The ordinal is the backend's snapshot-stable exploration position, so an
+    // imported book (every event at one instant) explores in narrative order.
+    expect(source).toContain("createUniverseTemporalAxis(browseSession.timeline.totalEvents ?? 0)");
+    expect(source).toContain("state.totalEvents = page.total_events");
+    expect(source).toContain("temporalOrdinalByBundleId");
+    expect(source).toContain("Number.isInteger(workingBundle.ordinal)");
+    // Clock time no longer keys the axis anywhere: no histogram, no timestamp
+    // lookup, no window-relative rank fallback.
+    expect(source).not.toContain("time_buckets");
+    expect(source).not.toContain("universeTemporalRankProgress");
+    expect(source).not.toContain("temporalTimestampByBundleId");
+    // Axis length is events × a fixed per-event slice, so the visible window
+    // spans the same depth whatever the source's size — and never rides on the
+    // source's visual radius.
+    expect(source).toContain("const TEMPORAL_AXIS_UNITS_PER_EVENT =");
+    expect(source).toContain("universeTemporalAxisDepth(");
+    expect(source).toContain("temporalAxis\n        ? projectUniverseTemporalAxis(");
+  });
+
+  it("hands the scene a flight config bound to the browsed source's axis", () => {
+    expect(source).toContain("const temporalFlight = temporalAxis && browseSessionSourceId");
+    expect(source).toContain("unitsPerEvent: TEMPORAL_AXIS_UNITS_PER_EVENT");
+    expect(source).toContain("maxDepth: temporalAxisDepth");
+    // The window's depth band comes from the same projections that place the
+    // nodes, so flight paging can never disagree with the layout.
+    expect(source).toContain("windowNearAge * temporalAxisDepth");
+    expect(source).toContain("windowFarAge * temporalAxisDepth");
+    // Flight config participates in the stable-identity signature: a config
+    // change must reach the scene even when nodes and links are unchanged.
+    expect(source).toContain("temporalFlight: data.temporalFlight ?? null");
+  });
+
+  it("shifts every event one vestibule deeper so arrival is nebula-only", () => {
+    // Flight depth 0 is the hero pose in front of the intact galaxy: the first
+    // event, the window band and the axis end all sit one vestibule deeper.
+    // Retreating to the wall at depth 0 therefore restores the initial state.
+    expect(source).toContain("UNIVERSE_TEMPORAL_AXIS_VESTIBULE_UNITS,");
+    expect(source).toContain(
+      "- UNIVERSE_TEMPORAL_AXIS_VESTIBULE_UNITS,",
+    );
+    expect(source).toContain(
+      "vestibuleDepth: UNIVERSE_TEMPORAL_AXIS_VESTIBULE_UNITS",
+    );
+    expect(source).toContain(
+      "maxDepth: temporalAxisDepth + UNIVERSE_TEMPORAL_AXIS_VESTIBULE_UNITS",
+    );
   });
 
   it("keeps concrete-node clicks presentation-only", () => {
     const handler = sourceBetween(
       "const handleNodeClick = React.useCallback(",
-      "const clearSelection = React.useCallback(",
+      "const moveTimelineManually = React.useCallback(",
     );
-    expect(handler).toContain("nextUniverseLockedNodeId(");
-    expect(handler).toContain("graphRef.current?.lockNode(nextLockedId)");
-    expect(handler).toContain("graphRef.current?.clearSelection()");
+    expect(handler).toContain("activatePartition(node as Universe3DNode)");
+    expect(handler).toContain("lockNodeForReading(concreteNode)");
+    expect(source).toContain("graphRef.current?.lockNode(node.id)");
+    expect(source).toContain("graphRef.current?.clearSelection()");
     expect(handler).not.toContain("expandNode(");
     expect(handler).not.toContain("loadSourceTimelinePage(");
     expect(handler).not.toContain("api.");
@@ -62,16 +128,17 @@ describe("knowledge universe production interaction policy", () => {
   it("clears a canvas lock without changing graph data or the camera", () => {
     const clearSelection = sourceBetween(
       "const clearSelection = React.useCallback(",
-      "const handleSceneUnavailable = React.useCallback(",
+      "const timelineNavigationForNode = React.useCallback(",
     );
     const handler = sourceBetween(
       "const handleNodeClick = React.useCallback(",
-      "const clearSelection = React.useCallback(",
+      "const moveTimelineManually = React.useCallback(",
     );
 
     expect(clearSelection).toContain("graphRef.current?.clearSelection()");
     expect(clearSelection).toContain("setLockedKey(null)");
     expect(clearSelection).toContain("setSelectedKey(null)");
+    expect(clearSelection).toContain("dispatchUniverseInteraction()");
     expect(clearSelection).not.toMatch(/focusOverview\(|resetOverview\(|setData\(|loadSourceTimelinePage\(|api\./);
     expect(handler).not.toContain("commitWorkingSet(");
     expect(handler).not.toContain("setUniversePinnedNetwork(");
@@ -79,36 +146,61 @@ describe("knowledge universe production interaction policy", () => {
     expect(clearSelection).not.toContain("setUniversePinnedNetwork(");
   });
 
-  it("keeps transient hover inside the scene instead of mounting a second inspector", () => {
-    expect(source).toContain("const inspectorNode = selectedConcreteNode;");
+  it("keeps transient hover inside the scene instead of mounting a second reading panel", () => {
     expect(source).toContain("const handleSceneHover = React.useCallback(() => undefined, [])");
     expect(source).not.toContain("hoveredConcreteKey");
     expect(source).not.toContain("hoveredConcreteNode");
+    expect(source).not.toContain("UniverseNodeDetailPanel");
   });
 
   it("derives hover exploration progress without loading and reserves actions for click lock", () => {
     const graphProjection = sourceBetween(
       "const graphData = React.useMemo",
-      "const selectedNode = React.useMemo",
+      "const visibleGraphCounts = React.useMemo",
     );
     const handler = sourceBetween(
       "const handleNodeClick = React.useCallback(",
-      "const clearSelection = React.useCallback(",
+      "const moveTimelineManually = React.useCallback(",
     );
-    const inspector = sourceBetween(
-      "{interactive && inspectorNode && viewportSource && (",
-      "{(loading || webglAvailable === null) && (",
-    );
-
     expect(graphProjection).toContain("relatedProgressByKey");
     expect(graphProjection).toContain("relatedProgress,");
     expect(graphProjection).toContain("canExploreMore:");
-    expect(handler).toContain("graphRef.current?.lockNode(nextLockedId)");
+    expect(handler).toContain("lockNodeForReading(concreteNode)");
     expect(handler).not.toMatch(/expandNode\(|requestExpansion\(|loadSourceTimelinePage\(|api\./);
-    expect(source).toContain("const inspectorNode = selectedConcreteNode;");
-    expect(inspector).toContain("dispatchUniverseDetail(");
-    expect(inspector).toContain("dispatchUniverseAsk(inspectorNode)");
-    expect(inspector).toContain("onClick={() => void expandNode(inspectorNode)}");
+    expect(source).toContain("onAskNode={handleAskNode}");
+    expect(source).toContain("onExploreMore={handleExploreMore}");
+  });
+
+  it("uses the mini workspace as the only reading panel with linked event navigation", () => {
+    expect(source).not.toContain("<UniverseNodeDetailPanel");
+    expect(source).not.toContain('data-universe-detail-panel="true"');
+    expect(source).not.toContain('data-universe-inspector="true"');
+    expect(source).toContain("timelineNavigationForNode(concreteNode)");
+    expect(miniWorkspaceSource).toContain(".universeNode(");
+    expect(miniWorkspaceSource).toContain("const openTimelineEvent = React.useCallback(");
+    expect(miniWorkspaceSource).toContain("dispatchUniverseFocus(item.kind, item.id, item.source_id, { lock: true })");
+    expect(miniWorkspaceSource).toContain('t("detail.previousEvent")');
+    expect(miniWorkspaceSource).toContain('t("detail.nextEvent")');
+  });
+
+  it("keeps autoplay bounded by the existing cached timeline", () => {
+    expect(source).toContain("planUniverseTimelinePlayback({");
+    expect(source).toContain("hasOlder: timelineJourney.hasNext");
+    expect(source).toContain("hasNewer: timelineJourney.hasPrevious");
+    expect(source).toContain("graphRef.current?.moveTimeline(timelinePlaybackPlan.sceneDirection)");
+    expect(source).toContain("toggleUniverseTimelinePlaybackOrder(current)");
+    expect(source).toContain('setTimelinePlaying(false)');
+    expect(source).not.toContain("setInterval(() => graphRef.current?.moveTimeline");
+  });
+
+  it("exposes locked-card actions and a non-destructive origin control", () => {
+    expect(source).toContain("actionLabels={{");
+    expect(source).toContain("onExploreMore={handleExploreMore}");
+    expect(source).toContain("onAskNode={handleAskNode}");
+    expect(source).toContain("onUserInteraction={handleSceneInteraction}");
+    expect(source).toContain("const returnToTimelineOrigin = React.useCallback(");
+    expect(source).toContain("graphRef.current?.focusSource(sourceId)");
+    expect(source).toContain('label={t("controls.origin")}');
   });
 
   it("provides a themed left-top return to the galaxy overview", () => {
@@ -122,16 +214,26 @@ describe("knowledge universe production interaction policy", () => {
     );
 
     expect(summary).toContain('data-universe-home-control="true"');
+    expect(summary).toContain("{showReturnHomeControl && (");
     expect(summary).toContain('aria-label={t("controls.home")}');
     expect(summary).toContain('title={t("controls.homeHint")}');
     expect(summary).toContain("<Orbit");
     expect(summary).toContain("bg-amber-200");
+    expect(summary).toContain("var(--universe-source-accent)");
     expect(summary).not.toContain("<House");
     expect(summary).toContain("onClick={returnToUniverseHome}");
     expect(summary).toContain("pointer-events-auto");
     expect(home).toContain("resetScene(epochRef.current + 1)");
     expect(source).toContain("viewportSourceRef.current = null");
     expect(source).toContain("setViewportSourceId(null)");
+    expect(source).toContain("const showReturnHomeControl = Boolean(browseSessionSourceId)");
+  });
+
+  it("routes the active source accent through shell progress and entity affordances", () => {
+    expect(source).toContain("universeSourceAccent(activeSourceId, darkTheme)");
+    expect(source).toContain('"--universe-source-accent": activeSourceAccent');
+    expect(source).toContain('backgroundColor: "var(--universe-source-accent)"');
+    expect(source).toContain('data-tone={tone}');
   });
 
   it("blocks timeline paging while a node is locked", () => {
@@ -149,8 +251,9 @@ describe("knowledge universe production interaction policy", () => {
     expect(source).toContain("timelineRequestRef.current?.controller.abort()");
   });
 
-  it("keeps expansion behind the explicit inspector action", () => {
-    expect(source).toContain("onClick={() => void expandNode(inspectorNode)}");
+  it("keeps expansion behind the explicit detail action", () => {
+    expect(source).toContain("onExploreMore={handleExploreMore}");
+    expect(source).toContain("void expandNode(node as UniverseConcrete3DNode)");
   });
 
   it("keeps one source session with cache, visible window and working set", () => {
@@ -349,8 +452,6 @@ describe("knowledge universe production interaction policy", () => {
     expect(intent).toContain("advanceUniverseTimelineWindow(\n        current,\n        direction,\n        pageStride");
     expect(intent).toContain("const completeTerminalPage = localRunway > 0 && !edgeAvailable");
     expect(intent).toContain("localRunway < pageStride && !completeTerminalPage");
-    expect(intent).toContain("planUniverseDisplayTimelineIntent(");
-    expect(intent).toContain('commitUniverseDisplayIntent(state, displayPlan, "shifted")');
     expect(intent.indexOf("timelineJourneyCommitRef.current ="))
       .toBeLessThan(intent.indexOf("commitTimelineWindow(session, next)"));
   });
@@ -487,7 +588,7 @@ describe("knowledge universe production interaction policy", () => {
     );
     const graph = sourceBetween(
       "const graphData = React.useMemo(() => {",
-      "const selectedNode = React.useMemo(",
+      "const visibleGraphCounts = React.useMemo(",
     );
     expect(expansion).toContain(
       "browseSession ? residentBudgetRef.current : budgetRef.current",
@@ -553,7 +654,7 @@ describe("knowledge universe production interaction policy", () => {
   it("derives browse root roles from the visible window instead of cached ownership", () => {
     const graph = sourceBetween(
       "const graphData = React.useMemo(() => {",
-      "const selectedNode = React.useMemo(",
+      "const visibleGraphCounts = React.useMemo(",
     );
     expect(graph).toContain("const visibleTimelineNodeKeys = new Set(");
     expect(graph).toContain("const isVisualRoot =");
@@ -623,10 +724,12 @@ describe("knowledge universe production interaction policy", () => {
   it("keeps click lock presentation-only and out of the working-set projection", () => {
     const click = sourceBetween(
       "const handleNodeClick = React.useCallback(",
-      "const clearSelection = React.useCallback(",
+      "const moveTimelineManually = React.useCallback(",
     );
-    expect(click).toContain("graphRef.current?.lockNode(nextLockedId)");
-    expect(click).toContain("graphRef.current?.clearSelection()");
+    expect(click).toContain("lockNodeForReading(concreteNode)");
+    expect(click).toContain("lockedKeyRef.current === concreteNode.id");
+    expect(click).toContain("clearSelection()");
+    expect(source).toContain("graphRef.current?.clearSelection()");
     expect(click).not.toContain("workingRef.current");
     expect(click).not.toContain("setUniversePinnedNetwork(");
     expect(source).not.toContain("function universeLockNetwork(");
@@ -663,19 +766,20 @@ describe("knowledge universe production interaction policy", () => {
     );
     expect(pruning).not.toContain("universeAnchorProgress(");
     expect(source).not.toContain("residentProgress >= exactNode.relatedCount");
-    expect(source).toContain("expandedAnchorsRef.current.has(inspectorAnchorKey)");
-    expect(source).toContain("!cursorsRef.current.has(inspectorAnchorKey)");
+    expect(source).toContain("expandedAnchorsRef.current.has(anchorKey)");
+    expect(source).toContain("!cursorsRef.current.has(key)");
     expect(source).toContain("committedCount < totalCount");
   });
 
-  it("keeps time buttons aligned with the wheel journey while pointer gestures restore stable view", () => {
+  it("keeps time buttons aligned with the wheel journey", () => {
     expect(source).toContain("timelineJourney={timelineJourney}");
     expect(source).toContain("onTimelineIntent={handleTimelineIntent}");
-    expect(source).toContain('graphRef.current?.moveTimeline("previous")');
-    expect(source).toContain('graphRef.current?.moveTimeline("next")');
+    expect(source).toContain('onClick={() => moveTimelineManually("previous")}');
+    expect(source).toContain('onClick={() => moveTimelineManually("next")}');
     expect(source).toContain('data-universe-timeline-controls="true"');
-    expect(source).toContain("onCameraInteraction={restoreStablePresentation}");
-    expect(source).toContain("data-universe-display-mode={displayModeState.mode}");
+    // No camera gesture may reach back and rearrange the layout: the axis is not
+    // a presentation the camera can restore.
+    expect(source).not.toContain("onCameraInteraction");
   });
 
   it("keeps the time-page controls mounted while page availability changes", () => {
@@ -707,8 +811,8 @@ describe("knowledge universe production interaction policy", () => {
     expect(controls).toContain("timelineControlsVisible && (");
     expect(controls).not.toMatch(/timelineJourney\.has(?:Previous|Next)\s*&&\s*\(/);
 
-    expect(controls).toContain('graphRef.current?.moveTimeline("previous")');
-    expect(controls).toContain('graphRef.current?.moveTimeline("next")');
+    expect(controls).toContain('onClick={() => moveTimelineManually("previous")}');
+    expect(controls).toContain('onClick={() => moveTimelineManually("next")}');
     expect(controls).toContain("disabled={!timelineJourney.hasPrevious");
     expect(controls).toContain("disabled={!timelineJourney.hasNext");
     expect(controls.match(/timelineJourney\.phase === "loading"/g)).toHaveLength(2);
@@ -747,7 +851,7 @@ describe("knowledge universe production interaction policy", () => {
     );
     const graph = sourceBetween(
       "const graphData = React.useMemo(() => {",
-      "const selectedNode = React.useMemo(",
+      "const visibleGraphCounts = React.useMemo(",
     );
 
     expect(activation).toContain('activationOriginRef.current = "browse"');

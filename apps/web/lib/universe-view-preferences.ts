@@ -43,7 +43,7 @@ export const UNIVERSE_VIEW_LIMITS = {
     min: 12,
     max: 96,
     step: 6,
-    default: 24,
+    default: 36,
   },
   deviceBundleCaps: {
     desktop: { visible: 18, cached: 96 },

@@ -644,10 +644,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <div
                 className={cn(
                   "bg-space-field relative grid h-svh min-h-0 overflow-hidden",
+                  // Explore owns the whole sky in WebGL: the CSS washes, orbit
+                  // arcs and sparkles are a second, static universe that stays
+                  // put while the 3D one rotates — that mismatch reads as the
+                  // depths drifting. One universe at a time.
+                  appMode === "explore" && "bg-space-field--void",
                   windowed && "place-items-center p-4",
                 )}
               >
-                <SpaceBackdrop pauseAmbientMotion={appMode === "explore"} />
+                {appMode !== "explore" && <SpaceBackdrop />}
                 <KnowledgeUniverse interactive={appMode === "explore"} />
                 {appMode === "explore" && (
                   <motion.div
@@ -658,7 +663,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     data-explore-controls="true"
                   >
                     <ThemeToggle
-                      className="size-8 border border-border/60 bg-background/80 shadow-soft backdrop-blur-md hover:border-cyan-300/35 hover:bg-cyan-300/10"
+                      className="size-8 border border-border/60 bg-background/80 shadow-soft backdrop-blur-md hover:border-amber-300/40 hover:bg-amber-300/10 hover:text-amber-200"
                     />
                     <UniverseViewSettingsDrawer
                       trigger={(
@@ -666,7 +671,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                           type="button"
                           variant="outline"
                           size="icon"
-                          className="size-8 border-border/60 bg-background/80 shadow-soft backdrop-blur-md hover:border-cyan-300/35 hover:bg-cyan-300/10 hover:text-cyan-100"
+                          className="size-8 border-border/60 bg-background/80 shadow-soft backdrop-blur-md hover:border-[#7ea6ff]/35 hover:bg-[#4f86ff]/10 hover:text-[#c8d9ff]"
                           aria-label={t("graphSettings")}
                           title={t("graphSettings")}
                           data-universe-settings-trigger="true"

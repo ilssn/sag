@@ -11,7 +11,7 @@ describe("app shell viewport stage", () => {
   it("pins the universe stage to the visible viewport instead of content height", () => {
     const stageStart = appShellSource.indexOf("<DetailPanelProvider>");
     const backdropStart = appShellSource.indexOf(
-      '<SpaceBackdrop pauseAmbientMotion={appMode === "explore"} />',
+      "{appMode !== \"explore\" && <SpaceBackdrop />}",
       stageStart,
     );
     const stageOpening = appShellSource.slice(stageStart, backdropStart);

@@ -59,15 +59,15 @@ describe("universe scene production invariants", () => {
     expect(pixelRatio).toContain("const areaCap = Math.sqrt(renderPixelBudget / cssPixelArea)");
     expect(pixelRatio).toContain("Math.min(window.devicePixelRatio || 1, qualityCap, areaCap)");
     expect(pixelRatio).toContain("this.host.dataset.universeRenderPixels");
-    expect(cameraChange).toContain("this.updateLabels(performance.now())");
-    expect(cameraChange).not.toContain("this.updateLabels(performance.now(), true)");
+    expect(cameraChange).toContain("this.updateLabels(now)");
+    expect(cameraChange).not.toContain("this.updateLabels(now, true)");
     expect(cameraChange).not.toContain("this.armNebulaAnimation(");
     expect(labelLayout.match(/this\.host\.getBoundingClientRect\(\)/g)).toHaveLength(1);
     expect(labelLayout).toContain("this.miniPanelRect(hostRect)");
     expect(labelLayout).toContain("hostRect,");
   });
 
-  it("keeps native wheel zoom while thresholded wheel and pointer gestures own distinct modes", () => {
+  it("gives the wheel one meaning per context: flight in a source, zoom elsewhere", () => {
     const cameraStart = sourceBetween(
       "private handleControlsStart = () =>",
       "private handleControlsChange = () =>",
@@ -78,15 +78,19 @@ describe("universe scene production invariants", () => {
     );
     const wheel = sourceBetween(
       "private handleTimelineWheel = (event: WheelEvent) =>",
-      "private handlePointerDown = () =>",
+      "private handlePointerDown = (event: PointerEvent) =>",
     );
     const wheelRouting = sourceBetween(
       "private timelineWheelSurface(target: EventTarget | null)",
       "private handleTimelineWheel = (event: WheelEvent) =>",
     );
     const pointer = sourceBetween(
-      "private handlePointerDown = () =>",
+      "private handlePointerDown = (event: PointerEvent) =>",
       "private handleControlsStart = () =>",
+    );
+    const flight = sourceBetween(
+      "private updateTemporalFlight(now: number)",
+      "private timelineWheelSurface(target: EventTarget | null)",
     );
     const intent = sourceBetween(
       "async moveTimeline(",
@@ -97,43 +101,52 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("windowRevision?: number");
     expect(source).toContain('this.controls.addEventListener("start", this.handleControlsStart)');
     expect(source).toContain('this.controls.addEventListener("change", this.handleControlsChange)');
-    expect(source).toContain('this.controls.addEventListener("end", this.handleControlsEnd)');
+    // The listener must be able to consume the gesture outright.
     expect(source).toContain('this.host.addEventListener("wheel", this.handleTimelineWheel, {');
     expect(source).toContain("capture: true,");
-    expect(source).toContain("passive: true,");
+    expect(source).toContain("passive: false,");
     expect(source).toContain('this.host.removeEventListener("wheel", this.handleTimelineWheel, true)');
-    expect(source).toContain('from "@/lib/universe-timeline-wheel"');
-    expect(source).toContain("planUniverseTimelineWheel(this.timelineWheelState");
-    expect(source).not.toContain("drainUniverseTimelineWheel");
-    expect(source).not.toContain("timelineDepthGateReached");
-    expect(source).not.toContain("timelineWheelAccumulator");
-    expect(source).toContain("this.controls.minDistance = UNIVERSE_CAMERA_MIN_DISTANCE");
-    expect(source).toContain("this.controls.maxDistance = UNIVERSE_CAMERA_MAX_DISTANCE");
-    expect(source).toContain("this.controls.zoomToCursor = true");
-    expect(source).toContain("this.controls.enableZoom = options.interactive");
-    expect(wheel).toContain('this.cameraGestureKind = "wheel"');
-    expect(wheel).toContain("const surface = this.timelineWheelSurface(event.target)");
-    expect(wheel).toContain('this.syncTimelineWheelDiagnostics("ignored-ui")');
+    // The 120px hidden-threshold planner is gone for good.
+    expect(source).not.toContain("universe-timeline-wheel");
+    expect(source).toContain('from "@/lib/universe-temporal-flight"');
+
+    // In a browsed source with an axis the wheel flies; pinch and overview stay
+    // native OrbitControls zoom, consumed before the canvas listener ever fires.
+    expect(wheel).toContain(
+      "const flightActive = this.timelineJourney.enabled && this.flightConfig !== null",
+    );
+    expect(wheel).toContain("event.ctrlKey || event.metaKey");
     expect(wheel).toContain('if (surface === "label") this.forwardTimelineWheelToCanvas(event)');
-    expect(wheel).toContain("planUniverseTimelineWheel(");
-    expect(wheel).toContain("if (plan.intent) this.runTimelineWheelIntent(");
-    expect(wheel).not.toContain("event.preventDefault()");
-    expect(wheel).not.toContain("this.callbacks.onCameraInteraction()");
+    expect(wheel).toContain("event.preventDefault()");
+    expect(wheel).toContain("event.stopPropagation()");
+    expect(wheel).toContain("applyUniverseTemporalFlightWheel(this.flightState");
+    expect(wheel).not.toContain("moveTimeline(");
+
     expect(wheelRouting).toContain("TIMELINE_WHEEL_LABEL_SELECTOR");
     expect(wheelRouting).toContain("this.labelLayer.contains(label)");
     expect(wheelRouting).toContain('const forwarded = new WheelEvent("wheel"');
     expect(wheelRouting).toContain("this.forwardedTimelineWheelEvents.add(forwarded)");
     expect(wheelRouting).toContain("this.rendererCanvas.dispatchEvent(forwarded)");
-    expect(pointer).toContain('this.cameraGestureKind = "pointer"');
-    expect(pointer).toContain("this.resetTimelineWheel()");
-    expect(cameraStart).toContain("this.cameraGesturePosition.copy(camera.position)");
+
+    // A grab brakes the flight; the flight moves the camera only through deltas
+    // applied to camera and orbit target together, so orbiting composes freely
+    // and no pointer-vs-wheel gesture classifier is needed.
+    expect(pointer).toContain("brakeUniverseTemporalFlight");
+    expect(flight).toContain("camera.position.z -= delta");
+    expect(flight).toContain("this.controls.target.z -= delta");
+    expect(flight).toContain("planUniverseTemporalFlightFollow(");
+    // The camera never waits for data: paging along is fire-and-forget.
+    expect(flight).not.toContain("await ");
+    expect(source).not.toContain("cameraGesture");
+    expect(source).not.toContain("onCameraInteraction");
+
+    expect(source).toContain("this.controls.minDistance = UNIVERSE_CAMERA_MIN_DISTANCE");
+    expect(source).toContain("this.controls.maxDistance = UNIVERSE_CAMERA_MAX_DISTANCE");
+    expect(source).toContain("this.controls.zoomToCursor = true");
+    expect(source).toContain("this.controls.enableZoom = options.interactive");
     expect(cameraStart).toContain("this.lodArmed = true");
-    expect(cameraStart).not.toContain("this.armNebulaAnimation");
-    expect(cameraStart).not.toContain("this.callbacks.onCameraInteraction()");
-    expect(cameraChange).toContain("positionChanged || targetChanged");
-    expect(cameraChange).toContain('this.cameraGestureKind === "pointer"');
-    expect(cameraChange).toContain("this.callbacks.onCameraInteraction()");
     expect(cameraChange).not.toContain("moveTimeline(");
+
     expect(intent).toContain("await this.callbacks.onTimelineIntent(direction)");
     expect(intent).not.toContain("animateTimelineExit");
     expect(source).not.toContain("private animateTimelineExit(");
@@ -167,29 +180,28 @@ describe("universe scene production invariants", () => {
       "\n  focusOverview() {",
     );
 
-    expect(source).toContain('kind: "enter" | "exit"');
+    expect(source).toContain('kind: "enter" | "shift" | "exit"');
     expect(source).toContain("planUniverseSceneDelta(");
     expect(source).toContain("private pruneRetiringTimelineElements()");
     expect(source).toContain("this.timelineExitSide(node)");
     expect(source).toContain("TIMELINE_EXIT_MIN_MS");
     expect(source).toContain("TIMELINE_ENTRY_MS");
     expect(dataCommit).toContain("const animateTimelineWindow = windowChanged");
-    expect(dataCommit).toContain('windowChangeCause === "journey"');
     expect(dataCommit).toContain("nextWindowRevision !== this.dataWindowRevision");
     expect(dataCommit).toContain("const timelineMotionFor = (");
     expect(dataCommit).toContain("const timelineMotion = timelineMotionFor(");
-    expect(dataCommit).not.toContain('kind: existingPosition ? "shift" : "enter"');
+    expect(dataCommit).toContain("previousVisual");
     expect(dataCommit).toContain("existing.timelineRetiring = false");
     expect(dataCommit).toContain("node.timelineRetiring = true");
     expect(dataCommit).toContain('windowDirection === "previous"');
     expect(dataCommit).toContain("const timelineTransitionOrigin =");
-    expect(dataCommit).toContain("this.timelineTransitionOrigin?.clone()");
-    expect(dataCommit).toContain(
-      "const desired = new THREE.Vector3(existing.x, existing.y, existing.z)",
-    );
+    // Under flight, pages condense and dissolve where they stand; the birth-at-
+    // lookat and fly-out choreography remains only for non-flight transitions.
+    expect(dataCommit).toContain("const condenseInPlace = this.flightConfig !== null");
+    expect(dataCommit).toContain("const dissolveInPlace = this.flightConfig !== null");
+    expect(dataCommit).toContain("? destination.clone()");
     expect(dataCommit).toContain("collapseTarget");
     expect(dataCommit).toContain("if (topologyChanged) {");
-    expect(dataCommit.match(/this\.graph\.graphData/g)).toHaveLength(1);
     expect(dataCommit).toContain('this.timelineMotionPhase = "entering"');
     expect(source).toContain("const startWindowRevision = this.dataWindowRevision");
     expect(source).toContain("this.dataWindowRevision === startWindowRevision");
@@ -199,22 +211,6 @@ describe("universe scene production invariants", () => {
       "moveTimeline: (direction) => engineRef.current?.moveTimeline(direction)",
     );
     expect(source).not.toContain("waitForTimelineMotions");
-  });
-
-  it("settles a journey page without a second topology commit", () => {
-    const hideRetiring = sourceBetween(
-      "private hideRetiringTimelineElements()",
-      "private finishTimelineMotionPhase()",
-    );
-    const finish = sourceBetween(
-      "private finishTimelineMotionPhase()",
-      "private updateTimelineMotions(now: number)",
-    );
-
-    expect(hideRetiring).not.toContain("this.graph.graphData(");
-    expect(finish).toContain('this.timelineJourney.mode === "stable"');
-    expect(finish).toContain("this.hideRetiringTimelineElements()");
-    expect(finish).not.toContain("this.drainTimelineWheelIntent()");
   });
 
   it("starts every node in a timeline window on one shared batch clock", () => {
@@ -287,7 +283,7 @@ describe("universe scene production invariants", () => {
       "private handleKeyDown = (event: KeyboardEvent)",
       "private updatePixelRatio()",
     );
-    expect(diagnostics).toContain("label.element.disabled = busy");
+    expect(diagnostics).toContain("label.primary.disabled = busy");
     expect(labelInteraction).toContain("if (this.timelineIsBusy()) return");
     expect(keyboard).toContain('this.timelineIsBusy() && event.key !== "Escape"');
     expect(keyboard).toContain('event.key.startsWith("Arrow")');
@@ -371,7 +367,7 @@ describe("universe scene production invariants", () => {
     expect(labels).toContain("const transientHover =");
     expect(labels).toContain('(node.sceneNode.state === "active" || focusCardIds.has(node.id))');
     expect(labels).toContain("&& (!focusId || focusCardIds.has(node.id))");
-    expect(labels).toContain('element.dataset.compact = String(node.kind === "entity")');
+    expect(labels).toContain('element.dataset.compact = String(node.kind === "entity" && !locked)');
     expect(labels).toContain('node.kind === "event" && node.id === focusId');
     expect(labels).toContain("total: totalLimit");
     expect(labels).toContain("const eventCandidateLimit = hasConcreteFocus");
@@ -386,14 +382,16 @@ describe("universe scene production invariants", () => {
     expect(labels).toContain("const nextLabels: SceneLabel[] = []");
     expect(labels).toContain("existingLabels.forEach((label) => label.element.remove())");
     expect(labels).not.toContain("this.labelLayer.replaceChildren()");
-    expect(layout).toContain('const expanded = node.kind === "event"');
+    expect(layout).toContain('const expanded = locked || (node.kind === "event"');
     expect(layout).toContain("&& node.id === labelFocusId");
     expect(layout).toContain("const requiredFocusCard =");
     expect(layout).toContain("Boolean(focusCardIds?.has(node.id))");
     expect(layout).toContain("new Set([labelFocusId, ...(labelFocusNeighbors ?? [])])");
     expect(layout).toContain("Math.max(0.72, calculatedOpacity)");
+    expect(layout).toContain("const timelineEventCard = label.kind === \"node\"");
+    expect(layout).toContain("const distributedCard = requiredFocusCard || timelineEventCard");
     expect(layout).toContain("const clampedCandidates = requiredFocusCard");
-    expect(layout).toContain("const focusGridCandidates: LabelRect[] = []");
+    expect(layout).not.toContain("focusGridCandidates");
     expect(layout).toContain("requiredFocusCard || emphasized");
     expect(source).toContain("visibleEntityLabels >= this.labelPlacementBudget.entities");
     expect(source).toContain("this.host.dataset.universeEntityLabelCount");
@@ -415,7 +413,7 @@ describe("universe scene production invariants", () => {
       "\n  setSelection(selectedId: string | null)",
     );
     expect(options).toContain("const cardPreferencesChanged =");
-    expect(options).toContain("if (this.dataReady && (cardPreferencesChanged || localeChanged)) this.rebuildLabels()");
+    expect(options).toContain("if (this.dataReady && (cardPreferencesChanged || labelTextChanged)) this.rebuildLabels()");
     expect(options).not.toContain("graphData(");
   });
 
@@ -448,6 +446,44 @@ describe("universe scene production invariants", () => {
     expect(labelInteraction).toContain("this.handleNodeHover(node, true)");
     expect(labelInteraction).toContain("this.callbacks.onNodeClick(node.sceneNode)");
     expect(labelInteraction).not.toMatch(/expandNode|requestExpansion|onTimelineIntent|fetch\(|api\./);
+  });
+
+  it("keeps locked-card actions semantic and lets the same wheel gesture unlock and travel", () => {
+    const labels = sourceBetween(
+      "private rebuildLabels()",
+      "private sortLabelsForLayout()",
+    );
+    const nodeInteraction = sourceBetween(
+      "private bindNodeLabelInteraction(",
+      "private updateLabels(now: number",
+    );
+    const wheel = sourceBetween(
+      "private handleTimelineWheel = (event: WheelEvent) =>",
+      "private handlePointerDown = (event: PointerEvent) =>",
+    );
+    const labelLayout = sourceBetween(
+      "private updateLabels(now: number",
+      "private miniPanelRect(",
+    );
+    const safeViewport = sourceBetween(
+      "private safeViewportCenter()",
+      "private moveCamera(",
+    );
+
+    expect(labels).toContain('const element = retained?.element ?? document.createElement("div")');
+    expect(labels).toContain('const primary = retained?.primary ?? document.createElement("button")');
+    expect(labels).toContain("element.append(primary, actions)");
+    expect(labels).not.toContain("primary.append(primary, actions)");
+    expect(labels).toContain('button.dataset.universeNodeAction = index === 0 ? "explore-more" : "ask-ai"');
+    expect(labels).toContain("actions.hidden = !locked");
+    expect(nodeInteraction).toContain("this.callbacks.onExploreMore?.(node.sceneNode)");
+    expect(nodeInteraction).toContain("this.callbacks.onAskNode?.(node.sceneNode)");
+    expect(wheel).toContain("this.callbacks.onUserInteraction?.()");
+    expect(wheel).toContain("this.callbacks.onSelectionClear()");
+    expect(wheel.indexOf("this.callbacks.onSelectionClear()"))
+      .toBeLessThan(wheel.indexOf("applyUniverseTemporalFlightWheel"));
+    expect(labelLayout).not.toContain('"[data-universe-detail-panel=\'true\']"');
+    expect(safeViewport).not.toContain('"[data-universe-detail-panel=\'true\']"');
   });
 
   it("dismisses a locked network atomically on blank canvas without reloading or moving it", () => {
@@ -514,7 +550,7 @@ describe("universe scene production invariants", () => {
       "private nodeProjectionScale(node: ForceNode)",
     );
     const morphScale = sourceBetween(
-      "private updateNodeMorphScales()",
+      "private updateNodeMorphScales(",
       "private updateSourceAuraOpacities()",
     );
     const labels = sourceBetween(
@@ -541,10 +577,19 @@ describe("universe scene production invariants", () => {
       "const dataOpacity = currentNodePresentationOpacity(node)",
     );
     expect(objectVisual).toContain("* dataScale");
-    expect(objectVisual).toContain("* detailFactor * dataOpacity");
     expect(morphScale).toContain("* dataScale");
 
+    // Camera-relative presence must reach every visual layer a package owns:
+    // mesh scale and opacity, the DOM card, and both link endpoints. Missing
+    // one layer leaves stars dim while their cards glow, or vice versa.
+    expect(objectVisual).toContain("const presenceScale = node.temporalPresenceScale ?? 1");
+    expect(objectVisual).toContain("* dataOpacity * presenceOpacity");
+    expect(objectVisual).toContain("* presenceScale");
+    expect(objectVisual).toContain("node.renderedTemporalPresence === presenceKey");
+    expect(morphScale).toContain("* (node.temporalPresenceScale ?? 1)");
+
     expect(labels).toContain("* dataOpacity");
+    expect(labels).toContain("node.temporalPresenceOpacity ?? 1");
     expect(labels).toContain(
       "currentNodePresentationCardScale(node)",
     );
@@ -552,7 +597,8 @@ describe("universe scene production invariants", () => {
     expect(linkStyle).toContain(
       "presentationOpacity(link.sceneLink.presentationOpacity)",
     );
-    expect(linkStyle).toContain(") * dataOpacity");
+    expect(linkStyle).toContain(") * dataOpacity * presenceOpacity");
+    expect(linkStyle).toContain("source?.temporalPresenceOpacity ?? 1");
   });
 
   it("renders every entity as a layered, minimum-size interactive glyph", () => {
@@ -567,12 +613,14 @@ describe("universe scene production invariants", () => {
     expect(nodeObject).toContain("sprite.userData.entityCore = true");
     expect(nodeObject).toContain("hit.userData.entityHitArea = true");
     expect(nodeObject).toContain("const coreSize = node.sceneNode.root ? 5.2 : 4");
+    expect(nodeObject).toContain("const color = this.entityVisualColor(node.sourceId)");
     expect(nodeObject).toContain("sprite.renderOrder = 2");
     expect(source).toContain(": node.sceneNode.root ? 10 : 8");
     expect(source).toContain("this.host.dataset.universeEntityGlyphCount");
+    expect(source).toContain('"--universe-node-accent"');
   });
 
-  it("shows focus relations during journey and the full topology only when stable", () => {
+  it("shows every factual edge by default and only dims context on focus", () => {
     const dataCommit = sourceBetween(
       "setData(\n    data: UniverseSceneData",
       "\n  focusOverview() {",
@@ -595,20 +643,19 @@ describe("universe scene production invariants", () => {
     );
     const renderLoop = sourceBetween(
       "private loop = (now: number) =>",
-      "private syncTimelineWheelDiagnostics(",
+      "private updateTemporalFlight(now: number)",
     );
 
     expect(dataCommit).toContain("existing.visible = true");
     expect(dataCommit).toContain("visible: true");
-    expect(dataCommit).toContain("const showStableRelations =");
-    expect(dataCommit).toContain("link.visible = showStableRelations");
-    expect(highlight).toContain(
-      "&& (source === anchorId || target === anchorId)",
+    expect(dataCommit).toContain(
+      "this.visibleEdgeIds = new Set(this.links.map((link) => link.id))",
     );
+    expect(dataCommit).toContain("link.visible = true");
     expect(highlight).toContain(
-      "link.visible = (!link.timelineRetiring && showStableRelations) || link.highlighted",
+      "link.visible && anchorId && (source === anchorId || target === anchorId)",
     );
-    expect(highlight).toContain('this.host.dataset.universeRelationPresentation');
+    expect(highlight).not.toMatch(/link\.visible\s*=/);
     expect(source).not.toContain("edgeDensity");
     expect(source).toContain("new THREE.MeshBasicMaterial(");
     expect(source).toContain("private restingLinkOpacity()");
@@ -643,7 +690,8 @@ describe("universe scene production invariants", () => {
     expect(linkStyle).toContain("if (this.transientHoverFocusId())");
     expect(linkStyle).toContain("this.restingLinkOpacity() * 0.68");
     expect(linkStyle).toContain("if (this.labelFocusId())");
-    expect(highlight).toContain("if (anchorId && !transientHover)");
+    expect(highlight).toContain("if (anchorId)");
+    expect(highlight).toContain("transientHover ? 0.76 : 0.92");
     expect(highlight).toContain("this.syncHighlightFlowSprites()");
     expect(source).toContain("HIGHLIGHT_FLOW_FRAME_MS");
     expect(source).toContain("private updateHighlightFlowSprites(now: number, animate: boolean)");
@@ -667,8 +715,8 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("sprite.userData.sourceCore = true");
     expect(source).toContain("private sourceMarkerDetailFactor(");
     expect(source).toContain("return Math.max(0, 1 - detail)");
-    expect(source).toContain("const NEBULA_DETAIL_ALPHA = 0.9");
-    expect(source).toContain("const NEBULA_DETAIL_DUST_POINT_SIZE_CSS = 18");
+    expect(source).toContain("const NEBULA_DETAIL_ALPHA = 1.3");
+    expect(source).toContain("const NEBULA_DETAIL_DUST_POINT_SIZE_CSS = 26");
     expect(source).toContain("uDetail: { value: 0 }");
     expect(source).toContain("uDetailAlpha: { value: NEBULA_DETAIL_ALPHA }");
     expect(source).toContain("attribute float aGlow");
@@ -692,6 +740,180 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("this.host.dataset.universeNebulaPointSizeCap");
     expect(source).toContain("this.host.dataset.universeNebulaDetailFactor");
     expect(source).toContain("this.updateNebulaAlphas();");
+  });
+
+  it("lets the browse session own the detail latch and calms the sky under gestures", () => {
+    const layout = sourceBetween(
+      "private updateVisualLayout(now: number",
+      "private evaluateLod(now: number)",
+    );
+    const controls = sourceBetween(
+      "private handleControlsStart = () =>",
+      "private handlePointerMove = (event: PointerEvent)",
+    );
+    const motionStrength = sourceBetween(
+      "private nebulaMotionStrength()",
+      "private shouldAnimateNebula(",
+    );
+
+    // The radius heuristic measures distance to the source's centre, but the
+    // flight travels along the axis away from it by design. Unlatching mid-
+    // flight hid every card, collapsed the corridor and re-enabled the drift.
+    expect(layout).toContain(
+      "const browseDetailSourceId = this.timelineJourney.enabled && this.flightConfig",
+    );
+    expect(layout).toContain("browseDetailSourceId ?? resolveUniverseDetailSource({");
+    expect(layout).toMatch(/browseDetailSourceId\s*&& visual\?\.sourceId === browseDetailSourceId\s*\?\s*1/);
+
+    // Camera gestures freeze the ambient drift instead of igniting it.
+    expect(controls).not.toContain("this.armNebulaAnimation(");
+    expect(controls.match(/cameraCalmUntil = /g)?.length).toBe(2);
+    expect(motionStrength).toContain("performance.now() < this.cameraCalmUntil");
+  });
+
+  it("stretches a browsed source's nebula into its exploration corridor on the GPU", () => {
+    const nebulaMaterial = sourceBetween(
+      "function makeNebulaMaterial(darkTheme: boolean)",
+      "class UniverseForceSceneEngine",
+    );
+    const nebulaBuild = sourceBetween(
+      "private rebuildNebula()",
+      "private updateNebulaPositions()",
+    );
+
+    // The corridor is the second form of the same particles: the vertex shader
+    // blends galaxy → corridor with the existing detail mix, so diving into a
+    // source needs no CPU reposition and no extra particle budget.
+    expect(nebulaMaterial).toContain("attribute vec3 aCorridor");
+    expect(nebulaMaterial).toContain("vec3 corridorTarget = position + aCorridor");
+    expect(nebulaMaterial).toContain(
+      "vec3 animatedPosition = mix(position, corridorTarget, corridorMix)",
+    );
+    // Dust yields inside the loaded window band, where real packages condensed.
+    expect(nebulaMaterial).toContain("uniform float uCorridorNearZ");
+    expect(nebulaMaterial).toContain("float loadedBand = smoothstep(");
+    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.16, corridorMix * loadedBand)");
+    // Corridor depth lives on the same counting grid as packages and flight.
+    expect(nebulaBuild).toContain("UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT");
+    expect(nebulaBuild).toContain('geometry.setAttribute("aCorridor"');
+    expect(source).toContain("private syncNebulaCorridorUniforms()");
+    expect(source).toContain("material.uniforms.uCorridorNearZ.value = config");
+    expect(source).toContain("const NEBULA_CORRIDOR_BAND_OFF = 1e8");
+
+    // Corridor dust is camera-anchored: it wraps modulo a fixed span around
+    // the flight depth, so density beside the camera never depends on source
+    // size — a 586-event book gets the same dust as a 12-event note. The axis
+    // still has real ends: an entry-plane fade, a dissolving horizon, and a
+    // hard stop past the last event.
+    expect(source).toContain("const NEBULA_CORRIDOR_WRAP_SPAN = 2400");
+    expect(nebulaBuild).toContain(
+      "Math.min(Math.max(1, axisDepth), NEBULA_CORRIDOR_WRAP_SPAN)",
+    );
+    expect(nebulaMaterial).toContain("uniform float uFlightDepth");
+    expect(nebulaMaterial).toContain("float rel = mod(depthAlongAxis - uFlightDepth, span)");
+    expect(nebulaMaterial).toContain("float wrappedDepth = uFlightDepth + rel");
+    expect(nebulaMaterial).toContain("float entryFade = smoothstep(-220.0, -40.0, wrappedDepth)");
+    expect(nebulaMaterial).toContain("float horizonFade = 1.0 - smoothstep(0.82, 1.0, endProgress) * 0.8");
+    expect(source).toContain(
+      "material.uniforms.uFlightDepth.value = config ? this.appliedFlightDepth : 0",
+    );
+
+    // The corridor carries its own light and has no visible far wall: glow
+    // pockets brighten and swell, and the last stretch dissolves.
+    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 1.2, corridorMix * glowParticle)");
+    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, axisFade, corridorMix)");
+    expect(nebulaMaterial).toContain("* detailScale * glowScale * corridorBoost");
+
+    // Most dust becomes the canyon walls: a fine star field framing the
+    // corridor — bright, grain-sized (dust cap, no glow cap), and near enough
+    // to actually live inside the field of view.
+    expect(source).toContain("const NEBULA_WALL_SHARE = 0.62");
+    expect(source).toContain("const NEBULA_WALL_LATERAL_MIN = 2.2");
+    expect(source).toContain("const NEBULA_WALL_LATERAL_MAX = 5.2");
+    expect(nebulaBuild).toContain("NEBULA_WALL_LATERAL_MIN");
+    expect(nebulaBuild).toContain('geometry.setAttribute("aCorridorWall"');
+    expect(nebulaMaterial).toContain("mix(1.0, 1.35, corridorMix * aCorridorWall)");
+    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.95, corridorMix * aCorridorWall)");
+    expect(nebulaMaterial).toContain("float capSelect = glowParticle;");
+
+    // While inside one source the rest of the sky recedes deep enough that a
+    // white-hot core cannot smudge the corridor, and the browsed source claims
+    // a heavier share of the fixed particle budget.
+    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.12, uDetail * (1.0 - sourceMatch))");
+    expect(nebulaBuild).toContain("source.sourceId === browsedSourceId ? 6 : 1");
+    expect(nebulaBuild).toContain("const browsedSourceId = this.flightConfig?.sourceId ?? null");
+  });
+
+  it("clamps browsing rotation to a forward gaze cone that cannot flip the nebula", () => {
+    const focus = sourceBetween(
+      "focusSource(sourceId: string) {",
+      "focusResult() {",
+    );
+    const dataCommit = sourceBetween(
+      "setData(\n    data: UniverseSceneData",
+      "\n  focusOverview() {",
+    );
+
+    // Inside a source the wheel's "deeper" must stay roughly ahead: rotation
+    // is a bounded human glance, applied after the entry dive lands and
+    // released the moment the session leaves or switches sources.
+    expect(source).toContain("const BROWSE_GAZE_AZIMUTH_RAD = 0.3");
+    expect(source).toContain("const BROWSE_GAZE_POLAR_RAD = 0.22");
+    // The orbit pivot sits DEEP in the corridor: dragging tilts the near
+    // corridor around the depths, instead of sweeping the depths around a
+    // near point — the deep field must hold still under rotation.
+    expect(source).toContain("const CORRIDOR_ENTRY_LOOK_AHEAD = 520");
+    expect(source).toContain("private applyBrowseGaze()");
+    expect(source).toContain("private releaseBrowseGaze()");
+    expect(source).toContain(
+      "this.controls.minAzimuthAngle = -BROWSE_GAZE_AZIMUTH_RAD",
+    );
+    expect(source).toContain("this.controls.rotateSpeed = BROWSE_GAZE_ROTATE_SPEED");
+    expect(source).toContain("this.controls.rotateSpeed = UNIVERSE_ROTATE_SPEED");
+    expect(focus).toContain("this.applyBrowseGaze()");
+    expect(dataCommit).toContain(
+      "if (!nextFlight || flightSourceChanged) this.releaseBrowseGaze()",
+    );
+  });
+
+  it("dives into the corridor on entry and ducks cards while streaking past", () => {
+    const focus = sourceBetween(
+      "focusSource(sourceId: string) {",
+      "focusResult() {",
+    );
+    const flight = sourceBetween(
+      "private updateTemporalFlight(now: number)",
+      "private timelineWheelSurface(target: EventTarget | null)",
+    );
+    const labels = sourceBetween(
+      "private updateLabels(now: number",
+      "private miniPanelRect(",
+    );
+
+    // Entering a browse session flies to the corridor entrance looking down
+    // the axis — never a bearing-preserving dolly into a ball of nodes.
+    expect(focus).toContain("flight.centerZ - this.appliedFlightDepth");
+    expect(focus).toContain("CORRIDOR_ENTRY_STANDOFF");
+    expect(focus).toContain("entryZ - CORRIDOR_ENTRY_LOOK_AHEAD");
+
+    // Card discipline keys off real depth travel (wheel inertia and button
+    // glides alike) and eases asymmetrically: duck fast, recover after a beat.
+    expect(flight).toContain("const instantSpeed = Math.abs(delta)");
+    expect(flight).toContain("FLIGHT_CARD_COLLAPSE_MS");
+    expect(flight).toContain("return moving || cardsSettling");
+    expect(labels).toContain(
+      "universeCardMorph(this.visualDetailMix * this.flightCardPresence)",
+    );
+    // Passed packages keep an ember star but never a ghost card.
+    expect(labels).toContain("((node.temporalPresenceOpacity ?? 1) - 0.18) / 0.82");
+
+    // Reading is the point: a transient hover dims unrelated cards in place
+    // (no reflow, no board jump) — only a locked focus clears the stage — and
+    // the network answers a glance with a whisper of scale, not a pop.
+    expect(labels).toContain(
+      "belongsToLabelSource && transientHover ? nodeCardReveal * 0.35 : 0",
+    );
+    expect(source).toContain("? this.transientHoverFocusId() ? 1.04 : 1.12");
   });
 
   it("debounces pointer label rebuilds and restores defaults", () => {
@@ -751,10 +973,78 @@ describe("universe scene production invariants", () => {
       "private updateNebulaPositions()",
     );
 
-    expect(nebula).toContain("const budgetCap = mobile ? 1_200 : 3_000");
+    expect(nebula).toContain("const budgetCap = mobile ? 2_000 : 6_000");
     expect(nebula).toContain("const budget = Math.min(");
     expect(nebula).toContain("this.host.dataset.universeNebulaBudgetCap");
     expect(nebula).toContain("this.host.dataset.universeNebulaBudget");
+  });
+
+  it("keeps nebula grains on each source's entry colour", () => {
+    const nebulaMaterial = sourceBetween(
+      "function makeNebulaMaterial(darkTheme: boolean)",
+      "class UniverseForceSceneEngine",
+    );
+    const nebula = sourceBetween(
+      "private rebuildNebula()",
+      "private updateNebulaPositions()",
+    );
+
+    // Gold is the stable brand field; the marker, label, and dust all resolve
+    // through sourceVisualColor as a secondary tint when a source is entered.
+    expect(source).toContain('export const UNIVERSE_BRAND_GOLD = "#d6ae63"');
+    expect(nebulaMaterial).toContain("uniform vec3 uBrandColor");
+    expect(nebulaMaterial).toContain("vColor = mix(uBrandColor, aColor, sourceTint)");
+    expect(source).toContain("const SOURCE_PALETTE = [");
+    expect(nebula).toContain("const color = this.sourceVisualColor(particle.sourceId);");
+    expect(nebula).toContain("const whiteMix = particle.core");
+    expect(nebula).toContain("color.lerp(WHITE, whiteMix);");
+    expect(source).toContain("export function universeSourceAccent(sourceId: string");
+    expect(nebula).toContain("const glowChance = coreParticle ? 0.05 : 0.02");
+    expect(source).toContain("const NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP = 22");
+    // The hero anatomy stays intact: half the grains in a tight heart, a thin
+    // disc with arm lanes, and a wide whole-frame sprinkle.
+    expect(nebula).toContain("const coreParticle = population < 0.5");
+    expect(nebula).toContain("coreParticle ? 2.55 : 0.7");
+    expect(nebula).toContain("? 1.35 + stableUnit(`${key}:halo`) * 1.65");
+    expect(nebula).toContain("* (coreParticle ? 1.3 : 0.5)");
+    // Entity sprites and labels use the same source accent as their nebula.
+    expect(source).toContain("private entityVisualColor(sourceId: string)");
+    expect(source).toContain("this.sourceVisualColor(node.sourceId)");
+  });
+
+  it("arrives at a nebula-only initial state and explores through the vestibule", () => {
+    const nebulaMaterial = sourceBetween(
+      "function makeNebulaMaterial(darkTheme: boolean)",
+      "class UniverseForceSceneEngine",
+    );
+    const focus = sourceBetween(
+      "focusSource(sourceId: string) {",
+      "focusResult() {",
+    );
+    const presence = sourceBetween(
+      "private updateTemporalPresence()",
+      "private updateTemporalFlight(now: number)",
+    );
+
+    // Depth 0 is the hero pose: intact galaxy, no event stars, no cards. The
+    // corridor stretch and the packages both materialize only as the camera
+    // crosses the vestibule — and dissolve again on the way back out.
+    expect(source).toContain("vestibuleDepth: number");
+    expect(nebulaMaterial).toContain("uniform float uCorridorVestibule");
+    expect(nebulaMaterial).toContain(
+      "? smoothstep(0.0, uCorridorVestibule * 0.85, uFlightDepth)",
+    );
+    expect(nebulaMaterial).toContain(
+      "float corridorMix = smoothstep(0.12, 0.88, particleDetail) * diveMix",
+    );
+    expect(presence).toContain("config.vestibuleDepth * 0.85");
+    expect(presence).toContain("opacity = presence.opacity * dive");
+    expect(source).toContain(
+      "material.uniforms.uCorridorVestibule.value = config",
+    );
+    // The arrival stands back far enough for the hero framing.
+    expect(focus).toContain("node.sceneNode.radius * 1.45 * 1.9");
+    expect(focus).toContain("entryZ + heroStandoff");
   });
 
   it("snaps the imperceptible detail-morph tail so stable scenes can sleep", () => {
@@ -765,6 +1055,50 @@ describe("universe scene production invariants", () => {
     expect(source).toContain(
       "Math.abs(nextTarget - nextMix) > DETAIL_MORPH_SETTLE_EPSILON",
     );
+  });
+
+  it("throttles projection morph scales on the camera path without stalling motion", () => {
+    const morphScale = sourceBetween(
+      "private updateNodeMorphScales(",
+      "private updateSourceAuraOpacities()",
+    );
+    const cameraChange = sourceBetween(
+      "private handleControlsChange = () =>",
+      "private handlePointerMove = (event: PointerEvent)",
+    );
+    const objectVisual = sourceBetween(
+      "private setObjectOpacity(node: ForceNode",
+      "private nodeProjectionScale(node: ForceNode)",
+    );
+
+    expect(morphScale).toContain("if (!force && elapsed < 24) return");
+    expect(morphScale).toContain("this.lastNodeMorphAt = now");
+    expect(cameraChange).toContain("this.updateNodeMorphScales(now)");
+    expect(cameraChange).not.toContain("this.updateNodeMorphScales(now, true)");
+    // The throttle is only safe because a node mid-timelineMotion still gets the
+    // same scale formula applied every frame through setObjectOpacity.
+    expect(objectVisual).toContain("this.nodeMorphScale(node)");
+  });
+
+  it("waits for camera damping to fall quiet before sleeping the renderer", () => {
+    const wake = sourceBetween(
+      "private wakeRendering(settleMs = 1800)",
+      "private loop = (now: number)",
+    );
+    const cameraChange = sourceBetween(
+      "private handleControlsChange = () =>",
+      "private handlePointerMove = (event: PointerEvent)",
+    );
+
+    expect(source).toContain("const CAMERA_DAMPING_QUIET_MS = 120");
+    expect(source).toContain("const CAMERA_DAMPING_RECHECK_MS = 240");
+    expect(cameraChange).toContain("this.lastControlsChangeAt = now");
+    expect(wake).toContain(
+      "performance.now() - this.lastControlsChangeAt < CAMERA_DAMPING_QUIET_MS",
+    );
+    expect(wake).toContain("this.wakeRendering(CAMERA_DAMPING_RECHECK_MS)");
+    // Reduced motion disables damping outright, so there is no tail to wait for.
+    expect(wake).toContain("!this.reducedMotion");
   });
 
   it("reports import, initialization, and WebGL context failures once", () => {

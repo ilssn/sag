@@ -115,6 +115,14 @@ def _cursor_datetime(payload: dict[str, Any], key: str) -> datetime:
     return value
 
 
+def _cursor_int(payload: dict[str, Any], key: str) -> int:
+    value = payload.get(key)
+    # bool is an int subclass; a "true" rank is a malformed cursor, not rank 1.
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("invalid universe cursor")
+    return value
+
+
 def _weight(value: Any) -> float:
     return float(value) if value is not None else 1.0
 
@@ -1793,7 +1801,7 @@ class EngineManager:
         from zleap.sag.db import get_session_factory
         from zleap.sag.db.models import SourceEvent
 
-        bounded_limit = max(1, min(int(limit), 6))
+        bounded_limit = max(1, min(int(limit), 24))
         bounded_entities = max(4, min(int(entity_limit), 8))
         if direction not in {"older", "newer"}:
             raise ValueError("invalid universe timeline direction")
@@ -1846,8 +1854,13 @@ class EngineManager:
             event_time <= as_of_db,
             SourceEvent.created_time <= as_of_db,
         ]
+        # Canonical exploration order: newest first, then the extractor's
+        # source-wide narrative rank, then id. Rank is what makes a source whose
+        # events all share one instant (an imported book) explorable in reading
+        # order instead of uuid order — the counting axis keys on this sequence.
         if cursor_payload:
             boundary_time = _database_time(_cursor_datetime(cursor_payload, "time"))
+            boundary_rank = _cursor_int(cursor_payload, "rank")
             boundary_id = str(cursor_payload.get("id") or "")
             if boundary_time is None or not boundary_id:
                 raise ValueError("invalid universe cursor")
@@ -1855,21 +1868,31 @@ class EngineManager:
                 filters.append(
                     or_(
                         event_time < boundary_time,
-                        and_(event_time == boundary_time, SourceEvent.id < boundary_id),
+                        and_(event_time == boundary_time, SourceEvent.rank > boundary_rank),
+                        and_(
+                            event_time == boundary_time,
+                            SourceEvent.rank == boundary_rank,
+                            SourceEvent.id > boundary_id,
+                        ),
                     )
                 )
             else:
                 filters.append(
                     or_(
                         event_time > boundary_time,
-                        and_(event_time == boundary_time, SourceEvent.id > boundary_id),
+                        and_(event_time == boundary_time, SourceEvent.rank < boundary_rank),
+                        and_(
+                            event_time == boundary_time,
+                            SourceEvent.rank == boundary_rank,
+                            SourceEvent.id < boundary_id,
+                        ),
                     )
                 )
 
         ordering = (
-            (event_time.desc(), SourceEvent.id.desc())
+            (event_time.desc(), SourceEvent.rank.asc(), SourceEvent.id.asc())
             if direction == "older"
-            else (event_time.asc(), SourceEvent.id.asc())
+            else (event_time.asc(), SourceEvent.rank.desc(), SourceEvent.id.desc())
         )
 
         sf = get_session_factory()
@@ -1883,6 +1906,7 @@ class EngineManager:
                         SourceEvent.category,
                         SourceEvent.chunk_id,
                         SourceEvent.start_time,
+                        SourceEvent.rank,
                         event_time.label("event_time"),
                     )
                     .where(*filters)
@@ -1893,6 +1917,47 @@ class EngineManager:
             has_directional_more = len(event_rows) > bounded_limit
             selected_rows = event_rows[:bounded_limit]
             page = selected_rows if direction == "older" else list(reversed(selected_rows))
+
+            # Ordinals anchor the client's counting axis: within this snapshot,
+            # an event's depth is its position in the canonical order. One count
+            # for the page head; the page itself is contiguous in that order.
+            base_filters = [
+                SourceEvent.source_config_id == source_config_id,
+                (SourceEvent.status.is_(None) | (SourceEvent.status != "DELETED")),
+                event_time <= as_of_db,
+                SourceEvent.created_time <= as_of_db,
+            ]
+            total_events = int(
+                await session.scalar(
+                    select(func.count()).select_from(SourceEvent).where(*base_filters)
+                )
+                or 0
+            )
+            first_ordinal = 0
+            head = page[0] if page else None
+            if head is not None:
+                head_time = head.event_time
+                head_rank = int(head.rank or 0)
+                head_id = str(head.id)
+                first_ordinal = int(
+                    await session.scalar(
+                        select(func.count())
+                        .select_from(SourceEvent)
+                        .where(
+                            *base_filters,
+                            or_(
+                                event_time > head_time,
+                                and_(event_time == head_time, SourceEvent.rank < head_rank),
+                                and_(
+                                    event_time == head_time,
+                                    SourceEvent.rank == head_rank,
+                                    SourceEvent.id < head_id,
+                                ),
+                            ),
+                        )
+                    )
+                    or 0
+                )
 
             bundle_nodes, bundle_relations = await self._universe_event_bundles(
                 session,
@@ -1927,6 +1992,7 @@ class EngineManager:
                     "as_of": _utc_time(as_of).isoformat(),
                     "revision": source_revision,
                     "time": _utc_time(row.event_time).isoformat(),
+                    "rank": int(row.rank or 0),
                     "id": row.id,
                 },
                 self._settings.secret_key,
@@ -1980,6 +2046,7 @@ class EngineManager:
             bundles.append(
                 UniverseTimelineBundleInfo(
                     bundle_id=f"event:{event_id}",
+                    ordinal=first_ordinal + index,
                     event=event_node,
                     nodes=entity_nodes,
                     relations=relations,
@@ -1998,6 +2065,7 @@ class EngineManager:
 
         return UniverseTimelineInfo(
             bundles=bundles,
+            total_events=total_events,
             snapshot_id=stable_snapshot_id,
             direction=direction,
             has_newer=newer_cursor is not None,
@@ -2443,6 +2511,7 @@ class EngineManager:
                             SourceEvent.source_id,
                             SourceEvent.title,
                             SourceEvent.summary,
+                            SourceEvent.content,
                             SourceEvent.category,
                             SourceEvent.chunk_id,
                             SourceEvent.start_time,
@@ -2455,12 +2524,16 @@ class EngineManager:
                 ).one_or_none()
                 if event is None:
                     return None
+                summary = str(event.summary or "").strip()
+                content = str(event.content or "").strip()
                 return {
                     "id": event.id,
                     "kind": "event",
                     "source_ref_id": event.source_id,
                     "label": event.title or "未命名事件",
-                    "description": str(event.summary or "")[:4000],
+                    # summary is the compact graph-card copy; content is the
+                    # extracted event detail shown after opening the node.
+                    "description": (content or summary)[:4000],
                     "category": event.category or "",
                     "chunk_id": event.chunk_id,
                     "start_time": event.start_time,

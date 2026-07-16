@@ -3,10 +3,16 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SearchResponse } from "./types";
 import {
   activationFromSearch,
+  dispatchUniverseDetail,
+  dispatchUniverseFocus,
+  dispatchUniverseInteraction,
   dispatchUniversePatchReset,
   dispatchUniverseSourceFocus,
   dispatchUniverseView,
   readUniverseView,
+  UNIVERSE_INTERACTION_EVENT,
+  UNIVERSE_DETAIL_EVENT,
+  UNIVERSE_FOCUS_EVENT,
   UNIVERSE_PATCH_RESET_EVENT,
   UNIVERSE_SOURCE_FOCUS_EVENT,
 } from "./universe-events";
@@ -113,6 +119,62 @@ describe("universe view state", () => {
     dispatchUniverseSourceFocus("source-b");
 
     expect(sourceId).toBe("source-b");
+  });
+
+  it("signals real canvas gestures so contextual overlays can close", () => {
+    const target = new EventTarget();
+    vi.stubGlobal("window", target);
+    let gestures = 0;
+    target.addEventListener(UNIVERSE_INTERACTION_EVENT, () => {
+      gestures += 1;
+    });
+
+    dispatchUniverseInteraction();
+
+    expect(gestures).toBe(1);
+  });
+
+  it("carries a stable event sequence into contextual detail navigation", () => {
+    const target = new EventTarget();
+    vi.stubGlobal("window", target);
+    let detail: unknown = null;
+    target.addEventListener(UNIVERSE_DETAIL_EVENT, (event) => {
+      detail = (event as CustomEvent).detail;
+    });
+    const navigation = {
+      items: [
+        { kind: "event" as const, id: "event-a", source_id: "source-a" },
+        { kind: "event" as const, id: "event-b", source_id: "source-a" },
+      ],
+      index: 0,
+    };
+
+    dispatchUniverseDetail("event", "event-a", "source-a", navigation);
+
+    expect(detail).toEqual({
+      kind: "event",
+      id: "event-a",
+      source_id: "source-a",
+      navigation,
+    });
+  });
+
+  it("marks detail navigation focus as a lock request", () => {
+    const target = new EventTarget();
+    vi.stubGlobal("window", target);
+    let detail: unknown = null;
+    target.addEventListener(UNIVERSE_FOCUS_EVENT, (event) => {
+      detail = (event as CustomEvent).detail;
+    });
+
+    dispatchUniverseFocus("event", "event-b", "source-a", { lock: true });
+
+    expect(detail).toEqual({
+      kind: "event",
+      id: "event-b",
+      source_id: "source-a",
+      lock: true,
+    });
   });
 
   it("invalidates snapshot-bound detail patches without changing graph state", () => {

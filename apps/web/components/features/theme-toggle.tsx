@@ -13,7 +13,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-export function ThemeToggle({ className }: { className?: string }) {
+export function ThemeToggle({ className }: { className?: string } = {}) {
   const t = useTranslations("Theme");
   const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = React.useState(false);
@@ -25,7 +25,6 @@ export function ThemeToggle({ className }: { className?: string }) {
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
-            type="button"
             variant="ghost"
             size="icon"
             className={className}

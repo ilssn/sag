@@ -13,6 +13,7 @@ export const UNIVERSE_FOCUS_EVENT = "sag:universe-focus";
 export const UNIVERSE_SOURCE_FOCUS_EVENT = "sag:universe-source-focus";
 export const UNIVERSE_DETAIL_EVENT = "sag:universe-detail";
 export const UNIVERSE_ASK_EVENT = "sag:universe-ask";
+export const UNIVERSE_INTERACTION_EVENT = "sag:universe-interaction";
 export const UNIVERSE_PATCH_EVENT = "sag:universe-patch";
 export const UNIVERSE_PATCH_RESET_EVENT = "sag:universe-patch-reset";
 export const UNIVERSE_VIEW_EVENT = "sag:universe-view";
@@ -23,10 +24,22 @@ export interface UniverseViewState {
   progress: number;
 }
 
+export interface UniverseDetailTimelineItem {
+  kind: "event";
+  id: string;
+  source_id: string;
+}
+
+export interface UniverseDetailTimelineNavigation {
+  items: UniverseDetailTimelineItem[];
+  index: number;
+}
+
 export interface UniverseDetailTarget {
   kind: "event" | "entity";
   id: string;
   source_id: string;
+  navigation?: UniverseDetailTimelineNavigation;
 }
 
 export interface UniverseAskTarget extends UniverseDetailTarget {
@@ -78,6 +91,12 @@ export function dispatchUniverseView(view: UniverseViewState) {
     window.dispatchEvent(new CustomEvent<UniverseViewState>(UNIVERSE_VIEW_EVENT, { detail: next }));
   }
   return next;
+}
+
+/** Signals a real canvas gesture so contextual overlays can yield the map. */
+export function dispatchUniverseInteraction() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(UNIVERSE_INTERACTION_EVENT));
 }
 
 export function dispatchUniverseActivation(
@@ -168,11 +187,12 @@ export function dispatchUniverseFocus(
   kind: "event" | "entity",
   id: string,
   sourceId: string,
+  options?: { lock?: boolean },
 ) {
   if (typeof window === "undefined") return;
   window.dispatchEvent(
     new CustomEvent(UNIVERSE_FOCUS_EVENT, {
-      detail: { kind, id, source_id: sourceId },
+      detail: { kind, id, source_id: sourceId, lock: options?.lock === true },
     }),
   );
 }
@@ -190,9 +210,10 @@ export function dispatchUniverseDetail(
   kind: "event" | "entity",
   id: string,
   sourceId: string,
+  navigation?: UniverseDetailTimelineNavigation,
 ) {
   if (typeof window === "undefined") return;
-  pendingUniverseDetail = { kind, id, source_id: sourceId };
+  pendingUniverseDetail = { kind, id, source_id: sourceId, navigation };
   window.dispatchEvent(
     new CustomEvent<UniverseDetailTarget>(UNIVERSE_DETAIL_EVENT, {
       detail: pendingUniverseDetail,

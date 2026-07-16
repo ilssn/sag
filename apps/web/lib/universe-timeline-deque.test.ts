@@ -18,6 +18,9 @@ function bundle(
   const eventId = `event-${index}`;
   return {
     bundle_id: `bundle-${index}`,
+    // Fixtures number bundles newest-first from 1, so the counting-axis
+    // ordinal is simply the zero-based position in that same order.
+    ordinal: index - 1,
     event: {
       id: eventId,
       kind: "event",
@@ -55,7 +58,7 @@ function page(
     ?? (direction === "newer" && bundles.length === 0 ? requestCursor : null);
   const nextCursor = direction === "older" ? olderCursor : newerCursor;
   return {
-    schema_version: 2,
+    schema_version: 3,
     epoch: 1,
     source_id: "source-a",
     source_revision: "revision-a",
@@ -64,6 +67,7 @@ function page(
     request_cursor: requestCursor,
     page_id: `${direction}:${requestCursor ?? "root"}`,
     bundles,
+    total_events: 40,
     page: {
       returned_bundles: bundles.length,
       returned_unique_nodes: bundles.length,
@@ -167,6 +171,24 @@ describe("universe timeline raw deque", () => {
       page("older", "wrong-cursor", [bundle(2, "cursor-2", null)]),
       4,
     )).toThrow("not adjacent");
+  });
+
+  it("rejects a cursor-adjacent page whose ordinals overlap the cache", () => {
+    const initial = admitUniverseTimelineDequePage(null, page("older", null, [
+      bundle(1, null, "cursor-1"),
+      bundle(2, "cursor-2", "cursor-2"),
+    ]), 4);
+    // Same cursor seam, but the page claims depths the cache already owns —
+    // admitting it would fold two events onto one axis position.
+    const overlapping = page("older", "cursor-2", [
+      bundle(3, "cursor-3", null),
+    ]);
+    overlapping.bundles = [{ ...overlapping.bundles[0], ordinal: 1 }];
+    expect(() => admitUniverseTimelineDequePage(
+      initial.deque,
+      overlapping,
+      4,
+    )).toThrow("ordinals overlap");
   });
 
   it("rejects a malformed directional edge before mutating the cache", () => {

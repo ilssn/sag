@@ -73,53 +73,96 @@ def test_universe_v2_response_models_reject_malformed_or_stalled_pages():
             }
         )
 
+    def slice_payload(**overrides):
+        payload = {
+            "schema_version": 3,
+            "epoch": 1,
+            "source_id": "source-1",
+            "source_revision": "revision-1",
+            "snapshot_id": "snapshot-1",
+            "request_direction": "older",
+            "request_cursor": "same-cursor",
+            "page_id": "page-1",
+            "bundles": [
+                {
+                    "bundle_id": "bundle-1",
+                    "ordinal": 0,
+                    "event": node,
+                    "nodes": [entity],
+                    "relations": [
+                        {
+                            **relation,
+                            "to_id": "entity-1",
+                        }
+                    ],
+                    "neighbor_page": {
+                        "total_unique": 1,
+                        "returned_unique": 1,
+                        "complete": True,
+                        "next_cursor": None,
+                    },
+                    "cursor_before": None,
+                    "cursor_after": "same-cursor",
+                }
+            ],
+            "total_events": 3,
+            "page": {
+                "returned_bundles": 1,
+                "returned_unique_nodes": 2,
+                "returned_relations": 1,
+                "direction": "older",
+                "has_newer": False,
+                "newer_cursor": None,
+                "has_older": True,
+                "older_cursor": "same-cursor",
+                "has_more": True,
+                "next_cursor": "same-cursor",
+            },
+            "as_of": now,
+        }
+        payload.update(overrides)
+        return payload
+
     with pytest.raises(PydanticValidationError, match="游标没有前进"):
-        UniverseTimelineSliceOut.model_validate(
-            {
-                "schema_version": 2,
-                "epoch": 1,
-                "source_id": "source-1",
-                "source_revision": "revision-1",
-                "snapshot_id": "snapshot-1",
-                "request_direction": "older",
-                "request_cursor": "same-cursor",
-                "page_id": "page-1",
-                "bundles": [
-                    {
-                        "bundle_id": "bundle-1",
-                        "event": node,
-                        "nodes": [entity],
-                        "relations": [
-                            {
-                                **relation,
-                                "to_id": "entity-1",
-                            }
-                        ],
-                        "neighbor_page": {
-                            "total_unique": 1,
-                            "returned_unique": 1,
-                            "complete": True,
-                            "next_cursor": None,
-                        },
-                        "cursor_before": None,
-                        "cursor_after": "same-cursor",
-                    }
-                ],
-                "page": {
-                    "returned_bundles": 1,
-                    "returned_unique_nodes": 2,
-                    "returned_relations": 1,
-                    "direction": "older",
-                    "has_newer": False,
-                    "newer_cursor": None,
-                    "has_older": True,
-                    "older_cursor": "same-cursor",
-                    "has_more": True,
-                    "next_cursor": "same-cursor",
-                },
-                "as_of": now,
-            }
-        )
+        UniverseTimelineSliceOut.model_validate(slice_payload())
+
+    second_bundle = {
+        "bundle_id": "bundle-2",
+        "ordinal": 0,
+        "event": {**node, "id": "event-2", "related_count": 0},
+        "nodes": [],
+        "relations": [],
+        "neighbor_page": {
+            "total_unique": 0,
+            "returned_unique": 0,
+            "complete": True,
+            "next_cursor": None,
+        },
+        "cursor_before": "cursor-1",
+        "cursor_after": "same-cursor",
+    }
+
+    def two_bundle_payload(second_ordinal: int):
+        payload = slice_payload(request_cursor=None)
+        first = {
+            **payload["bundles"][0],
+            "cursor_after": "cursor-1",
+            "ordinal": 1,
+        }
+        payload["bundles"] = [first, {**second_bundle, "ordinal": second_ordinal}]
+        payload["page"] = {
+            **payload["page"],
+            "returned_bundles": 2,
+            "returned_unique_nodes": 3,
+        }
+        return payload
+
+    # The counting axis hangs off these two invariants: ordinals march strictly
+    # older within a page, and never reach past the snapshot's event total.
+    with pytest.raises(PydanticValidationError, match="序数必须严格递增"):
+        UniverseTimelineSliceOut.model_validate(two_bundle_payload(1))
+    with pytest.raises(PydanticValidationError, match="序数超出来源总量"):
+        UniverseTimelineSliceOut.model_validate(two_bundle_payload(3))
 
 
 @pytest.mark.asyncio

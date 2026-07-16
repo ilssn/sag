@@ -48,6 +48,12 @@ export interface UniverseWorkingSet {
 export interface UniverseWorkingBundle {
   id: string;
   origin: "timeline" | "expansion" | "activation";
+  /**
+   * Snapshot-stable position on the source's counting axis (0 = newest end).
+   * Present exactly for timeline bundles; the projection places the package at
+   * ordinal × axis-unit, so it must ride the bundle through the working set.
+   */
+  ordinal?: number;
   /** Canonical expansion anchor; absent for timeline/activation bundles. */
   anchor_key?: string;
   /**
@@ -73,6 +79,7 @@ export interface UniverseWorkingBundle {
 export interface UniverseAdmissionBundle {
   id: string;
   origin?: UniverseWorkingBundle["origin"];
+  ordinal?: number;
   anchor_key?: string;
   lineage_root_key?: string;
   request_cursor?: string | null;
@@ -693,6 +700,7 @@ export function admitUniverseBundle(
       && sameStringSet(existingBundle.relation_keys, bundleRelationKeys)
       && existingBundle.payload_fingerprint === payloadFingerprint
       && existingBundle.origin === (bundle.origin ?? "activation")
+      && existingBundle.ordinal === bundle.ordinal
       && existingBundle.anchor_key === bundle.anchor_key
       && existingBundle.lineage_root_key === bundle.lineage_root_key
       && existingBundle.request_cursor === bundle.request_cursor
@@ -731,6 +739,7 @@ export function admitUniverseBundle(
   candidate.bundles.set(bundle.id, {
     id: bundle.id,
     origin: bundle.origin ?? "activation",
+    ordinal: bundle.ordinal,
     anchor_key: bundle.anchor_key,
     lineage_root_key: bundle.lineage_root_key,
     request_cursor: bundle.request_cursor,
