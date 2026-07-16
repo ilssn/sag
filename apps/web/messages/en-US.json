@@ -911,6 +911,7 @@
       "knowledgeNode": "Knowledge node",
       "citationTitle": "Citation details",
       "nodeTitle": "Node details",
+      "eventDetail": "Event details",
       "loadFailed": "Failed to load node details",
       "noCitationSource": "No original text is available for this citation.",
       "loading": "Loading node",

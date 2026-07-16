@@ -107,6 +107,7 @@ type MiniDetailTarget = UniverseDetailTarget | MiniCitationTarget | MiniDocument
 interface MiniDetailLabels {
   localKnowledge: string;
   knowledgeNode: string;
+  eventDetail: string;
 }
 
 const DEFAULT_MINI_PANEL_SIZE: MiniPanelSize = { width: 360, height: 470 };
@@ -201,6 +202,9 @@ function detailFromSearchResult(
   const section = supportingEvent
     ? result.sections.find((item) => item.chunk_id === supportingEvent.chunk_id) ?? null
     : null;
+  const eventDetail = event
+    ? section?.content?.trim() || event.summary
+    : "";
 
   return {
     id: target.id,
@@ -208,7 +212,7 @@ function detailFromSearchResult(
     source_id: supportingEvent?.source_id ?? sourceId,
     source_name: supportingEvent?.source_name ?? labels.localKnowledge,
     label: event?.title ?? entity?.name ?? labels.knowledgeNode,
-    description: event?.summary ?? entity?.description ?? "",
+    description: event ? eventDetail : entity?.description ?? "",
     category: event?.category ?? entity?.type ?? "",
     start_time: event?.start_time ?? null,
     evidence: section
@@ -288,6 +292,7 @@ export function PetMiniWorkspace({
   const detailLabels = React.useMemo<MiniDetailLabels>(() => ({
     localKnowledge: t("detail.localKnowledge"),
     knowledgeNode: t("detail.knowledgeNode"),
+    eventDetail: t("detail.eventDetail"),
   }), [t]);
   const pathname = usePathname();
   const conversationRuntime = useConversationRuntime();
@@ -1250,9 +1255,16 @@ export function PetMiniWorkspace({
                         </div>
                         <h2 className="mt-2 text-sm font-medium leading-5">{detail.label}</h2>
                         {detail.description && (
-                          <p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-foreground/75">
-                            {detail.description}
-                          </p>
+                          <div className="mt-3">
+                            {detailTarget.kind === "event" && (
+                              <p className="text-[10px] font-medium tracking-wide text-muted-foreground/75">
+                                {detailLabels.eventDetail}
+                              </p>
+                            )}
+                            <p className="mt-1 whitespace-pre-wrap text-xs leading-5 text-foreground/75">
+                              {detail.description}
+                            </p>
+                          </div>
                         )}
                       </section>
 

@@ -2511,6 +2511,7 @@ class EngineManager:
                             SourceEvent.source_id,
                             SourceEvent.title,
                             SourceEvent.summary,
+                            SourceEvent.content,
                             SourceEvent.category,
                             SourceEvent.chunk_id,
                             SourceEvent.start_time,
@@ -2523,12 +2524,16 @@ class EngineManager:
                 ).one_or_none()
                 if event is None:
                     return None
+                summary = str(event.summary or "").strip()
+                content = str(event.content or "").strip()
                 return {
                     "id": event.id,
                     "kind": "event",
                     "source_ref_id": event.source_id,
                     "label": event.title or "未命名事件",
-                    "description": str(event.summary or "")[:4000],
+                    # summary is the compact graph-card copy; content is the
+                    # extracted event detail shown after opening the node.
+                    "description": (content or summary)[:4000],
                     "category": event.category or "",
                     "chunk_id": event.chunk_id,
                     "start_time": event.start_time,
