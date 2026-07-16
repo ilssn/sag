@@ -672,8 +672,8 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("sprite.userData.sourceCore = true");
     expect(source).toContain("private sourceMarkerDetailFactor(");
     expect(source).toContain("return Math.max(0, 1 - detail)");
-    expect(source).toContain("const NEBULA_DETAIL_ALPHA = 1.15");
-    expect(source).toContain("const NEBULA_DETAIL_DUST_POINT_SIZE_CSS = 22");
+    expect(source).toContain("const NEBULA_DETAIL_ALPHA = 1.3");
+    expect(source).toContain("const NEBULA_DETAIL_DUST_POINT_SIZE_CSS = 26");
     expect(source).toContain("uDetail: { value: 0 }");
     expect(source).toContain("uDetailAlpha: { value: NEBULA_DETAIL_ALPHA }");
     expect(source).toContain("attribute float aGlow");
@@ -759,7 +759,7 @@ describe("universe scene production invariants", () => {
     // The corridor carries its own light and has no visible far wall: glow
     // pockets brighten and swell, and the last stretch dissolves.
     expect(nebulaMaterial).toContain("attribute float aCorridorFade");
-    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 1.3, corridorMix * glowParticle)");
+    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 1.45, corridorMix * glowParticle)");
     expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, aCorridorFade, corridorMix)");
     expect(nebulaMaterial).toContain("* detailScale * glowScale * corridorBoost");
     expect(nebulaBuild).toContain('geometry.setAttribute("aCorridorFade"');
@@ -769,8 +769,14 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("const NEBULA_WALL_SHARE = 0.62");
     expect(nebulaBuild).toContain("NEBULA_WALL_LATERAL_MIN");
     expect(nebulaBuild).toContain('geometry.setAttribute("aCorridorWall"');
-    expect(nebulaMaterial).toContain("mix(1.0, 2.4, corridorMix * aCorridorWall)");
-    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.6, corridorMix * aCorridorWall)");
+    expect(nebulaMaterial).toContain("mix(1.0, 2.8, corridorMix * aCorridorWall)");
+    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.72, corridorMix * aCorridorWall)");
+
+    // While inside one source the rest of the sky recedes, and the browsed
+    // source claims a heavier share of the fixed particle budget.
+    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.3, uDetail * (1.0 - sourceMatch))");
+    expect(nebulaBuild).toContain("source.sourceId === browsedSourceId ? 4 : 1");
+    expect(nebulaBuild).toContain("const browsedSourceId = this.flightConfig?.sourceId ?? null");
   });
 
   it("clamps browsing rotation to a forward gaze cone that cannot flip the nebula", () => {
@@ -786,8 +792,8 @@ describe("universe scene production invariants", () => {
     // Inside a source the wheel's "deeper" must stay roughly ahead: rotation
     // is a bounded human glance, applied after the entry dive lands and
     // released the moment the session leaves or switches sources.
-    expect(source).toContain("const BROWSE_GAZE_AZIMUTH_RAD = 0.55");
-    expect(source).toContain("const BROWSE_GAZE_POLAR_RAD = 0.42");
+    expect(source).toContain("const BROWSE_GAZE_AZIMUTH_RAD = 0.42");
+    expect(source).toContain("const BROWSE_GAZE_POLAR_RAD = 0.3");
     expect(source).toContain("private applyBrowseGaze()");
     expect(source).toContain("private releaseBrowseGaze()");
     expect(source).toContain(

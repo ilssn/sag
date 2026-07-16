@@ -349,8 +349,8 @@ const NEBULA_BURST_MS = 1_400;
 // overview particles keep the smaller cap and the same 3k ceiling.
 // Inside a source the dust is the medium being explored: slightly brighter
 // than the overview, so diving in reads as entering the nebula, not leaving it.
-const NEBULA_DETAIL_ALPHA = 1.15;
-const NEBULA_DETAIL_DUST_POINT_SIZE_CSS = 22;
+const NEBULA_DETAIL_ALPHA = 1.3;
+const NEBULA_DETAIL_DUST_POINT_SIZE_CSS = 26;
 const NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP = 44;
 /** Sentinel z far outside any real layout: the loaded band dims nothing. */
 const NEBULA_CORRIDOR_BAND_OFF = 1e8;
@@ -362,10 +362,12 @@ const NEBULA_GESTURE_CALM_MS = 480;
  * "deeper" must always stay roughly ahead. Angles are radians around the
  * corridor's axis-aligned entry bearing.
  */
-const BROWSE_GAZE_AZIMUTH_RAD = 0.55;
-const BROWSE_GAZE_POLAR_RAD = 0.42;
-const BROWSE_GAZE_ROTATE_SPEED = 0.3;
+const BROWSE_GAZE_AZIMUTH_RAD = 0.42;
+const BROWSE_GAZE_POLAR_RAD = 0.3;
+const BROWSE_GAZE_ROTATE_SPEED = 0.26;
+const BROWSE_GAZE_PAN_SPEED = 0.4;
 const UNIVERSE_ROTATE_SPEED = 0.42;
+const UNIVERSE_PAN_SPEED = 0.52;
 /** Corridor entry pose: dive standoff behind the entrance plane… */
 const CORRIDOR_ENTRY_STANDOFF = 280;
 /** …looking this far down the axis into the past… */
@@ -765,6 +767,9 @@ function makeNebulaMaterial(darkTheme: boolean) {
         );
         vColor = aColor;
         vAlpha = aAlpha * mix(1.0, detailAlpha, sourceMatch);
+        // Depth of field for the whole sky: while inside one source, every
+        // other nebula recedes into the dark instead of competing for light.
+        vAlpha *= mix(1.0, 0.3, uDetail * (1.0 - sourceMatch));
         vDetail = smoothstep(0.08, 0.92, particleDetail);
         vGlow = aGlow;
         vShape = aShape;
@@ -792,10 +797,10 @@ function makeNebulaMaterial(darkTheme: boolean) {
         // along the axis, and the far end dissolves instead of hard-stopping —
         // vast, with no visible wall.
         float glowParticle = step(0.001, aGlow);
-        vAlpha *= mix(1.0, 1.3, corridorMix * glowParticle);
+        vAlpha *= mix(1.0, 1.45, corridorMix * glowParticle);
         vAlpha *= mix(1.0, aCorridorFade, corridorMix);
         // Distant canyon walls stay soft: their vastness is size, not glare.
-        vAlpha *= mix(1.0, 0.6, corridorMix * aCorridorWall);
+        vAlpha *= mix(1.0, 0.72, corridorMix * aCorridorWall);
         // Ambient drift is a whisper, not a float: it breathes only while the
         // camera is idle and holds still under any gesture.
         animatedPosition.x += sin(uTime * 0.28 + aPhase) * 0.16 * uMotion * aTwinkle;
@@ -807,7 +812,7 @@ function makeNebulaMaterial(darkTheme: boolean) {
         // Corridor beacons swell into soft volumetric pockets of light, and
         // the far walls grow into broad luminous banks.
         float corridorBoost = mix(1.0, mix(1.1, 1.6, glowParticle), corridorMix)
-          * mix(1.0, 2.4, corridorMix * aCorridorWall);
+          * mix(1.0, 2.8, corridorMix * aCorridorWall);
         float rawPointSize = aSize * uPixelRatio * perspective * pulse
           * detailScale * glowScale * corridorBoost;
         float detailDustCap = mix(13.0, ${NEBULA_DETAIL_DUST_POINT_SIZE_CSS.toFixed(1)}, vDetail)
@@ -815,7 +820,7 @@ function makeNebulaMaterial(darkTheme: boolean) {
         float capSelect = max(glowParticle, aCorridorWall * corridorMix);
         float pointSizeCap = mix(
           detailDustCap,
-          uPointSizeCap * (1.0 + 0.55 * corridorMix),
+          uPointSizeCap * (1.0 + 0.7 * corridorMix),
           capSelect
         );
         gl_PointSize = min(max(1.15, rawPointSize), pointSizeCap);
@@ -1129,11 +1134,11 @@ class UniverseForceSceneEngine {
 
     this.controls = this.graph.controls() as GraphControls;
     this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.085;
+    this.controls.dampingFactor = 0.095;
     this.controls.rotateSpeed = UNIVERSE_ROTATE_SPEED;
     this.controls.zoomSpeed = 0.72;
     this.controls.zoomToCursor = true;
-    this.controls.panSpeed = 0.52;
+    this.controls.panSpeed = UNIVERSE_PAN_SPEED;
     this.controls.minDistance = UNIVERSE_CAMERA_MIN_DISTANCE;
     this.controls.maxDistance = UNIVERSE_CAMERA_MAX_DISTANCE;
     this.controls.addEventListener("start", this.handleControlsStart);
@@ -2883,7 +2888,7 @@ class UniverseForceSceneEngine {
         map: this.eventTexture,
         color: this.darkTheme ? EVENT_COLOR : EVENT_LIGHT_COLOR,
         transparent: true,
-        opacity: node.sceneNode.root ? 0.5 : 0.38,
+        opacity: node.sceneNode.root ? 0.58 : 0.44,
         depthWrite: false,
         toneMapped: false,
         blending: THREE.AdditiveBlending,
@@ -3441,7 +3446,10 @@ class UniverseForceSceneEngine {
     this.host.dataset.universeNebulaConfiguredBudget = String(configuredBudget);
     this.host.dataset.universeNebulaBudgetCap = String(budgetCap);
     this.host.dataset.universeNebulaBudget = String(budget);
-    const signature = `${mobile ? "mobile" : "desktop"}:${budget}:` + sources
+    // The browsed source owns the sky while inside it: it takes a heavier
+    // share of the particle budget, rebuilt once per session entry/exit.
+    const browsedSourceId = this.flightConfig?.sourceId ?? null;
+    const signature = `${mobile ? "mobile" : "desktop"}:${budget}:${browsedSourceId ?? "none"}:` + sources
       .map((node) => `${node.id}:${Math.round(node.sceneNode.radius)}:${node.sceneNode.eventCount}:${node.sceneNode.entityCount}`)
       .join("|");
     if (signature === this.sourceSignature && this.nebulaPoints) {
@@ -3456,7 +3464,8 @@ class UniverseForceSceneEngine {
       sources.map((source, index) => [source.sourceId, index]),
     );
     const weights = sources.map((source) =>
-      Math.max(1, Math.log2(source.sceneNode.eventCount + source.sceneNode.entityCount + 2)),
+      Math.max(1, Math.log2(source.sceneNode.eventCount + source.sceneNode.entityCount + 2))
+        * (source.sourceId === browsedSourceId ? 4 : 1),
     );
     const totalWeight = weights.reduce((sum, value) => sum + value, 0);
     const baseCount = Math.max(
@@ -3637,6 +3646,7 @@ class UniverseForceSceneEngine {
     this.controls.minPolarAngle = Math.PI / 2 - BROWSE_GAZE_POLAR_RAD;
     this.controls.maxPolarAngle = Math.PI / 2 + BROWSE_GAZE_POLAR_RAD;
     this.controls.rotateSpeed = BROWSE_GAZE_ROTATE_SPEED;
+    this.controls.panSpeed = BROWSE_GAZE_PAN_SPEED;
     this.browseGazeApplied = true;
     this.host.dataset.universeBrowseGaze = "locked";
   }
@@ -3652,6 +3662,7 @@ class UniverseForceSceneEngine {
     this.controls.minPolarAngle = 0;
     this.controls.maxPolarAngle = Math.PI;
     this.controls.rotateSpeed = UNIVERSE_ROTATE_SPEED;
+    this.controls.panSpeed = UNIVERSE_PAN_SPEED;
     this.browseGazeApplied = false;
     this.host.dataset.universeBrowseGaze = "free";
   }

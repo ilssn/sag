@@ -115,13 +115,14 @@ function normalizedWheelPixels(input: UniverseTemporalFlightWheelInput) {
 /**
  * A wheel sample becomes a velocity impulse sized so its coasted distance is
  * the gesture's travel; reduced motion applies the travel directly instead.
- * Scrolling down (positive deltaY) flies into the past.
+ * Scrolling up (negative deltaY) flies deeper — the same hand motion that
+ * zooms in everywhere else pulls the corridor's depths toward you.
  */
 export function applyUniverseTemporalFlightWheel(
   state: UniverseTemporalFlightState,
   input: UniverseTemporalFlightWheelInput,
 ): UniverseTemporalFlightState {
-  const travel = normalizedWheelPixels(input) * UNIVERSE_FLIGHT_UNITS_PER_WHEEL_PIXEL;
+  const travel = -normalizedWheelPixels(input) * UNIVERSE_FLIGHT_UNITS_PER_WHEEL_PIXEL;
   if (travel === 0) return state;
   if (input.reducedMotion) {
     return {

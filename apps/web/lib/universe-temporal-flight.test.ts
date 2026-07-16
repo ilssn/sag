@@ -34,7 +34,7 @@ describe("universe temporal flight", () => {
   it("coasts a wheel notch to roughly the gesture's travel and stops", () => {
     const impelled = applyUniverseTemporalFlightWheel(
       createUniverseTemporalFlightState(),
-      { ...WHEEL, deltaY: 120 },
+      { ...WHEEL, deltaY: -120 },
     );
     const settled = coast(impelled);
 
@@ -44,10 +44,11 @@ describe("universe temporal flight", () => {
     expect(settled.depth).toBeLessThan(promisedTravel * 1.2);
   });
 
-  it("flies toward the present on upward scroll and walls at the newest moment", () => {
+  it("flies toward the present on downward scroll and walls at the newest moment", () => {
+    // Wheel-up dives deeper (the zoom-in hand motion); wheel-down backs out.
     const fromShallow = applyUniverseTemporalFlightWheel(
       createUniverseTemporalFlightState(20),
-      { ...WHEEL, deltaY: -600 },
+      { ...WHEEL, deltaY: 600 },
     );
     const settled = coast(fromShallow);
 
@@ -58,7 +59,7 @@ describe("universe temporal flight", () => {
   it("walls at the oldest moment instead of overshooting the axis", () => {
     const impelled = applyUniverseTemporalFlightWheel(
       createUniverseTemporalFlightState(),
-      { ...WHEEL, deltaY: 10_000 },
+      { ...WHEEL, deltaY: -10_000 },
     );
     const settled = coast(impelled, 300);
 
@@ -69,7 +70,7 @@ describe("universe temporal flight", () => {
   it("treats a long-blocked frame as one frame, not as elapsed teleport time", () => {
     const impelled = applyUniverseTemporalFlightWheel(
       createUniverseTemporalFlightState(),
-      { ...WHEEL, deltaY: 120 },
+      { ...WHEEL, deltaY: -120 },
     );
     const afterTabSwitch = stepUniverseTemporalFlight(impelled, {
       elapsedMs: 5_000,
@@ -101,7 +102,8 @@ describe("universe temporal flight", () => {
     });
 
     expect(grabbed.targetDepth).toBeNull();
-    expect(grabbed.velocity).toBeLessThan(0);
+    // Wheel-up is the dive: the takeover pushes deeper, ignoring the glide.
+    expect(grabbed.velocity).toBeGreaterThan(0);
   });
 
   it("brakes on grab and reports rest so the loop can sleep", () => {
@@ -123,7 +125,7 @@ describe("universe temporal flight", () => {
   it("applies travel directly under reduced motion, with no inertia tail", () => {
     const moved = applyUniverseTemporalFlightWheel(
       createUniverseTemporalFlightState(10),
-      { ...WHEEL, deltaY: 120, reducedMotion: true },
+      { ...WHEEL, deltaY: -120, reducedMotion: true },
     );
 
     expect(moved.velocity).toBe(0);
