@@ -132,10 +132,10 @@ describe("universe scene production invariants", () => {
     // applied to camera and orbit target together, so orbiting composes freely
     // and no pointer-vs-wheel gesture classifier is needed.
     expect(pointer).toContain("brakeUniverseTemporalFlight");
-    // The wheel scrubs the stream cursor only: which particles are lit moves
-    // across the galaxy while the camera stays the explorer's own.
-    expect(flight).not.toContain("camera.position");
+    // The wheel scrubs the stream cursor; the only camera motion it owns is
+    // the radial shuttle toward the lit shell — never a gaze-directed rig.
     expect(flight).not.toContain("getWorldDirection");
+    expect(flight).toContain("offset.normalize()");
     expect(flight).toContain("planUniverseTemporalFlightFollow(");
     // The camera never waits for data: paging along is fire-and-forget.
     expect(flight).not.toContain("await ");
@@ -797,6 +797,12 @@ describe("universe scene production invariants", () => {
     // The stream cursor still walls at the ends and leads with its rate.
     expect(flight).toContain("maxDepth: config.maxDepth");
     expect(flight).toContain("velocity: this.flightDepthRate");
+    // The shuttle: while scrubbing, the camera glides radially to hover just
+    // outside the lit shell — travel returns without owning the camera; the
+    // moment scrubbing stops the orbit is the user's again.
+    expect(flight).toContain("GALAXY_FOLLOW_BASE + GALAXY_FOLLOW_PER_SHELL * shell");
+    expect(flight).toContain("camera.position.copy(center).addScaledVector(offset.normalize(), next)");
+    expect(source).toContain("const GALAXY_OBLATENESS = 0.78");
   });
 
   it("frames the galaxy on entry and ducks cards while scrubbing fast", () => {

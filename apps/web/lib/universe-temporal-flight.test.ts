@@ -268,7 +268,7 @@ describe("universe temporal flight", () => {
     const nearDust = universeStreamPresence(960 + 60 * 2, window.near, window.far, 60);
     expect(nearDust.opacity).toBeLessThan(1);
     const deepDust = universeStreamPresence(960 + 60 * 12, window.near, window.far, 60);
-    expect(deepDust.opacity).toBeCloseTo(0.05, 5);
+    expect(deepDust.opacity).toBeCloseTo(0.09, 5);
     expect(deepDust.scale).toBeCloseTo(0.42, 5);
     expect(nearDust.opacity).toBeGreaterThan(deepDust.opacity);
   });

@@ -75,8 +75,8 @@ const PRESENCE_AHEAD_FAR_EVENTS = 8;
 const PRESENCE_BEHIND_FULL_EVENTS = 0.75;
 const PRESENCE_BEHIND_GONE_EVENTS = 2.5;
 const PRESENCE_FAR_SCALE = 0.42;
-/** Not-yet-loaded packages melt back into the nebula's dust. */
-const PRESENCE_DUST_OPACITY = 0.05;
+/** Not-yet-loaded packages keep a faint silhouette approaching from afar. */
+const PRESENCE_DUST_OPACITY = 0.09;
 /**
  * Passed packages keep a faint ember instead of going black: looking back
  * shows the travelled road, and the warm event stars read as cooling embers.

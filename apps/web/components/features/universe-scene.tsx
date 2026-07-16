@@ -419,7 +419,14 @@ function stableUnit(value: string) {
  * ≤ window real nodes, never per ordinal: dust is bounded like the data.
  */
 const GALAXY_CORE_SHARE = 0.2;
+/** Slight oblateness gives the ball a nebula's form; the core stays round. */
+const GALAXY_OBLATENESS = 0.78;
 const GALAXY_SPIN_RAD_PER_S = 0.04;
+/** Camera-follow: hover this many shell-radii outside the lit shell… */
+const GALAXY_FOLLOW_BASE = 0.55;
+const GALAXY_FOLLOW_PER_SHELL = 1.9;
+/** …with an exponential glide of this response time while scrubbing. */
+const GALAXY_FOLLOW_RESPONSE_MS = 480;
 /** The lit shell never collapses below this share of the radius. */
 const GALAXY_BAND_MIN_SHARE = 0.05;
 
@@ -464,7 +471,9 @@ function galaxyShellSeat(
   const seed = `${sourceId}:seat:${ordinal}`;
   const shell = galaxyAgeToShell(age)
     + galaxyGauss(`${seed}:jitter`) * 0.012;
-  return galaxyBearing(seed).multiplyScalar(Math.max(0.05, shell) * radius);
+  const seat = galaxyBearing(seed).multiplyScalar(Math.max(0.05, shell) * radius);
+  seat.y *= GALAXY_OBLATENESS;
+  return seat;
 }
 
 function stableDirection(key: string) {
@@ -997,6 +1006,8 @@ class UniverseForceSceneEngine {
   private flightDepthRate = 0;
   /** 1 = cards fully expanded; eases toward 0 as flight speed rises. */
   private flightCardPresence = 1;
+  /** World radius of the browsed ball; drives the scrub camera-follow. */
+  private flightBallRadius = 0;
   private sourceSignature = "";
   private labelLayer: HTMLDivElement;
   private labels: SceneLabel[] = [];
@@ -1357,6 +1368,15 @@ class UniverseForceSceneEngine {
     const nextFlight = data.temporalFlight ?? null;
     const flightSourceChanged = nextFlight?.sourceId !== this.flightConfig?.sourceId;
     this.flightConfig = nextFlight;
+    const flightSourceNode = nextFlight
+      ? data.nodes.find(
+          (candidate) => candidate.kind === "source"
+            && candidate.sourceId === nextFlight.sourceId,
+        )
+      : undefined;
+    this.flightBallRadius = flightSourceNode
+      ? Math.max(40, flightSourceNode.radius * 1.45)
+      : 0;
     if (nextFlight && flightSourceChanged) {
       // A fresh browse session starts at its window's newest package. The entry
       // camera framing is authoritative, so this reset applies no delta.
@@ -3576,12 +3596,14 @@ class UniverseForceSceneEngine {
           const share = GALAXY_CORE_SHARE
             + stableUnit(`${key}:shell`) * (1 - GALAXY_CORE_SHARE) * 1.04;
           offset = galaxyBearing(`${key}:bearing`).multiplyScalar(share * radius);
+          offset.y *= GALAXY_OBLATENESS;
           emphasis = 0.2 + stableUnit(`${key}:emphasis`) * 0.3;
           shellShare = share;
         } else {
           // Faint far halo: the vast outskirts that fill the frame.
           const reach = 1.25 + stableUnit(`${key}:halo`) * 1.15;
           offset = galaxyBearing(`${key}:bearing`).multiplyScalar(reach * radius);
+          offset.y *= GALAXY_OBLATENESS;
           emphasis = 0.04 + stableUnit(`${key}:emphasis`) * 0.12;
         }
         const twinkle = Math.pow(stableUnit(`${key}:twinkle`), 1.18);
@@ -5389,8 +5411,39 @@ class UniverseForceSceneEngine {
       this.flightDepthRate = state.velocity !== 0
         ? state.velocity
         : travel / Math.max(1, elapsedMs) * 1000;
+      // The shuttle: while the stream is scrubbing, the camera glides
+      // radially so it always hovers just outside the lit shell — deeper
+      // layers approach from afar and resolve as you sink toward the core.
+      // The moment scrubbing stops, the camera is entirely the user's again.
+      if (this.flightBallRadius > 0) {
+        const camera = this.graph.camera();
+        const center = new THREE.Vector3(
+          config.centerX,
+          config.centerY,
+          config.centerZ,
+        );
+        const shell = galaxyAgeToShell(
+          this.appliedFlightDepth / Math.max(1, config.maxDepth),
+        );
+        const desired = this.flightBallRadius
+          * (GALAXY_FOLLOW_BASE + GALAXY_FOLLOW_PER_SHELL * shell);
+        const offset = camera.position.clone().sub(center);
+        const distance = offset.length();
+        if (distance > 1e-3) {
+          const glide = this.reducedMotion
+            ? 1
+            : 1 - Math.exp(-elapsedMs / GALAXY_FOLLOW_RESPONSE_MS);
+          const next = THREE.MathUtils.lerp(distance, desired, glide);
+          camera.position.copy(center).addScaledVector(offset.normalize(), next);
+          if (this.controls.target) this.controls.target.lerp(center, glide * 0.5);
+        }
+      }
       this.wakeRendering(600);
+      this.updateTemporalPresence();
+      this.updateVisualLayout(now);
+      this.updateNodeMorphScales(now);
       this.updateLabels(now);
+      this.evaluateLod(now);
     } else {
       this.flightDepthRate = 0;
     }
