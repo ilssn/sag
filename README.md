@@ -23,6 +23,8 @@
   Built on the state-of-the-art SAG architecture, it turns scattered documents and data into knowledge that is searchable, connected, and traceable.
 </p>
 
+https://github.com/user-attachments/assets/9bb618e9-fef8-4d07-8a30-3f7d83beb0ff
+
 ## Contents
 
 <p align="center">
@@ -330,7 +332,7 @@ apps/
     └── sag_agent/          Framework-independent Agent runtime core
 skills/sag/                 Agent Skill for exploring SAG through MCP
 deploy/                     Deployment initialization assets
-docs/                       Architecture and engineering standards
+docs/assets/readme/         README screenshots and diagrams
 ```
 
 The central dependency rule is simple: application code reaches the engine through `apps/api/sag_api/sag/`; the engine does not know about FastAPI, the Web UI, users, conversations, or citations.
