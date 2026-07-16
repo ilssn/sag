@@ -148,19 +148,30 @@
 
 ---
 
-### 阶段 2：相机飞行，滚轮统一
+## 重规划 v2（2026-07-16，实施后修订）
 
-**文件：**
-- 修改：`apps/web/components/features/universe-scene.tsx`
-- 删除：`apps/web/lib/universe-timeline-wheel.ts`、`apps/web/lib/universe-timeline-wheel.test.ts`
-- 修改：`apps/web/components/features/universe-scene.test.ts`
-- 修改：`apps/web/lib/universe-timeline-prefetch.ts`（预取触发源）
+阶段 1 交付后停下来重新梳理，四个修订决定，均已落地或排入下方阶段：
 
-**接口：**
-- 消费：阶段 1 产出的稳定时间轴 Z
-- 产出：相机沿时间轴的连续飞行；滚轮的唯一语义
+1. **深度映射改为计数轴（CDF）**。线性时间轴在「正在看的地方」塌缩：可见窗口只有 6 个（最多 18 个）时间相邻的事件，200 事件跨两年的源里 6 个连续事件只占轴的 ~3% ≈ 19 单位 < 相机最近距离 24。改为深度 ∝ 累积事件数（time_buckets 的 CDF，桶内按时间线性插值），轴长 = 事件数 × `TEMPORAL_AXIS_UNITS_PER_EVENT`(60)——可见窗口永远占约 6×60 单位，与源大小无关，一格滚轮 = 飞过固定数量的事件。已知天花板：桶最多 24 个，同桶同刻的事件仍塌到同一深度（靠横向抖动分开）；巨源（>~800 事件）轴长超过相机 maxDistance，软压缩膝点（保持单调、不破坏稳定性）进 backlog 等真实数据。
 
-- [ ] **Step 1: 滚轮脱离 OrbitControls，直接驱动相机沿时间轴**
+2. **飞行先于星云**（推翻 v1 的「先星云看轴」）：星云因「总览紧凑球 ↔ 浏览走廊」双形态问题变大了，而验证轴只需节点摆位本身；飞行才是「不跟手」的根治。
+
+3. **相机 rig 定案：target 骑轴**。每帧把 camera 与 controls.target 沿 Z 一起平移深度增量，OrbitControls 的旋转/平移/pinch 与飞行正交组合——这就是阶段 1 删掉 cameraGesture 分类器的兑现：语义不重叠就不需要分类。
+
+4. **契约边界落字**：总览态滚轮仍是缩放（「滚轮=飞时间」只在源内生效）；axis 造不出来的源退化为按钮翻页 + 螺旋摆位，不硬造假轴；移动端无滚轮，飞行手势缺位，桌面先行、按钮兜底，进 backlog。
+
+---
+
+### 阶段 2：相机飞行，滚轮统一 ✅（MVP 已落地：`adf8389` CDF 轴 + `53acbac` 飞行）
+
+**实际交付：**
+- 新模块 `lib/universe-temporal-flight.ts`（11 单测）：滚轮冲量→惯性（半衰期 160ms，冲量大小使滑行总距离恰为手势行程）、按钮滑翔（140ms 指数逼近）、轴端是墙、长阻塞帧按一帧计、窗口跟随决策（前向 far−margin 提前翻页、回向 near−margin 才回翻，两阈值同点反向不 ping-pong；margin 钳到窗口跨度 1/3）
+- 滚轮源内 preventDefault + stopPropagation（捕获阶段消费）、pinch 与总览放行、label 层克隆转发保留（服务放行场景）
+- 窗口跟随 fire-and-forget，相机永不等数据；飞行自己翻的页不回拉相机，按钮/搜索翻的页让相机滑翔到新窗口近端；focusNode 同步飞行深度
+- 诊断：`data-universe-flight-depth` / `data-universe-flight-velocity`
+- `zoomToCursor` 保留（v1 计划要删；滚轮脱离 OrbitControls 后它只影响 pinch，支点漂移问题不复存在）
+
+- [x] **Step 1: 滚轮脱离 OrbitControls，直接驱动相机沿时间轴**
 
 现状是两个机制抢一个手势：`handleTimelineWheel` 绑在 `host` 捕获阶段（`:1059-1062`），OrbitControls 的 wheel 绑在 `rendererCanvas` 目标阶段，前者故意先跑一步标记 `cameraGestureKind` 再放行给后者做 dolly。
 
@@ -171,7 +182,7 @@
 
 注意 wheel 监听当前是 `passive: true`(`:1061`)，要 `preventDefault` 必须改为非 passive。
 
-- [ ] **Step 2: 删除滚轮阈值状态机**
+- [x] **Step 2: 删除滚轮阈值状态机**
 
 删 `universe-timeline-wheel.ts` + `.test.ts`。其中值得保留并迁移的设计资产：
 - `deltaMode` 0/1/2 的归一化（`:72-86`）——飞行速度换算仍然需要
@@ -183,17 +194,17 @@
 
 `:809` 的这个全局单值字段存在的理由是「滚轮=缩放+时间导航的组合手势，不能让它把 journey 打回 stable」。双模删除（阶段 1）+ 滚轮语义唯一化（Step 1）之后，这个字段的存在理由消失，连同它的已知缺陷一起删除：一次真实拖拽的 `start` 与首次 `change` 之间若插入一次杂散 wheel tick，`"pointer"` 会被覆盖成 `"wheel"`，让本该触发的回调被吞掉（`:4956` vs `:4978`）。
 
-- [ ] **Step 4: 预取改由相机 Z 驱动**
+- [x] **Step 4: 预取改由相机 Z 驱动** —— 以「窗口跟随」形式落地：相机接近可见窗口边缘时经既有 moveTimeline 翻页，预取管线（planUniverseTimelinePrefetch）随窗口前进自动填充前方，未改其输入。
 
-现状预取由「页意图」触发。新模型下改为由相机在时间轴上的位置与速度驱动：飞行前方低水位时预取。`planUniverseTimelinePrefetch`(`lib/universe-timeline-prefetch.ts:102-236`) 的「至多预取一页、优先用户当前方向、避免来回震荡」决策逻辑原样可用，只需把输入从「页意图方向」换成「相机飞行方向」。
+原设想：现状预取由「页意图」触发。新模型下改为由相机在时间轴上的位置与速度驱动：飞行前方低水位时预取。`planUniverseTimelinePrefetch`(`lib/universe-timeline-prefetch.ts:102-236`) 的「至多预取一页、优先用户当前方向、避免来回震荡」决策逻辑原样可用，只需把输入从「页意图方向」换成「相机飞行方向」。
 
-- [ ] **Step 5: 飞行途中的数据等待反馈**
+- [ ] **Step 5: 飞行途中的数据等待反馈**（MVP 遗留：进出场仍是旧动画——新页从注视点长出、旧页横向飞出，与飞行相机观感不匹配，应改为就地凝现/淡出；1.6s 看门狗未删）
 
 现状缓存未命中时 3D 场景零反馈，只有屏幕底部一行 11px 小字（`knowledge-universe.tsx:3534-3541`），1.6s 看门狗(`universe-scene.tsx:2629-2636`) 还会静默回滚整个意图。
 
 连续飞行下这个问题会更明显——飞行不能因为等数据而卡住。设计原则：**飞行永不阻塞**。前方数据未到位时，星云（阶段 3）先行表达「那里有东西，正在具象化」，节点到位后就地凝现，不打断相机运动。删除看门狗的静默回滚——飞行没有「意图」可回滚。
 
-- [ ] **Step 6: 验证阶段 2**
+- [ ] **Step 6: 验证阶段 2（待用户本地跑分支验收）**
 
 `npx tsc --noEmit && npx vitest run` 全绿。**视觉验证**：滚轮飞行连续跟手、无阈值跳变、无网络等待卡顿；拖拽只旋转平移；pinch 只缩放；四种手势互不干扰。低帧率设备（可用 CPU throttle 模拟）下阻尼收尾不被硬停。
 
