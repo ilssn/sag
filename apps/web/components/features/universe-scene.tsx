@@ -352,6 +352,21 @@ const NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP = 44;
 const NEBULA_CORRIDOR_BAND_OFF = 1e8;
 /** Ambient drift stays frozen this long after any camera gesture frame. */
 const NEBULA_GESTURE_CALM_MS = 480;
+/** Corridor entry pose: dive standoff behind the entrance plane… */
+const CORRIDOR_ENTRY_STANDOFF = 280;
+/** …looking this far down the axis into the past… */
+const CORRIDOR_ENTRY_LOOK_AHEAD = 150;
+/** …from a slight diagonal so the dust and lateral spread read in parallax. */
+const CORRIDOR_ENTRY_LATERAL_X = 38;
+const CORRIDOR_ENTRY_LATERAL_Y = 24;
+const CORRIDOR_ENTRY_MS = 920;
+/** Below this flight speed (units/s) cards are fully expanded. */
+const FLIGHT_CARD_CALM_SPEED = 240;
+/** Above this flight speed cards have fully collapsed into star points. */
+const FLIGHT_CARD_HIDE_SPEED = 760;
+/** Cards duck quickly when speed picks up and re-expand a beat after settling. */
+const FLIGHT_CARD_COLLAPSE_MS = 110;
+const FLIGHT_CARD_RECOVER_MS = 300;
 /** Corridor lateral spread mirrors the package axis policy. */
 const NEBULA_CORRIDOR_NEAR_SPREAD = 0.18;
 const NEBULA_CORRIDOR_FAR_SPREAD = 0.44;
@@ -702,6 +717,7 @@ function makeNebulaMaterial(darkTheme: boolean) {
       uniform float uCorridorFarZ;
       attribute vec3 aColor;
       attribute vec3 aCorridor;
+      attribute float aCorridorFade;
       attribute float aSize;
       attribute float aAlpha;
       attribute float aGlow;
@@ -749,6 +765,12 @@ function makeNebulaMaterial(darkTheme: boolean) {
           animatedPosition.z
         ));
         vAlpha *= mix(1.0, 0.16, corridorMix * loadedBand);
+        // The corridor's own light: glow pockets brighten into soft beacons
+        // along the axis, and the far end dissolves instead of hard-stopping —
+        // vast, with no visible wall.
+        float glowParticle = step(0.001, aGlow);
+        vAlpha *= mix(1.0, 1.3, corridorMix * glowParticle);
+        vAlpha *= mix(1.0, aCorridorFade, corridorMix);
         // Ambient drift is a whisper, not a float: it breathes only while the
         // camera is idle and holds still under any gesture.
         animatedPosition.x += sin(uTime * 0.28 + aPhase) * 0.16 * uMotion * aTwinkle;
@@ -757,14 +779,16 @@ function makeNebulaMaterial(darkTheme: boolean) {
         float perspective = clamp(360.0 / max(1.0, -mvPosition.z), 0.42, 2.2);
         float detailScale = mix(1.0, 1.28, vDetail);
         float glowScale = mix(1.0, mix(3.6, 4.8, vDetail), aGlow);
+        // Corridor beacons swell into soft volumetric pockets of light.
+        float corridorBoost = mix(1.0, mix(1.1, 1.6, glowParticle), corridorMix);
         float rawPointSize = aSize * uPixelRatio * perspective * pulse
-          * detailScale * glowScale;
+          * detailScale * glowScale * corridorBoost;
         float detailDustCap = mix(13.0, ${NEBULA_DETAIL_DUST_POINT_SIZE_CSS.toFixed(1)}, vDetail)
           * uPixelRatio;
         float pointSizeCap = mix(
           detailDustCap,
-          uPointSizeCap,
-          step(0.001, aGlow)
+          uPointSizeCap * (1.0 + 0.55 * corridorMix),
+          glowParticle
         );
         gl_PointSize = min(max(1.15, rawPointSize), pointSizeCap);
         vPulse = mix(0.92, 1.2, glint);
@@ -891,6 +915,10 @@ class UniverseForceSceneEngine {
   private nebulaAnimationUntil = 0;
   /** While in the future, the ambient nebula drift holds still (camera gestures). */
   private cameraCalmUntil = 0;
+  /** Low-passed flight speed in units/s, fed by actual per-frame depth travel. */
+  private flightSpeed = 0;
+  /** 1 = cards fully expanded; eases toward 0 as flight speed rises. */
+  private flightCardPresence = 1;
   private sourceSignature = "";
   private labelLayer: HTMLDivElement;
   private labels: SceneLabel[] = [];
@@ -2071,6 +2099,44 @@ class UniverseForceSceneEngine {
     if (sourceChanged) {
       this.rebuildLabels();
       this.applyHighlight();
+    }
+    // Entering a browse session is a dive, not a dolly: the camera flies in
+    // through the nebula shell and settles at the corridor entrance looking
+    // down the counting axis, while the detail morph stretches the dust into
+    // the corridor around it. Layer by layer, like the knowledge it carries.
+    const flight = this.flightConfig;
+    if (flight && flight.sourceId === sourceId) {
+      const entryZ = flight.centerZ - this.appliedFlightDepth;
+      const lookAt = new THREE.Vector3(
+        node.x + CORRIDOR_ENTRY_LATERAL_X * 0.35,
+        node.y + CORRIDOR_ENTRY_LATERAL_Y * 0.35,
+        entryZ - CORRIDOR_ENTRY_LOOK_AHEAD,
+      );
+      const position = new THREE.Vector3(
+        node.x + CORRIDOR_ENTRY_LATERAL_X,
+        node.y + CORRIDOR_ENTRY_LATERAL_Y,
+        entryZ + CORRIDOR_ENTRY_STANDOFF,
+      );
+      this.pointerActive = false;
+      this.lodArmed = false;
+      if (this.hoveredId) this.handleNodeHover(null, false, true);
+      const duration = this.reducedMotion ? 0 : CORRIDOR_ENTRY_MS;
+      this.wakeRendering(duration + 900);
+      this.host.dataset.universeCamera = [
+        position.x.toFixed(1),
+        position.y.toFixed(1),
+        position.z.toFixed(1),
+        lookAt.x.toFixed(1),
+        lookAt.y.toFixed(1),
+        lookAt.z.toFixed(1),
+      ].join(",");
+      this.graph.cameraPosition(
+        { x: position.x, y: position.y, z: position.z },
+        { x: lookAt.x, y: lookAt.y, z: lookAt.z },
+        duration,
+      );
+      this.startLoop(duration + 180);
+      return;
     }
     const concreteNodes = [...this.nodes.values()].filter(
       (candidate) =>
@@ -3420,6 +3486,7 @@ class UniverseForceSceneEngine {
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(particles.length * 3);
     const corridors = new Float32Array(particles.length * 3);
+    const corridorFades = new Float32Array(particles.length);
     const colors = new Float32Array(particles.length * 3);
     const sizes = new Float32Array(particles.length);
     const alphas = new Float32Array(particles.length);
@@ -3470,6 +3537,11 @@ class UniverseForceSceneEngine {
       corridors[index * 3 + 1] = Math.sin(angle) * lateral
         * NEBULA_CORRIDOR_VERTICAL_ASPECT - particle.offset.y;
       corridors[index * 3 + 2] = -depth - particle.offset.z;
+      // The last stretch of the axis dissolves into darkness instead of
+      // ending at a visible wall: vastness reads as an unresolved horizon.
+      corridorFades[index] = progress <= 0.82
+        ? 1
+        : 1 - ((progress - 0.82) / 0.18) * 0.8;
     });
     const positionAttribute = new THREE.BufferAttribute(positions, 3)
       .setUsage(THREE.DynamicDrawUsage);
@@ -3477,6 +3549,7 @@ class UniverseForceSceneEngine {
       .setUsage(THREE.DynamicDrawUsage);
     geometry.setAttribute("position", positionAttribute);
     geometry.setAttribute("aCorridor", new THREE.BufferAttribute(corridors, 3));
+    geometry.setAttribute("aCorridorFade", new THREE.BufferAttribute(corridorFades, 1));
     geometry.setAttribute("aColor", new THREE.BufferAttribute(colors, 3));
     geometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
     geometry.setAttribute("aAlpha", alphaAttribute);
@@ -4203,7 +4276,9 @@ class UniverseForceSceneEngine {
     const placed: Array<{ left: number; top: number; right: number; bottom: number }> = [];
     let visibleEventLabels = 0;
     let visibleEntityLabels = 0;
-    const cardMorph = universeCardMorph(this.visualDetailMix);
+    // Flight speed collapses cards through their own morph stages: full card →
+    // eyebrow-only strip → bare star, and back once the camera settles.
+    const cardMorph = universeCardMorph(this.visualDetailMix * this.flightCardPresence);
     const sourceReveal = 1 - THREE.MathUtils.smoothstep(this.visualDetailMix, 0, 0.72);
     const labelFocusId = this.labelFocusId();
     const transientHover = labelFocusId !== null
@@ -4292,8 +4367,15 @@ class UniverseForceSceneEngine {
       const layoutOpacity = label.kind === "source"
         ? sourceReveal
         : belongsToLabelSource && belongsToFocusNetwork ? nodeCardReveal : 0;
+      // Ember-level presence keeps the star but never a ghost card: remap so
+      // cards are gone by the time a package has clearly been passed.
+      const presenceForCards = THREE.MathUtils.clamp(
+        ((node.temporalPresenceOpacity ?? 1) - 0.18) / 0.82,
+        0,
+        1,
+      );
       const dataOpacity = currentNodePresentationOpacity(node)
-        * (label.kind === "node" ? node.temporalPresenceOpacity ?? 1 : 1);
+        * (label.kind === "node" ? presenceForCards : 1);
       const entryReveal = label.kind === "node"
         ? THREE.MathUtils.clamp((
             (node.entryOpacity ?? 1) * (node.timelineOpacity ?? 1) - 0.16
@@ -5152,6 +5234,33 @@ class UniverseForceSceneEngine {
       this.updateLabels(now);
       this.evaluateLod(now);
     }
+    // Cards duck while the camera streaks past and re-expand once it settles.
+    // Speed comes from actual depth travel, so wheel inertia and button glides
+    // behave identically.
+    const instantSpeed = Math.abs(delta) / Math.max(1, elapsedMs) * 1000;
+    this.flightSpeed += (instantSpeed - this.flightSpeed)
+      * (1 - Math.exp(-elapsedMs / 140));
+    const cardTarget = 1 - THREE.MathUtils.smoothstep(
+      this.flightSpeed,
+      FLIGHT_CARD_CALM_SPEED,
+      FLIGHT_CARD_HIDE_SPEED,
+    );
+    const cardResponse = 1 - Math.exp(-elapsedMs / (
+      cardTarget < this.flightCardPresence
+        ? FLIGHT_CARD_COLLAPSE_MS
+        : FLIGHT_CARD_RECOVER_MS
+    ));
+    const nextCardPresence = THREE.MathUtils.lerp(
+      this.flightCardPresence,
+      cardTarget,
+      cardResponse,
+    );
+    const cardsSettling = Math.abs(nextCardPresence - this.flightCardPresence) > 0.002;
+    if (cardsSettling) {
+      this.flightCardPresence = nextCardPresence;
+      this.host.dataset.universeFlightCardPresence = nextCardPresence.toFixed(2);
+      if (delta === 0) this.updateLabels(now);
+    }
     this.host.dataset.universeFlightDepth = state.depth.toFixed(1);
     this.host.dataset.universeFlightVelocity = state.velocity.toFixed(1);
     const follow = now >= this.flightFollowCooldownUntil
@@ -5176,7 +5285,7 @@ class UniverseForceSceneEngine {
         this.flightFollowCooldownUntil = performance.now() + 500;
       });
     }
-    return moving;
+    return moving || cardsSettling;
   }
 
   private timelineWheelSurface(target: EventTarget | null): "canvas" | "label" | null {

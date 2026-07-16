@@ -1115,6 +1115,8 @@
       "completedTimePosition": "{time} · Exploration complete",
       "partialTime": "{time} (some times are not specified)",
       "unknownTime": "Time not specified",
+      "countRange": "Items {from}\u2013{to} of {total}",
+      "countPosition": "Item {position} of {total}",
       "explorationComplete": "Exploration complete",
       "home": "Return to galaxy overview",
       "homeHint": "Leave this galaxy and return to the knowledge universe",

@@ -3025,14 +3025,32 @@ export function KnowledgeUniverse({
       .filter((value): value is string => typeof value === "string")
       .map((value) => ({ value, timestamp: Date.parse(value) }))
       .filter((item) => Number.isFinite(item.timestamp));
+    const oldest = Math.min(...values.map((item) => item.timestamp));
+    const newest = Math.max(...values.map((item) => item.timestamp));
+    // A window whose clock collapsed to one instant (an imported book) reads
+    // as exploration position, not as a meaningless repeated date.
+    const ordinals = visibleBundles
+      .map((bundle) => bundle.ordinal)
+      .filter((ordinal): ordinal is number => Number.isInteger(ordinal));
+    const total = session.timeline.totalEvents;
+    if (
+      total !== null
+      && ordinals.length === visibleBundles.length
+      && ordinals.length > 0
+      && (values.length === 0 || (oldest === newest && visibleBundles.length > 1))
+    ) {
+      const from = Math.min(...ordinals) + 1;
+      const to = Math.max(...ordinals) + 1;
+      return from === to
+        ? t("controls.countPosition", { position: from, total })
+        : t("controls.countRange", { from, to, total });
+    }
     if (values.length === 0) return t("controls.unknownTime");
     const includesClock = values.some(({ value }) =>
       !/T00:00(?::00(?:\.\d+)?)?(?:Z|[+-]\d\d:\d\d)?$/.test(value));
     const formatter = new Intl.DateTimeFormat(locale, includesClock
       ? { dateStyle: "medium", timeStyle: "short" }
       : { dateStyle: "medium" });
-    const oldest = Math.min(...values.map((item) => item.timestamp));
-    const newest = Math.max(...values.map((item) => item.timestamp));
     const oldestLabel = formatter.format(new Date(oldest));
     const newestLabel = formatter.format(new Date(newest));
     const range = oldest === newest ? oldestLabel : `${oldestLabel} – ${newestLabel}`;

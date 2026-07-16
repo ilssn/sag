@@ -755,6 +755,46 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("private syncNebulaCorridorUniforms()");
     expect(source).toContain("material.uniforms.uCorridorNearZ.value = config");
     expect(source).toContain("const NEBULA_CORRIDOR_BAND_OFF = 1e8");
+
+    // The corridor carries its own light and has no visible far wall: glow
+    // pockets brighten and swell, and the last stretch dissolves.
+    expect(nebulaMaterial).toContain("attribute float aCorridorFade");
+    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 1.3, corridorMix * glowParticle)");
+    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, aCorridorFade, corridorMix)");
+    expect(nebulaMaterial).toContain("* detailScale * glowScale * corridorBoost");
+    expect(nebulaBuild).toContain('geometry.setAttribute("aCorridorFade"');
+  });
+
+  it("dives into the corridor on entry and ducks cards while streaking past", () => {
+    const focus = sourceBetween(
+      "focusSource(sourceId: string) {",
+      "focusResult() {",
+    );
+    const flight = sourceBetween(
+      "private updateTemporalFlight(now: number)",
+      "private timelineWheelSurface(target: EventTarget | null)",
+    );
+    const labels = sourceBetween(
+      "private updateLabels(now: number",
+      "private miniPanelRect(",
+    );
+
+    // Entering a browse session flies to the corridor entrance looking down
+    // the axis — never a bearing-preserving dolly into a ball of nodes.
+    expect(focus).toContain("flight.centerZ - this.appliedFlightDepth");
+    expect(focus).toContain("CORRIDOR_ENTRY_STANDOFF");
+    expect(focus).toContain("entryZ - CORRIDOR_ENTRY_LOOK_AHEAD");
+
+    // Card discipline keys off real depth travel (wheel inertia and button
+    // glides alike) and eases asymmetrically: duck fast, recover after a beat.
+    expect(flight).toContain("const instantSpeed = Math.abs(delta)");
+    expect(flight).toContain("FLIGHT_CARD_COLLAPSE_MS");
+    expect(flight).toContain("return moving || cardsSettling");
+    expect(labels).toContain(
+      "universeCardMorph(this.visualDetailMix * this.flightCardPresence)",
+    );
+    // Passed packages keep an ember star but never a ghost card.
+    expect(labels).toContain("((node.temporalPresenceOpacity ?? 1) - 0.18) / 0.82");
   });
 
   it("debounces pointer label rebuilds and restores defaults", () => {

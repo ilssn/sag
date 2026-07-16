@@ -1115,6 +1115,8 @@
       "completedTimePosition": "{time} · 探索完成",
       "partialTime": "{time}（部分时间未标注）",
       "unknownTime": "时间未标注",
+      "countRange": "第 {from}–{to} 条 · 共 {total} 条",
+      "countPosition": "第 {position} 条 · 共 {total} 条",
       "explorationComplete": "探索完成",
       "home": "返回星系总览",
       "homeHint": "离开当前星系，回到知识宇宙全景",

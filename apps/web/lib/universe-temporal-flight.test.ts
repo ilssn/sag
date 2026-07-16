@@ -246,10 +246,12 @@ describe("universe temporal flight", () => {
     expect(mid.opacity).toBeGreaterThan(far.opacity);
     expect(mid.scale).toBeLessThan(1);
     expect(mid.scale).toBeGreaterThan(far.scale);
-    // Behind: passed packages fade out quickly but keep their size while going.
+    // Behind: passed packages fade fast but settle on a faint ember, so
+    // looking back shows the travelled road instead of pure black.
     expect(universeTemporalFlightPresence(-30, 60).opacity).toBe(1);
     expect(universeTemporalFlightPresence(-90, 60).opacity).toBeLessThan(1);
-    expect(universeTemporalFlightPresence(-60 * 3, 60).opacity).toBe(0);
+    expect(universeTemporalFlightPresence(-60 * 3, 60).opacity).toBeCloseTo(0.1, 10);
+    expect(universeTemporalFlightPresence(-60 * 30, 60).opacity).toBeCloseTo(0.1, 10);
     expect(universeTemporalFlightPresence(-60 * 3, 60).scale).toBe(1);
   });
 });

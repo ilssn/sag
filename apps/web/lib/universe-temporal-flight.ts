@@ -76,6 +76,11 @@ const PRESENCE_BEHIND_FULL_EVENTS = 0.75;
 const PRESENCE_BEHIND_GONE_EVENTS = 2.5;
 const PRESENCE_FAR_SCALE = 0.42;
 const PRESENCE_FAR_OPACITY = 0.16;
+/**
+ * Passed packages keep a faint ember instead of going black: looking back
+ * shows the travelled road, and the warm event stars read as cooling embers.
+ */
+const PRESENCE_BEHIND_EMBER = 0.1;
 /** Coasting velocity halves this often. */
 export const UNIVERSE_FLIGHT_VELOCITY_HALF_LIFE_MS = 160;
 /** Glides cover half their remaining distance this often. */
@@ -255,7 +260,10 @@ export function universeTemporalFlightPresence(
       PRESENCE_BEHIND_FULL_EVENTS,
       PRESENCE_BEHIND_GONE_EVENTS,
     );
-    return { scale: 1, opacity: kept };
+    return {
+      scale: 1,
+      opacity: PRESENCE_BEHIND_EMBER + (1 - PRESENCE_BEHIND_EMBER) * kept,
+    };
   }
   const fade = easedRange(
     events,
