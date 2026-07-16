@@ -766,9 +766,10 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("const NEBULA_DETAIL_DUST_POINT_SIZE_CSS = 20");
     expect(source).toContain("uDetail: { value: 0 }");
     expect(source).toContain("uDetailAlpha: { value: NEBULA_DETAIL_ALPHA }");
-    expect(source).toContain("attribute float aGlow");
+    expect(source).toContain("attribute vec4 aVisual");
+    expect(source).toContain("#define aGlow aVisual.y");
     expect(source).toContain("attribute float aSourceIndex");
-    expect(source).toContain('geometry.setAttribute("aGlow"');
+    expect(source).toContain('geometry.setAttribute("aVisual"');
     expect(source).toContain('geometry.setAttribute("aSourceIndex"');
     expect(source).toContain("material.uniforms.uDetail.value = this.visualDetailMix");
     expect(source).toContain("material.uniforms.uDetailSource.value");
@@ -800,6 +801,20 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("const NEBULA_SOURCE_FRAME_RATIO = 0.76");
     expect(source).toContain("const NEBULA_SOURCE_CORRIDOR_SCALE = 2.35");
     expect(overviewFrame.match(/\* NEBULA_SOURCE_FRAME_RATIO/g)).toHaveLength(3);
+  });
+
+  it("runs overview breathing on a throttled ticker while the main loop sleeps", () => {
+    const ambient = sourceBetween(
+      "private nebulaAmbientEligible()",
+      "private clearNebula()",
+    );
+
+    expect(source).toContain("const NEBULA_AMBIENT_FRAME_MS_DESKTOP = 1000 / 24");
+    expect(source).toContain("const NEBULA_AMBIENT_FRAME_MS_MOBILE = 1000 / 18");
+    expect(ambient).toContain("window.setInterval(() => {");
+    expect(ambient).toContain("this.updateNebulaAnimation(performance.now())");
+    expect(ambient).toContain("this.nebulaAnimationElapsed += elapsed / 1000");
+    expect(ambient).toContain("return active && this.nebulaAmbientTimer === null");
   });
 
   it("lets the browse session own the detail latch and calms the sky under gestures", () => {
@@ -845,12 +860,13 @@ describe("universe scene production invariants", () => {
     // blends galaxy → corridor with the existing detail mix, so diving into a
     // source needs no CPU reposition and no extra particle budget.
     expect(nebulaMaterial).toContain("attribute vec3 aCorridor");
-    expect(nebulaMaterial).toContain("attribute float aEmitter");
+    expect(nebulaMaterial).toContain("attribute vec4 aMotion");
+    expect(nebulaMaterial).toContain("#define aEmitter aMotion.z");
     expect(nebulaMaterial).toContain("vec3 corridorTarget = position + aCorridor");
     expect(nebulaMaterial).toContain(
       "vec3 journeyTarget = mix(corridorTarget, emitterTarget, aEmitter)",
     );
-    expect(nebulaBuild).toContain('geometry.setAttribute("aEmitter"');
+    expect(nebulaBuild).toContain('geometry.setAttribute("aMotion"');
     // Dust yields inside the loaded window band, where real packages condensed.
     expect(nebulaMaterial).toContain("uniform float uCorridorNearZ");
     expect(nebulaMaterial).toContain("float loadedBand = smoothstep(");
@@ -907,7 +923,8 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("const NEBULA_CORRIDOR_DUST_ALPHA = 0.5");
     expect(source).toContain("const NEBULA_CORRIDOR_WALL_ALPHA = 0.16");
     expect(nebulaBuild).toContain("NEBULA_WALL_LATERAL_MIN");
-    expect(nebulaBuild).toContain('geometry.setAttribute("aCorridorWall"');
+    expect(nebulaMaterial).toContain("#define aCorridorWall aMotion.w");
+    expect(nebulaBuild).toContain('geometry.setAttribute("aMotion"');
     expect(nebulaMaterial).toContain(
       "vAlpha *= mix(1.0, ${NEBULA_CORRIDOR_DUST_ALPHA.toFixed(2)}, streamMix)",
     );
@@ -1094,12 +1111,22 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("const NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP = 16");
     // The hero has a readable spiral silhouette with real z-thickness rather
     // than a flat random disc or an oversized field of fog sprites.
-    expect(nebula).toContain("const coreParticle = population < 0.28");
-    expect(nebula).toContain("const diffuseParticle = population >= 0.86");
-    expect(nebula).toContain("const armCount = 3 +");
+    expect(nebula).toContain("const coreParticle = population < 0.3");
+    expect(nebula).toContain("const haloParticle = population >= 0.92");
+    expect(nebula).toContain("const diffuseParticle = population >= 0.72 && !haloParticle");
+    expect(nebula).toContain("const armCount = 2 +");
     expect(nebula).toContain("const winding = Math.PI * (");
-    expect(nebula).toContain("const planarRadius = radius * Math.min(1.02, radial)");
+    expect(nebula).toContain("const planarRadius = radius * Math.min(1.16, radial)");
     expect(nebula).toContain("offset.applyEuler(rotation)");
+    // The disk is deliberately side-on, not a face-on circular marker, and
+    // rotates around its own tilted normal in the shared GPU draw call.
+    expect(nebula).toContain("(52 + stableUnit(`${source.id}:tilt`) * 16)");
+    expect(nebula).toContain('"ZXY"');
+    expect(nebula).toContain("new THREE.Vector3(0, 0, 1).applyEuler(rotation).normalize()");
+    expect(nebula).toContain('geometry.setAttribute("aSourceCenter"');
+    expect(nebula).toContain('geometry.setAttribute("aSpinAxis"');
+    expect(nebulaMaterial).toContain("vec3 rotateAroundAxis(");
+    expect(nebulaMaterial).toContain("uTime * aSpinRate");
     // Entity sprites and labels use the same source accent as their nebula.
     expect(source).toContain("private entityVisualColor(sourceId: string)");
     expect(source).toContain("this.sourceVisualColor(node.sourceId)");

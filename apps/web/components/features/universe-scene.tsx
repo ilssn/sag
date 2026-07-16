@@ -410,7 +410,9 @@ const DETAIL_MORPH_SETTLE_EPSILON = 0.01;
 const HOVER_LABEL_SETTLE_MS = 72;
 const HOVER_CLEAR_GRACE_MS = 84;
 const MAX_PLACEMENT_MEMORY = 512;
-const NEBULA_BURST_MS = 1_400;
+const NEBULA_AMBIENT_MOTION_MS = 5_000;
+const NEBULA_AMBIENT_FRAME_MS_DESKTOP = 1000 / 24;
+const NEBULA_AMBIENT_FRAME_MS_MOBILE = 1000 / 18;
 // Keep the focused source luminous while retaining a bounded per-device
 // particle budget. Detail gives the selected source most of that budget;
 // overview sources keep a proportional share of the same ceiling.
@@ -841,7 +843,7 @@ function makeNebulaMaterial(darkTheme: boolean) {
       uDetailSource: { value: -1 },
       uBrandColor: { value: NEBULA_BRAND_GOLD.clone() },
       uPointSizeCap: { value: NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP },
-      uTime: { value: 0 },
+      uTime: { value: performance.now() / 1000 },
       uMotion: { value: 1 },
       // Loaded-window band on the browsed source's axis, in world z. Particles
       // inside it yield to the real packages that condensed there.
@@ -872,24 +874,35 @@ function makeNebulaMaterial(darkTheme: boolean) {
       uniform float uCorridorCenterZ;
       uniform float uCorridorVestibule;
       attribute vec3 aColor;
-      attribute vec3 aLocalPosition;
       attribute vec3 aCorridor;
-      attribute float aCorridorWall;
-      attribute float aEmitter;
-      attribute float aSpin;
-      attribute float aSize;
+      attribute vec4 aVisual;
+      attribute vec4 aMotion;
       attribute float aAlpha;
-      attribute float aGlow;
       attribute float aSourceIndex;
-      attribute float aShape;
-      attribute float aPhase;
-      attribute float aTwinkle;
+      attribute vec3 aSourceCenter;
+      attribute vec3 aSpinAxis;
+      #define aSize aVisual.x
+      #define aGlow aVisual.y
+      #define aShape aVisual.z
+      #define aTwinkle aVisual.w
+      #define aPhase aMotion.x
+      #define aSpinRate aMotion.y
+      #define aEmitter aMotion.z
+      #define aCorridorWall aMotion.w
       varying vec3 vColor;
       varying float vAlpha;
       varying float vDetail;
       varying float vGlow;
       varying float vShape;
       varying float vPulse;
+
+      vec3 rotateAroundAxis(vec3 value, vec3 axis, float angle) {
+        float cosine = cos(angle);
+        float sine = sin(angle);
+        return value * cosine
+          + cross(axis, value) * sine
+          + axis * dot(axis, value) * (1.0 - cosine);
+      }
 
       void main() {
         float sourceMatch = 1.0 - step(0.5, abs(aSourceIndex - uDetailSource));
@@ -927,18 +940,14 @@ function makeNebulaMaterial(darkTheme: boolean) {
         vGlow = aGlow * (
           1.0 - smoothstep(0.08, 0.55, corridorMix) * (1.0 - aEmitter)
         );
-        // A source-specific, very slow spin keeps the silhouette alive. uTime
-        // advances only while the scene is awake, so this costs no idle loop.
-        float spinAngle = uTime * aSpin;
-        float spinCos = cos(spinAngle);
-        float spinSin = sin(spinAngle);
-        vec3 sourceCenter = position - aLocalPosition;
-        vec3 spunLocal = vec3(
-          aLocalPosition.x * spinCos - aLocalPosition.y * spinSin,
-          aLocalPosition.x * spinSin + aLocalPosition.y * spinCos,
-          aLocalPosition.z
+        // Each source is a genuinely tilted spiral system. Rotate its local
+        // disk around that tilted normal on the GPU; all sources still share
+        // one points draw call, so the slow motion remains inexpensive.
+        vec3 heroPosition = aSourceCenter + rotateAroundAxis(
+          position - aSourceCenter,
+          normalize(aSpinAxis),
+          uTime * aSpinRate
         );
-        vec3 heroPosition = sourceCenter + spunLocal;
         // Camera-anchored wrap: corridor dust repeats modulo the span around
         // the flight depth, so the density near the camera never depends on
         // the source's size — the fixed-window discipline for particles.
@@ -1175,7 +1184,8 @@ class UniverseForceSceneEngine {
   private nebulaAlphaKey = "";
   private nebulaAlphaUploads = 0;
   private lastNebulaAnimationAt = 0;
-  private nebulaAnimationUntil = 0;
+  private nebulaAnimationElapsed = 0;
+  private nebulaAmbientTimer: number | null = null;
   /** While in the future, the ambient nebula drift holds still (camera gestures). */
   private cameraCalmUntil = 0;
   /** Low-passed flight speed in units/s, fed by actual per-frame depth travel. */
@@ -2779,7 +2789,7 @@ class UniverseForceSceneEngine {
     this.cancelHoverClear();
     this.cancelHoverLabelRebuild();
     this.loopKeepAliveUntil = 0;
-    this.nebulaAnimationUntil = 0;
+    this.stopNebulaAmbientTicker();
     this.host.dataset.universeLoop = "idle";
     this.host.dataset.universeNebulaMotion = "idle";
     this.host.dataset.universePaused = "true";
@@ -4032,6 +4042,8 @@ class UniverseForceSceneEngine {
     );
     const weightedBudget = Math.max(0, budget - baseCount * sources.length);
     const particles: NebulaParticle[] = [];
+    const spinAxesBySource = new Map<string, THREE.Vector3>();
+    const spinRatesBySource = new Map<string, number>();
     sources.forEach((source, sourceIndex) => {
       const count = baseCount + Math.floor(
         (weightedBudget * weights[sourceIndex]) / Math.max(1, totalWeight),
@@ -4043,10 +4055,25 @@ class UniverseForceSceneEngine {
         NEBULA_SOURCE_RADIUS_MIN,
         source.sceneNode.radius * NEBULA_SOURCE_RADIUS_SCALE,
       );
+      const tiltDirection = stableUnit(`${source.id}:tilt-direction`) < 0.5 ? -1 : 1;
       const rotation = new THREE.Euler(
-        (stableUnit(`${source.id}:rx`) - 0.5) * 0.34,
-        (stableUnit(`${source.id}:ry`) - 0.5) * 0.42,
-        stableUnit(`${source.id}:rz`) * Math.PI,
+        THREE.MathUtils.degToRad(
+          (52 + stableUnit(`${source.id}:tilt`) * 16) * tiltDirection,
+        ),
+        THREE.MathUtils.degToRad(
+          (stableUnit(`${source.id}:yaw`) - 0.5) * 24,
+        ),
+        stableUnit(`${source.id}:roll`) * Math.PI * 2,
+        "ZXY",
+      );
+      spinAxesBySource.set(
+        source.sourceId,
+        new THREE.Vector3(0, 0, 1).applyEuler(rotation).normalize(),
+      );
+      const spinDirection = stableUnit(`${source.id}:spin-direction`) < 0.5 ? -1 : 1;
+      spinRatesBySource.set(
+        source.sourceId,
+        (0.007 + stableUnit(`${source.id}:spin-rate`) * 0.0045) * spinDirection,
       );
       const armCount = 2 + Math.floor(stableUnit(`${source.id}:arm-count`) * 2);
       const winding = Math.PI * (
@@ -4087,11 +4114,11 @@ class UniverseForceSceneEngine {
             + laneOffset;
         const planarRadius = radius * Math.min(1.16, radial);
         const thickness = radius
-          * (coreParticle ? 0.28 : haloParticle ? 0.22 : diffuseParticle ? 0.18 : 0.14)
+          * (coreParticle ? 0.2 : haloParticle ? 0.12 : diffuseParticle ? 0.11 : 0.085)
           * (1 - radial * 0.32);
         const offset = new THREE.Vector3(
-          Math.cos(angle) * planarRadius * 1.06,
-          Math.sin(angle) * planarRadius * 0.76,
+          Math.cos(angle) * planarRadius * 1.08,
+          Math.sin(angle) * planarRadius * 0.92,
           (stableUnit(`${key}:depth`) * 2 - 1) * thickness
             + Math.sin(angle * 1.8 + phase) * radius * 0.045 * (1 - radial),
         );
@@ -4099,7 +4126,8 @@ class UniverseForceSceneEngine {
         const twinkle = Math.pow(stableUnit(`${key}:twinkle`), 1.18);
         const glowSeed = stableUnit(`${key}:glow`);
         const emitterParticle = coreParticle
-          || stableUnit(`${key}:emitter`) < 0.2;
+          ? stableUnit(`${key}:emitter`) < 0.18
+          : stableUnit(`${key}:emitter`) < 0.025;
         // Sparse light pockets punctuate fine grain; no oversized fog blobs.
         const glowChance = coreParticle ? 0.018 : 0.006;
         particles.push({
@@ -4120,10 +4148,6 @@ class UniverseForceSceneEngine {
             : 0,
           phase,
           twinkle,
-          // Keep a small, deterministic share of the dense core as a
-          // camera-relative beacon while the remaining grains stream into the
-          // corridor during flight.
-          emitter: coreParticle && stableUnit(`${key}:emitter`) < 0.16,
         });
       }
     });
@@ -4132,16 +4156,13 @@ class UniverseForceSceneEngine {
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(particles.length * 3);
     const corridors = new Float32Array(particles.length * 3);
-    const corridorWalls = new Float32Array(particles.length);
     const colors = new Float32Array(particles.length * 3);
-    const sizes = new Float32Array(particles.length);
     const alphas = new Float32Array(particles.length);
-    const glows = new Float32Array(particles.length);
-    const emitters = new Float32Array(particles.length);
     const sourceIndices = new Float32Array(particles.length);
-    const shapes = new Float32Array(particles.length);
-    const phases = new Float32Array(particles.length);
-    const twinkles = new Float32Array(particles.length);
+    const sourceCenters = new Float32Array(particles.length * 3);
+    const spinAxes = new Float32Array(particles.length * 3);
+    const visuals = new Float32Array(particles.length * 4);
+    const motions = new Float32Array(particles.length * 4);
     const axisDepthBySource = new Map(sources.map((source) => [
       source.sourceId,
       Math.max(0, source.sceneNode.eventCount - 1)
@@ -4170,21 +4191,32 @@ class UniverseForceSceneEngine {
       colors[index * 3 + 1] = color.g;
       colors[index * 3 + 2] = color.b;
       // Brand grain: fine dust, a denser bright heart carried by size too.
-      sizes[index] = 0.95
+      const visualOffset = index * 4;
+      visuals[visualOffset] = 0.95
         + stableUnit(`${particle.sourceId}:${index}:size`) * 2.2
         + (particle.twinkle > 0.8 ? 0.6 : 0)
         + (eventGrain ? 0.16 : 0)
         + (particle.core ? (1 - particle.radial) * 0.8 : 0);
       alphas[index] = particle.alpha;
-      glows[index] = particle.glow;
-      emitters[index] = particle.emitter ? 1 : 0;
-      sourceIndices[index] = particle.sourceIndex;
-      shapes[index] = particle.glow === 0
+      visuals[visualOffset + 1] = particle.glow;
+      visuals[visualOffset + 2] = particle.glow === 0
         && (particle.twinkle > 0.9 || (eventGrain && particle.twinkle > 0.66))
         ? 1
         : 0;
-      phases[index] = particle.phase;
-      twinkles[index] = 0.18 + particle.twinkle * 0.82;
+      visuals[visualOffset + 3] = 0.18 + particle.twinkle * 0.82;
+      sourceIndices[index] = particle.sourceIndex;
+      const source = sources[particle.sourceIndex];
+      const spinAxis = spinAxesBySource.get(particle.sourceId)
+        ?? new THREE.Vector3(0, 0, 1);
+      sourceCenters[index * 3] = source?.x ?? 0;
+      sourceCenters[index * 3 + 1] = source?.y ?? 0;
+      sourceCenters[index * 3 + 2] = source?.z ?? 0;
+      spinAxes[index * 3] = spinAxis.x;
+      spinAxes[index * 3 + 1] = spinAxis.y;
+      spinAxes[index * 3 + 2] = spinAxis.z;
+      motions[visualOffset] = particle.phase;
+      motions[visualOffset + 1] = spinRatesBySource.get(particle.sourceId) ?? 0.008;
+      motions[visualOffset + 2] = particle.emitter ? 1 : 0;
       // The corridor form: the same dust, laid out along ONE wrap span of the
       // counting axis. The shader repeats it modulo the span around the
       // flight depth, so a fixed budget gives the same density beside the
@@ -4196,7 +4228,8 @@ class UniverseForceSceneEngine {
       // Two shells: sparse wisps you fly through, and the canyon walls — a
       // fine star field framing the corridor, far enough to barely parallax
       // under a gaze turn but near enough to live inside the field of view.
-      const wall = particle.glow === 0
+      const wall = !particle.emitter
+        && particle.glow === 0
         && stableUnit(`${key}:shell`) < NEBULA_WALL_SHARE;
       const lateralScale = wall
         ? NEBULA_WALL_LATERAL_MIN
@@ -4212,7 +4245,7 @@ class UniverseForceSceneEngine {
         * (lateralBySource.get(particle.sourceId) ?? 130)
         * lateralScale;
       const angle = stableUnit(`${key}:angle`) * Math.PI * 2;
-      corridorWalls[index] = wall ? 1 : 0;
+      motions[visualOffset + 3] = wall ? 1 : 0;
       corridors[index * 3] = Math.cos(angle) * lateral - particle.offset.x;
       corridors[index * 3 + 1] = Math.sin(angle) * lateral
         * NEBULA_CORRIDOR_VERTICAL_ASPECT - particle.offset.y;
@@ -4224,16 +4257,13 @@ class UniverseForceSceneEngine {
       .setUsage(THREE.DynamicDrawUsage);
     geometry.setAttribute("position", positionAttribute);
     geometry.setAttribute("aCorridor", new THREE.BufferAttribute(corridors, 3));
-    geometry.setAttribute("aCorridorWall", new THREE.BufferAttribute(corridorWalls, 1));
     geometry.setAttribute("aColor", new THREE.BufferAttribute(colors, 3));
-    geometry.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
+    geometry.setAttribute("aVisual", new THREE.BufferAttribute(visuals, 4));
+    geometry.setAttribute("aMotion", new THREE.BufferAttribute(motions, 4));
     geometry.setAttribute("aAlpha", alphaAttribute);
-    geometry.setAttribute("aGlow", new THREE.BufferAttribute(glows, 1));
-    geometry.setAttribute("aEmitter", new THREE.BufferAttribute(emitters, 1));
     geometry.setAttribute("aSourceIndex", new THREE.BufferAttribute(sourceIndices, 1));
-    geometry.setAttribute("aShape", new THREE.BufferAttribute(shapes, 1));
-    geometry.setAttribute("aPhase", new THREE.BufferAttribute(phases, 1));
-    geometry.setAttribute("aTwinkle", new THREE.BufferAttribute(twinkles, 1));
+    geometry.setAttribute("aSourceCenter", new THREE.BufferAttribute(sourceCenters, 3));
+    geometry.setAttribute("aSpinAxis", new THREE.BufferAttribute(spinAxes, 3));
     this.nebulaPoints = new THREE.Points(geometry, makeNebulaMaterial(this.darkTheme));
     this.nebulaPoints.name = "sag-source-nebulae";
     this.nebulaPoints.frustumCulled = false;
@@ -4307,6 +4337,9 @@ class UniverseForceSceneEngine {
   private updateNebulaPositions() {
     if (!this.nebulaPoints) return;
     const position = this.nebulaPoints.geometry.getAttribute("position") as THREE.BufferAttribute;
+    const sourceCenter = this.nebulaPoints.geometry.getAttribute(
+      "aSourceCenter",
+    ) as THREE.BufferAttribute;
     const sources = new Map(
       [...this.nodes.values()]
         .filter((node) => node.kind === "source")
@@ -4321,8 +4354,10 @@ class UniverseForceSceneEngine {
         source.y + particle.offset.y,
         source.z + particle.offset.z,
       );
+      sourceCenter.setXYZ(index, source.x, source.y, source.z);
     });
     position.needsUpdate = true;
+    sourceCenter.needsUpdate = true;
   }
 
   private updateNebulaAlphas(force = false) {
@@ -4389,23 +4424,60 @@ class UniverseForceSceneEngine {
     return THREE.MathUtils.clamp((0.52 - this.visualDetailMix) / 0.22, 0, 1);
   }
 
-  private shouldAnimateNebula(now = performance.now()) {
-    return this.nebulaMotionStrength() > 0.01 && now < this.nebulaAnimationUntil;
+  private nebulaAmbientEligible() {
+    return Boolean(
+      this.nebulaPoints
+      && this.interactive
+      && !this.paused
+      && !this.reducedMotion
+      && !this.reportedViewSourceId
+      && this.visualDetailMix < 0.52
+      && document.visibilityState === "visible"
+    );
   }
 
-  private armNebulaAnimation(duration = NEBULA_BURST_MS) {
-    if (this.paused || this.nebulaMotionStrength() <= 0.01) return;
-    const now = performance.now();
-    this.nebulaAnimationUntil = Math.max(this.nebulaAnimationUntil, now + duration);
+  private shouldAnimateNebula() {
+    return this.nebulaAmbientEligible() && this.nebulaMotionStrength() > 0.01;
+  }
+
+  private stopNebulaAmbientTicker() {
+    if (this.nebulaAmbientTimer !== null) {
+      window.clearInterval(this.nebulaAmbientTimer);
+      this.nebulaAmbientTimer = null;
+    }
+    this.lastNebulaAnimationAt = 0;
+  }
+
+  private syncNebulaAmbientTicker() {
+    if (!this.nebulaAmbientEligible()) {
+      this.stopNebulaAmbientTicker();
+      return;
+    }
+    if (this.nebulaAmbientTimer !== null) return;
+    const interval = this.host.clientWidth < 768
+      ? NEBULA_AMBIENT_FRAME_MS_MOBILE
+      : NEBULA_AMBIENT_FRAME_MS_DESKTOP;
+    this.nebulaAmbientTimer = window.setInterval(() => {
+      if (!this.nebulaAmbientEligible()) {
+        this.stopNebulaAmbientTicker();
+        return;
+      }
+      this.updateNebulaAnimation(performance.now());
+    }, interval);
+  }
+
+  private armNebulaAnimation(duration = NEBULA_AMBIENT_MOTION_MS) {
+    if (this.paused || !this.nebulaAmbientEligible()) return;
     this.updateNebulaMotionState();
-    this.wakeRendering(duration + 120);
-    this.startLoop(duration + 120);
+    this.wakeRendering(Math.min(duration + 120, 1_200));
+    this.startLoop(Math.min(duration + 120, 900));
   }
 
   private updateNebulaMotionState() {
     const strength = this.nebulaMotionStrength();
     const active = this.shouldAnimateNebula();
     this.host.dataset.universeNebulaMotion = active ? "active" : "idle";
+    this.syncNebulaAmbientTicker();
     if (!this.nebulaPoints) return;
     const material = this.nebulaPoints.material as THREE.ShaderMaterial;
     material.uniforms.uMotion.value = strength;
@@ -4413,7 +4485,7 @@ class UniverseForceSceneEngine {
 
   private updateNebulaAnimation(now: number) {
     const strength = this.nebulaMotionStrength();
-    const active = this.shouldAnimateNebula(now);
+    const active = this.shouldAnimateNebula();
     if (!this.nebulaPoints) return false;
     const material = this.nebulaPoints.material as THREE.ShaderMaterial;
     material.uniforms.uMotion.value = strength;
@@ -4422,15 +4494,23 @@ class UniverseForceSceneEngine {
       return false;
     }
     this.host.dataset.universeNebulaMotion = "active";
-    const frameInterval = this.host.clientWidth < 768 ? 50 : 1000 / 30;
+    const frameInterval = this.host.clientWidth < 768
+      ? NEBULA_AMBIENT_FRAME_MS_MOBILE
+      : NEBULA_AMBIENT_FRAME_MS_DESKTOP;
     if (now - this.lastNebulaAnimationAt >= frameInterval) {
+      const elapsed = this.lastNebulaAnimationAt > 0
+        ? Math.min(100, now - this.lastNebulaAnimationAt)
+        : 0;
       this.lastNebulaAnimationAt = now;
-      material.uniforms.uTime.value = now / 1000;
+      this.nebulaAnimationElapsed += elapsed / 1000;
+      material.uniforms.uTime.value = this.nebulaAnimationElapsed;
       if (!this.renderingAwake) {
         this.graph.renderer().render(this.graph.scene(), this.graph.camera());
       }
     }
-    return true;
+    // A dedicated low-frequency ticker owns ambient overview motion. The main
+    // interaction loop can therefore sleep instead of polling at display Hz.
+    return active && this.nebulaAmbientTimer === null;
   }
 
   private clearNebula() {
@@ -4438,8 +4518,8 @@ class UniverseForceSceneEngine {
     this.nebulaSourceIndices.clear();
     this.nebulaAlphaKey = "";
     this.nebulaAlphaUploads = 0;
-    this.lastNebulaAnimationAt = 0;
-    this.nebulaAnimationUntil = 0;
+    this.stopNebulaAmbientTicker();
+    this.nebulaAnimationElapsed = 0;
     this.host.dataset.universeNebulaMotion = "idle";
     this.host.dataset.universeNebulaAlphaUploads = "0";
     this.host.dataset.universeParticleCount = "0";
