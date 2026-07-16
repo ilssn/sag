@@ -78,14 +78,14 @@ describe("universe scene production invariants", () => {
     );
     const wheel = sourceBetween(
       "private handleTimelineWheel = (event: WheelEvent) =>",
-      "private handlePointerDown = () =>",
+      "private handlePointerDown = (event: PointerEvent) =>",
     );
     const wheelRouting = sourceBetween(
       "private timelineWheelSurface(target: EventTarget | null)",
       "private handleTimelineWheel = (event: WheelEvent) =>",
     );
     const pointer = sourceBetween(
-      "private handlePointerDown = () =>",
+      "private handlePointerDown = (event: PointerEvent) =>",
       "private handleControlsStart = () =>",
     );
     const flight = sourceBetween(
@@ -795,15 +795,18 @@ describe("universe scene production invariants", () => {
       "private timelineWheelSurface(target: EventTarget | null)",
     );
 
-    // Freedom without incoherence: no angle clamps anywhere — the wheel flies
-    // along the gaze, so every orientation keeps its meaning. Browsing only
-    // weights the hand, and a soft spine magnet bounds lateral wander.
+    // Freedom without incoherence: no angle clamps anywhere, and rotation in
+    // a source is FIRST-PERSON — the target turns around the camera, never the
+    // camera around a forward pivot, so the corridor cannot skew sideways.
     expect(source).not.toContain("minAzimuthAngle");
     expect(source).not.toContain("maxPolarAngle");
     expect(source).toContain("private applyBrowseGaze()");
     expect(source).toContain("private releaseBrowseGaze()");
-    expect(source).toContain("this.controls.rotateSpeed = BROWSE_GAZE_ROTATE_SPEED");
-    expect(source).toContain("this.controls.rotateSpeed = UNIVERSE_ROTATE_SPEED");
+    expect(source).toContain("this.controls.enableRotate = false");
+    expect(source).toContain("this.controls.enableRotate = true");
+    expect(source).toContain("private lookAroundBy(");
+    expect(source).toContain("target.copy(camera.position).add(offset)");
+    expect(source).toContain("BROWSE_LOOK_MIN_PHI");
     expect(flight).toContain("camera.getWorldDirection");
     expect(flight).toContain("const depthPerTravel = -forward.z");
     // Walls apply to the axis projection of free travel, and paging leads on
@@ -811,6 +814,10 @@ describe("universe scene production invariants", () => {
     expect(flight).toContain("nextState = brakeUniverseTemporalFlight(state)");
     expect(flight).toContain("this.flightDepthRate = nextState.velocity * depthPerTravel");
     expect(flight).toContain("const spine = this.flightSpine");
+    // Sustained flight re-levels the gaze onto the corridor, unless a hand is
+    // actively looking around.
+    expect(flight).toContain("BROWSE_RELEVEL_TRAVEL_UNITS");
+    expect(flight).toContain("this.lookPointerId === null");
     expect(focus).toContain("this.applyBrowseGaze()");
     expect(dataCommit).toContain(
       "if (!nextFlight || flightSourceChanged) this.releaseBrowseGaze()",

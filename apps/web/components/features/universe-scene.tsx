@@ -311,6 +311,7 @@ interface SceneCallbacks {
 interface GraphControls {
   enabled: boolean;
   enableZoom?: boolean;
+  enableRotate?: boolean;
   enableDamping?: boolean;
   dampingFactor?: number;
   rotateSpeed?: number;
@@ -353,11 +354,18 @@ const NEBULA_CORRIDOR_BAND_OFF = 1e8;
 /** Ambient drift stays frozen this long after any camera gesture frame. */
 const NEBULA_GESTURE_CALM_MS = 480;
 /**
- * Inside a source the gaze is fully free — the wheel flies where you look, so
- * every orientation stays self-consistent — but rotation and pan carry more
- * weight than in the overview, keeping the sky steady under the hand.
+ * Inside a source the gaze is fully free and FIRST-PERSON: dragging turns the
+ * head (the view direction rotates around the camera), never the camera around
+ * a point ahead — orbiting a forward pivot swings the position sideways and
+ * renders the corridor as a crooked diagonal. The wheel flies where you look,
+ * and sustained flight gently re-levels the gaze onto the corridor, so free
+ * exploration always settles back into a clean view without any hard lock.
  */
-const BROWSE_GAZE_ROTATE_SPEED = 0.26;
+const BROWSE_LOOK_RAD_PER_PX = 0.0028;
+/** Pitch keepout around the poles so the head can never flip over. */
+const BROWSE_LOOK_MIN_PHI = 0.3;
+/** Flying this many units re-levels most of the gaze onto the axis. */
+const BROWSE_RELEVEL_TRAVEL_UNITS = 420;
 const BROWSE_GAZE_PAN_SPEED = 0.4;
 const UNIVERSE_ROTATE_SPEED = 0.42;
 const UNIVERSE_PAN_SPEED = 0.52;
@@ -955,6 +963,10 @@ class UniverseForceSceneEngine {
   private browseGazeTimer: number | null = null;
   /** Corridor spine (source centre) that free flight softly recenters onto. */
   private flightSpine: { x: number; y: number } | null = null;
+  /** Active first-person look drag, if any. */
+  private lookPointerId: number | null = null;
+  private lookLastX = 0;
+  private lookLastY = 0;
   private sourceSignature = "";
   private labelLayer: HTMLDivElement;
   private labels: SceneLabel[] = [];
@@ -1193,6 +1205,8 @@ class UniverseForceSceneEngine {
     this.host.addEventListener("blur", this.handleCanvasBlur);
     this.host.addEventListener("keydown", this.handleKeyDown);
     window.addEventListener("pointermove", this.handleWindowPointerMove, { passive: true });
+    window.addEventListener("pointerup", this.handleWindowPointerUp, { passive: true });
+    window.addEventListener("pointercancel", this.handleWindowPointerUp, { passive: true });
     document.addEventListener("visibilitychange", this.handleVisibilityChange);
     this.resizeObserver = new ResizeObserver(this.handleResize);
     this.resizeObserver.observe(this.host);
@@ -2402,6 +2416,8 @@ class UniverseForceSceneEngine {
     this.host.removeEventListener("blur", this.handleCanvasBlur);
     this.host.removeEventListener("keydown", this.handleKeyDown);
     window.removeEventListener("pointermove", this.handleWindowPointerMove);
+    window.removeEventListener("pointerup", this.handleWindowPointerUp);
+    window.removeEventListener("pointercancel", this.handleWindowPointerUp);
     document.removeEventListener("visibilitychange", this.handleVisibilityChange);
     this.rendererCanvas.removeEventListener("webglcontextlost", this.handleWebglContextLost);
     this.clearNebula();
@@ -3651,10 +3667,12 @@ class UniverseForceSceneEngine {
    * the flight's meaning — but the hand moves the sky more slowly.
    */
   private applyBrowseGaze() {
-    this.controls.rotateSpeed = BROWSE_GAZE_ROTATE_SPEED;
+    // First-person look takes over the primary drag; OrbitControls keeps pan
+    // and pinch. Orbiting a forward pivot is what made rotation feel crooked.
+    this.controls.enableRotate = false;
     this.controls.panSpeed = BROWSE_GAZE_PAN_SPEED;
     this.browseGazeApplied = true;
-    this.host.dataset.universeBrowseGaze = "weighted";
+    this.host.dataset.universeBrowseGaze = "first-person";
   }
 
   private releaseBrowseGaze() {
@@ -3663,10 +3681,42 @@ class UniverseForceSceneEngine {
       this.browseGazeTimer = null;
     }
     if (!this.browseGazeApplied) return;
-    this.controls.rotateSpeed = UNIVERSE_ROTATE_SPEED;
+    this.controls.enableRotate = true;
     this.controls.panSpeed = UNIVERSE_PAN_SPEED;
+    this.lookPointerId = null;
     this.browseGazeApplied = false;
     this.host.dataset.universeBrowseGaze = "free";
+  }
+
+  /**
+   * Turns the head: rotates the orbit target around the camera position. The
+   * camera itself never translates, so the corridor cannot skew sideways —
+   * exactly a gaze, in every direction, with a keepout at the poles.
+   */
+  private lookAroundBy(dxPx: number, dyPx: number, now: number) {
+    const target = this.controls.target;
+    if (!target) return;
+    const camera = this.graph.camera();
+    const offset = target.clone().sub(camera.position);
+    const radius = offset.length();
+    if (!Number.isFinite(radius) || radius < 1e-3) return;
+    const spherical = new THREE.Spherical().setFromVector3(offset);
+    spherical.theta -= dxPx * BROWSE_LOOK_RAD_PER_PX;
+    spherical.phi = THREE.MathUtils.clamp(
+      spherical.phi - dyPx * BROWSE_LOOK_RAD_PER_PX,
+      BROWSE_LOOK_MIN_PHI,
+      Math.PI - BROWSE_LOOK_MIN_PHI,
+    );
+    spherical.makeSafe();
+    offset.setFromSpherical(spherical).setLength(radius);
+    target.copy(camera.position).add(offset);
+    this.cameraCalmUntil = now + NEBULA_GESTURE_CALM_MS;
+    this.wakeRendering(700);
+    this.startLoop(240);
+    this.updateVisualLayout(now);
+    this.updateNodeMorphScales(now);
+    this.updateLabels(now);
+    this.evaluateLod(now);
   }
 
   /**
@@ -5365,6 +5415,24 @@ class UniverseForceSceneEngine {
         }
         appliedTravel = allowed;
         this.flightDepthRate = nextState.velocity * depthPerTravel;
+        // Sustained flight re-levels the gaze onto the corridor: look anywhere,
+        // and flying gently brings the nose back in line — free, never crooked.
+        if (this.lookPointerId === null && this.controls.target) {
+          const offset = this.controls.target.clone().sub(camera.position);
+          const radius = offset.length();
+          if (radius > 1e-3 && Math.abs(this.flightDepthRate) > 1) {
+            const desired = new THREE.Vector3(
+              0,
+              0,
+              this.flightDepthRate > 0 ? -radius : radius,
+            );
+            const level = 1 - Math.exp(
+              -Math.abs(appliedTravel) / BROWSE_RELEVEL_TRAVEL_UNITS,
+            );
+            offset.lerp(desired, level).setLength(radius);
+            this.controls.target.copy(camera.position).add(offset);
+          }
+        }
         // A soft spine magnet keeps free wander near the corridor without a
         // wall: lateral offset eases back only while actually flying.
         const spine = this.flightSpine;
@@ -5512,10 +5580,29 @@ class UniverseForceSceneEngine {
     this.startLoop(900);
   };
 
-  private handlePointerDown = () => {
+  private handlePointerDown = (event: PointerEvent) => {
     if (this.paused || !this.interactive) return;
     // A deliberate grab owns the camera immediately and brakes the flight.
     this.flightState = brakeUniverseTemporalFlight(this.flightState);
+    if (this.lookPointerId !== null) {
+      // A second pointer means a pinch is starting: hand the gesture back.
+      this.lookPointerId = null;
+      return;
+    }
+    if (
+      this.browseGazeApplied
+      && event.isPrimary
+      && event.button === 0
+      && this.timelineWheelSurface(event.target) === "canvas"
+    ) {
+      this.lookPointerId = event.pointerId;
+      this.lookLastX = event.clientX;
+      this.lookLastY = event.clientY;
+    }
+  };
+
+  private handleWindowPointerUp = (event: PointerEvent) => {
+    if (event.pointerId === this.lookPointerId) this.lookPointerId = null;
   };
 
   private handleControlsStart = () => {
@@ -5586,6 +5673,14 @@ class UniverseForceSceneEngine {
 
   private handleWindowPointerMove = (event: PointerEvent) => {
     if (this.paused || !this.interactive) return;
+    if (event.pointerId === this.lookPointerId) {
+      const dx = event.clientX - this.lookLastX;
+      const dy = event.clientY - this.lookLastY;
+      this.lookLastX = event.clientX;
+      this.lookLastY = event.clientY;
+      if (dx !== 0 || dy !== 0) this.lookAroundBy(dx, dy, performance.now());
+      return;
+    }
     const target = event.target;
     if (!(target instanceof Node) || this.host.contains(target)) return;
     this.pointerActive = false;
