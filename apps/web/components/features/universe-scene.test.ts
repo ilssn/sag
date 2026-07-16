@@ -67,7 +67,7 @@ describe("universe scene production invariants", () => {
     expect(labelLayout).toContain("hostRect,");
   });
 
-  it("keeps native wheel zoom while the thresholded wheel owns time paging", () => {
+  it("gives the wheel one meaning per context: flight in a source, zoom elsewhere", () => {
     const cameraStart = sourceBetween(
       "private handleControlsStart = () =>",
       "private handleControlsChange = () =>",
@@ -88,6 +88,10 @@ describe("universe scene production invariants", () => {
       "private handlePointerDown = () =>",
       "private handleControlsStart = () =>",
     );
+    const flight = sourceBetween(
+      "private updateTemporalFlight(now: number)",
+      "private timelineWheelSurface(target: EventTarget | null)",
+    );
     const intent = sourceBetween(
       "async moveTimeline(",
       "private createNodeObject(node: ForceNode)",
@@ -97,38 +101,52 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("windowRevision?: number");
     expect(source).toContain('this.controls.addEventListener("start", this.handleControlsStart)');
     expect(source).toContain('this.controls.addEventListener("change", this.handleControlsChange)');
+    // The listener must be able to consume the gesture outright.
     expect(source).toContain('this.host.addEventListener("wheel", this.handleTimelineWheel, {');
     expect(source).toContain("capture: true,");
-    expect(source).toContain("passive: true,");
+    expect(source).toContain("passive: false,");
     expect(source).toContain('this.host.removeEventListener("wheel", this.handleTimelineWheel, true)');
-    expect(source).toContain('from "@/lib/universe-timeline-wheel"');
-    expect(source).toContain("planUniverseTimelineWheel(this.timelineWheelState");
-    expect(source).toContain("drainUniverseTimelineWheel(this.timelineWheelState");
-    expect(source).not.toContain("timelineDepthGateReached");
-    expect(source).not.toContain("timelineWheelAccumulator");
-    expect(source).toContain("this.controls.minDistance = UNIVERSE_CAMERA_MIN_DISTANCE");
-    expect(source).toContain("this.controls.maxDistance = UNIVERSE_CAMERA_MAX_DISTANCE");
-    expect(source).toContain("this.controls.zoomToCursor = true");
-    expect(source).toContain("this.controls.enableZoom = options.interactive");
-    expect(wheel).toContain("const surface = this.timelineWheelSurface(event.target)");
-    expect(wheel).toContain('this.syncTimelineWheelDiagnostics("ignored-ui")');
+    // The 120px hidden-threshold planner is gone for good.
+    expect(source).not.toContain("universe-timeline-wheel");
+    expect(source).toContain('from "@/lib/universe-temporal-flight"');
+
+    // In a browsed source with an axis the wheel flies; pinch and overview stay
+    // native OrbitControls zoom, consumed before the canvas listener ever fires.
+    expect(wheel).toContain(
+      "const flightActive = this.timelineJourney.enabled && this.flightConfig !== null",
+    );
+    expect(wheel).toContain("event.ctrlKey || event.metaKey");
     expect(wheel).toContain('if (surface === "label") this.forwardTimelineWheelToCanvas(event)');
-    expect(wheel).toContain("planUniverseTimelineWheel(");
-    expect(wheel).toContain("if (plan.intent) this.runTimelineWheelIntent(");
-    expect(wheel).not.toContain("event.preventDefault()");
+    expect(wheel).toContain("event.preventDefault()");
+    expect(wheel).toContain("event.stopPropagation()");
+    expect(wheel).toContain("applyUniverseTemporalFlightWheel(this.flightState");
+    expect(wheel).not.toContain("moveTimeline(");
+
     expect(wheelRouting).toContain("TIMELINE_WHEEL_LABEL_SELECTOR");
     expect(wheelRouting).toContain("this.labelLayer.contains(label)");
     expect(wheelRouting).toContain('const forwarded = new WheelEvent("wheel"');
     expect(wheelRouting).toContain("this.forwardedTimelineWheelEvents.add(forwarded)");
     expect(wheelRouting).toContain("this.rendererCanvas.dispatchEvent(forwarded)");
-    expect(pointer).toContain("this.resetTimelineWheel()");
-    expect(cameraStart).toContain("this.lodArmed = true");
-    expect(cameraChange).not.toContain("moveTimeline(");
-    // Classifying a camera gesture as pointer-vs-wheel only ever fed the stable/
-    // journey switch. With depth as the layout there is nothing to switch back to,
-    // and no gesture may reach into the scene to rearrange it.
+
+    // A grab brakes the flight; the flight moves the camera only through deltas
+    // applied to camera and orbit target together, so orbiting composes freely
+    // and no pointer-vs-wheel gesture classifier is needed.
+    expect(pointer).toContain("brakeUniverseTemporalFlight");
+    expect(flight).toContain("camera.position.z -= delta");
+    expect(flight).toContain("this.controls.target.z -= delta");
+    expect(flight).toContain("planUniverseTemporalFlightFollow(");
+    // The camera never waits for data: paging along is fire-and-forget.
+    expect(flight).not.toContain("await ");
     expect(source).not.toContain("cameraGesture");
     expect(source).not.toContain("onCameraInteraction");
+
+    expect(source).toContain("this.controls.minDistance = UNIVERSE_CAMERA_MIN_DISTANCE");
+    expect(source).toContain("this.controls.maxDistance = UNIVERSE_CAMERA_MAX_DISTANCE");
+    expect(source).toContain("this.controls.zoomToCursor = true");
+    expect(source).toContain("this.controls.enableZoom = options.interactive");
+    expect(cameraStart).toContain("this.lodArmed = true");
+    expect(cameraChange).not.toContain("moveTimeline(");
+
     expect(intent).toContain("await this.callbacks.onTimelineIntent(direction)");
     expect(intent).not.toContain("animateTimelineExit");
     expect(source).not.toContain("private animateTimelineExit(");
@@ -571,7 +589,7 @@ describe("universe scene production invariants", () => {
     );
     const renderLoop = sourceBetween(
       "private loop = (now: number) =>",
-      "private syncTimelineWheelDiagnostics(",
+      "private updateTemporalFlight(now: number)",
     );
 
     expect(dataCommit).toContain("existing.visible = true");

@@ -29,12 +29,14 @@ import {
 } from "@/lib/universe-presentation";
 import { planUniverseSceneDelta } from "@/lib/universe-scene-transition";
 import {
-  createUniverseTimelineWheelState,
-  drainUniverseTimelineWheel,
-  planUniverseTimelineWheel,
-  resetUniverseTimelineWheelState,
-  type UniverseTimelineWheelState,
-} from "@/lib/universe-timeline-wheel";
+  applyUniverseTemporalFlightWheel,
+  brakeUniverseTemporalFlight,
+  createUniverseTemporalFlightState,
+  flyUniverseTemporalFlightTo,
+  planUniverseTemporalFlightFollow,
+  stepUniverseTemporalFlight,
+  type UniverseTemporalFlightState,
+} from "@/lib/universe-temporal-flight";
 import { UNIVERSE_SCENE_BUDGET } from "@/lib/universe-working-set";
 import { classifyUniverseWebGLContextFailure } from "@/lib/universe-webgl-capability";
 
@@ -84,6 +86,20 @@ export interface UniverseSceneLink {
   presentationOpacity?: number;
 }
 
+/**
+ * Everything the scene needs to fly the browsed source's counting axis. Depths
+ * are world units from the source's newest moment; the window depths locate the
+ * currently visible packages so flight knows when to page.
+ */
+export interface UniverseSceneTemporalFlight {
+  sourceId: string;
+  centerZ: number;
+  unitsPerEvent: number;
+  maxDepth: number;
+  windowNearDepth: number;
+  windowFarDepth: number;
+}
+
 export interface UniverseSceneData {
   epoch: number;
   nodes: UniverseSceneNode[];
@@ -94,6 +110,8 @@ export interface UniverseSceneData {
   windowChangeCause?: "journey" | "synchronization";
   /** Direction is explicit so forward and reverse transitions share one path. */
   windowDirection?: UniverseTimelineDirection;
+  /** Null while no browsed source carries a usable time axis. */
+  temporalFlight?: UniverseSceneTemporalFlight | null;
 }
 
 export interface UniverseSceneHover {
@@ -804,9 +822,15 @@ class UniverseForceSceneEngine {
   private pointerX = 0;
   private pointerY = 0;
   private pointerActive = false;
-  private timelineWheelState: UniverseTimelineWheelState =
-    createUniverseTimelineWheelState();
   private forwardedTimelineWheelEvents = new WeakSet<Event>();
+  private flightConfig: UniverseSceneTemporalFlight | null = null;
+  private flightState: UniverseTemporalFlightState =
+    createUniverseTemporalFlightState();
+  /** Depth already translated into the camera; deltas compose with orbiting. */
+  private appliedFlightDepth = 0;
+  private lastFlightStepAt = 0;
+  private flightOwnWindowChange = false;
+  private flightFollowCooldownUntil = 0;
   private eventTexture = makeSpriteTexture("event");
   private eventCoreTexture = makeEventCoreTexture();
   private entityTexture = makeSpriteTexture("entity");
@@ -1051,9 +1075,10 @@ class UniverseForceSceneEngine {
     this.host.appendChild(this.labelLayer);
     this.host.addEventListener("pointermove", this.handlePointerMove, { passive: true });
     this.host.addEventListener("pointerdown", this.handlePointerDown, { capture: true });
+    // Not passive: in flight the handler consumes the gesture outright.
     this.host.addEventListener("wheel", this.handleTimelineWheel, {
       capture: true,
-      passive: true,
+      passive: false,
     });
     this.host.addEventListener("pointerenter", this.handlePointerEnter, { passive: true });
     this.host.addEventListener("pointerleave", this.handlePointerLeave, { passive: true });
@@ -1110,10 +1135,9 @@ class UniverseForceSceneEngine {
       .enableNavigationControls(options.interactive)
       .enableNodeDrag(false);
     if (timelineDisabled) {
-      this.resetTimelineWheel();
+      this.flightState = brakeUniverseTemporalFlight(this.flightState);
       this.cancelTimelineTransition(true);
     }
-    if (!this.timelineIsBusy()) this.drainTimelineWheelIntent();
     if (leavingInteractiveMode) this.resetOverview();
     if (!options.interactive) this.pause();
     this.updatePixelRatio();
@@ -1181,8 +1205,30 @@ class UniverseForceSceneEngine {
     const animateTimelineWindow = windowChanged && this.timelineJourney.enabled;
     this.dataWindowRevision = nextWindowRevision;
     this.host.dataset.universeWindowRevision = String(nextWindowRevision);
+    const nextFlight = data.temporalFlight ?? null;
+    const flightSourceChanged = nextFlight?.sourceId !== this.flightConfig?.sourceId;
+    this.flightConfig = nextFlight;
+    if (nextFlight && flightSourceChanged) {
+      // A fresh browse session starts at its window's newest package. The entry
+      // camera framing is authoritative, so this reset applies no delta.
+      this.flightState = createUniverseTemporalFlightState(
+        nextFlight.windowNearDepth,
+      );
+      this.appliedFlightDepth = this.flightState.depth;
+      this.flightOwnWindowChange = false;
+    } else if (nextFlight && windowChanged && !this.flightOwnWindowChange) {
+      // A window moved by buttons or search glides the camera to the new page;
+      // a window moved by flight itself already has the camera there.
+      this.flightState = flyUniverseTemporalFlightTo(
+        this.flightState,
+        nextFlight.windowNearDepth,
+      );
+      this.wakeRendering(900);
+      this.startLoop(900);
+    }
+    if (windowChanged) this.flightOwnWindowChange = false;
     if (epochChanged) {
-      this.resetTimelineWheel();
+      this.flightState = brakeUniverseTemporalFlight(this.flightState);
       this.cancelTimelineTransition(true);
       this.releaseLockedNode(false);
       this.dataEpoch = data.epoch;
@@ -2031,6 +2077,19 @@ class UniverseForceSceneEngine {
     if (!node || !Number.isFinite(node.x) || !Number.isFinite(node.y) || !Number.isFinite(node.z)) {
       return;
     }
+    // Focusing moves the camera on its own, so the flight's notion of depth
+    // must follow — otherwise window-follow would tug the window back toward
+    // wherever the camera used to be.
+    const config = this.flightConfig;
+    if (config && node.kind !== "source" && node.sourceId === config.sourceId) {
+      const depth = THREE.MathUtils.clamp(
+        config.centerZ - node.z,
+        0,
+        config.maxDepth,
+      );
+      this.flightState = createUniverseTemporalFlightState(depth);
+      this.appliedFlightDepth = depth;
+    }
     this.moveCamera(new THREE.Vector3(node.x, node.y, node.z), 112, 480);
   }
 
@@ -2111,7 +2170,7 @@ class UniverseForceSceneEngine {
     this.pendingLod = null;
     this.lodArmed = false;
     this.pointerActive = false;
-    this.resetTimelineWheel();
+    this.flightState = brakeUniverseTemporalFlight(this.flightState);
     this.hoveredId = null;
     this.hoveredFromLabel = false;
     this.clearHighlightFlowSprites();
@@ -2452,7 +2511,6 @@ class UniverseForceSceneEngine {
     this.host.dataset.universeTimelineMovingCount = "0";
     this.syncTimelineDiagnostics();
     this.callbacks.onTimelineSettled(this.timelineJourney.revision);
-    this.drainTimelineWheelIntent();
   }
 
   private updateTimelineMotions(now: number) {
@@ -4869,6 +4927,7 @@ class UniverseForceSceneEngine {
     }
     const entering = this.updateNodeEntries(now);
     const timelineMoving = this.updateTimelineMotions(now);
+    const flightMoving = this.updateTemporalFlight(now);
     this.updateVisualLayout(now);
     const nebulaAnimating = this.updateNebulaAnimation(now);
     this.updateLabels(now);
@@ -4876,6 +4935,7 @@ class UniverseForceSceneEngine {
     if (
       entering
       || timelineMoving
+      || flightMoving
       || nebulaAnimating
       || now < this.loopKeepAliveUntil
     ) {
@@ -4885,35 +4945,60 @@ class UniverseForceSceneEngine {
     }
   };
 
-  private syncTimelineWheelDiagnostics(outcome = "idle") {
-    this.host.dataset.universeWheelOutcome = outcome;
-    this.host.dataset.universeWheelAccumulated =
-      this.timelineWheelState.accumulatedDistance.toFixed(1);
-    this.host.dataset.universeWheelDirection = this.timelineWheelState.direction ?? "";
-    this.host.dataset.universeWheelQueued = this.timelineWheelState.queuedDirection ?? "";
-  }
-
-  private resetTimelineWheel() {
-    this.timelineWheelState = resetUniverseTimelineWheelState();
-    this.syncTimelineWheelDiagnostics("reset");
-  }
-
-  private runTimelineWheelIntent(direction: UniverseTimelineDirection) {
-    void Promise.resolve(this.moveTimeline(direction)).then((result) => {
-      if (result === "advanced") return;
-      this.drainTimelineWheelIntent();
+  /**
+   * Advances the flight each frame: integrates the state, translates camera and
+   * orbit target together by the depth delta, and pages the window when the
+   * camera nears its edge. The camera never waits for data — a page that isn't
+   * loaded yet simply condenses in once it lands.
+   */
+  private updateTemporalFlight(now: number) {
+    const config = this.flightConfig;
+    if (!config || !this.timelineJourney.enabled || !this.interactive) {
+      this.lastFlightStepAt = now;
+      return false;
+    }
+    const elapsedMs = this.lastFlightStepAt > 0 ? now - this.lastFlightStepAt : 16;
+    this.lastFlightStepAt = now;
+    const { state, moving } = stepUniverseTemporalFlight(this.flightState, {
+      elapsedMs,
+      maxDepth: config.maxDepth,
+      reducedMotion: this.reducedMotion,
     });
-  }
-
-  private drainTimelineWheelIntent() {
-    const plan = drainUniverseTimelineWheel(this.timelineWheelState, {
-      busy: this.timelineIsBusy(),
-      // Vestigial: the planner's mode only tags intent.action, which nothing reads.
-      mode: "journey",
-    });
-    this.timelineWheelState = plan.state;
-    this.syncTimelineWheelDiagnostics(plan.outcome);
-    if (plan.intent) this.runTimelineWheelIntent(plan.intent.direction);
+    this.flightState = state;
+    const delta = state.depth - this.appliedFlightDepth;
+    if (delta !== 0) {
+      this.appliedFlightDepth = state.depth;
+      const camera = this.graph.camera();
+      camera.position.z -= delta;
+      if (this.controls.target) this.controls.target.z -= delta;
+      this.wakeRendering(600);
+      this.updateVisualLayout(now);
+      this.updateNodeMorphScales(now);
+      this.updateLabels(now);
+      this.evaluateLod(now);
+    }
+    this.host.dataset.universeFlightDepth = state.depth.toFixed(1);
+    this.host.dataset.universeFlightVelocity = state.velocity.toFixed(1);
+    const follow = now >= this.flightFollowCooldownUntil
+      ? planUniverseTemporalFlightFollow({
+          depth: state.depth,
+          windowNearDepth: config.windowNearDepth,
+          windowFarDepth: config.windowFarDepth,
+          marginUnits: config.unitsPerEvent * 1.5,
+          busy: this.timelineIsBusy(),
+          hasNext: this.timelineJourney.hasNext,
+          hasPrevious: this.timelineJourney.hasPrevious,
+        })
+      : null;
+    if (follow) {
+      this.flightOwnWindowChange = true;
+      void Promise.resolve(this.moveTimeline(follow)).then((result) => {
+        if (result === "advanced") return;
+        this.flightOwnWindowChange = false;
+        this.flightFollowCooldownUntil = performance.now() + 500;
+      });
+    }
+    return moving;
   }
 
   private timelineWheelSurface(target: EventTarget | null): "canvas" | "label" | null {
@@ -4955,35 +5040,33 @@ class UniverseForceSceneEngine {
       return;
     }
     const surface = this.timelineWheelSurface(event.target);
-    if (!surface) {
-      this.syncTimelineWheelDiagnostics("ignored-ui");
+    if (!surface) return;
+    const flightActive = this.timelineJourney.enabled && this.flightConfig !== null;
+    if (!flightActive || event.ctrlKey || event.metaKey) {
+      // Overview zoom and pinch belong to OrbitControls. Its listener lives on
+      // the canvas, and the label layer never bubbles into it, so forward a
+      // clone when the pointer rests on a label.
+      if (surface === "label") this.forwardTimelineWheelToCanvas(event);
       return;
     }
-    if (surface === "label") this.forwardTimelineWheelToCanvas(event);
-    if (!this.timelineJourney.enabled) {
-      this.resetTimelineWheel();
-      return;
-    }
-    const plan = planUniverseTimelineWheel(this.timelineWheelState, {
+    // In flight the wheel has exactly one meaning. Consuming the event in the
+    // capture phase keeps OrbitControls' canvas listener from also zooming.
+    event.preventDefault();
+    event.stopPropagation();
+    this.flightState = applyUniverseTemporalFlightWheel(this.flightState, {
       deltaY: event.deltaY,
       deltaMode: event.deltaMode,
       viewportHeight: this.host.clientHeight,
-      ctrlKey: event.ctrlKey,
-      metaKey: event.metaKey,
-      busy: this.timelineIsBusy(),
-      // Vestigial: the planner's mode only tags intent.action, which nothing reads.
-      mode: "journey",
+      reducedMotion: this.reducedMotion,
     });
-    this.timelineWheelState = plan.state;
-    this.syncTimelineWheelDiagnostics(plan.outcome);
-    if (plan.intent) this.runTimelineWheelIntent(plan.intent.direction);
+    this.wakeRendering(900);
+    this.startLoop(900);
   };
 
   private handlePointerDown = () => {
     if (this.paused || !this.interactive) return;
-    // A deliberate drag owns the camera immediately and cancels trackpad
-    // momentum queued for a later time page.
-    this.resetTimelineWheel();
+    // A deliberate grab owns the camera immediately and brakes the flight.
+    this.flightState = brakeUniverseTemporalFlight(this.flightState);
   };
 
   private handleControlsStart = () => {

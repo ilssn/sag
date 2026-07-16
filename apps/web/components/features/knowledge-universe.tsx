@@ -473,6 +473,7 @@ function universeSceneDataSignature(data: UniverseSceneData) {
     windowRevision: data.windowRevision ?? 0,
     windowChangeCause: data.windowChangeCause ?? "synchronization",
     windowDirection: data.windowDirection ?? null,
+    temporalFlight: data.temporalFlight ?? null,
     nodes: data.nodes,
     links: data.links,
   });
@@ -1836,6 +1837,28 @@ export function KnowledgeUniverse({
       && journeyCommit.cause === "journey"
       ? "journey"
       : "synchronization";
+    // The visible window's depth band tells the flight when the camera is
+    // running out of loaded packages and the window has to page along.
+    let windowNearAge = Number.POSITIVE_INFINITY;
+    let windowFarAge = Number.NEGATIVE_INFINITY;
+    temporalProjectionByBundleId.forEach((projection) => {
+      windowNearAge = Math.min(windowNearAge, projection.ageProgress);
+      windowFarAge = Math.max(windowFarAge, projection.ageProgress);
+    });
+    const temporalFlight = temporalAxis && browseSessionSourceId
+      ? {
+          sourceId: browseSessionSourceId,
+          centerZ: sourceById.get(browseSessionSourceId)?.z ?? 0,
+          unitsPerEvent: TEMPORAL_AXIS_UNITS_PER_EVENT,
+          maxDepth: temporalAxisDepth,
+          windowNearDepth: Number.isFinite(windowNearAge)
+            ? windowNearAge * temporalAxisDepth
+            : 0,
+          windowFarDepth: Number.isFinite(windowFarAge)
+            ? windowFarAge * temporalAxisDepth
+            : 0,
+        }
+      : null;
     const candidate = {
       epoch: working.epoch,
       windowRevision: sceneWindowRevision,
@@ -1843,6 +1866,7 @@ export function KnowledgeUniverse({
       windowDirection: windowChangeCause === "journey"
         ? journeyCommit?.direction
         : undefined,
+      temporalFlight,
       nodes,
       links,
     } satisfies UniverseSceneData;

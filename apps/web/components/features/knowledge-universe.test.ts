@@ -70,6 +70,19 @@ describe("knowledge universe production interaction policy", () => {
     expect(source).toContain("temporalAxis\n        ? projectUniverseTemporalAxis(");
   });
 
+  it("hands the scene a flight config bound to the browsed source's axis", () => {
+    expect(source).toContain("const temporalFlight = temporalAxis && browseSessionSourceId");
+    expect(source).toContain("unitsPerEvent: TEMPORAL_AXIS_UNITS_PER_EVENT");
+    expect(source).toContain("maxDepth: temporalAxisDepth");
+    // The window's depth band comes from the same projections that place the
+    // nodes, so flight paging can never disagree with the layout.
+    expect(source).toContain("windowNearAge * temporalAxisDepth");
+    expect(source).toContain("windowFarAge * temporalAxisDepth");
+    // Flight config participates in the stable-identity signature: a config
+    // change must reach the scene even when nodes and links are unchanged.
+    expect(source).toContain("temporalFlight: data.temporalFlight ?? null");
+  });
+
   it("keeps concrete-node clicks presentation-only", () => {
     const handler = sourceBetween(
       "const handleNodeClick = React.useCallback(",
