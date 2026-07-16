@@ -166,7 +166,11 @@ export function stepUniverseTemporalFlight(
   input: UniverseTemporalFlightStepInput,
 ): UniverseTemporalFlightStepResult {
   const elapsed = Math.min(MAX_STEP_MS, Math.max(0, finite(input.elapsedMs)));
-  const maxDepth = Math.max(0, finite(input.maxDepth));
+  // An explicitly unbounded axis is legal (free flight enforces its own walls
+  // on the axis projection); only NaN and negatives collapse to zero.
+  const maxDepth = input.maxDepth === Number.POSITIVE_INFINITY
+    ? Number.POSITIVE_INFINITY
+    : Math.max(0, finite(input.maxDepth));
   let { depth, velocity, targetDepth } = state;
 
   if (targetDepth !== null) {

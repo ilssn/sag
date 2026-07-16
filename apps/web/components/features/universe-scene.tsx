@@ -361,11 +361,18 @@ const NEBULA_GESTURE_CALM_MS = 480;
  * and sustained flight gently re-levels the gaze onto the corridor, so free
  * exploration always settles back into a clean view without any hard lock.
  */
-const BROWSE_LOOK_RAD_PER_PX = 0.0028;
+const BROWSE_LOOK_RAD_PER_PX = 0.0024;
 /** Pitch keepout around the poles so the head can never flip over. */
 const BROWSE_LOOK_MIN_PHI = 0.3;
 /** Flying this many units re-levels most of the gaze onto the axis. */
 const BROWSE_RELEVEL_TRAVEL_UNITS = 420;
+/**
+ * Free flight integrates an odometer far from the library's walls; the real
+ * axis walls apply scene-side to the depth projection of the travel.
+ */
+const FREE_FLIGHT_ODOMETER_BASE = 1_000_000;
+/** Pinch may not fling the camera out of the corridor's neighbourhood. */
+const BROWSE_MAX_DOLLY_DISTANCE = 1_600;
 const BROWSE_GAZE_PAN_SPEED = 0.4;
 const UNIVERSE_ROTATE_SPEED = 0.42;
 const UNIVERSE_PAN_SPEED = 0.52;
@@ -3671,6 +3678,7 @@ class UniverseForceSceneEngine {
     // and pinch. Orbiting a forward pivot is what made rotation feel crooked.
     this.controls.enableRotate = false;
     this.controls.panSpeed = BROWSE_GAZE_PAN_SPEED;
+    this.controls.maxDistance = BROWSE_MAX_DOLLY_DISTANCE;
     this.browseGazeApplied = true;
     this.host.dataset.universeBrowseGaze = "first-person";
   }
@@ -3683,6 +3691,7 @@ class UniverseForceSceneEngine {
     if (!this.browseGazeApplied) return;
     this.controls.enableRotate = true;
     this.controls.panSpeed = UNIVERSE_PAN_SPEED;
+    this.controls.maxDistance = UNIVERSE_CAMERA_MAX_DISTANCE;
     this.lookPointerId = null;
     this.browseGazeApplied = false;
     this.host.dataset.universeBrowseGaze = "free";
@@ -5374,12 +5383,16 @@ class UniverseForceSceneEngine {
     // derived axis depth below, because oblique travel spends only part of its
     // distance on depth.
     const gliding = this.flightState.targetDepth !== null;
-    const { state, moving } = stepUniverseTemporalFlight(this.flightState, {
+    const stepState = gliding
+      ? this.flightState
+      : { ...this.flightState, depth: FREE_FLIGHT_ODOMETER_BASE };
+    const { state, moving } = stepUniverseTemporalFlight(stepState, {
       elapsedMs,
-      maxDepth: gliding ? config.maxDepth : Number.POSITIVE_INFINITY,
+      maxDepth: gliding ? config.maxDepth : FREE_FLIGHT_ODOMETER_BASE * 2,
       reducedMotion: this.reducedMotion,
     });
-    const travel = state.depth - this.appliedFlightDepth;
+    const travel = state.depth
+      - (gliding ? this.appliedFlightDepth : FREE_FLIGHT_ODOMETER_BASE);
     let nextState = state;
     let appliedTravel = 0;
     if (travel !== 0) {

@@ -80,6 +80,22 @@ describe("universe temporal flight", () => {
     expect(afterTabSwitch.state.depth).toBeLessThan(30);
   });
 
+  it("treats an explicitly unbounded axis as wall-free, not as length zero", () => {
+    // Free flight passes +Infinity and enforces the real walls itself on the
+    // axis projection; collapsing Infinity to a zero-length axis silently
+    // killed every wheel gesture.
+    const impelled = applyUniverseTemporalFlightWheel(
+      createUniverseTemporalFlightState(500),
+      { ...WHEEL, deltaY: -120 },
+    );
+    const stepped = stepUniverseTemporalFlight(impelled, {
+      elapsedMs: 16,
+      maxDepth: Number.POSITIVE_INFINITY,
+    });
+    expect(stepped.state.depth).toBeGreaterThan(500);
+    expect(stepped.moving).toBe(true);
+  });
+
   it("glides to a button target and settles exactly there", () => {
     const gliding = flyUniverseTemporalFlightTo(
       createUniverseTemporalFlightState(100),

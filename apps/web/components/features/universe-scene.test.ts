@@ -809,6 +809,11 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("BROWSE_LOOK_MIN_PHI");
     expect(flight).toContain("camera.getWorldDirection");
     expect(flight).toContain("const depthPerTravel = -forward.z");
+    // The library collapses non-finite axis lengths; free flight must keep its
+    // odometer far away from the library walls instead of passing Infinity.
+    expect(flight).toContain("FREE_FLIGHT_ODOMETER_BASE");
+    expect(flight).not.toContain("Number.POSITIVE_INFINITY");
+    expect(source).toContain("this.controls.maxDistance = BROWSE_MAX_DOLLY_DISTANCE");
     // Walls apply to the axis projection of free travel, and paging leads on
     // the depth rate, never on raw speed.
     expect(flight).toContain("nextState = brakeUniverseTemporalFlight(state)");
