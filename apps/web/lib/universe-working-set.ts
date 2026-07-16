@@ -590,6 +590,46 @@ export function replaceUniverseWorkingSet(
   return trimUniverseWorkingSet(replacement, budget);
 }
 
+/**
+ * Adds one contextual result to an existing graph without changing the graph
+ * epoch. Stable node identities let the renderer keep every existing node in
+ * place while newly discovered events and entities animate into the network.
+ *
+ * A later result wins when the same factual node/relation is returned again;
+ * accumulated facts remain event-bundle-aware and are evicted oldest-first
+ * only when the hard scene budget is reached.
+ */
+export function mergeUniverseWorkingSetActivation(
+  current: UniverseWorkingSet,
+  activation: UniverseActivation,
+  budget: { nodes: number; edges: number },
+  now = Date.now(),
+): UniverseWorkingSet {
+  const nodes = new Map(current.nodes.map((node) => [
+    universeNodeKey(node.kind, node.id, node.source_id),
+    node as UniverseActivationNode,
+  ]));
+  activation.nodes.forEach((node) => {
+    nodes.set(
+      universeNodeKey(node.kind, node.id, node.source_id),
+      node,
+    );
+  });
+  const relations = new Map(current.relations.map((relation) => [
+    universeRelationKey(relation),
+    relation,
+  ]));
+  activation.relations.forEach((relation) => {
+    relations.set(universeRelationKey(relation), relation);
+  });
+  return replaceUniverseWorkingSet({
+    ...activation,
+    epoch: current.epoch,
+    nodes: [...nodes.values()],
+    relations: [...relations.values()],
+  }, budget, now);
+}
+
 export function universeAnchorProgress(
   current: UniverseWorkingSet,
   kind: UniverseNodeKind,

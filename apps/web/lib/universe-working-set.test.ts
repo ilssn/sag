@@ -5,6 +5,7 @@ import {
   admitUniverseBundle,
   admitUniverseBundles,
   emptyUniverseWorkingSet,
+  mergeUniverseWorkingSetActivation,
   replaceUniverseWorkingSet,
   setUniversePinnedKeys,
   setUniversePinnedNetwork,
@@ -211,6 +212,115 @@ describe("universe working set", () => {
     expect(second.bundle_order).toHaveLength(4);
     expect(second.epoch).toBe(2);
     expectBundleInvariants(second, { nodes: 20, edges: 20 });
+  });
+
+  it("accumulates multi-turn answer evidence with stable identity and epoch", () => {
+    const budget = { nodes: 20, edges: 20 };
+    const first = replaceUniverseWorkingSet({
+      epoch: 9,
+      origin: "assistant",
+      query: "第一轮",
+      nodes: [
+        { id: "event-a", kind: "event", source_id: "source-a", label: "事件 A" },
+        { id: "shared", kind: "entity", source_id: "source-a", label: "共享线索" },
+      ],
+      relations: [{
+        source_id: "source-a",
+        from_id: "event-a",
+        to_id: "shared",
+        kind: "mentions",
+        weight: 1,
+        description: "",
+      }],
+    }, budget, 1);
+    const accumulated = mergeUniverseWorkingSetActivation(first, {
+      epoch: 12,
+      origin: "assistant",
+      query: "第二轮",
+      nodes: [
+        { id: "event-b", kind: "event", source_id: "source-a", label: "事件 B" },
+        { id: "shared", kind: "entity", source_id: "source-a", label: "共享线索（更新）" },
+      ],
+      relations: [{
+        source_id: "source-a",
+        from_id: "event-b",
+        to_id: "shared",
+        kind: "mentions",
+        weight: 0.9,
+        description: "",
+      }],
+    }, budget, 2);
+
+    expect(accumulated.epoch).toBe(9);
+    expect(accumulated.nodes.filter((node) => node.id === "shared")).toHaveLength(1);
+    expect(accumulated.nodes.find((node) => node.id === "shared")?.label)
+      .toBe("共享线索（更新）");
+    expect(accumulated.nodes.filter((node) => node.kind === "event").map((node) => node.id))
+      .toEqual(["event-a", "event-b"]);
+    expect(accumulated.relations).toHaveLength(2);
+    expectBundleInvariants(accumulated, budget);
+  });
+
+  it("keeps card exploration evidence when the next answer turn arrives", () => {
+    const budget = { nodes: 20, edges: 20 };
+    const firstAnswer = replaceUniverseWorkingSet({
+      epoch: 21,
+      origin: "assistant",
+      query: "第一轮",
+      nodes: [
+        { id: "event-a", kind: "event", source_id: "source-a", label: "事件 A" },
+        { id: "entity-a", kind: "entity", source_id: "source-a", label: "实体 A" },
+      ],
+      relations: [{
+        source_id: "source-a",
+        from_id: "event-a",
+        to_id: "entity-a",
+        kind: "mentions",
+        weight: 1,
+        description: "",
+      }],
+    }, budget, 1);
+    const explored = admitUniverseBundle(firstAnswer, {
+      id: "explore-more:event-a:1",
+      epoch: firstAnswer.epoch,
+      origin: "expansion",
+      anchor_key: universeNodeKey("event", "event-a", "source-a"),
+      nodes: [
+        { id: "event-expanded", kind: "event", source_id: "source-a", label: "扩展事件" },
+        { id: "entity-a", kind: "entity", source_id: "source-a", label: "实体 A" },
+      ],
+      relations: [{
+        source_id: "source-a",
+        from_id: "event-expanded",
+        to_id: "entity-a",
+        kind: "mentions",
+        weight: 0.8,
+        description: "",
+      }],
+    }, budget, 2).workingSet;
+    const nextAnswer = mergeUniverseWorkingSetActivation(explored, {
+      epoch: 24,
+      origin: "assistant",
+      query: "第二轮",
+      nodes: [
+        { id: "event-b", kind: "event", source_id: "source-a", label: "事件 B" },
+        { id: "entity-a", kind: "entity", source_id: "source-a", label: "实体 A" },
+      ],
+      relations: [{
+        source_id: "source-a",
+        from_id: "event-b",
+        to_id: "entity-a",
+        kind: "mentions",
+        weight: 0.9,
+        description: "",
+      }],
+    }, budget, 3);
+
+    expect(nextAnswer.nodes.filter((node) => node.kind === "event").map((node) => node.id))
+      .toEqual(["event-a", "event-expanded", "event-b"]);
+    expect(nextAnswer.nodes.filter((node) => node.id === "entity-a")).toHaveLength(1);
+    expect(nextAnswer.relations).toHaveLength(3);
+    expectBundleInvariants(nextAnswer, budget);
   });
 
   it("trims replacement results only at event-bundle boundaries", () => {

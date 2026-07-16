@@ -213,7 +213,18 @@
   /* 品牌深空：对齐官网首屏的近黑蓝底，让香槟金粒子有干净的舞台。 */
   .dark .bg-space-field--void {
     --space-bg: hsl(228 42% 4%);
-    background-image: none;
+    background-image:
+      radial-gradient(
+        ellipse 74% 52% at 52% 45%,
+        hsl(198 38% 18% / 0.13) 0%,
+        transparent 70%
+      ),
+      radial-gradient(
+        ellipse 32% 28% at 51% 48%,
+        hsl(42 74% 54% / 0.075) 0%,
+        transparent 68%
+      ),
+      linear-gradient(136deg, hsl(228 42% 4%), hsl(232 30% 5%));
   }
 
   .bg-space-field--void::before,
@@ -259,6 +270,25 @@
     z-index: 1;
     overflow: hidden;
     pointer-events: none;
+  }
+
+  .sag-space-sparkles[data-space-variant="universe"] {
+    /* The universe layer is the depth cue for every graph state. Keep it
+       present behind the cards; only the foreground decoration is gated in
+       detail mode below. */
+    opacity: 0.88;
+    transition: opacity 360ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .sag-space-sparkles[data-space-variant="universe"][data-universe-view="detail"] {
+    /* A quieter star field gives the timeline room without flattening the
+       scene into a black void. */
+    opacity: 0.38;
+  }
+
+  .sag-space-sparkles[data-space-variant="universe"][data-universe-view="detail"]
+    :is(.sag-space-sparkle, .sag-space-meteor, .sag-space-cursor-meteor) {
+    opacity: 0 !important;
   }
 
   .sag-space-particles,
@@ -2714,6 +2744,10 @@
 
     .sag-space-meteor {
       opacity: 0;
+    }
+
+    .sag-space-sparkles[data-space-variant="universe"] {
+      transition: none;
     }
   }
 

@@ -131,7 +131,7 @@ describe("universe view preference normalization", () => {
       min: 2,
       max: 18,
       step: 1,
-      default: 6,
+      default: 8,
     });
     expect(UNIVERSE_VIEW_LIMITS.cachedEventBundles).toMatchObject({
       min: 12,
@@ -190,7 +190,7 @@ describe("universe view preference normalization", () => {
       DEFAULT_UNIVERSE_VIEW_PREFERENCES,
       false,
     )).toEqual({
-      visibleEventBundles: 6,
+      visibleEventBundles: 8,
       cachedEventBundles: 36,
     });
     expect(effectiveUniverseBundleWindow(preferences({

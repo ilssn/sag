@@ -32,6 +32,15 @@ export interface UniverseTemporalAxis {
 export const UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT = 60;
 
 /**
+ * Lateral corridor spread is intentionally wider than the source core. The
+ * axis still owns chronology on Z, while these values give neighbouring
+ * packages enough breathing room for their event cards and entities.
+ */
+export const UNIVERSE_TEMPORAL_AXIS_NEAR_LATERAL_SPREAD = 0.24;
+export const UNIVERSE_TEMPORAL_AXIS_FAR_LATERAL_SPREAD = 0.58;
+export const UNIVERSE_TEMPORAL_AXIS_VERTICAL_ASPECT = 0.7;
+
+/**
  * The vestibule: a stretch of axis between the entry pose (flight depth 0)
  * and the first event. Arriving in a source shows only the intact nebula —
  * the hero pose; scrolling forward crosses the vestibule while the dust
@@ -70,10 +79,10 @@ export interface UniverseTemporalBundleProjection {
 
 export const DEFAULT_UNIVERSE_TEMPORAL_AXIS_POLICY: UniverseTemporalAxisPolicy = {
   depthSpan: 1,
-  nearLateralSpread: 0.18,
-  farLateralSpread: 0.44,
+  nearLateralSpread: UNIVERSE_TEMPORAL_AXIS_NEAR_LATERAL_SPREAD,
+  farLateralSpread: UNIVERSE_TEMPORAL_AXIS_FAR_LATERAL_SPREAD,
   lateralJitter: 0.45,
-  verticalAspect: 0.7,
+  verticalAspect: UNIVERSE_TEMPORAL_AXIS_VERTICAL_ASPECT,
   ageExponent: 1,
 };
 

@@ -4,6 +4,11 @@ import * as React from "react";
 import dynamic from "next/dynamic";
 import { useReducedMotion } from "motion/react";
 import { ParticleGalaxy } from "@/components/features/particle-galaxy";
+import {
+  readUniverseView,
+  UNIVERSE_VIEW_EVENT,
+  type UniverseViewState,
+} from "@/lib/universe-events";
 
 const SpaceParticles = dynamic(
   () => import("@/components/features/space-particles").then((module) => module.SpaceParticles),
@@ -33,13 +38,53 @@ const SPARKLES = [
 
 export function SpaceBackdrop({
   pauseAmbientMotion = false,
+  variant = "shell",
 }: {
   pauseAmbientMotion?: boolean;
+  variant?: "shell" | "universe";
 }) {
   const reducedMotion = useReducedMotion();
   const ambientMotionPaused = Boolean(reducedMotion) || pauseAmbientMotion;
   const backdropRef = React.useRef<HTMLDivElement>(null);
   const cursorMeteorRef = React.useRef<HTMLSpanElement>(null);
+  const universeDetailRef = React.useRef(false);
+
+  React.useEffect(() => {
+    const backdrop = backdropRef.current;
+    if (!backdrop) return;
+
+    if (variant !== "universe") {
+      universeDetailRef.current = false;
+      backdrop.dataset.universeView = "fixed";
+      backdrop.dataset.ambientMotion = ambientMotionPaused ? "paused" : "active";
+      return;
+    }
+
+    const syncView = (view: UniverseViewState) => {
+      // The threshold is intentionally crossed once during the source dive.
+      // CSS owns the fade; React never re-renders on camera progress frames.
+      const detail = view.mode === "detail" || view.progress >= 0.12;
+      const nextView = detail ? "detail" : "overview";
+      if (
+        detail !== universeDetailRef.current
+        || backdrop.dataset.universeView !== nextView
+      ) {
+        universeDetailRef.current = detail;
+        backdrop.dataset.universeView = nextView;
+      }
+      backdrop.dataset.ambientMotion = ambientMotionPaused || detail ? "paused" : "active";
+      if (detail && cursorMeteorRef.current) {
+        cursorMeteorRef.current.dataset.active = "false";
+      }
+    };
+    const handleView = (event: Event) => {
+      syncView((event as CustomEvent<UniverseViewState>).detail);
+    };
+
+    syncView(readUniverseView());
+    window.addEventListener(UNIVERSE_VIEW_EVENT, handleView);
+    return () => window.removeEventListener(UNIVERSE_VIEW_EVENT, handleView);
+  }, [ambientMotionPaused, variant]);
 
   React.useEffect(() => {
     if (reducedMotion || !cursorMeteorRef.current) return;
@@ -53,6 +98,7 @@ export function SpaceBackdrop({
     let hasPreviousPoint = false;
     let previousX = 0;
     let previousY = 0;
+    let previousTime = 0;
     let angle = -0.35;
     let fieldBounds = field.getBoundingClientRect();
     let pendingFrame: {
@@ -89,7 +135,7 @@ export function SpaceBackdrop({
       );
       if (meteor.dataset.active !== "true") meteor.dataset.active = "true";
       if (hideTimer) window.clearTimeout(hideTimer);
-      hideTimer = window.setTimeout(hideMeteor, 300);
+      hideTimer = window.setTimeout(hideMeteor, 210);
     };
 
     const handlePointerMove = (event: PointerEvent) => {
@@ -99,22 +145,46 @@ export function SpaceBackdrop({
         && target.closest("[data-universe-mode='explore']") !== null;
       const isMeteorSurface = target === field || insideExploreUniverse;
 
-      if (event.pointerType !== "mouse" || event.buttons !== 0 || !isMeteorSurface) {
+      if (
+        event.pointerType !== "mouse"
+        || event.buttons !== 0
+        || !isMeteorSurface
+        || (variant === "universe" && universeDetailRef.current)
+      ) {
         hideMeteor();
         return;
       }
 
       const x = event.clientX - fieldBounds.left;
       const y = event.clientY - fieldBounds.top;
-      const deltaX = hasPreviousPoint ? x - previousX : 0;
-      const deltaY = hasPreviousPoint ? y - previousY : 0;
-      const speed = Math.hypot(deltaX, deltaY);
+      if (!hasPreviousPoint) {
+        previousX = x;
+        previousY = y;
+        previousTime = event.timeStamp;
+        hasPreviousPoint = true;
+        return;
+      }
+      const deltaX = x - previousX;
+      const deltaY = y - previousY;
+      const elapsed = Math.max(8, Math.min(50, event.timeStamp - previousTime || 16.67));
+      // Normalize to a 60 Hz frame so a high-polling mouse does not produce a
+      // shorter trail than the same physical gesture on a standard display.
+      const speed = Math.hypot(deltaX, deltaY) * (16.67 / elapsed);
 
-      if (speed > 0.4) angle = Math.atan2(deltaY, deltaX);
+      if (speed > 0.7) {
+        const nextAngle = Math.atan2(deltaY, deltaX);
+        const angleDelta = Math.atan2(
+          Math.sin(nextAngle - angle),
+          Math.cos(nextAngle - angle),
+        );
+        angle += angleDelta * 0.42;
+      }
 
       previousX = x;
       previousY = y;
-      hasPreviousPoint = true;
+      previousTime = event.timeStamp;
+
+      if (speed <= 0.7) return;
 
       pendingFrame = { x, y, speed, angle };
       if (animationFrame === undefined) {
@@ -125,7 +195,7 @@ export function SpaceBackdrop({
     const resizeObserver = new ResizeObserver(measureField);
     resizeObserver.observe(field);
     window.addEventListener("resize", measureField, { passive: true });
-    field.addEventListener("pointermove", handlePointerMove);
+    field.addEventListener("pointermove", handlePointerMove, { passive: true });
     field.addEventListener("pointerleave", hideMeteor);
 
     return () => {
@@ -136,24 +206,32 @@ export function SpaceBackdrop({
       if (animationFrame !== undefined) window.cancelAnimationFrame(animationFrame);
       if (hideTimer) window.clearTimeout(hideTimer);
     };
-  }, [reducedMotion]);
+  }, [reducedMotion, variant]);
 
   return (
     <div
       ref={backdropRef}
       className="sag-space-sparkles"
-      data-universe-view="fixed"
+      data-space-variant={variant}
+      data-universe-view={variant === "universe" ? "overview" : "fixed"}
       data-ambient-motion={ambientMotionPaused ? "paused" : "active"}
       aria-hidden
     >
-      <SpaceParticles reducedMotion={ambientMotionPaused} />
+      <SpaceParticles
+        reducedMotion={ambientMotionPaused || variant === "universe"}
+        density={variant === "universe" ? 1.8 : 1}
+      />
       {!reducedMotion && (
         <span ref={cursorMeteorRef} className="sag-space-cursor-meteor" data-active="false" />
       )}
-      <span className="sag-space-galaxy-orbit">
-        <ParticleGalaxy reducedMotion={ambientMotionPaused} />
-      </span>
-      <span className="sag-space-dust" />
+      {variant === "shell" && (
+        <>
+          <span className="sag-space-galaxy-orbit">
+            <ParticleGalaxy reducedMotion={ambientMotionPaused} />
+          </span>
+          <span className="sag-space-dust" />
+        </>
+      )}
       <span className="sag-space-meteor sag-space-meteor--one" />
       <span className="sag-space-meteor sag-space-meteor--two" />
       <span className="sag-space-meteor sag-space-meteor--three" />

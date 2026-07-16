@@ -25,7 +25,8 @@ describe("universe scene production invariants", () => {
       "setData(\n    data: UniverseSceneData",
       "\n  focusOverview() {",
     );
-    expect(dataCommit).toContain("if (!this.paused && searchFocusSourceId) this.focusSource(");
+    expect(dataCommit).toContain("searchFocusSourceId && !this.lockedId");
+    expect(dataCommit).toContain("this.focusSource(searchFocusSourceId)");
     expect(dataCommit).not.toMatch(/sourceHits[\s\S]*?(?:\.x\s*=|\.y\s*=|\.z\s*=)/);
   });
 
@@ -115,6 +116,10 @@ describe("universe scene production invariants", () => {
     expect(wheel).toContain(
       "const flightActive = this.timelineJourney.enabled && this.flightConfig !== null",
     );
+    expect(wheel).toContain("hoveredNode?.kind === \"source\"");
+    expect(wheel).toContain("this.callbacks.onSourceWheel?.(hoveredNode.sourceId)");
+    expect(wheel).toContain("this.sourceNavigationPhase === \"origin\"");
+    expect(wheel).toContain("this.callbacks.onBackRequest?.()");
     expect(wheel).toContain("event.ctrlKey || event.metaKey");
     expect(wheel).toContain('if (surface === "label") this.forwardTimelineWheelToCanvas(event)');
     expect(wheel).toContain("event.preventDefault()");
@@ -287,6 +292,23 @@ describe("universe scene production invariants", () => {
     expect(labelInteraction).toContain("if (this.timelineIsBusy()) return");
     expect(keyboard).toContain('this.timelineIsBusy() && event.key !== "Escape"');
     expect(keyboard).toContain('event.key.startsWith("Arrow")');
+  });
+
+  it("routes Escape through reading focus and then the owner's two-stage back action", () => {
+    const keyboard = sourceBetween(
+      "private handleKeyDown = (event: KeyboardEvent)",
+      "private updatePixelRatio()",
+    );
+
+    expect(source).toContain("onBackRequest?: () => void");
+    expect(keyboard).toContain('if (event.key !== "Escape") return');
+    expect(keyboard).toContain("const hadKeyboardFocus = Boolean(this.keyboardFocusedId)");
+    expect(keyboard).toContain("const hadReadingFocus = Boolean(this.lockedId || this.selectedId)");
+    expect(keyboard).toContain("this.clearKeyboardFocus()");
+    expect(keyboard).toContain("if (hadReadingFocus) this.callbacks.onSelectionClear()");
+    expect(keyboard).toContain("else if (!hadKeyboardFocus) this.callbacks.onBackRequest?.()");
+    expect(keyboard.indexOf("this.callbacks.onSelectionClear()"))
+      .toBeLessThan(keyboard.indexOf("this.callbacks.onBackRequest?.()"));
   });
 
   it("bounds transition ghosts and initializes deferred node objects at their live visual state", () => {
@@ -606,6 +628,10 @@ describe("universe scene production invariants", () => {
       "private createNodeObject(node: ForceNode)",
       "private pinNode(node: ForceNode)",
     );
+    const objectVisual = sourceBetween(
+      "private setObjectOpacity(node: ForceNode",
+      "private nodeProjectionScale(node: ForceNode)",
+    );
 
     expect(nodeObject).toContain("map: this.entityTexture");
     expect(nodeObject).toContain("map: this.entityCoreTexture");
@@ -618,6 +644,22 @@ describe("universe scene production invariants", () => {
     expect(source).toContain(": node.sceneNode.root ? 10 : 8");
     expect(source).toContain("this.host.dataset.universeEntityGlyphCount");
     expect(source).toContain('"--universe-node-accent"');
+
+    // Entering a source makes entity glyphs quieter and finer without ever
+    // shrinking their invisible target. Detail treatment belongs to the
+    // visual children only; the hit area keeps its generous fixed radius.
+    expect(objectVisual).toContain('const entityDetail = node.kind === "entity"');
+    expect(objectVisual).toContain("THREE.MathUtils.smoothstep(this.visualDetailMix, 0.42, 0.82)");
+    expect(objectVisual).toContain("if (child.userData.hitArea) {");
+    expect(objectVisual).toContain("child.visible = entryOpacity * dataOpacity * presenceOpacity > 0.16");
+    expect(objectVisual).toContain("return;");
+    expect(objectVisual).toContain("const targetOpacity = isHalo");
+    expect(objectVisual).toContain("const targetScale = isHalo");
+    expect(objectVisual).toContain("detailOpacity = THREE.MathUtils.lerp(1, targetOpacity, entityDetail)");
+    expect(objectVisual).toContain("baseVisualScale * THREE.MathUtils.lerp(1, targetScale, entityDetail)");
+    expect(objectVisual).toContain("* detailOpacity * dataOpacity * presenceOpacity");
+    expect(objectVisual.indexOf("if (child.userData.hitArea)"))
+      .toBeLessThan(objectVisual.indexOf("const targetScale = isHalo"));
   });
 
   it("shows every factual edge by default and only dims context on focus", () => {
@@ -818,28 +860,46 @@ describe("universe scene production invariants", () => {
       "material.uniforms.uFlightDepth.value = config ? this.appliedFlightDepth : 0",
     );
 
-    // The corridor carries its own light and has no visible far wall: glow
-    // pockets brighten and swell, and the last stretch dissolves.
-    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 1.2, corridorMix * glowParticle)");
+    // Glow pockets belong to the intact hero. Once the source stretches into
+    // a corridor they collapse into fine grains and their alpha is suppressed,
+    // so isolated screen-space blobs cannot compete with the graph.
+    expect(nebulaMaterial).toContain(
+      "vGlow = aGlow * (1.0 - smoothstep(0.08, 0.55, corridorMix))",
+    );
+    expect(nebulaMaterial).toContain("float originalGlowParticle = step(0.001, aGlow)");
+    expect(nebulaMaterial).toContain(
+      "vAlpha *= mix(1.0, 0.04, corridorMix * originalGlowParticle)",
+    );
     expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, axisFade, corridorMix)");
     expect(nebulaMaterial).toContain("* detailScale * glowScale * corridorBoost");
 
-    // Most dust becomes the canyon walls: a fine star field framing the
-    // corridor — bright, grain-sized (dust cap, no glow cap), and near enough
-    // to actually live inside the field of view.
+    // Most dust becomes restrained canyon walls: small grains and low alpha
+    // frame the graph without turning the source interior into visual noise.
     expect(source).toContain("const NEBULA_WALL_SHARE = 0.62");
     expect(source).toContain("const NEBULA_WALL_LATERAL_MIN = 2.2");
     expect(source).toContain("const NEBULA_WALL_LATERAL_MAX = 5.2");
+    expect(source).toContain("const NEBULA_CORRIDOR_DUST_POINT_SIZE_CSS = 5.5");
+    expect(source).toContain("const NEBULA_CORRIDOR_GLOW_POINT_SIZE_CSS = 9");
+    expect(source).toContain("const NEBULA_CORRIDOR_DUST_ALPHA = 0.16");
+    expect(source).toContain("const NEBULA_CORRIDOR_WALL_ALPHA = 0.03");
     expect(nebulaBuild).toContain("NEBULA_WALL_LATERAL_MIN");
     expect(nebulaBuild).toContain('geometry.setAttribute("aCorridorWall"');
-    expect(nebulaMaterial).toContain("mix(1.0, 1.35, corridorMix * aCorridorWall)");
-    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.95, corridorMix * aCorridorWall)");
+    expect(nebulaMaterial).toContain(
+      "vAlpha *= mix(1.0, ${NEBULA_CORRIDOR_DUST_ALPHA.toFixed(2)}, corridorMix)",
+    );
+    expect(nebulaMaterial).toContain(
+      "${(NEBULA_CORRIDOR_WALL_ALPHA / NEBULA_CORRIDOR_DUST_ALPHA).toFixed(4)}",
+    );
+    expect(nebulaMaterial).toContain(
+      "float corridorBoost = mix(1.0, mix(1.0, 0.62, aCorridorWall), corridorMix)",
+    );
+    expect(nebulaMaterial).toContain("detailDustCap = mix(detailDustCap, corridorDustCap, corridorMix)");
     expect(nebulaMaterial).toContain("float capSelect = glowParticle;");
 
     // While inside one source the rest of the sky recedes deep enough that a
     // white-hot core cannot smudge the corridor, and the browsed source claims
     // a heavier share of the fixed particle budget.
-    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.12, uDetail * (1.0 - sourceMatch))");
+    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.03, uDetail * (1.0 - sourceMatch))");
     expect(nebulaBuild).toContain("source.sourceId === browsedSourceId ? 6 : 1");
     expect(nebulaBuild).toContain("const browsedSourceId = this.flightConfig?.sourceId ?? null");
   });
@@ -871,15 +931,18 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("this.controls.rotateSpeed = BROWSE_GAZE_ROTATE_SPEED");
     expect(source).toContain("this.controls.rotateSpeed = UNIVERSE_ROTATE_SPEED");
     expect(focus).toContain("this.applyBrowseGaze()");
-    expect(dataCommit).toContain(
-      "if (!nextFlight || flightSourceChanged) this.releaseBrowseGaze()",
-    );
+    expect(dataCommit).toContain("if (!nextFlight || flightSourceChanged) {");
+    expect(dataCommit).toContain("this.releaseBrowseGaze()");
   });
 
   it("dives into the corridor on entry and ducks cards while streaking past", () => {
     const focus = sourceBetween(
       "focusSource(sourceId: string) {",
       "focusResult() {",
+    );
+    const heroPose = sourceBetween(
+      "private sourceHeroPose(node: ForceNode, depth: number)",
+      "private markSourceExploring()",
     );
     const flight = sourceBetween(
       "private updateTemporalFlight(now: number)",
@@ -892,9 +955,10 @@ describe("universe scene production invariants", () => {
 
     // Entering a browse session flies to the corridor entrance looking down
     // the axis — never a bearing-preserving dolly into a ball of nodes.
-    expect(focus).toContain("flight.centerZ - this.appliedFlightDepth");
-    expect(focus).toContain("CORRIDOR_ENTRY_STANDOFF");
-    expect(focus).toContain("entryZ - CORRIDOR_ENTRY_LOOK_AHEAD");
+    expect(focus).toContain("this.sourceHeroPose(node, this.appliedFlightDepth)");
+    expect(heroPose).toContain("flight.centerZ - depth");
+    expect(heroPose).toContain("CORRIDOR_ENTRY_STANDOFF");
+    expect(heroPose).toContain("entryZ - CORRIDOR_ENTRY_LOOK_AHEAD");
 
     // Card discipline keys off real depth travel (wheel inertia and button
     // glides alike) and eases asymmetrically: duck fast, recover after a beat.
@@ -1021,9 +1085,17 @@ describe("universe scene production invariants", () => {
       "focusSource(sourceId: string) {",
       "focusResult() {",
     );
+    const heroPose = sourceBetween(
+      "private sourceHeroPose(node: ForceNode, depth: number)",
+      "private markSourceExploring()",
+    );
     const presence = sourceBetween(
       "private updateTemporalPresence()",
       "private updateTemporalFlight(now: number)",
+    );
+    const dataCommit = sourceBetween(
+      "setData(\n    data: UniverseSceneData",
+      "\n  focusOverview() {",
     );
 
     // Depth 0 is the hero pose: intact galaxy, no event stars, no cards. The
@@ -1042,9 +1114,62 @@ describe("universe scene production invariants", () => {
     expect(source).toContain(
       "material.uniforms.uCorridorVestibule.value = config",
     );
+    expect(dataCommit).toContain("this.flightState = createUniverseTemporalFlightState(0)");
+    expect(dataCommit).toContain("this.appliedFlightDepth = this.flightState.depth");
+    expect(dataCommit).toContain('this.sourceNavigationPhase = "origin"');
+    expect(dataCommit).toContain('this.host.dataset.universeSourceNavigation = "origin"');
     // The arrival stands back far enough for the hero framing.
-    expect(focus).toContain("node.sceneNode.radius * 1.45 * 1.9");
-    expect(focus).toContain("entryZ + heroStandoff");
+    expect(focus).toContain("this.sourceHeroPose(node, this.appliedFlightDepth)");
+    expect(heroPose).toContain("const entryZ = flight.centerZ - depth");
+    expect(heroPose).toContain("node.sceneNode.radius * 1.45 * 1.9");
+    expect(heroPose).toContain("entryZ + heroStandoff");
+  });
+
+  it("coordinates a source-origin retreat before the owner exits to overview", () => {
+    const navigation = sourceBetween(
+      "  returnToSourceOrigin(sourceId: string):",
+      "\n  focusSource(sourceId: string) {",
+    );
+    const flight = sourceBetween(
+      "private updateTemporalFlight(now: number)",
+      "private timelineWheelSurface(target: EventTarget | null)",
+    );
+
+    // At origin the handle reports that stage one is already complete, which
+    // lets the owner perform stage two (the overview zoom-out) on the same API.
+    expect(source).toContain(
+      'returnToSourceOrigin: (sourceId: string) => "moved" | "already-at-origin"',
+    );
+    expect(navigation).toContain(
+      'if (this.sourceNavigationPhase === "origin" && !this.sourceReturnMotion)',
+    );
+    expect(navigation).toContain('return "already-at-origin"');
+    expect(navigation).toContain(
+      'if (this.sourceNavigationPhase === "returning" && this.sourceReturnMotion)',
+    );
+    expect(navigation).toContain('return "moved"');
+
+    // Retreat is one coordinated motion: selection, gaze, parallax, temporal
+    // inertia, camera target and corridor depth all settle together.
+    expect(navigation).toContain("const pose = node ? this.sourceHeroPose(node, 0) : null");
+    expect(navigation).toContain("this.cancelTimelineTransition(true)");
+    expect(navigation).toContain("this.clearSelection()");
+    expect(navigation).toContain("this.releaseBrowseGaze()");
+    expect(navigation).toContain("this.parallaxApplied = { x: 0, y: 0 }");
+    expect(navigation).toContain("this.flightState = brakeUniverseTemporalFlight(this.flightState)");
+    expect(navigation).toContain("fromDepth: this.appliedFlightDepth");
+    expect(navigation).toContain("fromCamera: this.graph.camera().position.clone()");
+    expect(navigation).toContain("toCamera: pose.camera");
+    expect(navigation).toContain('this.sourceNavigationPhase = "returning"');
+    expect(navigation).toContain("const depth = THREE.MathUtils.lerp(motion.fromDepth, 0, eased)");
+    expect(navigation).toContain("this.flightState = createUniverseTemporalFlightState(depth)");
+    expect(navigation).toContain("this.graph.camera().position.lerpVectors(");
+    expect(navigation).toContain("this.controls.target?.lerpVectors(");
+    expect(navigation).toContain("this.syncNebulaCorridorUniforms()");
+    expect(navigation).toContain("this.updateTemporalPresence()");
+    expect(navigation).toContain('this.sourceNavigationPhase = "origin"');
+    expect(navigation).toContain("this.applyBrowseGaze()");
+    expect(flight).toContain("if (this.sourceReturnMotion) return this.updateSourceReturnMotion(now)");
   });
 
   it("snaps the imperceptible detail-morph tail so stable scenes can sleep", () => {

@@ -130,6 +130,10 @@ describe("knowledge universe production interaction policy", () => {
   });
 
   it("clears a canvas lock without changing graph data or the camera", () => {
+    const releaseReadingFocus = sourceBetween(
+      "const releaseReadingFocus = React.useCallback(",
+      "const retainCurrentExploration = React.useCallback(",
+    );
     const clearSelection = sourceBetween(
       "const clearSelection = React.useCallback(",
       "const timelineNavigationForNode = React.useCallback(",
@@ -139,15 +143,37 @@ describe("knowledge universe production interaction policy", () => {
       "const moveTimelineManually = React.useCallback(",
     );
 
-    expect(clearSelection).toContain("graphRef.current?.clearSelection()");
-    expect(clearSelection).toContain("setLockedKey(null)");
-    expect(clearSelection).toContain("setSelectedKey(null)");
+    expect(releaseReadingFocus).toContain("graphRef.current?.clearSelection()");
+    expect(releaseReadingFocus).toContain("setLockedKey(null)");
+    expect(releaseReadingFocus).toContain("setSelectedKey(null)");
+    expect(clearSelection).toContain("releaseReadingFocus()");
     expect(clearSelection).toContain("dispatchUniverseInteraction()");
     expect(clearSelection).not.toMatch(/focusOverview\(|resetOverview\(|setData\(|loadSourceTimelinePage\(|api\./);
     expect(handler).not.toContain("commitWorkingSet(");
     expect(handler).not.toContain("setUniversePinnedNetwork(");
     expect(clearSelection).not.toContain("commitWorkingSet(");
     expect(clearSelection).not.toContain("setUniversePinnedNetwork(");
+  });
+
+  it("releases the reading lock when a question starts or a follow-up result arrives", () => {
+    const ask = sourceBetween(
+      "const handleAskNode = React.useCallback(",
+      "const timelinePlaybackPlan = React.useMemo(",
+    );
+    const activation = sourceBetween(
+      "React.useEffect(() => {\n    const onActivate",
+      "const onFocus = (event: Event) =>",
+    );
+
+    expect(ask).toContain("setTimelinePlaying(false)");
+    expect(ask).toContain("releaseReadingFocus()");
+    expect(ask).toContain("dispatchUniverseAsk(node as UniverseConcrete3DNode)");
+    expect(ask.indexOf("releaseReadingFocus()"))
+      .toBeLessThan(ask.indexOf("dispatchUniverseAsk("));
+    expect(activation).toContain('if (origin === "assistant") {');
+    expect(activation).toContain("retained.lockedKey = null");
+    expect(activation).toContain("retained.selectedKey = null");
+    expect(activation).toContain("releaseReadingFocus()");
   });
 
   it("keeps transient hover inside the scene instead of mounting a second reading panel", () => {
@@ -187,19 +213,33 @@ describe("knowledge universe production interaction policy", () => {
     expect(miniWorkspaceSource).toContain('t("detail.nextEvent")');
   });
 
-  it("keeps search and answer contextual while a timeline browse session is active", () => {
+  it("maps multi-turn answers into a cumulative graph and restores the retained timeline", () => {
     const activation = sourceBetween(
-      "React.useEffect(() => {\n    const hasRetainedBrowseSession",
+      "React.useEffect(() => {\n    const onActivate",
       "const onFocus = (event: Event) =>",
     );
-    expect(activation).toContain('origin !== "browse" && hasRetainedBrowseSession()');
-    expect(activation).toContain('value?.owner?.startsWith("search")');
-    expect(activation).toContain("sourceSessionRef.current = null");
-    expect(activation.indexOf('origin !== "browse" && hasRetainedBrowseSession()'))
-      .toBeLessThan(activation.indexOf("sourceSessionRef.current = null"));
+    const expansion = sourceBetween(
+      "const expandNode = React.useCallback(",
+      "const loadSourceTimelinePage = React.useCallback(",
+    );
+    expect(source).toContain("interface RetainedExploration");
+    expect(source).toContain("captureExplorationView()");
+    expect(activation).toContain("retainCurrentExploration()");
+    expect(activation).toContain("mergeUniverseWorkingSetActivation(");
+    expect(activation).toContain('origin === "assistant" && !firstActivation');
+    expect(activation).toContain("contextSession.activationCount += 1");
+    expect(expansion).toContain("admitUniverseExpansionPage(");
+    expect(expansion).toContain("commitWorkingSet(next)");
+    expect(expansion).toContain(
+      "browseSession ? residentBudgetRef.current : budgetRef.current",
+    );
+    expect(source).toContain("restoreRetainedExploration");
+    expect(source).toContain("restoreExplorationView(view)");
     expect(source).toContain('data-universe-context-return="true"');
     expect(source).toContain("onClick={dispatchUniverseResume}");
+    expect(source).toContain("onBackgroundClick={handleSceneBackgroundClick}");
     expect(petSource).toContain("dispatchUniverseContext({ active, section:");
+    expect(petSource).toContain("if (readUniverseContext().active) return");
     expect(petSource).toContain("UNIVERSE_INTERACTION_EVENT, closeForCanvasGesture");
     expect(miniWorkspaceSource).not.toContain("data-explore-context-status");
   });
@@ -220,17 +260,21 @@ describe("knowledge universe production interaction policy", () => {
     expect(source).toContain("onAskNode={handleAskNode}");
     expect(source).toContain("onUserInteraction={handleSceneInteraction}");
     expect(source).toContain("const returnToTimelineOrigin = React.useCallback(");
-    expect(source).toContain("graphRef.current?.focusSource(sourceId)");
+    expect(source).toContain("graphRef.current?.returnToSourceOrigin(sourceId)");
     expect(source).toContain('label={t("controls.origin")}');
   });
 
-  it("provides a themed left-top return to the galaxy overview", () => {
+  it("provides a source-only left-top back control with a two-stage retreat", () => {
     const summary = sourceBetween(
       '<div className="pointer-events-none absolute left-3 top-3',
       "{(moreHint || error) && (",
     );
     const home = sourceBetween(
       "const returnToUniverseHome = React.useCallback(",
+      "const requestSourceBack = React.useCallback(",
+    );
+    const sourceBack = sourceBetween(
+      "const requestSourceBack = React.useCallback(",
       "React.useEffect(() => {\n    const visibleNodeIds",
     );
 
@@ -238,16 +282,24 @@ describe("knowledge universe production interaction policy", () => {
     expect(summary).toContain("{showReturnHomeControl && (");
     expect(summary).toContain('aria-label={t("controls.home")}');
     expect(summary).toContain('title={t("controls.homeHint")}');
-    expect(summary).toContain("<Orbit");
-    expect(summary).toContain("bg-amber-200");
+    expect(summary).toContain("<ChevronLeft");
+    expect(summary).not.toContain("<Orbit");
     expect(summary).toContain("var(--universe-source-accent)");
     expect(summary).not.toContain("<House");
-    expect(summary).toContain("onClick={returnToUniverseHome}");
+    expect(summary).toContain("onClick={requestSourceBack}");
     expect(summary).toContain("pointer-events-auto");
+    expect(sourceBack).toContain("graphRef.current?.returnToSourceOrigin(sourceId)");
+    expect(sourceBack).toContain('?? "already-at-origin"');
+    expect(sourceBack).toContain(
+      'if (result === "already-at-origin") returnToUniverseHome()',
+    );
+    expect(sourceBack.indexOf("returnToSourceOrigin(sourceId)"))
+      .toBeLessThan(sourceBack.indexOf("returnToUniverseHome()"));
     expect(home).toContain("resetScene(epochRef.current + 1)");
     expect(source).toContain("viewportSourceRef.current = null");
     expect(source).toContain("setViewportSourceId(null)");
     expect(source).toContain("const showReturnHomeControl = Boolean(browseSessionSourceId)");
+    expect(source).toContain("onBackRequest={requestSourceBack}");
   });
 
   it("routes the active source accent through shell progress and entity affordances", () => {

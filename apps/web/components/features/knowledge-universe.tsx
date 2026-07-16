@@ -52,6 +52,7 @@ import {
   UNIVERSE_RESIDENT_BUDGET,
   UNIVERSE_SCENE_BUDGET,
   emptyUniverseWorkingSet,
+  mergeUniverseWorkingSetActivation,
   replaceUniverseWorkingSet,
   trimUniverseWorkingSet,
   universeAnchorProgress,
@@ -107,6 +108,7 @@ import {
   UniverseScene,
   universeSourceAccent,
   type UniverseSceneData,
+  type UniverseSceneExplorationView,
   type UniverseSceneHandle,
   type UniverseSceneLink,
   type UniverseSceneNode,
@@ -179,6 +181,32 @@ interface SourceBrowseSession {
   timeline: SourceTimelinePageState;
 }
 
+interface RetainedExploration {
+  session: SourceBrowseSession | null;
+  working: UniverseWorkingSet;
+  timelineWindow: UniverseTimelineWindowState | null;
+  activePartition: string | null;
+  viewportSourceId: string | null;
+  selectedKey: string | null;
+  lockedKey: string | null;
+  sourceHits: NonNullable<UniverseActivation["source_hits"]>;
+  summary: ActivationSummary | null;
+  moreHint: string;
+  activationOrigin: UniverseActivationOrigin;
+  view: UniverseSceneExplorationView | null;
+  expansionSnapshots: Map<string, ExpansionSnapshotContext>;
+  completedSources: Set<string>;
+  expansionCache: Map<string, UniverseGraphPatch>;
+  cursors: Map<string, string>;
+  expandedAnchors: Set<string>;
+}
+
+interface ContextGraphSession {
+  sceneEpoch: number;
+  activationCount: number;
+  answerTurnCount: number;
+}
+
 interface ExpansionSnapshotContext {
   snapshotId: string;
   sourceRevision: string;
@@ -204,6 +232,12 @@ interface SourceLoadProgress {
 const PARTITION_RENDER_LIMIT = { desktop: 160, mobile: 64 } as const;
 const EVENT_ENTITY_PROJECTION_LIMIT = 8;
 const ENTITY_EXPANSION_EVENT_LIMIT = 4;
+// Keep the original deterministic placement model, but give the visible
+// timeline packages a wider stage so cards do not collapse into the source
+// core. These are bounded world-space multipliers, not a force simulation.
+const TIMELINE_EVENT_LATERAL_SPREAD = 2.6;
+const LOCAL_ENTITY_SPREAD_MIN = 56;
+const LOCAL_ENTITY_SPREAD_RANGE = 56;
 const EMPTY_TIMELINE_BUNDLE_IDS: string[] = [];
 // World length of one event's slice of its source's counting axis. The axis
 // length is event count × this, so the handful of visible packages always
@@ -366,7 +400,7 @@ function stableRootEventOffset(
   // small, deterministic Z variation for 3D depth.
   const count = Math.max(1, total);
   const progress = (index + 0.65) / count;
-  const distance = radius * (0.5 + Math.sqrt(progress) * 0.43);
+  const distance = radius * (0.62 + Math.sqrt(progress) * 0.5);
   const goldenAngle = Math.PI * (3 - Math.sqrt(5));
   const phase = stableUnit(`${sourceId}:root-event-phase`) * Math.PI * 2;
   const angle = phase + index * goldenAngle;
@@ -691,6 +725,10 @@ export function KnowledgeUniverse({
   const focusTimerRef = React.useRef<number | null>(null);
   const cameraFrameRef = React.useRef<number | null>(null);
   const epochRef = React.useRef(0);
+  const activationEventEpochRef = React.useRef(0);
+  const retainedExplorationRef = React.useRef<RetainedExploration | null>(null);
+  const contextGraphSessionRef = React.useRef<ContextGraphSession | null>(null);
+  const contextProjectionClosedRef = React.useRef(false);
   const workingRef = React.useRef<UniverseWorkingSet>(emptyUniverseWorkingSet());
   const budgetRef = React.useRef<{ nodes: number; edges: number }>(
     UNIVERSE_SCENE_BUDGET.mobile,
@@ -758,6 +796,7 @@ export function KnowledgeUniverse({
   const [timelinePlaying, setTimelinePlaying] = React.useState(false);
   const [contextWorkspace, setContextWorkspace] =
     React.useState<UniverseContextState>(readUniverseContext);
+  const [contextActivationCount, setContextActivationCount] = React.useState(0);
   const [timelinePlaybackOrder, setTimelinePlaybackOrder] =
     React.useState<UniverseTimelinePlaybackOrder>("reverse");
   const [documentHidden, setDocumentHidden] = React.useState(false);
@@ -782,7 +821,10 @@ export function KnowledgeUniverse({
   React.useEffect(() => {
     const onContext = (event: Event) => {
       const value = (event as CustomEvent<UniverseContextState>).detail;
-      if (value) setContextWorkspace(value);
+      if (value) {
+        if (value.active) contextProjectionClosedRef.current = false;
+        setContextWorkspace(value);
+      }
     };
     window.addEventListener(UNIVERSE_CONTEXT_EVENT, onContext);
     return () => window.removeEventListener(UNIVERSE_CONTEXT_EVENT, onContext);
@@ -1251,6 +1293,9 @@ export function KnowledgeUniverse({
       snapshotReloadAttemptsRef.current.clear();
       clearTimelineSettle();
       timelineJourneyCommitRef.current = null;
+      retainedExplorationRef.current = null;
+      contextGraphSessionRef.current = null;
+      setContextActivationCount(0);
       sourceSessionRef.current = null;
       setTimelineWindow(null);
       expansionSnapshotsRef.current.clear();
@@ -1274,6 +1319,7 @@ export function KnowledgeUniverse({
       viewportSourceRef.current = null;
       setViewportSourceId(null);
       setActivePartition(null);
+      dispatchUniverseView({ mode: "overview", source_id: null, progress: 0 });
       setExpandingKey(null);
       setMoreHint("");
       if (interactiveRef.current) {
@@ -1380,19 +1426,282 @@ export function KnowledgeUniverse({
     }, 0);
   }, [bundleWindow, clearTimelineSettle, commitWorkingSet, refreshLoadProgress, setLockedKey, setSelectedKey, sourceById, t]);
 
+  const releaseReadingFocus = React.useCallback(() => {
+    graphRef.current?.clearSelection();
+    setLockedKey(null);
+    setSelectedKey(null);
+  }, [setLockedKey, setSelectedKey]);
+
+  const retainCurrentExploration = React.useCallback(() => {
+    const retained = retainedExplorationRef.current;
+    if (retained) return retained;
+    const session = sourceSessionRef.current;
+    const settledWindow = session
+      ? settleUniverseTimelineWindow(session.timeline.window)
+      : timelineWindow;
+    if (session) {
+      session.timeline.loading = false;
+      session.timeline.window = settledWindow as UniverseTimelineWindowState;
+    }
+    const snapshot: RetainedExploration = {
+      session,
+      working: workingRef.current,
+      timelineWindow: settledWindow,
+      activePartition,
+      viewportSourceId: viewportSourceRef.current,
+      selectedKey,
+      lockedKey,
+      sourceHits: [...sourceHits],
+      summary: summary ? { ...summary } : null,
+      moreHint,
+      activationOrigin: activationOriginRef.current,
+      view: graphRef.current?.captureExplorationView() ?? null,
+      expansionSnapshots: new Map(expansionSnapshotsRef.current),
+      completedSources: new Set(completedSourcesRef.current),
+      expansionCache: new Map(expansionCacheRef.current),
+      cursors: new Map(cursorsRef.current),
+      expandedAnchors: new Set(expandedAnchorsRef.current),
+    };
+    retainedExplorationRef.current = snapshot;
+    setTimelinePlaying(false);
+    expandAbortRef.current?.abort();
+    expandAbortRef.current = null;
+    timelineRequestRef.current?.controller.abort();
+    timelineRequestRef.current = null;
+    clearTimelineSettle();
+    timelineJourneyCommitRef.current = null;
+    if (snapshotReloadTimerRef.current !== null) {
+      window.clearTimeout(snapshotReloadTimerRef.current);
+      snapshotReloadTimerRef.current = null;
+    }
+    return snapshot;
+  }, [
+    activePartition,
+    clearTimelineSettle,
+    lockedKey,
+    moreHint,
+    selectedKey,
+    sourceHits,
+    summary,
+    timelineWindow,
+  ]);
+
+  const prepareContextScene = React.useCallback((
+    sceneEpoch: number,
+    origin: UniverseActivationOrigin,
+  ) => {
+    contextProjectionClosedRef.current = false;
+    epochRef.current = sceneEpoch;
+    contextGraphSessionRef.current = {
+      sceneEpoch,
+      activationCount: 0,
+      answerTurnCount: 0,
+    };
+    expandAbortRef.current?.abort();
+    expandAbortRef.current = null;
+    expandingAnchorRef.current = null;
+    timelineRequestRef.current?.controller.abort();
+    timelineRequestRef.current = null;
+    snapshotReloadAttemptsRef.current.clear();
+    clearTimelineSettle();
+    timelineJourneyCommitRef.current = null;
+    sourceSessionRef.current = null;
+    setTimelineWindow(null);
+    expansionSnapshotsRef.current.clear();
+    completedSourcesRef.current.clear();
+    expansionCacheRef.current.clear();
+    expansionInflightRef.current.clear();
+    dispatchUniversePatchReset();
+    graphRef.current?.unlockNode();
+    clearCameraSchedule();
+    cursorsRef.current.clear();
+    expandedAnchorsRef.current.clear();
+    commitWorkingSet(emptyUniverseWorkingSet(sceneEpoch));
+    setContextActivationCount(0);
+    setLockedKey(null);
+    setSelectedKey(null);
+    setSourceHits([]);
+    setSummary(null);
+    activationOriginRef.current = origin;
+    setActivationOrigin(origin);
+    viewportSourceRef.current = null;
+    setViewportSourceId(null);
+    setActivePartition(null);
+    setExpandingKey(null);
+    setMoreHint("");
+    refreshLoadProgress();
+  }, [
+    clearCameraSchedule,
+    clearTimelineSettle,
+    commitWorkingSet,
+    refreshLoadProgress,
+    setLockedKey,
+    setSelectedKey,
+  ]);
+
+  const restoreRetainedExploration = React.useCallback(() => {
+    const snapshot = retainedExplorationRef.current;
+    contextGraphSessionRef.current = null;
+    setContextActivationCount(0);
+    if (!snapshot) {
+      graphRef.current?.clearSelection();
+      setLockedKey(null);
+      setSelectedKey(null);
+      setMoreHint("");
+      return;
+    }
+    retainedExplorationRef.current = null;
+    expandAbortRef.current?.abort();
+    expandAbortRef.current = null;
+    expandingAnchorRef.current = null;
+    expansionInflightRef.current.clear();
+    dispatchUniversePatchReset();
+    graphRef.current?.unlockNode();
+    clearCameraSchedule();
+    sourceSessionRef.current = snapshot.session;
+    if (snapshot.session) {
+      snapshot.session.working = snapshot.working;
+      snapshot.session.timeline.loading = false;
+      if (snapshot.timelineWindow) {
+        snapshot.session.timeline.window = snapshot.timelineWindow;
+      }
+    }
+    epochRef.current = snapshot.working.epoch;
+    expansionSnapshotsRef.current = new Map(snapshot.expansionSnapshots);
+    completedSourcesRef.current = new Set(snapshot.completedSources);
+    expansionCacheRef.current = new Map(snapshot.expansionCache);
+    cursorsRef.current = new Map(snapshot.cursors);
+    expandedAnchorsRef.current = new Set(snapshot.expandedAnchors);
+    commitWorkingSet(snapshot.working);
+    setTimelineWindow(snapshot.timelineWindow);
+    activationOriginRef.current = snapshot.activationOrigin;
+    setActivationOrigin(snapshot.activationOrigin);
+    setSourceHits(snapshot.sourceHits);
+    setSummary(snapshot.summary);
+    viewportSourceRef.current = snapshot.viewportSourceId;
+    setViewportSourceId(snapshot.viewportSourceId);
+    setActivePartition(snapshot.activePartition);
+    setLockedKey(snapshot.lockedKey);
+    setSelectedKey(snapshot.selectedKey);
+    setExpandingKey(null);
+    setMoreHint(snapshot.moreHint);
+    refreshLoadProgress();
+    const view = snapshot.view;
+    const sessionSourceId = snapshot.session?.sourceId ?? null;
+    const lockedNodeKey = snapshot.lockedKey;
+    cameraFrameRef.current = window.requestAnimationFrame(() => {
+      cameraFrameRef.current = null;
+      if (view) graphRef.current?.restoreExplorationView(view);
+      else if (sessionSourceId) graphRef.current?.focusSource(sessionSourceId);
+      else graphRef.current?.focusOverview();
+      if (lockedNodeKey) graphRef.current?.lockNode(lockedNodeKey);
+    });
+  }, [
+    clearCameraSchedule,
+    commitWorkingSet,
+    refreshLoadProgress,
+    setLockedKey,
+    setSelectedKey,
+  ]);
+
   React.useEffect(() => {
-    const hasRetainedBrowseSession = () => Boolean(
-      sourceSessionRef.current && activationOriginRef.current === "browse",
-    );
     const onActivate = (event: Event) => {
       const activation = (event as CustomEvent<UniverseActivation>).detail;
-      const epoch = activation?.epoch ?? epochRef.current + 1;
-      if (!activation || epoch < epochRef.current) return;
+      const eventEpoch = activation?.epoch ?? activationEventEpochRef.current + 1;
+      if (!activation || eventEpoch < activationEventEpochRef.current) return;
+      activationEventEpochRef.current = eventEpoch;
       const origin = activation.origin ?? "assistant";
-      if (origin !== "browse" && hasRetainedBrowseSession()) {
+      const context = readUniverseContext();
+      const contextual = origin !== "browse" && (
+        context.active
+        || Boolean(contextGraphSessionRef.current && retainedExplorationRef.current)
+      );
+      if (
+        origin !== "browse"
+        && !contextual
+        && (
+          contextProjectionClosedRef.current
+          || (
+            sourceSessionRef.current
+            && activationOriginRef.current === "browse"
+          )
+        )
+      ) {
+        // A result that finishes after the user returned must never replace the
+        // restored timeline. The conversation may keep streaming in its panel;
+        // its graph projection belongs only to an active contextual workspace.
         return;
       }
-      epochRef.current = epoch;
+      if (contextual) {
+        const retained = retainCurrentExploration();
+        if (origin === "assistant") {
+          // A question starts a new reading beat. Release the card that
+          // launched it so the incoming evidence owns the visual focus, and
+          // do not resurrect that stale lock when the retained view returns.
+          retained.lockedKey = null;
+          retained.selectedKey = null;
+          releaseReadingFocus();
+        }
+        if (!contextGraphSessionRef.current) {
+          prepareContextScene(eventEpoch, origin);
+        }
+        const contextSession = contextGraphSessionRef.current;
+        if (!contextSession) return;
+        const firstActivation = contextSession.activationCount === 0;
+        const normalizedActivation = {
+          ...activation,
+          epoch: contextSession.sceneEpoch,
+        };
+        const next = origin === "assistant" && !firstActivation
+          ? mergeUniverseWorkingSetActivation(
+              workingRef.current,
+              normalizedActivation,
+              budget,
+            )
+          : replaceUniverseWorkingSet(normalizedActivation, budget);
+        contextSession.activationCount += 1;
+        if (origin === "assistant") contextSession.answerTurnCount += 1;
+        setContextActivationCount(contextSession.answerTurnCount);
+        commitWorkingSet(next);
+        if (firstActivation) {
+          setLockedKey(null);
+          setSelectedKey(null);
+        }
+        setSourceHits(activation.source_hits ?? []);
+        activationOriginRef.current = origin;
+        setActivationOrigin(origin);
+        setMoreHint("");
+        setSummary({
+          query: activation.query,
+          events: new Set(
+            next.nodes.filter((node) => node.kind === "event").map((node) => node.id),
+          ).size,
+          entities: new Set(
+            next.nodes.filter((node) => node.kind === "entity").map((node) => node.id),
+          ).size,
+          relations: next.relations.length,
+        });
+        const sourceId = dominantSource(activation);
+        setActivePartition(sourceId);
+        if (
+          firstActivation
+          && sourceId
+          && !(activation.source_hits?.length)
+          && interactiveRef.current
+        ) {
+          focusTimerRef.current = window.setTimeout(() => {
+            focusTimerRef.current = null;
+            if (contextGraphSessionRef.current === contextSession) {
+              focusPartition(sourceId);
+            }
+          }, reducedMotion ? 0 : 80);
+        }
+        return;
+      }
+      retainedExplorationRef.current = null;
+      contextGraphSessionRef.current = null;
+      setContextActivationCount(0);
+      epochRef.current = eventEpoch;
       expandAbortRef.current?.abort();
       expandAbortRef.current = null;
       expandingAnchorRef.current = null;
@@ -1415,7 +1724,7 @@ export function KnowledgeUniverse({
       clearCameraSchedule();
       cursorsRef.current.clear();
       expandedAnchorsRef.current.clear();
-      const next = replaceUniverseWorkingSet({ ...activation, epoch }, budget);
+      const next = replaceUniverseWorkingSet({ ...activation, epoch: eventEpoch }, budget);
       commitWorkingSet(next);
       setLockedKey(null);
       setSelectedKey(null);
@@ -1436,25 +1745,43 @@ export function KnowledgeUniverse({
       const sourceId = dominantSource(activation);
       setActivePartition(sourceId);
       if (sourceId && !(activation.source_hits?.length) && interactiveRef.current) {
-        const activationEpoch = epoch;
+        const activationEpoch = eventEpoch;
         focusTimerRef.current = window.setTimeout(() => {
           focusTimerRef.current = null;
-          if (epochRef.current === activationEpoch) focusPartition(sourceId);
+          if (activationEventEpochRef.current === activationEpoch) focusPartition(sourceId);
         }, reducedMotion ? 0 : 80);
       }
     };
     const onReset = (event: Event) => {
       const value = (event as CustomEvent<{ epoch: number; owner?: string }>).detail;
-      if (value?.owner?.startsWith("search") && hasRetainedBrowseSession()) {
+      const eventEpoch = value?.epoch ?? activationEventEpochRef.current + 1;
+      if (eventEpoch < activationEventEpochRef.current) return;
+      activationEventEpochRef.current = eventEpoch;
+      const searchReset = value?.owner?.startsWith("search") ?? false;
+      const context = readUniverseContext();
+      if (
+        searchReset
+        && (context.active || Boolean(contextGraphSessionRef.current))
+      ) {
+        retainCurrentExploration();
+        prepareContextScene(eventEpoch, "search");
         return;
       }
-      resetScene(value?.epoch ?? epochRef.current + 1);
+      if (
+        searchReset
+        && sourceSessionRef.current
+        && activationOriginRef.current === "browse"
+      ) {
+        return;
+      }
+      retainedExplorationRef.current = null;
+      contextGraphSessionRef.current = null;
+      setContextActivationCount(0);
+      resetScene(eventEpoch);
     };
     const onResume = () => {
-      graphRef.current?.clearSelection();
-      setLockedKey(null);
-      setSelectedKey(null);
-      setMoreHint("");
+      contextProjectionClosedRef.current = true;
+      restoreRetainedExploration();
     };
     const onFocus = (event: Event) => {
       const value = (
@@ -1503,11 +1830,14 @@ export function KnowledgeUniverse({
     commitWorkingSet,
     focusNode,
     focusPartition,
+    prepareContextScene,
     reducedMotion,
+    releaseReadingFocus,
+    restoreRetainedExploration,
+    retainCurrentExploration,
     resetScene,
     setLockedKey,
     setSelectedKey,
-    t,
   ]);
 
   const graphData = React.useMemo(() => {
@@ -1748,7 +2078,8 @@ export function KnowledgeUniverse({
         z: partition?.z ?? 0,
       };
       const radius = anchor
-        ? 34 + stableUnit(`${key}:local-radius`) * 42
+        ? LOCAL_ENTITY_SPREAD_MIN
+          + stableUnit(`${key}:local-radius`) * LOCAL_ENTITY_SPREAD_RANGE
         : Math.max(72, (visualRadiusBySource.get(sourceId) ?? 72) * 1.02);
       const timelinePlacement = timelineEventPlacementByKey.get(key);
       const temporalBundleId = node.kind === "event"
@@ -1768,8 +2099,10 @@ export function KnowledgeUniverse({
         // visible timeline packages carry a temporal projection.
         ? temporalProjection
           ? {
-              x: temporalProjection.normalizedOffset.x * radius * 1.8,
-              y: temporalProjection.normalizedOffset.y * radius * 1.8,
+              x: temporalProjection.normalizedOffset.x * radius
+                * TIMELINE_EVENT_LATERAL_SPREAD,
+              y: temporalProjection.normalizedOffset.y * radius
+                * TIMELINE_EVENT_LATERAL_SPREAD,
               // Every event sits one vestibule deeper than its ordinal says:
               // flight depth 0 is the hero pose in front of the intact nebula,
               // and the first event only condenses after crossing it.
@@ -2763,6 +3096,11 @@ export function KnowledgeUniverse({
   const activateSource = React.useCallback(
     (sourceId: string) => {
       if (!sourceById.has(sourceId)) return;
+      retainedExplorationRef.current = null;
+      contextGraphSessionRef.current = null;
+      contextProjectionClosedRef.current = false;
+      setContextActivationCount(0);
+      dispatchUniverseResume();
       // Explicit source navigation starts a timeline browse session even when
       // the user arrived from search or an assistant-provided activation.
       activationOriginRef.current = "browse";
@@ -2855,6 +3193,18 @@ export function KnowledgeUniverse({
       setActivePartition(sourceId);
     },
     [],
+  );
+
+  const handleSourceWheel = React.useCallback(
+    (sourceId: string) => {
+      if (!interactiveRef.current) return;
+      // The source may already be loading because a prior wheel tick or a
+      // click started the same dive. Keep that in-flight session intact so a
+      // trackpad cannot restart the timeline on every native wheel event.
+      if (sourceSessionRef.current?.sourceId === sourceId) return;
+      activateSource(sourceId);
+    },
+    [activateSource],
   );
 
   const handleTimelineIntent = React.useCallback(
@@ -3067,7 +3417,7 @@ export function KnowledgeUniverse({
     && timelineWindow,
   );
   const contextualWorkspaceActive = Boolean(
-    timelineControlsVisible
+    interactive
     && contextWorkspace.active
     && contextWorkspace.section,
   );
@@ -3149,11 +3499,9 @@ export function KnowledgeUniverse({
   );
 
   const clearSelection = React.useCallback(() => {
-    graphRef.current?.clearSelection();
-    setLockedKey(null);
-    setSelectedKey(null);
+    releaseReadingFocus();
     dispatchUniverseInteraction();
-  }, [setLockedKey, setSelectedKey]);
+  }, [releaseReadingFocus]);
 
   const timelineNavigationForNode = React.useCallback(
     (node: UniverseConcrete3DNode) => {
@@ -3224,14 +3572,25 @@ export function KnowledgeUniverse({
   const returnToTimelineOrigin = React.useCallback(() => {
     setTimelinePlaying(false);
     clearSelection();
+    if (timelineRequestRef.current?.cause !== "source-entry") {
+      timelineRequestRef.current?.controller.abort();
+      timelineRequestRef.current = null;
+    }
+    clearTimelineSettle();
     const sourceId = sourceSessionRef.current?.sourceId;
-    if (sourceId) graphRef.current?.focusSource(sourceId);
+    if (sourceId) graphRef.current?.returnToSourceOrigin(sourceId);
     else graphRef.current?.focusOverview();
-  }, [clearSelection]);
+  }, [clearSelection, clearTimelineSettle]);
 
   const handleSceneInteraction = React.useCallback(() => {
     setTimelinePlaying(false);
     dispatchUniverseInteraction();
+  }, []);
+
+  const handleSceneBackgroundClick = React.useCallback(() => {
+    if (readUniverseContext().active || contextGraphSessionRef.current) {
+      dispatchUniverseResume();
+    }
   }, []);
 
   const handleExploreMore = React.useCallback((node: UniverseSceneNode) => {
@@ -3241,8 +3600,10 @@ export function KnowledgeUniverse({
 
   const handleAskNode = React.useCallback((node: UniverseSceneNode) => {
     if (node.kind === "source") return;
+    setTimelinePlaying(false);
+    releaseReadingFocus();
     dispatchUniverseAsk(node as UniverseConcrete3DNode);
-  }, []);
+  }, [releaseReadingFocus]);
 
   const timelinePlaybackPlan = React.useMemo(() => planUniverseTimelinePlayback({
     enabled: timelinePlaying && interactive && timelineJourney.enabled,
@@ -3353,6 +3714,21 @@ export function KnowledgeUniverse({
     // Leave the current source session and reveal the complete knowledge universe.
     resetScene(epochRef.current + 1);
   }, [resetScene]);
+
+  const requestSourceBack = React.useCallback(() => {
+    const sourceId = sourceSessionRef.current?.sourceId;
+    if (!sourceId) return;
+    setTimelinePlaying(false);
+    clearSelection();
+    if (timelineRequestRef.current?.cause !== "source-entry") {
+      timelineRequestRef.current?.controller.abort();
+      timelineRequestRef.current = null;
+    }
+    clearTimelineSettle();
+    const result = graphRef.current?.returnToSourceOrigin(sourceId)
+      ?? "already-at-origin";
+    if (result === "already-at-origin") returnToUniverseHome();
+  }, [clearSelection, clearTimelineSettle, returnToUniverseHome]);
 
   React.useEffect(() => {
     const visibleNodeIds = new Set(graphData.nodes.map((node) => node.id));
@@ -3553,7 +3929,10 @@ export function KnowledgeUniverse({
             onTimelineSettled={handleTimelineSettled}
             onViewChange={handleSceneViewChange}
             onSourceLod={handleSourceLod}
+            onSourceWheel={handleSourceWheel}
             onSelectionClear={clearSelection}
+            onBackRequest={requestSourceBack}
+            onBackgroundClick={handleSceneBackgroundClick}
             actionLabels={{
               exploreMore: t("nodeActions.exploreMore"),
               askAi: t("nodeActions.askAi"),
@@ -3620,13 +3999,10 @@ export function KnowledgeUniverse({
               data-universe-home-control="true"
               aria-label={t("controls.home")}
               title={t("controls.homeHint")}
-              onClick={returnToUniverseHome}
+              onClick={requestSourceBack}
               disabled={!browseSessionSourceId && !working.nodes.length}
             >
-              <span className="relative grid size-4 place-items-center" aria-hidden="true">
-                <Orbit className="size-4 transition-colors" />
-                <span className="absolute size-1 rounded-full bg-amber-200 shadow-[0_0_7px_rgb(253_230_138_/_0.9)]" />
-              </span>
+              <ChevronLeft className="size-4 transition-transform group-hover:-translate-x-0.5" />
             </Button>
           )}
           <div
@@ -3793,21 +4169,25 @@ export function KnowledgeUniverse({
         </div>
       )}
 
-      {timelineControlsVisible && contextualWorkspaceActive && (
+      {contextualWorkspaceActive && (
         <div
-          className="absolute bottom-5 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-amber-400/25 bg-background/82 p-1.5 pl-3 shadow-soft backdrop-blur-xl"
+          className="absolute bottom-5 left-1/2 z-20 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-amber-400/25 bg-background/82 p-1.5 pl-3 shadow-soft backdrop-blur-xl"
           data-universe-context-return="true"
         >
-          <span className="whitespace-nowrap text-[10px] text-muted-foreground">
-            {t(contextWorkspace.section === "answer"
-              ? "controls.answerContext"
-              : "controls.searchContext")}
+          <span className="min-w-0 truncate whitespace-nowrap text-[10px] text-muted-foreground">
+            {contextWorkspace.section === "answer"
+              ? t("controls.answerContext", {
+                  count: contextActivationCount,
+                  events: contextGraphSessionRef.current ? summary?.events ?? 0 : 0,
+                  entities: contextGraphSessionRef.current ? summary?.entities ?? 0 : 0,
+                })
+              : t("controls.searchContext")}
           </span>
           <Button
             type="button"
             variant="outline"
             size="sm"
-            className="h-8 gap-1.5 rounded-full border-amber-400/30 bg-amber-400/10 px-3 text-[11px] text-amber-700 hover:bg-amber-400/15 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200"
+            className="h-8 shrink-0 gap-1.5 rounded-full border-amber-400/30 bg-amber-400/10 px-3 text-[11px] text-amber-700 hover:bg-amber-400/15 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200"
             onClick={dispatchUniverseResume}
           >
             <Orbit className="size-3.5" />

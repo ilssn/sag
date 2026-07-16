@@ -54,6 +54,7 @@ import {
   UNIVERSE_RESUME_EVENT,
   UNIVERSE_SOURCE_FOCUS_EVENT,
   dispatchUniverseContext,
+  readUniverseContext,
 } from "@/lib/universe-events";
 import { cn } from "@/lib/utils";
 import type { WorkspaceSection } from "@/lib/workspace";
@@ -422,6 +423,14 @@ export function Pet({
   React.useEffect(() => {
     if (appMode !== "explore") return;
     const closeForCanvasGesture = () => {
+      // Search/answer owns a live result graph. Camera gestures should inspect
+      // that graph, not silently leave it; only an actual background click or
+      // the explicit bottom return control resumes the retained timeline.
+      if (readUniverseContext().active) return;
+      setOpen(false);
+      setPetOverlay("none");
+    };
+    const closeForResume = () => {
       setOpen(false);
       setPetOverlay("none");
     };
@@ -447,12 +456,12 @@ export function Pet({
     };
     window.addEventListener(UNIVERSE_INTERACTION_EVENT, closeForCanvasGesture);
     window.addEventListener(UNIVERSE_RESET_EVENT, closeForReset);
-    window.addEventListener(UNIVERSE_RESUME_EVENT, closeForCanvasGesture);
+    window.addEventListener(UNIVERSE_RESUME_EVENT, closeForResume);
     window.addEventListener(UNIVERSE_SOURCE_FOCUS_EVENT, closeOnSourceChange);
     return () => {
       window.removeEventListener(UNIVERSE_INTERACTION_EVENT, closeForCanvasGesture);
       window.removeEventListener(UNIVERSE_RESET_EVENT, closeForReset);
-      window.removeEventListener(UNIVERSE_RESUME_EVENT, closeForCanvasGesture);
+      window.removeEventListener(UNIVERSE_RESUME_EVENT, closeForResume);
       window.removeEventListener(UNIVERSE_SOURCE_FOCUS_EVENT, closeOnSourceChange);
     };
   }, [appMode]);

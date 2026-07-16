@@ -37,7 +37,7 @@ export const UNIVERSE_VIEW_LIMITS = {
     min: 2,
     max: 18,
     step: 1,
-    default: 6,
+    default: 8,
   },
   cachedEventBundles: {
     min: 12,
@@ -177,7 +177,7 @@ export interface UniverseBundleWindow {
   cachedEventBundles: number;
 }
 
-/** Applies device caps while retaining a six-bundle prefetch runway. */
+/** Applies device caps while retaining the configured prefetch runway. */
 export function effectiveUniverseBundleWindow(
   preferences: UniverseViewPreferences,
   isMobile: boolean,

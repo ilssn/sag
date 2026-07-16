@@ -11,7 +11,7 @@ describe("app shell viewport stage", () => {
   it("pins the universe stage to the visible viewport instead of content height", () => {
     const stageStart = appShellSource.indexOf("<DetailPanelProvider>");
     const backdropStart = appShellSource.indexOf(
-      "{appMode !== \"explore\" && <SpaceBackdrop />}",
+      '<SpaceBackdrop variant={appMode === "explore" ? "universe" : "shell"} />',
       stageStart,
     );
     const stageOpening = appShellSource.slice(stageStart, backdropStart);
@@ -23,6 +23,15 @@ describe("app shell viewport stage", () => {
     );
     expect(stageOpening).not.toContain(
       '"bg-space-field relative grid min-h-svh overflow-hidden"',
+    );
+  });
+
+  it("keeps one backdrop mounted and selects the lightweight universe atmosphere in explore", () => {
+    expect(appShellSource).toContain(
+      '<SpaceBackdrop variant={appMode === "explore" ? "universe" : "shell"} />',
+    );
+    expect(appShellSource).not.toContain(
+      '{appMode !== "explore" && <SpaceBackdrop />}',
     );
   });
 });
