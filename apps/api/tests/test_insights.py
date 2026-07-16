@@ -17,9 +17,7 @@ async def test_entity_read_path():
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
             tok = (
-                await c.post(
-                    "/api/v1/auth/register", json={"email": "book@x.com", "password": "password123"}
-                )
+                await c.post("/api/v1/auth/register", json={"email": "book@x.com", "password": "password123"})
             ).json()["access_token"]
             H = {"Authorization": f"Bearer {tok}"}
 
@@ -230,8 +228,7 @@ async def test_entity_read_path():
 
             # 图谱允许界面按性能选择更大的展示量，同时保留防止误请求的上限。
             large = await c.get(
-                f"/api/v1/sources/{sid}/graph"
-                "?document_limit=2000&event_limit=2000&entity_limit=2000",
+                f"/api/v1/sources/{sid}/graph?document_limit=2000&event_limit=2000&entity_limit=2000",
                 headers=H,
             )
             assert large.status_code == 200
@@ -256,14 +253,156 @@ async def test_entity_read_path():
                 assert await s.get(SourceEvent, hidden_event_id) is None
                 assert await s.get(Entity, entity_id) is None
 
-            empty_source = (
-                await c.post("/api/v1/sources", headers=H, json={"name": "空信源"})
-            ).json()
-            empty_graph = (
-                await c.get(f"/api/v1/sources/{empty_source['id']}/graph", headers=H)
-            ).json()
+            empty_source = (await c.post("/api/v1/sources", headers=H, json={"name": "空信源"})).json()
+            empty_graph = (await c.get(f"/api/v1/sources/{empty_source['id']}/graph", headers=H)).json()
             assert empty_graph["documents"] == []
             assert empty_graph["events"] == []
             assert empty_graph["entities"] == []
             assert empty_graph["relations"] == []
             assert empty_graph["truncated"] is False
+
+
+@pytest.mark.asyncio
+async def test_source_graph_can_filter_one_or_multiple_documents(monkeypatch):
+    from sag_api.core.db import SessionLocal
+    from sag_api.db.models import Document, Source
+    from sag_api.enums import DocumentStatus
+    from sag_api.main import app
+    from sag_api.sag import GraphEventInfo, SourceGraphInfo
+
+    transport = httpx.ASGITransport(app=app)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            token = (
+                await client.post(
+                    "/api/v1/auth/register",
+                    json={
+                        "email": f"graph-filter-{uuid.uuid4().hex}@x.com",
+                        "password": "password123",
+                    },
+                )
+            ).json()["access_token"]
+            headers = {"Authorization": f"Bearer {token}"}
+            source_payload = (
+                await client.post(
+                    "/api/v1/sources",
+                    headers=headers,
+                    json={"name": "文档筛选"},
+                )
+            ).json()
+            source_id = source_payload["id"]
+
+            async with SessionLocal() as session:
+                source = await session.get(Source, source_id)
+                assert source is not None
+                first = Document(
+                    source_id=source_id,
+                    filename="第一篇.md",
+                    content_type="text/markdown",
+                    size_bytes=10,
+                    storage_path="/tmp/first.md",
+                    status=DocumentStatus.READY,
+                    chunk_count=1,
+                    event_count=2,
+                    sag_source_id="engine-first",
+                )
+                second = Document(
+                    source_id=source_id,
+                    filename="第二篇.md",
+                    content_type="text/markdown",
+                    size_bytes=10,
+                    storage_path="/tmp/second.md",
+                    status=DocumentStatus.READY,
+                    chunk_count=1,
+                    event_count=3,
+                    sag_source_id="engine-second",
+                )
+                session.add_all([first, second])
+                source.document_count = 2
+                source.chunk_count = 2
+                source.event_count = 5
+                await session.commit()
+                first_id, second_id = first.id, second.id
+
+            seen_source_ids: list[list[str]] = []
+
+            async def fake_source_graph(
+                _source_config_id,
+                source_ids,
+                **_kwargs,
+            ):
+                seen_source_ids.append(list(source_ids))
+                return SourceGraphInfo(
+                    events=[
+                        GraphEventInfo(
+                            id=f"event-{engine_source_id}",
+                            source_id=engine_source_id,
+                            title=f"事项 {engine_source_id}",
+                        )
+                        for engine_source_id in source_ids
+                    ]
+                )
+
+            monkeypatch.setattr(
+                app.state.engine_manager,
+                "source_graph",
+                fake_source_graph,
+            )
+
+            single = await client.get(
+                f"/api/v1/sources/{source_id}/graph",
+                headers=headers,
+                params=[("document_ids", second_id)],
+            )
+            assert single.status_code == 200
+            single_graph = single.json()
+            assert [document["id"] for document in single_graph["documents"]] == [second_id]
+            assert single_graph["events"][0]["document_id"] == second_id
+            assert single_graph["counts"]["documents"] == 1
+            assert single_graph["counts"]["events"] == 3
+            assert seen_source_ids[-1] == ["engine-second"]
+
+            multiple = await client.get(
+                f"/api/v1/sources/{source_id}/graph",
+                headers=headers,
+                params=[
+                    ("document_ids", first_id),
+                    ("document_ids", second_id),
+                    ("document_ids", second_id),
+                ],
+            )
+            assert multiple.status_code == 200
+            multiple_graph = multiple.json()
+            assert {document["id"] for document in multiple_graph["documents"]} == {
+                first_id,
+                second_id,
+            }
+            assert multiple_graph["counts"]["documents"] == 2
+            assert multiple_graph["counts"]["events"] == 5
+            assert set(seen_source_ids[-1]) == {"engine-first", "engine-second"}
+
+            empty = await client.get(
+                f"/api/v1/sources/{source_id}/graph",
+                headers=headers,
+                params=[("document_ids", "")],
+            )
+            assert empty.status_code == 200
+            assert empty.json()["documents"] == []
+            assert empty.json()["events"] == []
+            assert empty.json()["counts"]["documents"] == 0
+            assert empty.json()["counts"]["events"] == 0
+            assert seen_source_ids[-1] == []
+
+            all_documents = await client.get(
+                f"/api/v1/sources/{source_id}/graph",
+                headers=headers,
+            )
+            assert all_documents.status_code == 200
+            assert all_documents.json()["counts"]["documents"] == 2
+            assert all_documents.json()["counts"]["events"] == 5
+
+            async with SessionLocal() as session:
+                source = await session.get(Source, source_id)
+                assert source is not None
+                await session.delete(source)
+                await session.commit()

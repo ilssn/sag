@@ -41,8 +41,8 @@ async def test_parser_routes_markdown_and_markitdown_with_cache(tmp_path, monkey
     assert direct.path == str(markdown)
     assert direct.provider == "original"
 
-    source = tmp_path / "notes.txt"
-    source.write_text("hello", encoding="utf-8")
+    source = tmp_path / "notes.docx"
+    source.write_bytes(b"fake-office")
     calls: list[str] = []
 
     def convert(path: str) -> str:
@@ -57,6 +57,40 @@ async def test_parser_routes_markdown_and_markitdown_with_cache(tmp_path, monkey
     assert Path(first.path).read_text(encoding="utf-8") == "# Converted\n\nhello\n"
     assert second.cached is True and second.path == first.path
     assert calls == [str(source)]
+
+
+@pytest.mark.asyncio
+async def test_legacy_gb18030_text_is_normalized_without_markitdown(tmp_path, monkeypatch):
+    source = tmp_path / "骆驼祥子.txt"
+    expected = "《骆驼祥子》\r\n作者：老舍\r\n正文只有一个损坏字节："
+    source.write_bytes(expected.encode("gb18030") + b"\xff")
+    stale_cache = Path(f"{source}.parsed.markitdown.md")
+    stale_cache.write_text("None\n", encoding="utf-8")
+
+    def should_not_run(_path: str) -> str:
+        raise AssertionError("plain text should use Muse's text decoder")
+
+    monkeypatch.setattr(service, "_markitdown_sync", should_not_run)
+    parsed = await service.prepare_document(str(source), _settings())
+    markdown = Path(parsed.path).read_text(encoding="utf-8")
+
+    assert parsed.cached is False
+    assert parsed.provider == "markitdown"
+    assert markdown.startswith(expected.replace("\r\n", "\n"))
+    assert markdown.count("�") == 1
+    assert markdown != "None\n"
+
+
+@pytest.mark.asyncio
+async def test_markitdown_none_sentinel_is_rejected(tmp_path, monkeypatch):
+    source = tmp_path / "broken.docx"
+    source.write_bytes(b"fake-office")
+    monkeypatch.setattr(service, "_markitdown_sync", lambda _path: "None")
+
+    with pytest.raises(Exception, match="未从文件中解析出有效文本"):
+        await service.prepare_document(str(source), _settings())
+
+    assert not Path(f"{source}.parsed.markitdown.md").exists()
 
 
 @pytest.mark.asyncio
@@ -369,6 +403,7 @@ async def test_document_job_sends_parsed_markdown_to_engine(monkeypatch):
     document = SimpleNamespace(
         id="doc-1",
         source_id="source-1",
+        filename="original.pdf",
         storage_path="/uploads/original.pdf",
         status=None,
         error=None,
@@ -419,9 +454,11 @@ async def test_document_job_sends_parsed_markdown_to_engine(monkeypatch):
             on_checkpoint,
             should_pause,
             max_concurrency,
+            document_title,
         ):
             self.seen_path = path
             assert max_concurrency == tasks.settings.document_extract_concurrency
+            assert document_title == "original"
             await on_stage("loading")
             await on_checkpoint(
                 ProcessCheckpoint(

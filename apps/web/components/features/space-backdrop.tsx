@@ -2,19 +2,7 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
-import {
-  motion,
-  useMotionValue,
-  useReducedMotion,
-  useSpring,
-  useTransform,
-} from "motion/react";
-
-import {
-  UNIVERSE_VIEW_EVENT,
-  readUniverseView,
-  type UniverseViewState,
-} from "@/lib/universe-events";
+import { useReducedMotion } from "motion/react";
 import { ParticleGalaxy } from "@/components/features/particle-galaxy";
 
 const SpaceParticles = dynamic(
@@ -43,50 +31,15 @@ const SPARKLES = [
   { x: 96, y: 88, size: 6, delay: -10.7, duration: 14.8 },
 ] as const;
 
-export function SpaceBackdrop() {
+export function SpaceBackdrop({
+  pauseAmbientMotion = false,
+}: {
+  pauseAmbientMotion?: boolean;
+}) {
   const reducedMotion = useReducedMotion();
-  const initialViewRef = React.useRef(readUniverseView());
-  const ambientMotionPausedRef = React.useRef(
-    initialViewRef.current.mode === "detail" || initialViewRef.current.progress >= 0.18,
-  );
-  const [ambientMotionPaused, setAmbientMotionPaused] = React.useState(
-    ambientMotionPausedRef.current,
-  );
+  const ambientMotionPaused = Boolean(reducedMotion) || pauseAmbientMotion;
   const backdropRef = React.useRef<HTMLDivElement>(null);
   const cursorMeteorRef = React.useRef<HTMLSpanElement>(null);
-  const viewProgress = useMotionValue(initialViewRef.current.progress);
-  const springProgress = useSpring(viewProgress, {
-    stiffness: 92,
-    damping: 23,
-    mass: 1.05,
-    restDelta: 0.001,
-  });
-  const renderedProgress = reducedMotion ? viewProgress : springProgress;
-  const galaxyX = useTransform(renderedProgress, [0, 0.55, 1], ["0%", "12%", "36%"]);
-  const galaxyY = useTransform(renderedProgress, [0, 0.55, 1], ["0%", "-8%", "-24%"]);
-  const galaxyScale = useTransform(renderedProgress, [0, 0.55, 1], [1, 0.98, 0.9]);
-  const galaxyOpacity = useTransform(renderedProgress, [0, 0.55, 1], [1, 0.72, 0.16]);
-
-  React.useEffect(() => {
-    const applyView = (view: UniverseViewState) => {
-      viewProgress.set(view.progress);
-      const shouldPauseAmbient = view.mode === "detail" || view.progress >= 0.18;
-      if (shouldPauseAmbient !== ambientMotionPausedRef.current) {
-        ambientMotionPausedRef.current = shouldPauseAmbient;
-        setAmbientMotionPaused(shouldPauseAmbient);
-      }
-      if (!backdropRef.current) return;
-      backdropRef.current.dataset.universeView = view.mode;
-      backdropRef.current.dataset.universeViewProgress = view.progress.toFixed(2);
-    };
-    const handleView = (event: Event) => {
-      const view = (event as CustomEvent<UniverseViewState>).detail;
-      if (view) applyView(view);
-    };
-    applyView(readUniverseView());
-    window.addEventListener(UNIVERSE_VIEW_EVENT, handleView);
-    return () => window.removeEventListener(UNIVERSE_VIEW_EVENT, handleView);
-  }, [viewProgress]);
 
   React.useEffect(() => {
     if (reducedMotion || !cursorMeteorRef.current) return;
@@ -146,7 +99,7 @@ export function SpaceBackdrop() {
         && target.closest("[data-universe-mode='explore']") !== null;
       const isMeteorSurface = target === field || insideExploreUniverse;
 
-      if (event.pointerType !== "mouse" || !isMeteorSurface) {
+      if (event.pointerType !== "mouse" || event.buttons !== 0 || !isMeteorSurface) {
         hideMeteor();
         return;
       }
@@ -189,25 +142,17 @@ export function SpaceBackdrop() {
     <div
       ref={backdropRef}
       className="sag-space-sparkles"
-      data-universe-view={initialViewRef.current.mode}
-      data-universe-view-progress={initialViewRef.current.progress.toFixed(2)}
+      data-universe-view="fixed"
+      data-ambient-motion={ambientMotionPaused ? "paused" : "active"}
       aria-hidden
     >
-      <SpaceParticles reducedMotion={Boolean(reducedMotion) || ambientMotionPaused} />
+      <SpaceParticles reducedMotion={ambientMotionPaused} />
       {!reducedMotion && (
         <span ref={cursorMeteorRef} className="sag-space-cursor-meteor" data-active="false" />
       )}
-      <motion.span
-        className="sag-space-galaxy-orbit"
-        style={{
-          x: galaxyX,
-          y: galaxyY,
-          scale: galaxyScale,
-          opacity: galaxyOpacity,
-        }}
-      >
-        <ParticleGalaxy reducedMotion={Boolean(reducedMotion) || ambientMotionPaused} />
-      </motion.span>
+      <span className="sag-space-galaxy-orbit">
+        <ParticleGalaxy reducedMotion={ambientMotionPaused} />
+      </span>
       <span className="sag-space-dust" />
       <span className="sag-space-meteor sag-space-meteor--one" />
       <span className="sag-space-meteor sag-space-meteor--two" />

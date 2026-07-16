@@ -25,6 +25,7 @@ import {
   getSearchStrategy,
   type SearchStrategy,
 } from "@/lib/retrieval-config";
+import { sortSearchEvents, type SearchResultSort } from "@/lib/search-result-sort";
 import { cn } from "@/lib/utils";
 import type {
   ActivityItem,
@@ -47,7 +48,13 @@ import { EmptyState } from "@/components/features/empty-state";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 // 图谱视图较重，按需加载。
 const SearchGraph = dynamic(() => import("@/components/features/search-graph"), {
@@ -418,14 +425,17 @@ function ResultList({
   onEventClick,
   onCitationClick,
   compact,
+  sort,
 }: {
   result: SearchResponse;
   onEventClick?: (event: SearchEvent, result: SearchResponse) => void;
   onCitationClick?: (citation: Citation, result: SearchResponse) => void;
   compact: boolean;
+  sort: SearchResultSort;
 }) {
   const t = useTranslations("Search");
   const { open } = useDetailPanel();
+  const events = sortSearchEvents(result.events, sort);
   if (result.events.length === 0 && result.sections.length === 0) {
     return (
       <EmptyState
@@ -489,7 +499,7 @@ function ResultList({
   }
   return (
     <div className="flex flex-col gap-3">
-      {result.events.map((event) => (
+      {events.map((event) => (
         <button
           key={event.id}
           type="button"
@@ -557,12 +567,14 @@ function SearchSummaryCard({
   citations,
   compact,
   streaming,
+  containerRef,
   onCitationClick,
 }: {
   summary: string;
   citations: Citation[];
   compact: boolean;
   streaming: boolean;
+  containerRef: React.RefObject<HTMLDivElement | null>;
   onCitationClick: (citation: Citation) => void;
 }) {
   const t = useTranslations("Search");
@@ -570,7 +582,8 @@ function SearchSummaryCard({
   const [canExpand, setCanExpand] = React.useState(false);
   const [expandedScrollable, setExpandedScrollable] = React.useState(false);
   const [following, setFollowing] = React.useState(true);
-  const [streamLayoutLocked, setStreamLayoutLocked] = React.useState(streaming);
+  const [availableHeight, setAvailableHeight] = React.useState<number | null>(null);
+  const cardRef = React.useRef<HTMLDivElement>(null);
   const viewportRef = React.useRef<HTMLDivElement>(null);
   const contentRef = React.useRef<HTMLDivElement>(null);
   const followOutputRef = React.useRef(true);
@@ -602,14 +615,6 @@ function SearchSummaryCard({
   React.useLayoutEffect(() => {
     if (streaming && !wasStreamingRef.current) {
       setExpanded(true);
-      setStreamLayoutLocked(true);
-      updateFollowing(true);
-    } else if (!streaming && wasStreamingRef.current) {
-      // Streaming reserves a stable viewport to avoid page jitter. Once the
-      // final answer arrives, release that temporary height while preserving
-      // the user's expanded state. Answers only collapse through an explicit
-      // user action, so completed output remains immediately readable.
-      setStreamLayoutLocked(false);
       updateFollowing(true);
     }
     wasStreamingRef.current = streaming;
@@ -617,18 +622,50 @@ function SearchSummaryCard({
 
   const collapsedLimit = compact ? 72 : 96;
 
+  const measureAvailableHeight = React.useCallback(() => {
+    const container = containerRef.current;
+    const card = cardRef.current;
+    if (!container || !card) return;
+    const containerRect = container.getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
+    const topInScrollContent = cardRect.top - containerRect.top + container.scrollTop;
+    const bottomPadding = Number.parseFloat(window.getComputedStyle(container).paddingBottom) || 0;
+    const next = Math.max(
+      80,
+      Math.floor(container.clientHeight - topInScrollContent - bottomPadding),
+    );
+    setAvailableHeight((current) => (current === next ? current : next));
+  }, [containerRef]);
+
+  React.useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    measureAvailableHeight();
+    const observer = new ResizeObserver(measureAvailableHeight);
+    observer.observe(container);
+    window.addEventListener("resize", measureAvailableHeight);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measureAvailableHeight);
+    };
+  }, [containerRef, measureAvailableHeight]);
+
+  React.useLayoutEffect(() => {
+    // The query form can wrap without resizing the outer panel. Re-measure
+    // when a new streamed answer is mounted so the cap still ends exactly at
+    // the container boundary.
+    measureAvailableHeight();
+  }, [compact, measureAvailableHeight, streaming]);
+
   React.useLayoutEffect(() => {
     const viewport = viewportRef.current;
     const content = contentRef.current;
     if (!viewport || !content) return;
 
     const update = () => {
-      const expandedLimit = compact
-        ? Math.min(288, Math.max(176, window.innerHeight * 0.42))
-        : Math.min(280, Math.max(176, window.innerHeight * 0.32));
       const contentHeight = content.scrollHeight;
       const nextCanExpand = contentHeight > collapsedLimit + 1;
-      const nextScrollable = expanded && contentHeight > expandedLimit + 1;
+      const nextScrollable = expanded && viewport.scrollHeight > viewport.clientHeight + 1;
       setCanExpand((current) => (current === nextCanExpand ? current : nextCanExpand));
       setExpandedScrollable((current) => (current === nextScrollable ? current : nextScrollable));
     };
@@ -640,32 +677,28 @@ function SearchSummaryCard({
   }, [collapsedLimit, compact, expanded]);
 
   React.useLayoutEffect(() => {
-    if (!streaming || !expanded || !followOutputRef.current) return;
+    if (!expanded || !followOutputRef.current) return;
     const frame = requestAnimationFrame(() => {
       // The user may scroll up after this frame was queued. Re-check here so
       // programmatic following never wins that race and pulls them back down.
       if (followOutputRef.current) scrollToLatest();
     });
     return () => cancelAnimationFrame(frame);
-  }, [expanded, scrollToLatest, streaming, summary]);
+  }, [expanded, scrollToLatest, summary]);
 
-  const collapsed = canExpand && !expanded;
+  const collapsed = !expanded;
   const expandedScrollRegion = expanded && expandedScrollable;
-  const streamHeight = compact ? "7.5rem" : "10rem";
-  const maxHeight = streamLayoutLocked && expanded
-    ? streamHeight
-    : !expanded
-      ? `${collapsedLimit}px`
-      : compact
-        ? "clamp(11rem, 42dvh, 18rem)"
-        : "clamp(11rem, 32dvh, 17.5rem)";
 
   return (
     <div
+      ref={cardRef}
       className={cn(
-        "shrink-0 rounded-lg border border-amber-500/15 bg-amber-500/[0.04]",
+        "flex shrink-0 flex-col overflow-hidden rounded-lg border border-amber-500/15 bg-amber-500/[0.04]",
         compact ? "px-3 py-2.5" : "px-4 py-3",
       )}
+      style={expanded && availableHeight !== null
+        ? { maxHeight: `${availableHeight}px` }
+        : undefined}
     >
       <div className="flex items-center justify-between gap-3">
         <div
@@ -689,15 +722,13 @@ function SearchSummaryCard({
               {t("followOutput")}
             </button>
           )}
-          {summary && (canExpand || streaming || (streamLayoutLocked && expanded)) && (
+          {summary && (canExpand || streaming || !expanded) && (
             <button
               type="button"
               onClick={() => {
                 const next = !expanded;
                 setExpanded(next);
-                if (!next) setStreamLayoutLocked(false);
-                else if (streaming) setStreamLayoutLocked(true);
-                if (streaming) updateFollowing(next);
+                updateFollowing(next);
               }}
               aria-expanded={expanded}
               aria-controls={contentId}
@@ -723,20 +754,19 @@ function SearchSummaryCard({
         role={expandedScrollRegion ? "region" : undefined}
         tabIndex={expandedScrollRegion ? 0 : undefined}
         onScroll={(event) => {
-          if (!streaming || !expanded) return;
+          if (!expanded) return;
           const viewport = event.currentTarget;
           const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
           updateFollowing(distance <= 32);
         }}
         className={cn(
-          "text-sm leading-6 text-foreground/80",
+          "min-h-0 text-sm leading-6 text-foreground/80",
           summary && "mt-1.5",
           !expanded && "overflow-hidden",
-          expanded && "overflow-y-auto overscroll-contain pr-1 outline-none [scrollbar-gutter:stable] focus-visible:ring-2 focus-visible:ring-ring",
+          expanded && "shrink overflow-y-auto overscroll-contain pr-1 outline-none [scrollbar-gutter:stable] focus-visible:ring-2 focus-visible:ring-ring",
         )}
         style={{
-          maxHeight,
-          height: streamLayoutLocked && expanded && summary ? maxHeight : undefined,
+          maxHeight: collapsed ? `${collapsedLimit}px` : undefined,
           WebkitMaskImage: collapsed
             ? "linear-gradient(to bottom, black 0, black calc(100% - 2rem), transparent 100%)"
             : undefined,
@@ -815,6 +845,7 @@ export function SearchPanel({
   const [mentionOpen, setMentionOpen] = React.useState(false);
   const [mentionIndex, setMentionIndex] = React.useState(0);
   const [view, setView] = React.useState<"list" | "graph">("graph");
+  const [resultSort, setResultSort] = React.useState<SearchResultSort>("relevance");
   const [compact, setCompact] = React.useState(false);
   const rootRef = React.useRef<HTMLDivElement>(null);
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -853,11 +884,24 @@ export function SearchPanel({
     [changeContentView, onSearchComplete, onSearchError, onSearchStart, search, t],
   );
 
+  const activitySourceIds = React.useMemo(
+    () => search.scoped.map((source) => source.id).sort(),
+    [search.scoped],
+  );
+  const activityScopeKey = activitySourceIds.join("\u0000");
+  const scopedActivity = React.useMemo(() => {
+    if (!search.activity || activitySourceIds.length === 0) return search.activity;
+    const allowed = new Set(activitySourceIds);
+    return search.activity.filter((item) => (
+      typeof item.source_id === "string" && allowed.has(item.source_id)
+    ));
+  }, [activitySourceIds, search.activity]);
+
   React.useEffect(() => {
-    if (showRecentActivity) void search.ensureActivity();
+    if (showRecentActivity) void search.ensureActivity(activitySourceIds);
     const seedQuery = initialQuery.trim();
     const hydrationKey = `${seedQuery}\u0000${initialSourceId ?? ""}`;
-    if (!seedQuery || hydrationKeyRef.current === hydrationKey) {
+    if (hydrationKeyRef.current === hydrationKey) {
       if (active) inputRef.current?.focus();
       return;
     }
@@ -870,7 +914,11 @@ export function SearchPanel({
         ? sources.find((item) => item.id === initialSourceId)
         : undefined;
       const sourceIds = source ? [source.id] : undefined;
-      if (source) search.setScope([{ id: source.id, name: source.name }]);
+      search.setScope(source ? [{ id: source.id, name: source.name }] : []);
+      if (!seedQuery) {
+        if (active) inputRef.current?.focus();
+        return;
+      }
       search.setQuery(seedQuery);
       void executeSearch({
         query: seedQuery,
@@ -883,7 +931,14 @@ export function SearchPanel({
     };
     // The URL seed is consumed once; live search state is owned by SearchProvider.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, initialQuery, initialSourceId, saveInitialExploration, showRecentActivity]);
+  }, [
+    active,
+    activityScopeKey,
+    initialQuery,
+    initialSourceId,
+    saveInitialExploration,
+    showRecentActivity,
+  ]);
 
   React.useEffect(() => {
     void ensureSources();
@@ -974,6 +1029,20 @@ export function SearchPanel({
         : search.result
           ? t("selectedEvidence", { count: search.result.sections.length })
           : "";
+  const currentSortLabel =
+    resultSort === "relevance" ? t("sortRelevance") : t("sortTime");
+  const nextSortLabel =
+    resultSort === "relevance" ? t("sortTime") : t("sortRelevance");
+  const sortToggleHint = t("sortToggleHint", {
+    current: currentSortLabel,
+    next: nextSortLabel,
+  });
+  const currentViewLabel = activeView === "list" ? t("listView") : t("graphView");
+  const nextViewLabel = activeView === "list" ? t("graphView") : t("listView");
+  const viewToggleHint = t("viewToggleHint", {
+    current: currentViewLabel,
+    next: nextViewLabel,
+  });
 
   return (
     <div
@@ -1205,23 +1274,44 @@ export function SearchPanel({
               {!compact && <span className="text-xs text-muted-foreground">
                 {resultStatus}
               </span>}
-              {showGraphView && (
-                <ToggleGroup
-                  type="single"
-                  variant="outline"
-                  size="sm"
-                  value={view}
-                  onValueChange={(v) => v && setView(v as typeof view)}
-                  aria-label={t("resultViewAria")}
-                >
-                  <ToggleGroupItem value="list" aria-label={t("listView")}>
-                    <List />
-                  </ToggleGroupItem>
-                  <ToggleGroupItem value="graph" aria-label={t("graphView")}>
-                    <Waypoints />
-                  </ToggleGroupItem>
-                </ToggleGroup>
-              )}
+              <div className="flex items-center gap-1">
+                {activeView === "list" && search.result.events.length > 0 && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Toggle
+                        variant="outline"
+                        size="sm"
+                        pressed={resultSort === "time"}
+                        onPressedChange={(pressed) =>
+                          setResultSort(pressed ? "time" : "relevance")
+                        }
+                        aria-label={sortToggleHint}
+                      >
+                        {resultSort === "time" ? <Clock /> : <Sparkles />}
+                      </Toggle>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">{sortToggleHint}</TooltipContent>
+                  </Tooltip>
+                )}
+                {showGraphView && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Toggle
+                        variant="outline"
+                        size="sm"
+                        pressed={activeView === "graph"}
+                        onPressedChange={(pressed) =>
+                          setView(pressed ? "graph" : "list")
+                        }
+                        aria-label={viewToggleHint}
+                      >
+                        {activeView === "graph" ? <Waypoints /> : <List />}
+                      </Toggle>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">{viewToggleHint}</TooltipContent>
+                  </Tooltip>
+                )}
+              </div>
             </div>
           </div>
           {(search.summaryStreaming || search.result.summary) && (
@@ -1230,6 +1320,7 @@ export function SearchPanel({
               citations={citations}
               compact={compact}
               streaming={search.summaryStreaming}
+              containerRef={rootRef}
               onCitationClick={(citation) => {
                 if (onCitationClick) {
                   onCitationClick(citation, search.result!);
@@ -1283,6 +1374,7 @@ export function SearchPanel({
                 onEventClick={onEventClick}
                 onCitationClick={onCitationClick}
                 compact={compact}
+                sort={resultSort}
               />
               {((search.canLoadMore && !search.error) || (search.busy && search.hasMore)) && (
                 <div className="flex justify-center pt-1">
@@ -1332,7 +1424,7 @@ export function SearchPanel({
       ) : contentView === "activity" && showRecentActivity ? (
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
           <ActivityTimeline
-            items={search.activity}
+            items={scopedActivity}
             compact={compact}
             interactive={activityInteractive}
             onItemOpen={onActivityClick}

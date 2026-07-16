@@ -567,7 +567,7 @@ export interface UniverseTimelineRelation extends UniverseRelation {
 export type UniverseTimelineDirection = "older" | "newer";
 
 export interface UniverseTimelineSlice {
-  schema_version: 2;
+  schema_version: 3;
   epoch: number;
   source_id: string;
   source_revision: string;
@@ -577,6 +577,8 @@ export interface UniverseTimelineSlice {
   page_id: string;
   bundles: Array<{
     bundle_id: string;
+    /** Snapshot-stable position in the source's exploration order; 0 = newest. */
+    ordinal: number;
     event: UniverseTimelineEventNode;
     nodes: UniverseTimelineEntityNode[];
     relations: UniverseTimelineRelation[];
@@ -589,6 +591,8 @@ export interface UniverseTimelineSlice {
     cursor_before: string | null;
     cursor_after: string | null;
   }>;
+  /** Snapshot-stable event total: the counting axis' length for this source. */
+  total_events: number;
   page: {
     returned_bundles: number;
     returned_unique_nodes: number;

@@ -213,7 +213,7 @@ async def test_universe_real_store_statistics_and_keyset_cursor():
             assert partition["entity_count"] == 11
             assert partition["relation_count"] == 34
             assert sum(bucket["count"] for bucket in partition["time_buckets"]) == 24
-            assert rebuilt.json()["policy"]["timeline_event_page_size"] == 6
+            assert rebuilt.json()["policy"]["timeline_event_page_size"] == 12
             assert rebuilt.json()["policy"]["event_entity_limit"] == 8
 
             oversized_timeline = await client.post(
@@ -222,7 +222,7 @@ async def test_universe_real_store_statistics_and_keyset_cursor():
                 json={
                     "epoch": 10,
                     "source_id": source_id,
-                    "limit": 7,
+                    "limit": 25,
                 },
             )
             assert oversized_timeline.status_code == 422
@@ -301,6 +301,19 @@ async def test_universe_real_store_statistics_and_keyset_cursor():
             assert len(timeline_events) == len(set(timeline_events)) == 24
             assert set(timeline_events) == {*event_ids, old_event_id}
             assert timeline_events[-1] == old_event_id
+
+            # The counting axis: ordinals stay contiguous across page seams and
+            # every page reports the same snapshot event total.
+            assert [
+                bundle["ordinal"]
+                for page in timeline_pages
+                for bundle in page["bundles"]
+            ] == list(range(24))
+            assert all(page["total_events"] == 24 for page in timeline_pages)
+            assert recovered_newer_page["total_events"] == 24
+            assert [
+                bundle["ordinal"] for bundle in recovered_newer_page["bundles"]
+            ] == [0, 1, 2, 3, 4, 5]
             assert sum(
                 len(bundle["relations"])
                 for page in timeline_pages
@@ -312,7 +325,7 @@ async def test_universe_real_store_statistics_and_keyset_cursor():
                 for bundle in page["bundles"]
             ) == 11
             for page in timeline_pages:
-                assert page["schema_version"] == 2
+                assert page["schema_version"] == 3
                 assert "nodes" not in page
                 assert "relations" not in page
                 assert len(page["bundles"]) == page["page"]["returned_bundles"]
@@ -730,3 +743,161 @@ async def test_universe_real_store_statistics_and_keyset_cursor():
             assert stale_continuation_expand.json()["error"]["code"] == (
                 "snapshot_changed"
             )
+
+
+@pytest.mark.asyncio
+async def test_universe_timeline_orders_same_instant_book_by_narrative_rank():
+    """An imported book stamps every event with one instant; the canonical
+    exploration order must fall back to the extractor's narrative rank, and the
+    ordinals must stay contiguous so the client's counting axis can carry it."""
+    from sag_api.core.db import SessionLocal
+    from sag_api.db.models import Source
+    from sag_api.main import app
+
+    transport = httpx.ASGITransport(app=app)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            email = f"universe-book-{uuid.uuid4().hex}@t.com"
+            token = (
+                await client.post(
+                    "/api/v1/auth/register",
+                    json={"email": email, "password": "password123"},
+                )
+            ).json()["access_token"]
+            headers = {"Authorization": f"Bearer {token}"}
+            source_body = (
+                await client.post(
+                    "/api/v1/sources",
+                    headers=headers,
+                    json={"name": "同刻书籍源"},
+                )
+            ).json()
+            source_id = source_body["id"]
+            async with SessionLocal() as session:
+                source = await session.get(Source, source_id)
+                assert source is not None
+                source_config_id = source.sag_source_config_id
+
+            from zleap.sag.db import get_session_factory
+            from zleap.sag.db.models import (
+                Entity,
+                EntityType,
+                EventEntity,
+                SourceConfig,
+                SourceEvent,
+            )
+
+            imported_at = datetime.now() - timedelta(days=2)
+            entity_type_id = uuid.uuid4().hex
+            entity_id = uuid.uuid4().hex
+            # Ids sort in the exact opposite direction of ranks, so any id
+            # tie-break would reverse the book; only rank produces reading order.
+            chapter_ids = [f"{9 - rank}{uuid.uuid4().hex[:12]}" for rank in range(8)]
+            session_factory = get_session_factory()
+            async with session_factory() as session:
+                await session.merge(SourceConfig(id=source_config_id, name="同刻书籍源"))
+                session.add(
+                    EntityType(
+                        id=entity_type_id,
+                        type=f"concept_{entity_type_id[:8]}",
+                        name="概念",
+                    )
+                )
+                session.add(
+                    Entity(
+                        id=entity_id,
+                        source_config_id=source_config_id,
+                        entity_type_id=entity_type_id,
+                        type="concept",
+                        name="书中人物",
+                        normalized_name="书中人物",
+                        description="全书事件共享的实体",
+                    )
+                )
+                await session.flush()
+                for rank, event_id in enumerate(chapter_ids):
+                    session.add(
+                        SourceEvent(
+                            id=event_id,
+                            source_config_id=source_config_id,
+                            source_type="ARTICLE",
+                            source_id="book-doc",
+                            title=f"章节 {rank:02d}",
+                            summary="整本书的事件共享同一导入时刻。",
+                            content="测试内容",
+                            category="书籍",
+                            chunk_id=f"chunk-{rank // 2}",
+                            rank=rank,
+                            start_time=imported_at,
+                            created_time=imported_at,
+                        )
+                    )
+                    session.add(
+                        EventEntity(
+                            id=uuid.uuid4().hex,
+                            event_id=event_id,
+                            entity_id=entity_id,
+                            weight=1.0,
+                        )
+                    )
+                await session.commit()
+
+            async def timeline(
+                cursor: str | None = None,
+                snapshot_id: str | None = None,
+                direction: str = "older",
+            ):
+                response = await client.post(
+                    "/api/v1/universe/timeline",
+                    headers=headers,
+                    json={
+                        "epoch": 7,
+                        "source_id": source_id,
+                        "limit": 6,
+                        "direction": direction,
+                        "cursor": cursor,
+                        "snapshot_id": snapshot_id,
+                    },
+                )
+                assert response.status_code == 200, response.text
+                return response.json()
+
+            pages = [await timeline()]
+            while pages[-1]["page"]["has_more"]:
+                pages.append(
+                    await timeline(
+                        pages[-1]["page"]["next_cursor"],
+                        pages[0]["snapshot_id"],
+                    )
+                )
+
+            assert [page["page"]["returned_bundles"] for page in pages] == [6, 2]
+            assert all(page["total_events"] == 8 for page in pages)
+            paged_event_ids = [
+                bundle["event"]["id"]
+                for page in pages
+                for bundle in page["bundles"]
+            ]
+            # Entry point is chapter 0; flying deeper reads the book forward.
+            assert paged_event_ids == chapter_ids
+            assert [
+                bundle["ordinal"] for page in pages for bundle in page["bundles"]
+            ] == list(range(8))
+
+            # Paging back toward the newer end recovers the same narrative order.
+            recovered = await timeline(
+                pages[1]["page"]["newer_cursor"],
+                pages[0]["snapshot_id"],
+                "newer",
+            )
+            assert [
+                bundle["event"]["id"] for bundle in recovered["bundles"]
+            ] == chapter_ids[:6]
+            assert [bundle["ordinal"] for bundle in recovered["bundles"]] == [
+                0,
+                1,
+                2,
+                3,
+                4,
+                5,
+            ]

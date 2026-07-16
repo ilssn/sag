@@ -85,6 +85,24 @@ async def test_default_agent_activity_and_document_file():
             assert any(x["id"] == doc["id"] for x in acts)
             assert acts == sorted(acts, key=lambda x: x["at"], reverse=True)
 
+            scoped_acts = (
+                await c.get(
+                    "/api/v1/activity",
+                    headers=A,
+                    params=[("source_ids", src["id"]), ("source_ids", src["id"])],
+                )
+            ).json()
+            assert any(x["id"] == doc["id"] for x in scoped_acts)
+            assert all(x["source_id"] == src["id"] for x in scoped_acts)
+            empty_acts = (
+                await c.get(
+                    "/api/v1/activity",
+                    headers=A,
+                    params={"source_ids": "missing-source"},
+                )
+            ).json()
+            assert empty_acts == []
+
             # 归档：PATCH → 默认列表消失、archived=true 列表出现、恢复回来
             arch = await c.patch(
                 f"/api/v1/agents/{a1['id']}/threads/{t['id']}",
@@ -156,6 +174,11 @@ async def test_default_agent_activity_and_document_file():
                 f"/api/v1/sources/{src['id']}/documents/{doc['id']}/file", headers=A
             )
             assert f.status_code == 200 and b"hello sag" in f.content
+            preview = await c.get(
+                f"/api/v1/sources/{src['id']}/documents/{doc['id']}/preview", headers=A
+            )
+            assert preview.status_code == 200 and "hello sag" in preview.text
+            assert preview.headers["x-muse-source-encoding"] == "utf-8"
             nf = await c.get(
                 f"/api/v1/sources/{src['id']}/documents/does-not-exist/file", headers=A
             )

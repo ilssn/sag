@@ -10,7 +10,10 @@ const appShellSource = readFileSync(
 describe("app shell viewport stage", () => {
   it("pins the universe stage to the visible viewport instead of content height", () => {
     const stageStart = appShellSource.indexOf("<DetailPanelProvider>");
-    const backdropStart = appShellSource.indexOf("<SpaceBackdrop />", stageStart);
+    const backdropStart = appShellSource.indexOf(
+      "{appMode !== \"explore\" && <SpaceBackdrop />}",
+      stageStart,
+    );
     const stageOpening = appShellSource.slice(stageStart, backdropStart);
 
     expect(stageStart).toBeGreaterThanOrEqual(0);

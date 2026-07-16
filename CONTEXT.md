@@ -31,3 +31,11 @@ _Avoid_: SAG 应用
 **SAG 自托管 API（SAG Self-hosted API）**:
 SAG 应用随 FastAPI 后端提供的 HTTP、OpenAI 兼容和 MCP 接口。开发者在自己的服务器上运行 SAG 后使用这些接口连接自定义前端或外部 Agent；它不是由项目方托管的公共云 API。
 _Avoid_: zleap-sag Python API、公共云 API
+
+**本机集成端点（Local Integration Endpoint）**:
+桌面版向同一台电脑上的外部宿主提供 API 与 MCP 的稳定入口；主机固定为 `127.0.0.1`，MCP 路径固定为 `/mcp/`，端口采用公开默认值并允许用户修改和持久化。端口冲突必须显式修复，不能静默改变外部宿主已保存的地址。
+_Avoid_: 客户端内部 API、每次启动随机地址、可任意填写的完整 URL
+
+**本机访问密钥（Local Access Key）**:
+桌面版首次安装时自动生成、供同一台电脑上的外部 API/MCP 宿主共用的单一长期密钥；默认访问当前用户的整个知识库，不按宿主、信源或有效期拆分，用户只能复制或重新生成它。
+_Avoid_: 登录令牌、个人访问令牌列表、细粒度权限系统

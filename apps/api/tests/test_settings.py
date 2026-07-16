@@ -72,6 +72,11 @@ def test_provider_base_urls_default_to_302_china_endpoint(monkeypatch):
     assert configured.mineru_base_url == "https://api.302ai.cn"
 
 
+def test_default_model_output_limit_is_20000(monkeypatch):
+    monkeypatch.delenv("SAG_LLM_MAX_TOKENS", raising=False)
+    assert Settings(_env_file=None).llm_max_tokens == 20_000
+
+
 @pytest.mark.asyncio
 async def test_legacy_atomic_db_strategy_is_migrated():
     from sqlalchemy import delete, select
