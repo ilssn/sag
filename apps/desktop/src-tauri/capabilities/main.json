@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "主窗口最小权限：UI 只经 HTTP 与 sidecar 通信；对话框/打开器/更新器均由 Rust 侧驱动，前端仅需 core 默认（含事件监听）。",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

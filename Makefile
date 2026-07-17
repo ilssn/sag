@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help dev api web install install-api install-web test build compose-config compose-up compose-ps compose-logs compose-down compose-up-postgres compose-down-postgres
+.PHONY: help dev api web install install-api install-web test build desktop-install desktop-dev desktop-sidecar desktop-build desktop-smoke compose-config compose-up compose-ps compose-logs compose-down compose-up-postgres compose-down-postgres
 
 help: ## 显示可用命令
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -48,3 +48,18 @@ compose-up-postgres: ## 使用 Postgres + pgvector 覆盖启动（需先配置 .
 
 compose-down-postgres: ## 停止 Postgres 覆盖部署
 	docker compose -f compose.yaml -f compose.postgres.yaml down
+
+desktop-install: ## 安装桌面壳依赖（npm，Tauri CLI）
+	cd apps/desktop && npm ci
+
+desktop-dev: ## 桌面开发模式（Next dev + venv sidecar + tauri dev，dev 标识不碰生产数据）
+	cd apps/desktop && npm run dev
+
+desktop-sidecar: ## 冻结 FastAPI sidecar（PyInstaller onedir → binaries/sidecar）
+	cd apps/desktop && python3 scripts/build_sidecar.py
+
+desktop-build: ## 生产构建（web 静态导出 + sidecar 冻结 + tauri build）
+	cd apps/desktop && npm run stage:frontend && python3 scripts/build_sidecar.py && npm run build
+
+desktop-smoke: ## 冻结产物冒烟（启动协议 + /system/health 探针）
+	cd apps/desktop && python3 scripts/smoke_sidecar.py

@@ -1,0 +1,22 @@
+{
+  "name": "sag-desktop",
+  "private": true,
+  "version": "1.2.2",
+  "description": "SAG 桌面壳（Tauri v2 + FastAPI sidecar）",
+  "packageManager": "npm@10.9.2",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "preinstall": "node ./scripts/require-npm.cjs",
+    "tauri": "tauri",
+    "dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
+    "stage:frontend": "node ./scripts/stage-frontend.mjs",
+    "stage:sidecar": "python3 ./scripts/build_sidecar.py",
+    "check:versions": "node ./scripts/check-versions.mjs",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

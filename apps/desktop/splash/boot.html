@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SAG</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #0b0d12; --fg: #e7e9ee; --muted: #9aa1ad; --border: #262b36;
+    --accent: #d3a95f; --destructive: #e5484d; --card: #12151c;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #f7f7f8; --fg: #1a1d24; --muted: #6b7280; --border: #e3e5ea; --card: #ffffff; }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    display: grid; place-items: center; background: var(--bg); color: var(--fg);
+    font: 14px/1.6 -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
+    -webkit-user-select: none; user-select: none;
+  }
+  .panel { display: flex; flex-direction: column; align-items: center; gap: 14px; width: min(420px, 86vw); }
+  .mark {
+    width: 56px; height: 56px; border-radius: 14px; display: grid; place-items: center;
+    background: linear-gradient(135deg, var(--accent), #b8863b); color: #14161c;
+    font-size: 24px; font-weight: 700; letter-spacing: .5px;
+    box-shadow: 0 8px 30px rgba(211, 169, 95, .25);
+  }
+  .phase { color: var(--muted); min-height: 1.6em; text-align: center; }
+  .bar { width: 220px; height: 3px; border-radius: 999px; background: var(--border); overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 40%; border-radius: 999px; background: var(--accent);
+    animation: slide 1.2s ease-in-out infinite; }
+  @keyframes slide { 0% { transform: translateX(-100%);} 100% { transform: translateX(320%);} }
+  .error { display: none; width: 100%; border: 1px solid color-mix(in srgb, var(--destructive) 45%, transparent);
+    background: var(--card); border-radius: 10px; padding: 14px 16px; }
+  .error h2 { font-size: 14px; color: var(--destructive); margin-bottom: 6px; }
+  .error p { color: var(--muted); font-size: 13px; word-break: break-all; }
+  .error .hint { margin-top: 6px; color: var(--fg); }
+  .row { display: none; gap: 8px; margin-top: 2px; flex-wrap: wrap; justify-content: center; }
+  .port-row { display: none; gap: 8px; align-items: center; }
+  input[type="number"] {
+    width: 110px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--card); color: var(--fg); font: inherit;
+  }
+  button {
+    padding: 7px 14px; border-radius: 8px; border: 1px solid var(--border); cursor: pointer;
+    background: var(--card); color: var(--fg); font: inherit;
+  }
+  button.primary { background: var(--accent); border-color: transparent; color: #14161c; font-weight: 600; }
+  button:hover { filter: brightness(1.06); }
+</style>
+</head>
+<body>
+  <main class="panel" role="status" aria-live="polite">
+    <div class="mark">S</div>
+    <div class="bar" id="bar"><i></i></div>
+    <div class="phase" id="phase">正在启动…</div>
+
+    <section class="error" id="error">
+      <h2 id="error-title">启动失败</h2>
+      <p id="error-detail"></p>
+      <p class="hint" id="error-hint"></p>
+    </section>
+
+    <div class="port-row" id="port-row">
+      <label for="port">端口</label>
+      <input id="port" type="number" min="1024" max="49151" />
+      <button class="primary" id="save-port">保存并重试</button>
+    </div>
+
+    <div class="row" id="actions">
+      <button id="retry">重试</button>
+      <button id="open-logs">打开日志</button>
+      <button id="quit">退出</button>
+    </div>
+  </main>
+
+<script>
+(function () {
+  var invoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
+  var listen = window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen;
+  var $ = function (id) { return document.getElementById(id); };
+
+  var PHASES = {
+    "port-check": "检查端口…",
+    "spawning": "启动本地服务…",
+    "starting": "正在启动…",
+    "migrating": "正在升级本地数据…",
+    "engine-init": "正在唤醒知识引擎…",
+    "restarting": "服务重启中…",
+    "ready": "即将就绪…"
+  };
+  // 终态错误 → 用户指引（ADR-0010/0014/0015/0017）
+  var GUIDANCE = {
+    "port-conflict": "该端口被其他程序占用。修改端口后重试，或退出占用程序。",
+    "instance-already-running": "SAG 已在运行。请使用已打开的窗口，或先从托盘退出。",
+    "migration-failed": "本地数据升级失败。数据已保留在恢复点（backups/），可打开日志查看详情。",
+    "engine-data-incompatible": "该数据由更新版本的 SAG 创建。请升级应用后再打开，或从备份恢复。",
+    "crash-loop": "本地服务连续启动失败。请打开日志查看详情。",
+    "version-mismatch": "组件版本不一致（疑似安装损坏）。请重新安装应用。",
+    "startup-timeout": "启动超时。请打开日志查看详情后重试。"
+  };
+
+  function showError(payload) {
+    $("bar").style.display = "none";
+    $("phase").style.display = "none";
+    $("error").style.display = "block";
+    $("actions").style.display = "flex";
+    $("error-title").textContent = payload.title || "启动失败";
+    $("error-detail").textContent = payload.message || "";
+    $("error-hint").textContent = GUIDANCE[payload.code] || "";
+    if (payload.code === "port-conflict") {
+      $("port-row").style.display = "flex";
+      if (payload.port) $("port").value = payload.port;
+    }
+  }
+
+  function showPhase(payload) {
+    $("error").style.display = "none";
+    $("actions").style.display = "none";
+    $("port-row").style.display = "none";
+    $("bar").style.display = "block";
+    $("phase").style.display = "block";
+    var text = PHASES[payload.phase] || "正在启动…";
+    if (payload.phase === "migrating" && payload.current && payload.total) {
+      text += "（" + payload.current + "/" + payload.total + "）";
+    }
+    if (payload.phase === "restarting" && payload.attempt) {
+      text += "（第 " + payload.attempt + " 次）";
+    }
+    $("phase").textContent = text;
+  }
+
+  if (listen) {
+    listen("sag://startup", function (event) {
+      var payload = event.payload || {};
+      if (payload.state === "error") showError(payload);
+      else showPhase(payload);
+    });
+  }
+  if (invoke) {
+    // 页面加载完成后向壳请求当前状态（避免错过窗口创建前的事件）
+    invoke("boot_status").then(function (payload) {
+      if (payload) (payload.state === "error" ? showError : showPhase)(payload);
+    }).catch(function () {});
+    $("retry").addEventListener("click", function () { invoke("retry_startup").catch(function () {}); });
+    $("quit").addEventListener("click", function () { invoke("quit_app").catch(function () {}); });
+    $("open-logs").addEventListener("click", function () { invoke("open_logs").catch(function () {}); });
+    $("save-port").addEventListener("click", function () {
+      var port = parseInt($("port").value, 10);
+      if (!port || port < 1024 || port > 49151) return;
+      invoke("set_port_preference", { port: port })
+        .then(function () { return invoke("retry_startup"); })
+        .catch(function () {});
+    });
+  }
+})();
+</script>
+</body>
+</html>
