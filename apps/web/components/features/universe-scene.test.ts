@@ -10,11 +10,15 @@ const engineSource = readFileSync(
   new URL("./universe-scene-engine.ts", import.meta.url),
   "utf8",
 );
+const texturesSource = readFileSync(
+  new URL("./universe-scene-textures.ts", import.meta.url),
+  "utf8",
+);
 const componentSource = readFileSync(
   new URL("./universe-scene.tsx", import.meta.url),
   "utf8",
 );
-const source = `${contractSource}\n${engineSource}\n${componentSource}`;
+const source = `${contractSource}\n${texturesSource}\n${engineSource}\n${componentSource}`;
 
 function sourceBetween(start: string, end: string) {
   const startIndex = source.indexOf(start);
