@@ -25,7 +25,7 @@ web: ## 启动前端（Next dev，局域网可访问）
 test: ## 运行后端与 Agent Core 测试
 	cd apps/api && . .venv/bin/activate && pytest -q
 
-build: ## 构建前端产物
+build: ## 构建前端静态导出（apps/web/out）
 	cd apps/web && npm run build
 
 compose-config: ## 校验默认 Docker 配置（SQLite + LanceDB）

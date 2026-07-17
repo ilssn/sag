@@ -45,7 +45,18 @@ jobs:
         run: npx tsc --noEmit
       - name: Lint（ESLint）
         run: npm run lint
+      - name: 词典一致性
+        run: npm run i18n:check
       - name: 单元测试
         run: npm run test:unit
-      - name: 生产构建
+      - name: 生产构建（静态导出）
         run: npm run build
+      - name: 产物断言（ADR-0006/0007）
+        run: |
+          test -f out/index.html
+          test -f out/chat/index.html
+          test -f out/knowledge/index.html
+          test -f out/login/index.html
+          test -f out/404.html
+          test ! -f out/config.json  # 运行时配置由部署生成,不得进产物
+          ! grep -r "NEXT_PUBLIC_API" out/_next/static >/dev/null

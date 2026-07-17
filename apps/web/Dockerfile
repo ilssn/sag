@@ -5,28 +5,21 @@ COPY package.json package-lock.json* ./
 COPY scripts/require-npm.cjs ./scripts/require-npm.cjs
 RUN npm ci
 
-# ── build ──────────────────────────────────────────────
+# ── build（静态导出，ADR-0006）─────────────────────────
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-# NEXT_PUBLIC_* 在构建时内联；浏览器直连该地址
-ARG NEXT_PUBLIC_API_BASE=http://localhost:8000
-ENV NEXT_PUBLIC_API_BASE=$NEXT_PUBLIC_API_BASE
-ARG NEXT_PUBLIC_ENABLE_WINDOW_SCALING=true
-ENV NEXT_PUBLIC_ENABLE_WINDOW_SCALING=$NEXT_PUBLIC_ENABLE_WINDOW_SCALING
-RUN npm run build
+# 运行时配置（ADR-0007）：不再有任何 NEXT_PUBLIC_* 构建参数;
+# API 地址由容器启动时生成的 config.json 下发,改动无需重建镜像。
+RUN rm -f public/config.json && npm run build
 
-# ── runner（standalone）────────────────────────────────
-FROM node:20-alpine AS runner
-WORKDIR /app
-ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
-RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
-COPY --from=builder /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-USER nextjs
+# ── runner（nginx 静态托管）────────────────────────────
+FROM nginx:alpine AS runner
+COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=builder /app/out /usr/share/nginx/html
+# nginx 官方镜像启动时执行 /docker-entrypoint.d/*.sh:按环境变量生成运行时配置
+COPY deploy/40-sag-runtime-config.sh /docker-entrypoint.d/40-sag-runtime-config.sh
+RUN chmod +x /docker-entrypoint.d/40-sag-runtime-config.sh
 EXPOSE 3000
-ENV PORT=3000 HOSTNAME=0.0.0.0
-CMD ["node", "server.js"]
