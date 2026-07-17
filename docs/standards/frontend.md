@@ -76,9 +76,9 @@
 
 ## 已知拆解跟进
 
-- `universe-scene-engine.ts` 的 `setData`（约 760 行、触碰 47 个字段）：数据装载/差分/涌现调度
+- `universe-scene/engine.ts` 的 `setData`（约 760 行、触碰 47 个字段）：数据装载/差分/涌现调度
   仍为单方法；后续按「建索引 → 差分链接 → 应用涌现 → 调度呈现」四段内分解，每段先补
   纯逻辑单测再动刀。
-- `components/features/knowledge-universe.tsx`（约 3.8k 行）：探索主组件的 50+ ref/state 深度耦合，
+- `components/features/knowledge-universe/knowledge-universe.tsx`（约 3.8k 行）：探索主组件的 50+ ref/state 深度耦合，
   无零风险接缝；后续拆解应以「先为目标 hook 补交互级测试，再按 数据装载（expansion 缓存族）/
   时间线播放 / 场景桥接 三条职责线渐进抽离」推进，禁止无测试的一次性大拆。

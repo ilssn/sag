@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { toolArgumentsPreview } from "@/lib/agent-run-activity";
 import { api } from "@/lib/api";
 import type { ConversationMessage } from "@/lib/conversation-runtime";
-import { parsePetDraft, PET_DRAFT_EVENT, PET_DRAFT_KEY } from "@/lib/pet-events";
+import { parsePetDraft, PET_DRAFT_EVENT, PET_DRAFT_KEY } from "@/lib/pet";
 import { formatTokenCount, relativeTime } from "@/lib/format";
 import type { Citation, Source } from "@/lib/types";
 import { cn } from "@/lib/utils";

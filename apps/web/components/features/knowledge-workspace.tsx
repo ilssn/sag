@@ -17,7 +17,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { knowledgeHref } from "@/lib/client-route";
 import { relativeTime } from "@/lib/format";
 import type { Source } from "@/lib/types";
-import { dispatchUniverseSourceFocus } from "@/lib/universe-events";
+import { dispatchUniverseSourceFocus } from "@/lib/universe";
 import { cn } from "@/lib/utils";
 import { useApp } from "@/components/features/app-shell";
 import { CreateSourceDialog } from "@/components/features/create-source-dialog";

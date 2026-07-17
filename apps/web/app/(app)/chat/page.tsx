@@ -13,7 +13,7 @@ import {
   useConversationSession,
 } from "@/components/features/chat/conversation-provider";
 import { ConversationPanel } from "@/components/features/chat/conversation-panel";
-import { PetHeadAvatar } from "@/components/features/pet-head-avatar";
+import { PetHeadAvatar } from "@/components/features/pet";
 import { Skeleton } from "@/components/ui/skeleton";
 
 /** 对话主入口；会话数据与迷你问答共享，仅保留完整工作台外壳。 */

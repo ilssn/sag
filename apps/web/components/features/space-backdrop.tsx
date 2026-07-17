@@ -9,7 +9,7 @@ import {
   readUniverseView,
   UNIVERSE_VIEW_EVENT,
   type UniverseViewState,
-} from "@/lib/universe-events";
+} from "@/lib/universe";
 
 const SpaceParticles = dynamic(
   () => import("@/components/features/space-particles").then((module) => module.SpaceParticles),

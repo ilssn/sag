@@ -26,7 +26,7 @@ import {
 import { DEFAULT_AGENT_AVATAR, DEFAULT_AGENT_NAME } from "@/lib/branding";
 import type { ConversationTransport } from "@/lib/conversation-runtime";
 import { DEFAULT_TIME_ZONE } from "@/lib/format";
-import { PetAgent } from "@/lib/pet-agent";
+import { PetAgent } from "@/lib/pet";
 import {
   DEFAULT_SEARCH_STRATEGY,
   isSearchStrategy,
@@ -46,7 +46,7 @@ import {
   UNIVERSE_ASK_EVENT,
   UNIVERSE_DETAIL_EVENT,
   dispatchUniverseActivation,
-} from "@/lib/universe-events";
+} from "@/lib/universe";
 import { cn } from "@/lib/utils";
 import { runtimeConfig } from "@/lib/runtime-config";
 import {
@@ -72,13 +72,13 @@ import {
 } from "@/components/features/detail-panel";
 import { KnowledgeProvider } from "@/components/features/knowledge-provider";
 import { PetWithPreference } from "@/components/features/pet";
-import { PetHeadAvatar } from "@/components/features/pet-head-avatar";
+import { PetHeadAvatar } from "@/components/features/pet";
 import { QuickModelSetupDialog } from "@/components/features/quick-model-setup-dialog";
 import { SearchProvider } from "@/components/features/search/search-provider";
 import { SpaceBackdrop } from "@/components/features/space-backdrop";
 import { SiteHeader } from "@/components/features/site-header";
 import { ThemeToggle } from "@/components/features/theme-toggle";
-import { UniverseViewSettingsDrawer } from "@/components/features/universe-view-settings-drawer";
+import { UniverseViewSettingsDrawer } from "@/components/features/universe-view-settings";
 import { Button } from "@/components/ui/button";
 import {
   ResizableHandle,

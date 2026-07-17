@@ -83,7 +83,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 const OrbitalEventEntityGraph = dynamic(
   () =>
-    import("@/components/features/orbital-graph-3d").then(
+    import("@/components/features/orbital-graph").then(
       (module) => module.OrbitalEventEntityGraph,
     ),
   {

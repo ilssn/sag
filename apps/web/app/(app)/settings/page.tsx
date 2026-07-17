@@ -12,7 +12,7 @@ import { McpSettingsCard } from "@/components/features/mcp-settings-card";
 import { McpServiceSettings } from "@/components/features/mcp-service-settings";
 import { ModelConfigForm } from "@/components/features/model-config-form";
 import { PageHeader } from "@/components/features/page-header";
-import { UniverseViewSettings } from "@/components/features/universe-view-settings-panel";
+import { UniverseViewSettings } from "@/components/features/universe-view-settings";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   SETTINGS_PAGE,
@@ -23,7 +23,7 @@ import {
 import {
   useUniverseEntityCategories,
   useUniverseViewPreferences,
-} from "@/lib/universe-view-preferences";
+} from "@/lib/universe";
 
 const tabTriggerClassName =
   "h-10 flex-none gap-2 rounded-none border-b-2 border-transparent px-3 py-0 shadow-none " +

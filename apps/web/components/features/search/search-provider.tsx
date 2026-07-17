@@ -10,7 +10,7 @@ import {
   activationFromSearch,
   dispatchUniverseActivation,
   dispatchUniverseReset,
-} from "@/lib/universe-events";
+} from "@/lib/universe";
 import {
   appendSearchSummary,
   beginSearchLifecycle,

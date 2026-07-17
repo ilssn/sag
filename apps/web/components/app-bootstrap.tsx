@@ -9,7 +9,7 @@ import { DEFAULT_AGENT_AVATAR, PRODUCT_NAME } from "@/lib/branding";
 import { persistLocale, resolveInitialLocale } from "@/i18n/client";
 import { MESSAGES } from "@/i18n/messages";
 import type { AppLocale } from "@/i18n/config";
-import { PetHeadAvatar } from "@/components/features/pet-head-avatar";
+import { PetHeadAvatar } from "@/components/features/pet";
 import { SpaceBackdrop } from "@/components/features/space-backdrop";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
