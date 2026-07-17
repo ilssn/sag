@@ -31,10 +31,8 @@ import {
   readInitialPetCollapsed,
   shouldShowPet,
 } from "@/lib/app-initialization";
-import type { ConversationSessionSnapshot } from "@/lib/conversation-runtime";
 import {
   PetAgent,
-  type PetAgentActivity,
   type PetAgentFacing,
 } from "@/lib/pet-agent";
 import {
@@ -59,6 +57,12 @@ import {
 import { cn } from "@/lib/utils";
 import { chatHref } from "@/lib/client-route";
 import { workspaceSectionFromPathname, type WorkspaceSection } from "@/lib/workspace";
+import {
+  deriveActivity,
+  visiblePlacementAvoidRects,
+  type PetFormTransition,
+  type PetVisualMode,
+} from "@/components/features/pet-activity";
 import { useApp } from "@/components/features/app-shell";
 import {
   useOptionalConversationIndex,
@@ -70,17 +74,6 @@ import {
 } from "@/components/features/pet-mini-workspace";
 import { petFaceStyle } from "@/components/features/pet-head-avatar";
 
-type PetVisualMode = PetAgentActivity | "jumping" | "flying" | "roaming" | "dancing";
-type PetFormTransition = "idle" | "bursting" | "falling" | "launching";
-
-interface PetActivity {
-  streaming: boolean;
-  mode: Exclude<PetAgentActivity, "done">;
-  label: string;
-  threadId: string | null;
-  runKey: string | null;
-  failed: boolean;
-}
 
 const IDLE_EXPRESSIONS = ["^_^", "-_-", "o_o", "._.", "u_u"] as const;
 const PET_VIEWPORT_MARGIN = 24;
@@ -89,19 +82,6 @@ const PET_BUBBLE_FALL_DURATION = 460;
 const PET_BUBBLE_LAUNCH_DURATION = 1_250;
 const PET_BUBBLE_DROP_DISTANCE = 28;
 
-function visiblePlacementAvoidRects() {
-  return [...document.querySelectorAll<HTMLElement>("[data-universe-controls]")]
-    .filter((element) => element.offsetParent !== null)
-    .map((element) => {
-      const bounds = element.getBoundingClientRect();
-      return {
-        x: bounds.left,
-        y: bounds.top,
-        width: bounds.width,
-        height: bounds.height,
-      };
-    });
-}
 
 const MODE_EXPRESSIONS: Partial<Record<PetVisualMode, string>> = {
   thinking: "◔_◔",
@@ -123,53 +103,6 @@ function nameplateStyle(value: string): React.CSSProperties {
   return { fontSize: 5 };
 }
 
-function deriveActivity(
-  state: ConversationSessionSnapshot | null,
-  labels: { thinking: string; answering: string; working: string },
-): PetActivity {
-  const steps = state?.run?.steps ?? [];
-  const active = [...steps].reverse().find((step) => step.status === "active");
-  const failed = Boolean(state?.error) && !state?.run;
-
-  if (!state?.run) {
-    return {
-      streaming: false,
-      mode: failed ? "error" : "idle",
-      label: "",
-      threadId: state?.threadId ?? null,
-      runKey: null,
-      failed,
-    };
-  }
-  if (!active || active.kind === "thinking") {
-    return {
-      streaming: true,
-      mode: "thinking",
-      label: labels.thinking,
-      threadId: state.threadId,
-      runKey: `${state.sessionId}:${state.run.requestId}`,
-      failed,
-    };
-  }
-  if (active.kind === "answer") {
-    return {
-      streaming: true,
-      mode: "answering",
-      label: labels.answering,
-      threadId: state.threadId,
-      runKey: `${state.sessionId}:${state.run.requestId}`,
-      failed,
-    };
-  }
-  return {
-    streaming: true,
-    mode: "working",
-    label: active.label || active.name || labels.working,
-    threadId: state.threadId,
-    runKey: `${state.sessionId}:${state.run.requestId}`,
-    failed,
-  };
-}
 
 function usePetActivity() {
   const t = useTranslations("Pet");
