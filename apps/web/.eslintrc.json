@@ -2,6 +2,13 @@
   "extends": ["next/core-web-vitals", "next/typescript"],
   "root": true,
   "rules": {
-    "@next/next/no-img-element": "off"
+    "@next/next/no-img-element": "off",
+    "no-restricted-syntax": [
+      "error",
+      {
+        "selector": "MemberExpression[property.name=/^NEXT_PUBLIC_/]",
+        "message": "静态产物禁止编译期环境变量：改用 lib/runtime-config（ADR-0007）。"
+      }
+    ]
   }
 }

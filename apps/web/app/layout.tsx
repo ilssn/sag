@@ -5,6 +5,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages, getTranslations } from "next-intl/server";
 
 import { PRODUCT_NAME } from "@/lib/branding";
+import { AppBootstrap } from "@/components/app-bootstrap";
 import { Providers } from "@/components/providers";
 import { localeDocumentTag } from "@/i18n/config";
 import { fontVars } from "./fonts";
@@ -21,7 +22,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     <html lang={localeDocumentTag(locale)} suppressHydrationWarning className={fontVars}>
       <body className="min-h-screen bg-background text-foreground antialiased">
         <NextIntlClientProvider locale={locale} messages={messages}>
-          <Providers>{children}</Providers>
+          <Providers>
+            <AppBootstrap>{children}</AppBootstrap>
+          </Providers>
         </NextIntlClientProvider>
       </body>
     </html>

@@ -1,5 +1,5 @@
-import { API_BASE } from "./api";
 import { getToken } from "./auth";
+import { apiBase } from "./runtime-config";
 import { readClientLocale } from "../i18n/client";
 import { clientErrorMessage, serverErrorMessage } from "../i18n/client-errors";
 
@@ -130,7 +130,7 @@ async function streamPost(
   signal?: AbortSignal,
 ): Promise<AgentRunOutcome> {
   const token = getToken();
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(`${apiBase()}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

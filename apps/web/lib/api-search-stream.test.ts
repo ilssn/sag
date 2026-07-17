@@ -1,7 +1,20 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { api, ApiError } from "./api";
 import type { SearchResponse } from "./types";
+
+import { __setRuntimeConfigForTests } from "./runtime-config";
+
+beforeAll(() => {
+  __setRuntimeConfigForTests({
+    apiBase: "http://localhost:8000",
+    enableWindowScaling: true,
+  });
+});
+
+afterAll(() => {
+  __setRuntimeConfigForTests(null);
+});
 
 function result(summary = ""): SearchResponse {
   return {

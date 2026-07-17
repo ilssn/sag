@@ -48,6 +48,7 @@ import {
   dispatchUniverseActivation,
 } from "@/lib/universe-events";
 import { cn } from "@/lib/utils";
+import { runtimeConfig } from "@/lib/runtime-config";
 import {
   DEFAULT_WINDOW_MODE,
   DEFAULT_WINDOW_SIZE,
@@ -56,7 +57,6 @@ import {
   persistWindowSize,
   readWindowMode,
   readWindowSize,
-  resolveWindowScalingEnabled,
   type WindowMode,
   type WindowSize,
 } from "@/lib/window-layout";
@@ -98,9 +98,10 @@ const KnowledgeUniverse = dynamic(
 
 export type { AppMode } from "@/lib/app-initialization";
 
-const WINDOW_SCALING_ENABLED = resolveWindowScalingEnabled(
-  process.env.NEXT_PUBLIC_ENABLE_WINDOW_SCALING,
-);
+/** 窗口缩放开关来自运行时配置（ADR-0007）；AppShell 只在启动门之后渲染，读取安全。 */
+function windowScalingEnabled(): boolean {
+  return runtimeConfig().enableWindowScaling;
+}
 
 function currentViewportSize(): WindowSize {
   return { width: window.innerWidth, height: window.innerHeight };
@@ -186,8 +187,9 @@ const AppContext = React.createContext<AppCtx>({
   refreshThreads: async () => {},
   loadMoreThreads: async () => {},
   collapseThreads: () => {},
-  windowScalingEnabled: WINDOW_SCALING_ENABLED,
-  windowMode: WINDOW_SCALING_ENABLED ? DEFAULT_WINDOW_MODE : "full",
+  // Provider 之外不可达的默认值：模块级禁止读运行时配置，故写死关闭态。
+  windowScalingEnabled: false,
+  windowMode: "full",
   toggleWindowMode: () => {},
   appMode: APP_INITIALIZATION_DEFAULTS.appMode,
   workspaceSection: APP_INITIALIZATION_DEFAULTS.workspaceSection,
@@ -257,7 +259,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     APP_INITIALIZATION_DEFAULTS.appMode,
   );
   const [windowMode, setWindowMode] = React.useState<WindowMode>(
-    WINDOW_SCALING_ENABLED ? DEFAULT_WINDOW_MODE : "full",
+    windowScalingEnabled() ? DEFAULT_WINDOW_MODE : "full",
   );
   const [windowSize, setWindowSize] = React.useState<WindowSize>(
     DEFAULT_WINDOW_SIZE,
@@ -287,14 +289,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const initial = readInitialAppState(window.localStorage);
     setAppMode(initial.mode);
     setWorkspaceSection(initial.section);
-    if (WINDOW_SCALING_ENABLED) {
+    if (windowScalingEnabled()) {
       setWindowMode(readWindowMode(window.localStorage));
       setWindowSize(readWindowSize(window.localStorage, currentViewportSize()));
     }
   }, []);
 
   React.useEffect(() => {
-    if (!WINDOW_SCALING_ENABLED) {
+    if (!windowScalingEnabled()) {
       setIsDesktop(false);
       return;
     }
@@ -354,7 +356,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   const toggleWindowMode = React.useCallback(() => {
-    if (!WINDOW_SCALING_ENABLED) return;
+    if (!windowScalingEnabled()) return;
     setWindowMode((current) => {
       const next: WindowMode = current === "full" ? "window" : "full";
       persistWindowMode(window.localStorage, next);
@@ -385,7 +387,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     sidebarOpenRef.current = sidebarOpen;
   }, [sidebarOpen]);
 
-  const windowed = WINDOW_SCALING_ENABLED
+  const windowed = windowScalingEnabled()
     && isDesktop
     && windowMode === "window";
 
@@ -602,7 +604,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         refreshThreads,
         loadMoreThreads,
         collapseThreads,
-        windowScalingEnabled: WINDOW_SCALING_ENABLED,
+        windowScalingEnabled: windowScalingEnabled(),
         windowMode,
         toggleWindowMode,
         appMode,

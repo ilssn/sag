@@ -31,6 +31,12 @@ npm-debug.log*
 .env.local
 .env.*.local
 
+# Local runtime config override (ADR-0007; deploy entrypoint generates the real one)
+apps/web/public/config.json
+
+# Stale engine data from CWD-relative DATA_DIR drift (pre ADR-0012 hardening)
+.muse/
+
 # Editor / OS
 .DS_Store
 .idea/

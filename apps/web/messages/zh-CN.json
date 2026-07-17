@@ -2,6 +2,11 @@
   "Metadata": {
     "description": "上传信息，创建助手，带引用对话 · 开源知识助手平台"
   },
+  "Bootstrap": {
+    "configErrorTitle": "启动失败",
+    "configErrorBody": "无法加载运行时配置。请确认服务可达、部署的 config.json 合法后重试。",
+    "retry": "重试"
+  },
   "Common": {
     "cancel": "取消",
     "confirm": "确认",
@@ -857,7 +862,10 @@
       "loadFailed": "解析内容加载失败",
       "truncated": "内容较长，预览仅展示前 50 万字符。"
     },
-    "tabs": { "parsed": "解析内容", "original": "原始文件" },
+    "tabs": {
+      "parsed": "解析内容",
+      "original": "原始文件"
+    },
     "document": {
       "loadFailed": "文档加载失败",
       "tokens": "{count} tokens",
@@ -1007,7 +1015,10 @@
     "sourceStats": "{events, number} 事件 · {entities, number} 实体",
     "sourceStatsBuilding": "{events, number} 事件 · 实体统计中",
     "exploreNode": "探索{kind} {label}",
-    "kinds": { "event": "事件", "entity": "实体" },
+    "kinds": {
+      "event": "事件",
+      "entity": "实体"
+    },
     "relatedEvents": "{count, number} 个关联事件 · {category}",
     "continueExploring": "继续探索 {progress}/{total}",
     "explorationProgress": "已探索 {progress}/{total}",
@@ -1092,7 +1103,10 @@
       "overviewBuilding": "{sources, number} 信息源 · {events} 事件 · 实体统计构建中",
       "visibleContours": " · 当前显示 {count, number} 个高密度轮廓"
     },
-    "legend": { "entities": "主题实体", "events": "关联事件" },
+    "legend": {
+      "entities": "主题实体",
+      "events": "关联事件"
+    },
     "searchLocked": {
       "label": "显式探索",
       "description": "搜索结果中滚轮仅用于缩放；锁定节点后，可在详情中选择“探索更多”"

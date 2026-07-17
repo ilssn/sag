@@ -1,4 +1,5 @@
 import { clearToken, getToken } from "./auth";
+import { apiBase } from "./runtime-config";
 import { readClientLocale } from "../i18n/client";
 import { clientErrorMessage, serverErrorMessage } from "../i18n/client-errors";
 import type { SearchStrategy } from "./retrieval-config";
@@ -33,27 +34,6 @@ import type {
   ExplorationDetail,
   ExplorationSession,
 } from "./types";
-
-/** 浏览器通过局域网 IP 打开前端时，自动将 API 指向同主机 8000 端口。 */
-function resolveApiBase(): string {
-  const configured = process.env.NEXT_PUBLIC_API_BASE;
-  if (typeof window !== "undefined") {
-    const { protocol, hostname } = window.location;
-    const isLocalHost = hostname === "localhost" || hostname === "127.0.0.1";
-    if (!isLocalHost) {
-      const pointsToLocal =
-        !configured ||
-        configured.includes("localhost") ||
-        configured.includes("127.0.0.1");
-      if (pointsToLocal) {
-        return `${protocol}//${hostname}:8000`;
-      }
-    }
-  }
-  return configured || "http://localhost:8000";
-}
-
-export const API_BASE = resolveApiBase();
 
 export class ApiError extends Error {
   status: number;
@@ -160,7 +140,7 @@ async function streamGlobalSearch(
   armStreamTimeout("first-result", SEARCH_FIRST_RESULT_TIMEOUT_MS);
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}/api/v1/search/stream`, {
+    response = await fetch(`${apiBase()}/api/v1/search/stream`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -361,7 +341,7 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
     : timeoutSignal;
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}${path}`, { ...opts, headers, signal });
+    res = await fetch(`${apiBase()}${path}`, { ...opts, headers, signal });
   } catch (e) {
     if (e instanceof DOMException && e.name === "TimeoutError") {
       throw new ApiError(0, "timeout", clientErrorMessage("requestTimeout"));
@@ -498,7 +478,7 @@ export const api = {
   ) =>
     new Promise<Doc>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      xhr.open("POST", `${API_BASE}/api/v1/sources/${sid}/documents`);
+      xhr.open("POST", `${apiBase()}/api/v1/sources/${sid}/documents`);
       xhr.setRequestHeader("Authorization", `Bearer ${getToken() ?? ""}`);
       xhr.setRequestHeader("Accept-Language", readClientLocale());
       xhr.upload.onprogress = (e) => {
@@ -808,11 +788,11 @@ export const api = {
   getDocument: (sid: string, did: string) =>
     request<Doc>(`/api/v1/sources/${sid}/documents/${did}`),
   documentFileUrl: (sid: string, did: string) =>
-    `${API_BASE}/api/v1/sources/${sid}/documents/${did}/file`,
+    `${apiBase()}/api/v1/sources/${sid}/documents/${did}/file`,
   documentPreviewUrl: (sid: string, did: string) =>
-    `${API_BASE}/api/v1/sources/${sid}/documents/${did}/preview`,
+    `${apiBase()}/api/v1/sources/${sid}/documents/${did}/preview`,
   documentParsedUrl: (sid: string, did: string) =>
-    `${API_BASE}/api/v1/sources/${sid}/documents/${did}/parsed`,
+    `${apiBase()}/api/v1/sources/${sid}/documents/${did}/parsed`,
 
   // 对话图片附件（≤10MB，png/jpg/webp/gif）
   uploadAttachment: (file: File) => {
@@ -826,7 +806,7 @@ export const api = {
       },
     );
   },
-  attachmentUrl: (id: string) => `${API_BASE}/api/v1/attachments/${id}`,
+  attachmentUrl: (id: string) => `${apiBase()}/api/v1/attachments/${id}`,
 
   // 信源即 MCP：外部宿主（Claude Desktop / Cursor）挂载信息
   sourceMcp: (sourceId: string) =>

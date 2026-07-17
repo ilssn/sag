@@ -1,6 +1,19 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { streamAgentAsk } from "./sse";
+
+import { __setRuntimeConfigForTests } from "./runtime-config";
+
+beforeAll(() => {
+  __setRuntimeConfigForTests({
+    apiBase: "http://localhost:8000",
+    enableWindowScaling: true,
+  });
+});
+
+afterAll(() => {
+  __setRuntimeConfigForTests(null);
+});
 
 function completedResponse(): Response {
   const event = {
