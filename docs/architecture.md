@@ -81,6 +81,14 @@ Agent 编排已从 `sag_api` 业务代码抽离为平级、零运行时依赖的
 
 任意 Agent 暴露 `POST /api/v1/openai/{agent_id}/chat/completions`（无状态，`thread_id=None`，不落库）：复用同一套检索/工具循环/引用，返回标准 `chat.completion` + `sag.citations`；`stream:true` 走 SSE。
 
+## 桌面形态（`apps/desktop`，ADR-0023）
+
+Electron 壳拉起 `sag-api serve` sidecar（PyInstaller onedir），经 stdout JSONL 启动协议
+（ADR-0017）门控就绪后，以 `app://sag` 托管 web 静态导出并经 preload 注入运行时配置
+（ADR-0007）。数据落平台应用目录单根（ADR-0012），启动顺序 实例锁 → Alembic 迁移 →
+引擎数据版本门 → 业务开放；失败进维护模式仅开放 `/system/*`。工程细节见
+[desktop.md](desktop.md)。
+
 ## 前端（`apps/web`）
 
 Next.js 15 + shadcn/ui（中性主题，亮暗双色）。Sidebar 应用外壳（搜索 / 知识库 / 新对话）；引用抽屉一步溯源；Agent 对话支持工具步骤、审批和停止。搜索结果可在列表与关系图谱间切换，图谱的片段节点沿用同一原文入口。`lib/api.ts` 是单一 API 客户端，`lib/sse.ts` 消费版本化问答事件。

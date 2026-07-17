@@ -3,6 +3,14 @@
 本项目遵循语义化版本。各版本 tag 均可在 [Releases](https://github.com/ilssn/sag/tags) 查看。
 
 ## Unreleased
+- **桌面化生产就绪（ADR-0006/0007/0012~0017/0019~0023）**：
+  前端切换纯静态导出（查询参数路由 `/chat?thread=`、客户端 i18n、运行时配置注入、
+  字体本地化，旧路径不设兼容层）；web 镜像转 nginx 静态托管（API 地址运行时下发，
+  改动免重建）。后端 sidecar 就绪：单根数据目录与路径绝对化、Alembic 迁移门禁
+  （存量库自动 stamp + 升级前恢复点）、引擎数据版本门、storage_key 相对键存储、
+  本地访问密钥（外部 API/MCP 宿主共用，换发即废）、`sag-api serve` 结构化启动协议
+  （JSONL + 实例锁 + stdin EOF 停机）。新增 apps/desktop：Electron 壳（监督器/托盘/
+  关窗即隐藏/提示式更新）+ PyInstaller onedir 冻结管线与发布 CI（draft release）。
 - 知识宇宙探索模式重构为「时间即飞行」：源内滚轮沿计数轴驱动相机（惯性、轴端墙、窗口
   fire-and-forget 跟随翻页，快速飞行按速度提前补页），拖拽/旋转与 pinch 缩放正交保留。
 - 探索轴改为快照稳定的**序数计数轴**：后端时间线 canonical 序补充叙事 rank tie-break，

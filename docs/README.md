@@ -14,6 +14,8 @@
 - [**Agent · MCP · 搜索图谱**](architecture/agent-mcp-graph.md) —— 当前三条能力链路的边界、契约与实现位置。
 - [**Agent Runtime**](architecture/agent-runtime.md) —— extract-ready 的 `sag_agent` Core：公共 API、生命周期、事件契约、工具审批与宿主适配。
 - [连接器框架](architecture/connectors.md) —— 采集抽象：file_upload / web，统一接入协议。
+- [**桌面客户端**](desktop.md) —— Electron 壳 + sidecar 架构、开发循环、启动协议速查、发布 runbook 与真机 QA 清单。
+- [**ADR 决策记录**](adr/) —— 桌面化 23 条已定决策（0005~0017 政策层 · 0019~0023 工程层）。
 - 顶层 [README](../README.md) —— 快速开始、三步主干、MCP 用法、OpenAI 兼容端点。
 
 ## 目标设计与实施计划
