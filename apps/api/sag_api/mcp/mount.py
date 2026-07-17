@@ -5,7 +5,8 @@
     http://<host>/mcp/                         # 整个知识库
     http://<host>/mcp/?source_id=<信源 id>     # 单个信源
 
-请求先校验 JWT，再根据可选的 `source_id` 载入一个或全部 Source 并注入 contextvar。
+请求先鉴权（本地访问密钥或 JWT，经 core.deps.authenticate_bearer），
+再根据可选的 `source_id` 载入一个或全部 Source 并注入 contextvar。
 作用域随请求隔离，外部宿主与进程内 agent 可共用同一 server。
 """
 
@@ -15,12 +16,12 @@ import json
 from typing import TYPE_CHECKING
 from urllib.parse import parse_qs
 
-import jwt
 from sqlalchemy import select
 
 from sag_api.core.db import SessionLocal
+from sag_api.core.deps import authenticate_bearer
+from sag_api.core.errors import AuthError
 from sag_api.core.logging import get_logger
-from sag_api.core.security import decode_token
 from sag_api.db.models import Source
 from sag_api.mcp.server import build_source_mcp, use_scope
 
@@ -71,9 +72,10 @@ class ScopedKnowledgeMCP:
             await _send_json(send, 401, {"error": "缺少认证令牌"})
             return
         try:
-            decode_token(token)
-        except jwt.PyJWTError:
-            await _send_json(send, 401, {"error": "令牌无效或已过期"})
+            async with SessionLocal() as auth_session:
+                await authenticate_bearer(auth_session, token)
+        except AuthError as error:
+            await _send_json(send, 401, {"error": error.message})
             return
 
         async with SessionLocal() as session:

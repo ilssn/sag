@@ -22,6 +22,7 @@ from sag_api.core.litellm_policy import install_litellm_policy, uninstall_litell
 from sag_api.core.logging import RequestContextMiddleware, configure_logging, get_logger
 from sag_api.core.paths import ensure_data_layout, log_runtime_summary
 from sag_api.core.runtime_state import RuntimeState, StartupGateError
+from sag_api.core.security import ensure_runtime_secrets
 from sag_api.db.migrate import run_migrations
 from sag_api.generation import LLMClient
 from sag_api.jobs import InProcessAsyncQueue
@@ -30,25 +31,21 @@ from sag_api.sag import EngineManager
 log = get_logger("app")
 
 
-# 已知不安全的默认密钥（生产环境拒绝启动）
-_INSECURE_SECRETS = {
-    "dev-insecure-secret-change-me-in-production-0123456789",
-    "please-change-this-in-production-0123456789",
-    "dev-secret-change-me",
-}
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging("DEBUG" if settings.debug else "INFO")
     state: RuntimeState = app.state.runtime
-    if settings.environment == "prod" and settings.secret_key in _INSECURE_SECRETS:
+    from sag_api.core.security import INSECURE_SECRETS
+
+    if settings.environment == "prod" and settings.secret_key in INSECURE_SECRETS:
         raise RuntimeError(
             "生产环境禁止使用默认 SAG_SECRET_KEY。请设置强随机值（≥32 字节），例如：openssl rand -hex 32"
         )
     paths = ensure_data_layout(settings)
     log_runtime_summary(settings, paths)
     app.state.data_paths = paths
+    # desktop 首启：以持久随机值替换不安全默认签名密钥（ADR-0011/0012）
+    ensure_runtime_secrets(settings, paths.secret_key_path)
     startup_events.emit("start", pid=os.getpid(), app_version=__version__)
 
     litellm_policy = None
@@ -89,6 +86,11 @@ async def lifespan(app: FastAPI):
 
         async with SessionLocal() as _session:
             await get_default_agent(_session)
+
+        # 首装生成本地访问密钥（外部 API/MCP 宿主共用；ADR-0011）
+        from sag_api.services.access_key_service import ensure_local_access_key
+
+        await ensure_local_access_key(SessionLocal)
 
         # zleap-sag 内部也调用 LiteLLM；全局 pre-call policy 让它与 Muse 生成链
         # 共享相同的 provider 参数，而不修改依赖包。

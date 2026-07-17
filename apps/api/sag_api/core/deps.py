@@ -20,6 +20,27 @@ from sag_api.services.auth_service import get_user
 _bearer = HTTPBearer(auto_error=False)
 
 
+async def authenticate_bearer(session: AsyncSession, token: str) -> User:
+    """统一的 Bearer 鉴权：本地访问密钥（ADR-0011）或 JWT。
+
+    REST / MCP / openai-compat 共用本入口，外部宿主用长期密钥，
+    应用内 UI 继续走既有登录 JWT（ADR-0005：不分叉桌面鉴权）。
+    """
+    from sag_api.services import access_key_service
+
+    if token.startswith(access_key_service.KEY_PREFIX):
+        return await access_key_service.authenticate_access_key(session, token)
+    try:
+        payload = decode_token(token)
+    except jwt.PyJWTError as e:
+        raise AuthError("令牌无效或已过期") from e
+    user_id = payload.get("sub")
+    user = await get_user(session, user_id) if user_id else None
+    if user is None or not user.is_active:
+        raise AuthError("用户不存在或已停用")
+    return user
+
+
 async def get_current_user(
     request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
@@ -27,14 +48,7 @@ async def get_current_user(
 ) -> User:
     if creds is None:
         raise AuthError("缺少认证令牌")
-    try:
-        payload = decode_token(creds.credentials)
-    except jwt.PyJWTError as e:
-        raise AuthError("令牌无效或已过期") from e
-    user_id = payload.get("sub")
-    user = await get_user(session, user_id) if user_id else None
-    if user is None or not user.is_active:
-        raise AuthError("用户不存在或已停用")
+    user = await authenticate_bearer(session, creds.credentials)
     request.state.user = user
     return user
 

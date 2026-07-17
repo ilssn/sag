@@ -19,7 +19,7 @@ from sag_api.schemas.system import (
     QuickModelSetupRequest,
     SystemPreferencesUpdate,
 )
-from sag_api.services import settings_service
+from sag_api.services import access_key_service, settings_service
 
 router = APIRouter(prefix="/system", tags=["system"])
 log = get_logger("system")
@@ -127,6 +127,24 @@ async def get_model_setup_status(
     return await settings_service.model_setup_status(session)
 
 
+@router.get("/local-access-key")
+async def local_access_key(
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """本地访问密钥（ADR-0011）：供设置页复制给外部 API/MCP 宿主。"""
+    return await access_key_service.get_local_access_key(session)
+
+
+@router.post("/local-access-key/regenerate")
+async def regenerate_local_access_key(
+    _user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """换发本地访问密钥；旧钥即时失效（所有外部宿主需更新配置）。"""
+    return await access_key_service.regenerate_local_access_key(session)
+
+
 @router.get("/mcp")
 async def knowledge_mcp_descriptor(
     request: Request,
@@ -145,7 +163,9 @@ async def knowledge_mcp_descriptor(
         "http": {
             "transport": "streamable-http",
             "url": f"{base}/mcp/",
-            "headers": {"Authorization": "Bearer <SAG_TOKEN>"},
+            "headers": {
+                "Authorization": f"Bearer {access_key_service.current_key() or '<LOCAL_ACCESS_KEY>'}"
+            },
             "note": "默认开放全部信源；可在 URL 添加 ?source_id=<id> 临时限定单个信源。",
         },
         "stdio": {
