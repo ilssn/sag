@@ -92,8 +92,8 @@ export const EMPTY_TIMELINE_BUNDLE_IDS: string[] = [];
 export const TEMPORAL_AXIS_UNITS_PER_EVENT = UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT;
 
 export function emptySourceTimelinePageState(
-  visibleEventBundles: number,
-  cachedEventBundles: number,
+  eventWindowSize: number,
+  cacheCapacity: number,
 ): SourceTimelinePageState {
   return {
     deque: null,
@@ -106,8 +106,8 @@ export function emptySourceTimelinePageState(
     loading: false,
     pausedReason: null,
     window: createUniverseTimelineWindow(
-      visibleEventBundles,
-      cachedEventBundles,
+      eventWindowSize,
+      cacheCapacity,
     ),
   };
 }
@@ -115,15 +115,15 @@ export function emptySourceTimelinePageState(
 export function emptySourceBrowseSession(
   epoch: number,
   sourceId: string,
-  visibleEventBundles: number,
-  cachedEventBundles: number,
+  eventWindowSize: number,
+  cacheCapacity: number,
 ): SourceBrowseSession {
   return {
     sourceId,
     working: emptyUniverseWorkingSet(epoch),
     timeline: emptySourceTimelinePageState(
-      visibleEventBundles,
-      cachedEventBundles,
+      eventWindowSize,
+      cacheCapacity,
     ),
   };
 }

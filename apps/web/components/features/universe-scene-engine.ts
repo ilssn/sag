@@ -14,9 +14,9 @@ import {
   orderUniverseKeyboardCandidates,
   type UniverseKeyboardDirection,
 } from "@/lib/universe-keyboard-navigation";
-import { planUniverseFocusCards } from "@/lib/universe-focus-cards";
+import { planUniversePreviewCards } from "@/lib/universe-preview-plan";
 import {
-  universeCardBudget,
+  UNIVERSE_VIEW_LIMITS,
   type UniverseViewPreferences,
 } from "@/lib/universe-view-preferences";
 import {
@@ -1377,8 +1377,9 @@ export class UniverseForceSceneEngine {
     const motionChanged = this.reducedMotion !== options.reducedMotion;
     const timelineDisabled = this.timelineJourney.enabled && !options.timelineJourney.enabled;
     const cardPreferencesChanged =
-      this.viewPreferences.showEventCards !== options.viewPreferences.showEventCards
-      || this.viewPreferences.showEntityCards !== options.viewPreferences.showEntityCards;
+      this.viewPreferences.cardsEnabled !== options.viewPreferences.cardsEnabled
+      || this.viewPreferences.eventCardPreviewCount
+        !== options.viewPreferences.eventCardPreviewCount;
     const leavingInteractiveMode = this.interactive && !options.interactive;
     const labelTextChanged = this.text.locale !== options.text.locale
       || this.text.viewDetailsAction !== options.text.viewDetailsAction
@@ -1393,8 +1394,10 @@ export class UniverseForceSceneEngine {
     this.text = options.text;
     this.host.dataset.universeReducedMotion = String(options.reducedMotion);
     this.host.dataset.universeStrategy = options.strategy;
-    this.host.dataset.universeEventCards = String(options.viewPreferences.showEventCards);
-    this.host.dataset.universeEntityCards = String(options.viewPreferences.showEntityCards);
+    this.host.dataset.universeCards = String(options.viewPreferences.cardsEnabled);
+    this.host.dataset.universeEventCardPreviewCount = String(
+      options.viewPreferences.eventCardPreviewCount,
+    );
     this.syncTimelineDiagnostics();
     this.controls.enabled = options.interactive;
     this.controls.enableZoom = options.interactive;
@@ -1623,6 +1626,14 @@ export class UniverseForceSceneEngine {
     const searchFocusSourceId = previousSearchSignature !== nextSearchSignature
       ? sourceHits[0]?.source_id
       : undefined;
+    if (resetLayoutForStrategy && !epochChanged) {
+      // Exploration and accumulation are different spatial coordinate systems.
+      // Canonical node ids may overlap, but their remembered positions must
+      // not: leaking the timeline corridor into accumulation throws the whole
+      // evidence graph off-centre and can suppress every event card.
+      this.placementTargets.clear();
+      this.host.dataset.universePlacementMemory = "0";
+    }
     // A strategy boundary is a scene boundary. Reusing the old force nodes
     // would leak source-cluster coordinates into the accumulated evidence
     // graph (or vice versa) even when canonical node ids happen to match.
@@ -2510,7 +2521,10 @@ export class UniverseForceSceneEngine {
     const distanceY = size.y / Math.max(0.01, 2 * halfFov);
     const distanceX = size.x / Math.max(0.01, 2 * halfFov * aspect);
     const distance = Math.max(190, distanceX, distanceY, size.z * 1.28) * 1.12;
-    this.moveCamera(center, distance, duration, false, canonical);
+    // Accumulation is deliberately used beside search/answer panels. Frame the
+    // graph inside the remaining reading surface instead of centring it behind
+    // the workspace, where valid event cards would be collision-suppressed.
+    this.moveCamera(center, distance, duration, true, canonical);
   }
 
   private sourceHeroPose(node: ForceNode, depth: number) {
@@ -5120,29 +5134,6 @@ export class UniverseForceSceneEngine {
         return right.sceneNode.importance - left.sceneNode.importance;
       })
       .slice(0, mobile ? 8 : 18);
-    const focusCardPlan = planUniverseFocusCards(
-      [...this.nodes.values()]
-        .filter((node): node is ForceNode & { kind: "event" | "entity" } =>
-          node.kind === "event" || node.kind === "entity"),
-      focusId,
-      focusNeighbors ?? [],
-      labelSourceId,
-    );
-    const focusCardIds = new Set(focusCardPlan.ids);
-    const hasConcreteFocus = focusCardIds.size > 0;
-    this.host.dataset.universeFocusCardCount = String(focusCardPlan.ids.length);
-    this.host.dataset.universeFocusEventCardCount = String(focusCardPlan.eventCount);
-    this.host.dataset.universeFocusEntityCardCount = String(focusCardPlan.entityCount);
-    // Card preferences control the resting scene. Hover, keyboard focus and
-    // click lock all reveal the complete factual one-hop group.
-    const showEventCards = this.viewPreferences.showEventCards || hasConcreteFocus;
-    const showEntityCards = this.viewPreferences.showEntityCards || hasConcreteFocus;
-    const cardBudget = universeCardBudget(
-      Math.max(1, this.host.clientWidth),
-      Math.max(1, this.host.clientHeight),
-      showEventCards,
-      showEntityCards,
-    );
     const prioritize = (left: ForceNode, right: ForceNode) => {
       const emphasisRank = (node: ForceNode) => {
         if (node.id === this.lockedId) return 0;
@@ -5175,48 +5166,52 @@ export class UniverseForceSceneEngine {
         - (retainedLabelRank.get(right.id) ?? Number.MAX_SAFE_INTEGER);
       return retainedDifference || left.id.localeCompare(right.id);
     };
-    const candidates = [...this.nodes.values()].filter((node) =>
-      node.kind !== "source"
-      && (node.kind === "event" ? showEventCards : showEntityCards)
-      && (node.sceneNode.state === "active" || focusCardIds.has(node.id))
-      && (this.strategy === "accumulation" || node.sourceId === labelSourceId)
-      && (!focusId || focusCardIds.has(node.id))
+    const previewPlan = planUniversePreviewCards({
+      nodes: [...this.nodes.values()]
+        .filter((node): node is ForceNode & { kind: "event" | "entity" } =>
+          node.kind === "event" || node.kind === "entity")
+        .filter((node) =>
+          this.strategy === "accumulation" || node.sourceId === labelSourceId)
+        .sort(prioritize)
+        .map((node) => ({
+          id: node.id,
+          kind: node.kind,
+          sourceId: node.sourceId,
+          active: node.sceneNode.state === "active",
+        })),
+      adjacency: this.adjacency,
+      sourceId: labelSourceId,
+      includeAllSources: this.strategy === "accumulation",
+      focusId,
+      cardsEnabled: this.viewPreferences.cardsEnabled,
+      eventPreviewCount: this.viewPreferences.eventCardPreviewCount,
+      entitySafetyMax: UNIVERSE_VIEW_LIMITS.entityCardSafetyMax,
+    });
+    const hasConcreteFocus = previewPlan.focused;
+    this.host.dataset.universeFocusCardCount = String(
+      hasConcreteFocus ? previewPlan.ids.length : 0,
     );
-    const eventLimit = showEventCards
-      ? Math.max(cardBudget.events, focusCardPlan.eventCount)
-      : 0;
-    const entityLimit = showEntityCards
-      ? Math.max(cardBudget.entities, focusCardPlan.entityCount)
-      : 0;
-    const totalLimit = hasConcreteFocus
-      ? Math.max(cardBudget.total, focusCardPlan.ids.length)
-      : cardBudget.total;
+    this.host.dataset.universeFocusEventCardCount = String(
+      hasConcreteFocus ? previewPlan.eventIds.length : 0,
+    );
+    this.host.dataset.universeFocusEntityCardCount = String(
+      hasConcreteFocus ? previewPlan.entityIds.length : 0,
+    );
+    this.host.dataset.universeHiddenRelatedEntityCount = String(
+      previewPlan.hiddenRelatedEntityCount,
+    );
+    const eventLimit = previewPlan.eventIds.length;
+    const entityLimit = previewPlan.entityIds.length;
+    const totalLimit = previewPlan.ids.length;
     this.labelPlacementBudget = {
-      events: Math.min(eventLimit, totalLimit),
-      entities: Math.min(entityLimit, totalLimit),
+      events: eventLimit,
+      entities: entityLimit,
       total: totalLimit,
     };
-    const eventCandidateLimit = hasConcreteFocus
-      ? focusCardPlan.eventCount
-      : Math.min(60, eventLimit * 3);
-    const entityCandidateLimit = hasConcreteFocus
-      ? focusCardPlan.entityCount
-      : Math.min(60, entityLimit * 3);
-    const totalCandidateLimit = hasConcreteFocus
-      ? focusCardPlan.ids.length
-      : Math.min(60, totalLimit * 3);
-    const activeNodes = [
-      ...candidates
-        .filter((node) => node.kind === "event")
-        .sort(prioritize)
-        .slice(0, eventCandidateLimit),
-      ...candidates
-        .filter((node) => node.kind === "entity")
-        .sort(prioritize)
-        .slice(0, entityCandidateLimit),
-    ]
-      .sort(prioritize)
-      .slice(0, totalCandidateLimit);
+    const activeNodes = previewPlan.ids.flatMap((id) => {
+      const node = this.nodes.get(id);
+      return node && node.kind !== "source" ? [node] : [];
+    });
 
     sources.forEach((node) => {
       const labelKey = `source:${node.id}`;

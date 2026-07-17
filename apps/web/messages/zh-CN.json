@@ -1048,6 +1048,9 @@
       "eventEntitiesComplete": "事件关联的 {count, number} 个实体已全部呈现",
       "noEventEntities": "这个事件暂未抽取到关联实体"
     },
+    "accumulation": {
+      "noNewEvidence": "这一批线索已在当前图谱中，没有新增事件"
+    },
     "timeline": {
       "loading": "正在加载相邻一页时间",
       "defaultTitle": "知识时间轴",
@@ -1118,6 +1121,7 @@
       "origin": "快速回到当前星系原点",
       "answerContext": "增量线索图谱 · {events, number} 事项 · {entities, number} 实体 · {count, number} 轮问答",
       "searchContext": "搜索结果图谱 · 当前探索已保留",
+      "evidenceContext": "线索累积 · {events, number} 事项 · {entities, number} 实体 · {count, number} 批",
       "returnToExplore": "返回图谱探索",
       "playTimeline": "自动播放时间线",
       "pauseTimeline": "暂停自动播放",
@@ -1134,20 +1138,20 @@
   "GraphSettings": {
     "drawer": {
       "title": "图谱显示设置",
-      "description": "分别调整节点卡片、实体类型与时间窗口，设置会立即作用于当前图谱。"
+      "description": "一套配置同时作用于时空探索与线索累积，调整后立即生效。"
     },
     "cards": {
       "title": "节点卡片",
-      "description": "这里只控制常驻卡片，不改变节点或关系线；悬停、点击仍会显示当前节点卡片。",
-      "event": {
-        "title": "显示事件卡片",
-        "description": "默认显示事件摘要；关闭后仍保留事件星，悬停或点击时仍可查看。",
-        "aria": "显示事件卡片"
+      "description": "只控制可读卡片，不改变事件、实体和真实关系。",
+      "enabled": {
+        "title": "启用事件与实体卡片",
+        "description": "关闭后仍保留完整星点网络，悬停或锁定时仍可查看当前关系。",
+        "aria": "启用事件与实体卡片"
       },
-      "entity": {
-        "title": "显示实体卡片",
-        "description": "默认显示实体名称；关闭后仍保留实体图元，悬停或点击时仍可查看。",
-        "aria": "显示实体卡片"
+      "preview": {
+        "title": "事件卡片预览",
+        "description": "限制静止画面中可读事件卡片的数量，相关实体会随事件与焦点关系展示。",
+        "aria": "事件卡片预览数量"
       }
     },
     "entityTypes": {
@@ -1159,21 +1163,35 @@
     },
     "window": {
       "title": "探索窗口",
-      "description": "分别控制画面中的时间点与可复用缓存容量，长时间探索仍保持有界。"
+      "description": "窗口决定当前构图规模，缓存只保存纯数据，海量探索仍保持有界。"
     },
-    "visibleEventBundles": {
-      "title": "可见时间窗口",
-      "description": "控制画面中可见时间点的数量上限；每个时间点会与其实体一起完整呈现，并从边缘自然进出。",
-      "current": "当前配置上限",
-      "aria": "可见时间点数量",
+    "eventWindow": {
+      "title": "事件窗口",
+      "description": "控制参与当前构图的事件数量；实体随事件完整进入，旧事件从边缘自然退出。",
+      "aria": "事件窗口数量"
+    },
+    "cacheCapacity": {
+      "title": "事件缓存",
+      "description": "保存已加载的事件、实体和关系纯数据；达到上限后按进入顺序淘汰最旧记录。",
+      "aria": "事件缓存容量"
+    },
+    "temporal": {
+      "title": "时空探索",
+      "description": "只影响信息源时间探索的网络分页和前后准备，不改变同屏窗口。",
+      "page": {
+        "title": "分页大小",
+        "description": "每次从时间线加载的事件数量。",
+        "aria": "时空探索分页大小"
+      },
+      "prefetch": {
+        "title": "前后预取",
+        "description": "当前窗口前后各提前准备的页数；请求始终串行。",
+        "aria": "时空探索前后预取页数"
+      }
+    },
+    "value": {
+      "current": "当前",
       "recommended": "推荐 {count, number}"
-    },
-    "cachedEventBundles": {
-      "title": "时间缓存容量",
-      "description": "这是前后时间数据的内存容量上限；系统会按需预加载相邻时间，并优先复用已有缓存。",
-      "current": "本设备容量上限",
-      "aria": "时间缓存容量",
-      "runway": "最多预留 {count, number} 个时间点"
     },
     "reset": {
       "savedLocally": "设置会立即同步到当前图谱，并保存在本浏览器。",

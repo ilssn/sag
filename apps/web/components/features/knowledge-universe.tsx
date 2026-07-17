@@ -11,7 +11,6 @@ import {
   CircleDot,
   Focus,
   Loader2,
-  LockKeyhole,
   LocateFixed,
   Orbit,
   Pause,
@@ -52,7 +51,6 @@ import {
   UNIVERSE_RESIDENT_BUDGET,
   UNIVERSE_SCENE_BUDGET,
   emptyUniverseWorkingSet,
-  mergeUniverseWorkingSetActivation,
   replaceUniverseWorkingSet,
   trimUniverseWorkingSet,
   universeAnchorProgress,
@@ -85,7 +83,35 @@ import {
   UNIVERSE_TEMPORAL_AXIS_VESTIBULE_UNITS,
   universeTemporalAxisDepth,
 } from "@/lib/universe-temporal-axis";
-import { planUniverseTimelinePrefetch } from "@/lib/universe-timeline-prefetch";
+import { planUniversePrefetch } from "@/lib/universe-prefetch-controller";
+import {
+  advanceUniverseEvidenceTransition,
+  appendUniverseEvidence,
+  createUniverseAccumulationState,
+  type UniverseAccumulationState,
+} from "@/lib/universe-accumulation";
+import {
+  universeActivationFromEventBundles,
+  universeEventBundlesFromActivation,
+  universeEventBundlesFromTimeline,
+} from "@/lib/universe-event-bundle-adapter";
+import {
+  admitUniverseEventBundles,
+  createUniverseEventCache,
+  resizeUniverseEventCache,
+  type UniverseEventCache,
+} from "@/lib/universe-event-cache";
+import {
+  configureUniverseSceneWindow,
+  createUniverseSceneWindow,
+  projectUniverseSceneWindow,
+} from "@/lib/universe-scene-window";
+import {
+  createUniverseSessionState,
+  reduceUniverseSession,
+  type UniverseSessionAction,
+  type UniverseSessionState,
+} from "@/lib/universe-session-state";
 import {
   planUniverseTimelinePlayback,
   toggleUniverseTimelinePlaybackOrder,
@@ -177,7 +203,6 @@ interface RetainedExploration {
   sourceHits: NonNullable<UniverseActivation["source_hits"]>;
   summary: ActivationSummary | null;
   moreHint: string;
-  activationOrigin: UniverseActivationOrigin;
   view: UniverseSceneExplorationView | null;
   expansionSnapshots: Map<string, ExpansionSnapshotContext>;
   completedSources: Set<string>;
@@ -245,8 +270,24 @@ export function KnowledgeUniverse({
   const snapshotReloadTimerRef = React.useRef<number | null>(null);
   const snapshotReloadAttemptsRef = React.useRef(new Map<string, number>());
   const timelineSettleTimerRef = React.useRef<number | null>(null);
+  const accumulationSettleTimerRef = React.useRef<number | null>(null);
   const timelinePlaybackTimerRef = React.useRef<number | null>(null);
   const sourceSessionRef = React.useRef<SourceBrowseSession | null>(null);
+  const eventCacheRef = React.useRef<UniverseEventCache>(
+    createUniverseEventCache(),
+  );
+  const accumulationStateRef = React.useRef<UniverseAccumulationState>(
+    createUniverseAccumulationState(createUniverseSceneWindow()),
+  );
+  const accumulationMetaRef = React.useRef<{
+    query: string;
+    origin: UniverseActivationOrigin;
+    sourceHits: NonNullable<UniverseActivation["source_hits"]>;
+  }>({
+    query: "",
+    origin: "assistant",
+    sourceHits: [],
+  });
   const timelineJourneyCommitRef = React.useRef<{
     session: SourceBrowseSession;
     revision: number;
@@ -255,7 +296,10 @@ export function KnowledgeUniverse({
   } | null>(null);
   const expansionSnapshotsRef = React.useRef(new Map<string, ExpansionSnapshotContext>());
   const completedSourcesRef = React.useRef(new Set<string>());
-  const activationOriginRef = React.useRef<UniverseActivationOrigin>("browse");
+  const sessionStateRef = React.useRef<UniverseSessionState>(
+    createUniverseSessionState(),
+  );
+  const evidenceOriginRef = React.useRef<UniverseActivationOrigin>("browse");
   const viewportSourceRef = React.useRef<string | null>(null);
   const lockedKeyRef = React.useRef<string | null>(null);
   const cursorsRef = React.useRef(new Map<string, string>());
@@ -267,12 +311,12 @@ export function KnowledgeUniverse({
     data: UniverseSceneData;
   } | null>(null);
   const { preferences: viewPreferences } = useUniverseViewPreferences();
-  const entityCategorySignature = viewPreferences.entityCategories === null
+  const entityTypeSignature = viewPreferences.entityTypes === null
     ? "null"
-    : JSON.stringify([...viewPreferences.entityCategories].sort());
-  const projectedEntityCategories = React.useMemo<string[] | null>(
-    () => JSON.parse(entityCategorySignature) as string[] | null,
-    [entityCategorySignature],
+    : JSON.stringify([...viewPreferences.entityTypes].sort());
+  const projectedEntityTypes = React.useMemo<string[] | null>(
+    () => JSON.parse(entityTypeSignature) as string[] | null,
+    [entityTypeSignature],
   );
   const [dimensions, setDimensions] = React.useState({ width: 1, height: 1 });
   const [manifest, setManifest] = React.useState<UniverseManifest | null>(null);
@@ -281,8 +325,9 @@ export function KnowledgeUniverse({
     React.useState<UniverseTimelineWindowState | null>(null);
   const [activePartition, setActivePartition] = React.useState<string | null>(null);
   const [viewportSourceId, setViewportSourceId] = React.useState<string | null>(null);
-  const [selectedKey, setSelectedKeyState] = React.useState<string | null>(null);
-  const [lockedKey, setLockedKeyState] = React.useState<string | null>(null);
+  const [sessionState, setSessionState] = React.useState<UniverseSessionState>(
+    createUniverseSessionState,
+  );
   const [timelinePlaying, setTimelinePlaying] = React.useState(false);
   const [contextWorkspace, setContextWorkspace] =
     React.useState<UniverseContextState>(readUniverseContext);
@@ -296,11 +341,14 @@ export function KnowledgeUniverse({
   const [summary, setSummary] = React.useState<ActivationSummary | null>(null);
   const [expandingKey, setExpandingKey] = React.useState<string | null>(null);
   const [moreHint, setMoreHint] = React.useState("");
-  const [activationOrigin, setActivationOrigin] =
+  const [evidenceOrigin, setEvidenceOrigin] =
     React.useState<UniverseActivationOrigin>("browse");
-  const sceneStrategy: UniverseSceneStrategy = activationOrigin === "browse"
-    ? "exploration"
-    : "accumulation";
+  const sceneStrategy: UniverseSceneStrategy =
+    sessionState.mode === "accumulation"
+      ? "accumulation"
+      : "exploration";
+  const selectedKey = sessionState.selectedKey;
+  const lockedKey = sessionState.lockedKey;
   const [, setLoadProgressRevision] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
   const [rebuilding, setRebuilding] = React.useState(false);
@@ -331,18 +379,24 @@ export function KnowledgeUniverse({
   // The loaded browse session is the data authority for timeline paging.
   // `activePartition` is intentionally kept as camera/presentation state so
   // visual LOD changes cannot disconnect a valid cached timeline.
-  const browseSessionSourceId = activationOrigin === "browse" && timelineWindow
+  const browseSessionSourceId = sessionState.mode === "exploration" && timelineWindow
     ? sourceSessionRef.current?.sourceId ?? null
     : null;
 
-  const setSelectedKey = React.useCallback((key: string | null) => {
-    setSelectedKeyState(key);
+  const dispatchSession = React.useCallback((action: UniverseSessionAction) => {
+    const next = reduceUniverseSession(sessionStateRef.current, action);
+    sessionStateRef.current = next;
+    setSessionState(next);
   }, []);
+
+  const setSelectedKey = React.useCallback((key: string | null) => {
+    dispatchSession({ type: "SELECT", key });
+  }, [dispatchSession]);
 
   const setLockedKey = React.useCallback((key: string | null) => {
     lockedKeyRef.current = key;
-    setLockedKeyState(key);
-  }, []);
+    dispatchSession({ type: "LOCK", key });
+  }, [dispatchSession]);
 
   const commitWorkingSet = React.useCallback((next: UniverseWorkingSet) => {
     workingRef.current = next;
@@ -413,26 +467,9 @@ export function KnowledgeUniverse({
     () => effectiveUniverseBundleWindow(viewPreferences, mobile),
     [mobile, viewPreferences],
   );
-  const policyBudget = React.useMemo(() => {
-    const hardLimit = mobile
-      ? UNIVERSE_SCENE_BUDGET.mobile
-      : UNIVERSE_SCENE_BUDGET.desktop;
-    if (!manifest) return hardLimit;
-    return {
-      nodes: Math.min(
-        hardLimit.nodes,
-        mobile
-          ? manifest.policy.node_budget_mobile
-          : manifest.policy.node_budget_desktop,
-      ),
-      edges: Math.min(
-        hardLimit.edges,
-        mobile
-          ? manifest.policy.edge_budget_mobile
-          : manifest.policy.edge_budget_desktop,
-      ),
-    };
-  }, [manifest, mobile]);
+  const policyBudget = mobile
+    ? UNIVERSE_SCENE_BUDGET.mobile
+    : UNIVERSE_SCENE_BUDGET.desktop;
   const budget = React.useMemo(
     () => effectiveUniverseBudget(policyBudget),
     [policyBudget],
@@ -449,27 +486,18 @@ export function KnowledgeUniverse({
       ? Math.max(0, Math.floor(budget.edges / edgesPerPackage))
       : nodeCapacity;
     const packageCapacity = Math.min(nodeCapacity, edgeCapacity);
-    let visibleEventBundles = Math.max(
+    const eventWindowSize = Math.max(
       1,
-      Math.min(configuredBundleWindow.visibleEventBundles, packageCapacity || 1),
+      Math.min(configuredBundleWindow.eventWindowSize, packageCapacity || 1),
     );
-    // A visual page can replace the whole visible window in one gesture. Keep
-    // enough scene headroom for that complete outgoing page so event/entity
-    // networks fade as atomic groups instead of being dropped node by node.
-    const requiredTransitionPackages = (visible: number) => Math.max(1, visible);
-    while (
-      visibleEventBundles > 1
-      && visibleEventBundles + requiredTransitionPackages(visibleEventBundles)
-        > packageCapacity
-    ) visibleEventBundles -= 1;
     const transitionHeadroomPackages = Math.max(0, Math.min(
-      requiredTransitionPackages(visibleEventBundles),
-      packageCapacity - visibleEventBundles,
+      viewPreferences.temporalPageSize,
+      packageCapacity - eventWindowSize,
     ));
     return {
       window: {
-        visibleEventBundles,
-        cachedEventBundles: configuredBundleWindow.cachedEventBundles,
+        eventWindowSize,
+        cacheCapacity: configuredBundleWindow.cacheCapacity,
       },
       projectionBudget: {
         nodes: Math.max(
@@ -487,6 +515,7 @@ export function KnowledgeUniverse({
     budget,
     configuredBundleWindow,
     timelineBundleEntityLimit,
+    viewPreferences.temporalPageSize,
   ]);
   const bundleWindow = timelineWindowPlan.window;
   const timelineProjectionBudget = timelineWindowPlan.projectionBudget;
@@ -500,6 +529,158 @@ export function KnowledgeUniverse({
   const timelineWindowRevision = timelineWindow?.revision ?? -1;
   budgetRef.current = budget;
   residentBudgetRef.current = residentBudget;
+
+  const clearAccumulationSettle = React.useCallback(() => {
+    if (accumulationSettleTimerRef.current === null) return;
+    window.clearTimeout(accumulationSettleTimerRef.current);
+    accumulationSettleTimerRef.current = null;
+  }, []);
+
+  const resetAccumulationKernel = React.useCallback((clearCache: boolean) => {
+    clearAccumulationSettle();
+    if (clearCache) {
+      eventCacheRef.current = createUniverseEventCache(
+        viewPreferences.cacheCapacity,
+      );
+    }
+    accumulationStateRef.current = createUniverseAccumulationState(
+      createUniverseSceneWindow(
+        bundleWindow.eventWindowSize,
+        viewPreferences.temporalPageSize,
+      ),
+    );
+    accumulationMetaRef.current = {
+      query: "",
+      origin: "assistant",
+      sourceHits: [],
+    };
+  }, [
+    bundleWindow.eventWindowSize,
+    clearAccumulationSettle,
+    viewPreferences.cacheCapacity,
+    viewPreferences.temporalPageSize,
+  ]);
+
+  const commitAccumulationProjection = React.useCallback((
+    state: UniverseAccumulationState,
+  ) => {
+    const projection = projectUniverseSceneWindow(state.window);
+    const meta = accumulationMetaRef.current;
+    const activation = universeActivationFromEventBundles({
+      bundles: projection.bundles,
+      epoch: epochRef.current,
+      query: meta.query,
+      origin: meta.origin,
+      sourceHits: meta.sourceHits,
+    });
+    const next = replaceUniverseWorkingSet(activation, budget);
+    commitWorkingSet(next);
+    setSourceHits(meta.sourceHits);
+    setSummary({
+      query: meta.query,
+      events: projection.events.length,
+      entities: projection.entities.length,
+      relations: projection.relations.length,
+    });
+  }, [budget, commitWorkingSet]);
+
+  const scheduleAccumulationSettle = React.useCallback((
+    expectedRevision: number,
+  ) => {
+    clearAccumulationSettle();
+    const run = (revision: number) => {
+      accumulationSettleTimerRef.current = window.setTimeout(() => {
+        accumulationSettleTimerRef.current = null;
+        const current = accumulationStateRef.current;
+        if (current.window.revision !== revision) return;
+        const next = advanceUniverseEvidenceTransition(current);
+        accumulationStateRef.current = next;
+        commitAccumulationProjection(next);
+        if (next.window.phase === "transitioning") {
+          run(next.window.revision);
+        }
+      }, reducedMotion ? 0 : 780);
+    };
+    run(expectedRevision);
+  }, [
+    clearAccumulationSettle,
+    commitAccumulationProjection,
+    reducedMotion,
+  ]);
+
+  const appendActivationToAccumulation = React.useCallback((
+    activation: UniverseActivation,
+    origin: UniverseActivationOrigin,
+  ) => {
+    const bundles = universeEventBundlesFromActivation(
+      { ...activation, origin },
+      {
+        entityTypes: projectedEntityTypes,
+        documentIds: viewPreferences.documentIds,
+      },
+    );
+    accumulationMetaRef.current = {
+      query: activation.query,
+      origin,
+      sourceHits: activation.source_hits ?? [],
+    };
+    const result = appendUniverseEvidence(
+      accumulationStateRef.current,
+      eventCacheRef.current,
+      bundles,
+    );
+    accumulationStateRef.current = result.state;
+    eventCacheRef.current = result.cache;
+    dispatchSession({
+      type: "APPEND_EVIDENCE",
+      origin,
+      addedEvents: result.newBundleKeys.length,
+    });
+    if (!result.hasNewEvidence) {
+      if (result.updatedBundleKeys.length > 0) {
+        // Duplicate facts may still carry a richer entity/relation projection.
+        // Refresh the stable graph in place without scheduling camera work.
+        commitAccumulationProjection(result.state);
+      }
+      setMoreHint(t("accumulation.noNewEvidence"));
+      return result;
+    }
+    commitAccumulationProjection(result.state);
+    setMoreHint("");
+    if (result.state.window.phase === "transitioning") {
+      scheduleAccumulationSettle(result.state.window.revision);
+    }
+    return result;
+  }, [
+    commitAccumulationProjection,
+    dispatchSession,
+    projectedEntityTypes,
+    scheduleAccumulationSettle,
+    t,
+    viewPreferences.documentIds,
+  ]);
+
+  React.useEffect(() => {
+    eventCacheRef.current = resizeUniverseEventCache(
+      eventCacheRef.current,
+      viewPreferences.cacheCapacity,
+    ).cache;
+    const current = accumulationStateRef.current;
+    const window = configureUniverseSceneWindow(
+      current.window,
+      bundleWindow.eventWindowSize,
+      viewPreferences.temporalPageSize,
+    );
+    accumulationStateRef.current = { ...current, window };
+    if (sessionStateRef.current.mode === "accumulation") {
+      commitAccumulationProjection(accumulationStateRef.current);
+    }
+  }, [
+    bundleWindow.eventWindowSize,
+    commitAccumulationProjection,
+    viewPreferences.cacheCapacity,
+    viewPreferences.temporalPageSize,
+  ]);
 
   const refreshLoadProgress = React.useCallback(() => {
     setLoadProgressRevision((current) => current + 1);
@@ -639,7 +820,7 @@ export function KnowledgeUniverse({
     const ranked = [...sourcePartitions].sort(
       (left, right) => right.importance - left.importance || left.id.localeCompare(right.id),
     );
-    const relevantSourceIds = activationOrigin === "search"
+    const relevantSourceIds = sessionState.mode === "accumulation"
       ? new Set([
           ...sourceHits.map((hit) => hit.source_id),
           ...working.nodes.map((node) => node.source_id).filter(Boolean),
@@ -659,10 +840,10 @@ export function KnowledgeUniverse({
     }
     return rendered;
   }, [
-    activationOrigin,
     activePartition,
     browseSessionSourceId,
     mobile,
+    sessionState.mode,
     sourceById,
     sourceHits,
     sourcePartitions,
@@ -793,6 +974,7 @@ export function KnowledgeUniverse({
       timelineJourneyCommitRef.current = null;
       retainedExplorationRef.current = null;
       contextGraphSessionRef.current = null;
+      resetAccumulationKernel(true);
       setContextActivationCount(0);
       sourceSessionRef.current = null;
       setTimelineWindow(null);
@@ -809,8 +991,9 @@ export function KnowledgeUniverse({
       const empty = emptyUniverseWorkingSet(epoch);
       commitWorkingSet(empty);
       setSummary(null);
-      activationOriginRef.current = "browse";
-      setActivationOrigin("browse");
+      evidenceOriginRef.current = "browse";
+      setEvidenceOrigin("browse");
+      dispatchSession({ type: "GO_HOME" });
       setLockedKey(null);
       setSelectedKey(null);
       setSourceHits([]);
@@ -834,6 +1017,8 @@ export function KnowledgeUniverse({
       commitWorkingSet,
       focusOverview,
       refreshLoadProgress,
+      dispatchSession,
+      resetAccumulationKernel,
       setLockedKey,
       setSelectedKey,
     ],
@@ -877,8 +1062,8 @@ export function KnowledgeUniverse({
     const refreshedSession = emptySourceBrowseSession(
       epoch,
       sourceId,
-      bundleWindow.visibleEventBundles,
-      bundleWindow.cachedEventBundles,
+      bundleWindow.eventWindowSize,
+      bundleWindow.cacheCapacity,
     );
     sourceSessionRef.current = refreshedSession;
     commitWorkingSet(refreshedSession.working);
@@ -952,7 +1137,6 @@ export function KnowledgeUniverse({
       sourceHits: [...sourceHits],
       summary: summary ? { ...summary } : null,
       moreHint,
-      activationOrigin: activationOriginRef.current,
       view: graphRef.current?.captureExplorationView() ?? null,
       expansionSnapshots: new Map(expansionSnapshotsRef.current),
       completedSources: new Set(completedSourcesRef.current),
@@ -1016,12 +1200,19 @@ export function KnowledgeUniverse({
     expandedAnchorsRef.current.clear();
     commitWorkingSet(emptyUniverseWorkingSet(sceneEpoch));
     setContextActivationCount(0);
+    resetAccumulationKernel(false);
     setLockedKey(null);
     setSelectedKey(null);
     setSourceHits([]);
     setSummary(null);
-    activationOriginRef.current = origin;
-    setActivationOrigin(origin);
+    evidenceOriginRef.current = origin;
+    setEvidenceOrigin(origin);
+    dispatchSession({
+      type: "ENTER_ACCUMULATION",
+      origin,
+      sourceId: retainedExplorationRef.current?.session?.sourceId ?? null,
+      snapshotAvailable: Boolean(retainedExplorationRef.current),
+    });
     viewportSourceRef.current = null;
     setViewportSourceId(null);
     setActivePartition(null);
@@ -1032,7 +1223,9 @@ export function KnowledgeUniverse({
     clearCameraSchedule,
     clearTimelineSettle,
     commitWorkingSet,
+    dispatchSession,
     refreshLoadProgress,
+    resetAccumulationKernel,
     setLockedKey,
     setSelectedKey,
   ]);
@@ -1042,13 +1235,11 @@ export function KnowledgeUniverse({
     contextGraphSessionRef.current = null;
     setContextActivationCount(0);
     if (!snapshot) {
-      graphRef.current?.clearSelection();
-      setLockedKey(null);
-      setSelectedKey(null);
-      setMoreHint("");
+      resetScene(epochRef.current + 1);
       return;
     }
     retainedExplorationRef.current = null;
+    resetAccumulationKernel(false);
     expandAbortRef.current?.abort();
     expandAbortRef.current = null;
     expandingAnchorRef.current = null;
@@ -1072,8 +1263,16 @@ export function KnowledgeUniverse({
     expandedAnchorsRef.current = new Set(snapshot.expandedAnchors);
     commitWorkingSet(snapshot.working);
     setTimelineWindow(snapshot.timelineWindow);
-    activationOriginRef.current = snapshot.activationOrigin;
-    setActivationOrigin(snapshot.activationOrigin);
+    evidenceOriginRef.current = "browse";
+    setEvidenceOrigin("browse");
+    if (snapshot.session?.sourceId) {
+      dispatchSession({
+        type: "RETURN_TO_EXPLORATION",
+        sourceId: snapshot.session.sourceId,
+      });
+    } else {
+      dispatchSession({ type: "GO_HOME" });
+    }
     setSourceHits(snapshot.sourceHits);
     setSummary(snapshot.summary);
     viewportSourceRef.current = snapshot.viewportSourceId;
@@ -1097,7 +1296,10 @@ export function KnowledgeUniverse({
   }, [
     clearCameraSchedule,
     commitWorkingSet,
+    dispatchSession,
     refreshLoadProgress,
+    resetScene,
+    resetAccumulationKernel,
     setLockedKey,
     setSelectedKey,
   ]);
@@ -1110,143 +1312,58 @@ export function KnowledgeUniverse({
       activationEventEpochRef.current = eventEpoch;
       const origin = activation.origin ?? "assistant";
       const context = readUniverseContext();
-      const contextual = origin !== "browse" && (
-        context.active
-        || Boolean(contextGraphSessionRef.current && retainedExplorationRef.current)
-      );
       if (
         origin !== "browse"
-        && !contextual
-        && (
-          contextProjectionClosedRef.current
-          || (
-            sourceSessionRef.current
-            && activationOriginRef.current === "browse"
-          )
-        )
+        && contextProjectionClosedRef.current
+        && !context.active
+        && sessionStateRef.current.mode !== "accumulation"
       ) {
         // A result that finishes after the user returned must never replace the
         // restored timeline. The conversation may keep streaming in its panel;
         // its graph projection belongs only to an active contextual workspace.
         return;
       }
-      if (contextual) {
-        const retained = retainCurrentExploration();
-        if (origin === "assistant") {
-          // A question starts a new reading beat. Release the card that
-          // launched it so the incoming evidence owns the visual focus, and
-          // do not resurrect that stale lock when the retained view returns.
+      const retained = sessionStateRef.current.mode === "exploration"
+        ? retainCurrentExploration()
+        : retainedExplorationRef.current;
+      if (origin === "assistant") {
+        // A question starts a new reading beat. Release the card that launched
+        // it so the incoming evidence owns the visual focus.
+        if (retained) {
           retained.lockedKey = null;
           retained.selectedKey = null;
-          releaseReadingFocus();
         }
-        if (!contextGraphSessionRef.current) {
-          prepareContextScene(eventEpoch, origin);
-        }
-        const contextSession = contextGraphSessionRef.current;
-        if (!contextSession) return;
-        const firstActivation = contextSession.activationCount === 0;
-        const normalizedActivation = {
-          ...activation,
-          epoch: contextSession.sceneEpoch,
-        };
-        const next = origin === "assistant" && !firstActivation
-          ? mergeUniverseWorkingSetActivation(
-              workingRef.current,
-              normalizedActivation,
-              budget,
-            )
-          : replaceUniverseWorkingSet(normalizedActivation, budget);
-        contextSession.activationCount += 1;
-        if (origin === "assistant") contextSession.answerTurnCount += 1;
-        setContextActivationCount(contextSession.answerTurnCount);
-        commitWorkingSet(next);
-        if (firstActivation) {
-          setLockedKey(null);
-          setSelectedKey(null);
-        }
-        setSourceHits(activation.source_hits ?? []);
-        activationOriginRef.current = origin;
-        setActivationOrigin(origin);
-        setMoreHint("");
-        setSummary({
-          query: activation.query,
-          events: new Set(
-            next.nodes.filter((node) => node.kind === "event").map((node) => node.id),
-          ).size,
-          entities: new Set(
-            next.nodes.filter((node) => node.kind === "entity").map((node) => node.id),
-          ).size,
-          relations: next.relations.length,
-        });
-        const sourceId = dominantSource(activation);
-        setActivePartition(sourceId);
-        if (
-          firstActivation
-          && sourceId
-          && !(activation.source_hits?.length)
-          && interactiveRef.current
-        ) {
-          focusTimerRef.current = window.setTimeout(() => {
-            focusTimerRef.current = null;
-            if (contextGraphSessionRef.current === contextSession) {
-              focusPartition(sourceId);
-            }
-          }, reducedMotion ? 0 : 80);
-        }
-        return;
+        releaseReadingFocus();
       }
-      retainedExplorationRef.current = null;
-      contextGraphSessionRef.current = null;
-      setContextActivationCount(0);
-      epochRef.current = eventEpoch;
-      expandAbortRef.current?.abort();
-      expandAbortRef.current = null;
-      expandingAnchorRef.current = null;
-      timelineRequestRef.current?.controller.abort();
-      timelineRequestRef.current = null;
-      if (snapshotReloadTimerRef.current !== null) {
-        window.clearTimeout(snapshotReloadTimerRef.current);
-        snapshotReloadTimerRef.current = null;
+      if (!contextGraphSessionRef.current) {
+        prepareContextScene(eventEpoch, origin);
       }
-      snapshotReloadAttemptsRef.current.clear();
-      clearTimelineSettle();
-      sourceSessionRef.current = null;
-      setTimelineWindow(null);
-      expansionSnapshotsRef.current.clear();
-      completedSourcesRef.current.clear();
-      expansionCacheRef.current.clear();
-      expansionInflightRef.current.clear();
-      dispatchUniversePatchReset();
-      graphRef.current?.unlockNode();
-      clearCameraSchedule();
-      cursorsRef.current.clear();
-      expandedAnchorsRef.current.clear();
-      const next = replaceUniverseWorkingSet({ ...activation, epoch: eventEpoch }, budget);
-      commitWorkingSet(next);
-      setLockedKey(null);
-      setSelectedKey(null);
-      setSourceHits(activation.source_hits ?? []);
-      activationOriginRef.current = origin;
-      setActivationOrigin(origin);
-      setMoreHint("");
-      setSummary({
-        query: activation.query,
-        events: new Set(
-          next.nodes.filter((node) => node.kind === "event").map((node) => node.id),
-        ).size,
-        entities: new Set(
-          next.nodes.filter((node) => node.kind === "entity").map((node) => node.id),
-        ).size,
-        relations: next.relations.length,
-      });
+      const contextSession = contextGraphSessionRef.current;
+      if (!contextSession) return;
+      const firstActivation = contextSession.activationCount === 0;
+      const normalizedActivation = {
+        ...activation,
+        epoch: contextSession.sceneEpoch,
+      };
+      contextSession.activationCount += 1;
+      if (origin === "assistant") contextSession.answerTurnCount += 1;
+      setContextActivationCount(contextSession.answerTurnCount);
+      evidenceOriginRef.current = origin;
+      setEvidenceOrigin(origin);
+      appendActivationToAccumulation(normalizedActivation, origin);
       const sourceId = dominantSource(activation);
       setActivePartition(sourceId);
-      if (sourceId && !(activation.source_hits?.length) && interactiveRef.current) {
-        const activationEpoch = eventEpoch;
+      if (
+        firstActivation
+        && sourceId
+        && !(activation.source_hits?.length)
+        && interactiveRef.current
+      ) {
         focusTimerRef.current = window.setTimeout(() => {
           focusTimerRef.current = null;
-          if (activationEventEpochRef.current === activationEpoch) focusPartition(sourceId);
+          if (contextGraphSessionRef.current === contextSession) {
+            focusPartition(sourceId);
+          }
         }, reducedMotion ? 0 : 80);
       }
     };
@@ -1268,7 +1385,7 @@ export function KnowledgeUniverse({
       if (
         searchReset
         && sourceSessionRef.current
-        && activationOriginRef.current === "browse"
+        && sessionStateRef.current.mode === "exploration"
       ) {
         return;
       }
@@ -1322,10 +1439,8 @@ export function KnowledgeUniverse({
       window.removeEventListener(UNIVERSE_FOCUS_EVENT, onFocus);
     };
   }, [
-    budget,
+    appendActivationToAccumulation,
     clearCameraSchedule,
-    clearTimelineSettle,
-    commitWorkingSet,
     focusNode,
     focusPartition,
     prepareContextScene,
@@ -1378,7 +1493,7 @@ export function KnowledgeUniverse({
     const visibleTimelineBundleIds = timelineVisibleBundleIds;
     const categoryProjectedWorking = projectUniverseWorkingSet(
       working,
-      projectedEntityCategories,
+      projectedEntityTypes,
     );
     const timelineProjectionIds = timelineProjectionBundleIds(
       categoryProjectedWorking,
@@ -1395,7 +1510,7 @@ export function KnowledgeUniverse({
           visibleTimelineBundleIds,
           timelineSupportBundleIds,
           timelineProjectionBudget,
-          bundleWindow.visibleEventBundles,
+          bundleWindow.eventWindowSize,
           timelineBundleEntityLimit,
         )
       : categoryProjectedWorking;
@@ -1822,8 +1937,8 @@ export function KnowledgeUniverse({
     renderedSourcePartitions,
     sourceById,
     t,
-    bundleWindow.visibleEventBundles,
-    projectedEntityCategories,
+    bundleWindow.eventWindowSize,
+    projectedEntityTypes,
     timelineBundleEntityLimit,
     timelineProjectionBudget,
     timelineCacheBundleIds,
@@ -1931,7 +2046,7 @@ export function KnowledgeUniverse({
                 )
               : Math.min(
                   ENTITY_EXPANSION_EVENT_LIMIT,
-                  Math.max(1, bundleWindow.visibleEventBundles - 1),
+                  Math.max(1, bundleWindow.eventWindowSize - 1),
                   Math.max(1, budgetRef.current.nodes - 1),
                 ),
             cursor,
@@ -1947,7 +2062,7 @@ export function KnowledgeUniverse({
       expansionInflightRef.current.set(inflightKey, { promise: request, signal });
       return request;
     },
-    [bundleWindow.visibleEventBundles, manifest?.policy.event_entity_limit],
+    [bundleWindow.eventWindowSize, manifest?.policy.event_entity_limit],
   );
 
   const expandNode = React.useCallback(
@@ -1961,7 +2076,7 @@ export function KnowledgeUniverse({
         expandedAnchorsRef.current.has(anchorKey)
         && !cursor
       ) return;
-      const browseSession = activationOriginRef.current === "browse"
+      const browseSession = sessionStateRef.current.mode === "exploration"
         ? sourceSessionRef.current
         : null;
       const requestSession = sourceSessionRef.current;
@@ -1977,7 +2092,7 @@ export function KnowledgeUniverse({
         return;
       }
       let snapshot = expansionSnapshotsRef.current.get(exactNode.sourceId) ?? null;
-      if (activationOriginRef.current === "browse") {
+      if (sessionStateRef.current.mode === "exploration") {
         const timeline = browseSession?.sourceId === exactNode.sourceId
           ? browseSession.timeline
           : null;
@@ -2040,7 +2155,7 @@ export function KnowledgeUniverse({
         if (browseSession) {
           const categoryProjectedAdmission = projectUniverseWorkingSet(
             admissionWorking,
-            projectedEntityCategories,
+            projectedEntityTypes,
           );
           const projectionIds = timelineProjectionBundleIds(
             categoryProjectedAdmission,
@@ -2107,12 +2222,39 @@ export function KnowledgeUniverse({
               admission.workingSet.bundles[id]?.node_keys.includes(lineageRootKey))
           )
         ) return;
-        const next = admission.workingSet;
         const responseSnapshot = {
           snapshotId: patch.snapshot_id,
           sourceRevision: patch.source_revision,
           asOf: patch.as_of,
         };
+        const expansionActivation: UniverseActivation = {
+          epoch: requestEpoch,
+          origin: "browse",
+          query: node.label,
+          nodes: [patch.anchor, ...patch.nodes],
+          relations: patch.relations,
+          source_hits: accumulationMetaRef.current.sourceHits,
+        };
+        if (
+          browseSession
+          && sessionStateRef.current.mode === "exploration"
+        ) {
+          const retained = retainCurrentExploration();
+          retained.lockedKey = null;
+          retained.selectedKey = null;
+          releaseReadingFocus();
+          prepareContextScene(requestEpoch, "browse");
+          const contextSession = contextGraphSessionRef.current;
+          if (contextSession) contextSession.activationCount += 1;
+          appendActivationToAccumulation(expansionActivation, "browse");
+        } else if (sessionStateRef.current.mode === "accumulation") {
+          releaseReadingFocus();
+          appendActivationToAccumulation(expansionActivation, "browse");
+        } else {
+          commitWorkingSet(admission.workingSet);
+          pruneExpansionState(admission.workingSet);
+        }
+
         expansionSnapshotsRef.current.set(exactNode.sourceId, responseSnapshot);
         const cacheKey = universeExpansionCacheKey(
           requestEpoch,
@@ -2129,17 +2271,10 @@ export function KnowledgeUniverse({
           if (typeof oldest !== "string") break;
           expansionCacheRef.current.delete(oldest);
         }
-        commitWorkingSet(next);
-        pruneExpansionState(next);
         dispatchUniversePatch(patch);
-        setSummary((current) => ({
-          query: current?.query ?? node.label,
-          events: next.nodes.filter((item) => item.kind === "event").length,
-          entities: next.nodes.filter((item) => item.kind === "entity").length,
-          relations: next.relations.length,
-        }));
+        const committedWorking = workingRef.current;
         const committedCount = universeAnchorProgress(
-          next,
+          committedWorking,
           exactNode.kind,
           exactNode.rawId,
           exactNode.sourceId,
@@ -2183,11 +2318,15 @@ export function KnowledgeUniverse({
       }
     },
     [
+      appendActivationToAccumulation,
       commitWorkingSet,
       invalidateSourceSnapshot,
+      prepareContextScene,
       pruneExpansionState,
-      projectedEntityCategories,
+      projectedEntityTypes,
+      releaseReadingFocus,
       requestExpansion,
+      retainCurrentExploration,
       t,
       timelineBundleEntityLimit,
       timelineProjectionBudget,
@@ -2247,7 +2386,7 @@ export function KnowledgeUniverse({
       const epoch = epochRef.current;
       const source = sourceById.get(sourceId);
       const pageBundleLimit = state.queryPageSize ?? universeTimelinePageBundleLimit(
-        manifest.policy.timeline_event_page_size,
+        viewPreferences.temporalPageSize,
         Math.min(EVENT_ENTITY_PROJECTION_LIMIT, manifest.policy.event_entity_limit),
         residentBudgetRef.current,
       );
@@ -2301,6 +2440,13 @@ export function KnowledgeUniverse({
             throw new Error("timeline response does not match the active snapshot");
           }
 
+          // Network pages populate the pure FIFO cache only. Cache admission
+          // never creates scene objects or moves the camera.
+          eventCacheRef.current = admitUniverseEventBundles(
+            eventCacheRef.current,
+            universeEventBundlesFromTimeline(page),
+          ).cache;
+
           const previousDeque = state.deque;
           const dequeAdmission = admitUniverseTimelineDequePage(
             previousDeque,
@@ -2333,7 +2479,7 @@ export function KnowledgeUniverse({
           );
           const categoryProjectedAdmission = projectUniverseWorkingSet(
             admissionWorking,
-            projectedEntityCategories,
+            projectedEntityTypes,
           );
           const currentProjectionIds = timelineProjectionBundleIds(
             categoryProjectedAdmission,
@@ -2429,7 +2575,7 @@ export function KnowledgeUniverse({
           loadResult = "loaded";
           refreshLoadProgress();
 
-          if (activationOriginRef.current === "browse") {
+          if (sessionStateRef.current.mode === "exploration") {
             setSummary({
               query: source?.label ?? t("timeline.defaultTitle"),
               events: queriedUniverseTimelineEventCount(synchronizedWindow),
@@ -2493,12 +2639,13 @@ export function KnowledgeUniverse({
       invalidateSourceSnapshot,
       manifest,
       pruneExpansionState,
-      projectedEntityCategories,
+      projectedEntityTypes,
       refreshLoadProgress,
       sourceById,
       t,
       timelineBundleEntityLimit,
       timelineProjectionBudget,
+      viewPreferences.temporalPageSize,
     ],
   );
   timelinePageLoaderRef.current = loadSourceTimelinePage;
@@ -2514,13 +2661,13 @@ export function KnowledgeUniverse({
     if (deque && current.activeIndex >= 0) {
       const activeBundleId = current.cacheBundleIds[current.activeIndex];
       const pageSize = session.timeline.queryPageSize
-        ?? Math.max(1, manifest?.policy.timeline_event_page_size ?? 6);
+        ?? viewPreferences.temporalPageSize;
       const resized = activeBundleId
         ? resizeUniverseTimelineDeque(
             deque,
-            bundleWindow.cachedEventBundles,
+            bundleWindow.cacheCapacity,
             activeBundleId,
-            bundleWindow.visibleEventBundles,
+            bundleWindow.eventWindowSize,
             pageSize,
           )
         : null;
@@ -2528,7 +2675,7 @@ export function KnowledgeUniverse({
         ? syncUniverseTimelineWindowToDeque(resized.deque, {
             activeBundleId,
             activeIndex: current.activeIndex,
-            visibleLimit: bundleWindow.visibleEventBundles,
+            visibleLimit: bundleWindow.eventWindowSize,
           })
         : null;
       if (resized && anchor) {
@@ -2540,8 +2687,8 @@ export function KnowledgeUniverse({
           && anchor.activeIndex === anchor.cacheBundleIds.length - 1
           ? "complete" as const
           : "idle" as const;
-        const changed = current.visibleLimit !== bundleWindow.visibleEventBundles
-          || current.cacheLimit !== bundleWindow.cachedEventBundles
+        const changed = current.visibleLimit !== bundleWindow.eventWindowSize
+          || current.cacheLimit !== bundleWindow.cacheCapacity
           || current.activeIndex !== anchor.activeIndex
           || current.phase !== phase
           || current.cacheBundleIds.length !== anchor.cacheBundleIds.length
@@ -2565,8 +2712,8 @@ export function KnowledgeUniverse({
             networkExhausted,
             phase,
             revision: current.revision + 1,
-            visibleLimit: bundleWindow.visibleEventBundles,
-            cacheLimit: bundleWindow.cachedEventBundles,
+            visibleLimit: bundleWindow.eventWindowSize,
+            cacheLimit: bundleWindow.cacheCapacity,
             cacheStartOffset,
           };
         }
@@ -2574,8 +2721,8 @@ export function KnowledgeUniverse({
     } else {
       next = reconfigureUniverseTimelineWindow(
         current,
-        bundleWindow.visibleEventBundles,
-        bundleWindow.cachedEventBundles,
+        bundleWindow.eventWindowSize,
+        bundleWindow.cacheCapacity,
       );
     }
     if (next !== current) commitTimelineWindow(session, next);
@@ -2604,10 +2751,10 @@ export function KnowledgeUniverse({
     bundleWindow,
     commitTimelineWindow,
     commitWorkingSet,
-    manifest?.policy.timeline_event_page_size,
     pruneExpansionState,
     refreshLoadProgress,
     timelineWindow,
+    viewPreferences.temporalPageSize,
   ]);
 
   const activateSource = React.useCallback(
@@ -2617,11 +2764,13 @@ export function KnowledgeUniverse({
       contextGraphSessionRef.current = null;
       contextProjectionClosedRef.current = false;
       setContextActivationCount(0);
+      resetAccumulationKernel(true);
       dispatchUniverseResume();
       // Explicit source navigation starts a timeline browse session even when
       // the user arrived from search or an assistant-provided activation.
-      activationOriginRef.current = "browse";
-      setActivationOrigin("browse");
+      evidenceOriginRef.current = "browse";
+      setEvidenceOrigin("browse");
+      dispatchSession({ type: "ENTER_EXPLORATION", sourceId });
       setSourceHits([]);
       clearCameraSchedule();
       expandAbortRef.current?.abort();
@@ -2653,8 +2802,8 @@ export function KnowledgeUniverse({
       const session = emptySourceBrowseSession(
         epochRef.current,
         sourceId,
-        bundleWindow.visibleEventBundles,
-        bundleWindow.cachedEventBundles,
+        bundleWindow.eventWindowSize,
+        bundleWindow.cacheCapacity,
       );
       sourceSessionRef.current = session;
       completedSourcesRef.current.clear();
@@ -2671,9 +2820,11 @@ export function KnowledgeUniverse({
       clearCameraSchedule,
       clearTimelineSettle,
       commitWorkingSet,
+      dispatchSession,
       loadSourceTimelinePage,
       pruneExpansionState,
       refreshLoadProgress,
+      resetAccumulationKernel,
       setLockedKey,
       setSelectedKey,
       sourceById,
@@ -2727,7 +2878,7 @@ export function KnowledgeUniverse({
       const session = sourceSessionRef.current;
       if (
         !session
-        || activationOriginRef.current !== "browse"
+        || sessionStateRef.current.mode !== "exploration"
       ) return "blocked";
       if (lockedKeyRef.current) {
         setMoreHint(t("timeline.unlockToContinue"));
@@ -2735,7 +2886,7 @@ export function KnowledgeUniverse({
       }
 
       const queryPageSize = session.timeline.queryPageSize ?? universeTimelinePageBundleLimit(
-        manifest?.policy.timeline_event_page_size ?? 6,
+        viewPreferences.temporalPageSize,
         Math.min(
           EVENT_ENTITY_PROJECTION_LIMIT,
           manifest?.policy.event_entity_limit ?? EVENT_ENTITY_PROJECTION_LIMIT,
@@ -2834,10 +2985,10 @@ export function KnowledgeUniverse({
       commitTimelineWindow,
       loadSourceTimelinePage,
       manifest?.policy.event_entity_limit,
-      manifest?.policy.timeline_event_page_size,
       scheduleTimelineSettle,
       sourceById,
       t,
+      viewPreferences.temporalPageSize,
     ],
   );
 
@@ -2845,7 +2996,7 @@ export function KnowledgeUniverse({
     const session = sourceSessionRef.current;
     if (
       !interactive
-      || activationOrigin !== "browse"
+      || sessionState.mode !== "exploration"
       || !session
       || session.timeline.loading
       || session.timeline.pausedReason
@@ -2855,22 +3006,29 @@ export function KnowledgeUniverse({
     ) return;
     const current = session.timeline.window;
     const nextPageSize = session.timeline.queryPageSize ?? universeTimelinePageBundleLimit(
-      manifest?.policy.timeline_event_page_size ?? 6,
+      viewPreferences.temporalPageSize,
       Math.min(
         EVENT_ENTITY_PROJECTION_LIMIT,
         manifest?.policy.event_entity_limit ?? EVENT_ENTITY_PROJECTION_LIMIT,
       ),
       residentBudget,
     );
-    const plan = planUniverseTimelinePrefetch({
-      cacheLength: current.cacheBundleIds.length,
-      activeIndex: current.activeIndex,
-      visibleLimit: current.visibleLimit,
-      cacheLimit: current.cacheLimit,
+    const visibleStart = Math.max(
+      0,
+      current.activeIndex - current.visibleLimit + 1,
+    );
+    const plan = planUniversePrefetch({
+      newerEvents: visibleStart,
+      olderEvents: Math.max(
+        0,
+        current.cacheBundleIds.length - current.activeIndex - 1,
+      ),
       hasOlder: session.timeline.deque.hasOlder,
       hasNewer: session.timeline.deque.hasNewer,
       pageSize: nextPageSize,
+      pagesPerSide: viewPreferences.temporalPrefetchPages,
       preferredDirection: session.timeline.preferredDirection,
+      inFlight: Boolean(timelineRequestRef.current),
     });
     if (!plan.direction) return;
     void loadSourceTimelinePage(
@@ -2879,14 +3037,15 @@ export function KnowledgeUniverse({
       plan.direction,
     );
   }, [
-    activationOrigin,
     interactive,
     loadSourceTimelinePage,
     lockedKey,
     manifest?.policy.event_entity_limit,
-    manifest?.policy.timeline_event_page_size,
     residentBudget,
+    sessionState.mode,
     timelineWindow,
+    viewPreferences.temporalPageSize,
+    viewPreferences.temporalPrefetchPages,
   ]);
 
   const timelineJourney = React.useMemo<UniverseTimelineJourney>(() => {
@@ -2933,8 +3092,7 @@ export function KnowledgeUniverse({
   );
   const contextualWorkspaceActive = Boolean(
     interactive
-    && contextWorkspace.active
-    && contextWorkspace.section,
+    && sessionState.mode === "accumulation",
   );
 
   const handleTimelineSettled = React.useCallback((revision: number) => {
@@ -3080,8 +3238,9 @@ export function KnowledgeUniverse({
         concreteNode.sourceId,
         timelineNavigationForNode(concreteNode),
       );
+      dispatchSession({ type: "OPEN_DETAIL", key: concreteNode.id });
     },
-    [lockNodeForReading, timelineNavigationForNode],
+    [dispatchSession, lockNodeForReading, timelineNavigationForNode],
   );
 
   const moveTimelineManually = React.useCallback((direction: "next" | "previous") => {
@@ -3112,15 +3271,14 @@ export function KnowledgeUniverse({
   }, []);
 
   const handleSceneBackgroundClick = React.useCallback(() => {
-    if (readUniverseContext().active || contextGraphSessionRef.current) {
-      dispatchUniverseResume();
-    }
-  }, []);
+    clearSelection();
+  }, [clearSelection]);
 
   const handleExploreMore = React.useCallback((node: UniverseSceneNode) => {
     if (node.kind === "source") return;
+    clearSelection();
     void expandNode(node as UniverseConcrete3DNode);
-  }, [expandNode]);
+  }, [clearSelection, expandNode]);
 
   const handleAskNode = React.useCallback((node: UniverseSceneNode) => {
     if (node.kind === "source") return;
@@ -3347,13 +3505,14 @@ export function KnowledgeUniverse({
       }
       snapshotReloadAttemptsRef.current.clear();
       clearCameraSchedule();
+      clearAccumulationSettle();
       clearTimelineSettle();
       if (timelinePlaybackTimerRef.current !== null) {
         window.clearTimeout(timelinePlaybackTimerRef.current);
         timelinePlaybackTimerRef.current = null;
       }
     },
-    [clearCameraSchedule, clearTimelineSettle],
+    [clearAccumulationSettle, clearCameraSchedule, clearTimelineSettle],
   );
 
   const rebuild = React.useCallback(async () => {
@@ -3419,9 +3578,8 @@ export function KnowledgeUniverse({
       data-universe-suspended={!interactive}
       data-universe-mode={interactive ? "explore" : "normal"}
       data-universe-view={viewportSourceId ? "detail" : "overview"}
-      data-universe-activation-origin={activationOrigin}
+      data-universe-evidence-origin={evidenceOrigin}
       data-universe-scene-strategy={sceneStrategy}
-      data-universe-search-locked={activationOrigin === "search"}
       data-universe-engine={
         sceneUnavailableReason
         ?? (webglAvailable === true ? "ready" : webglAvailable === false ? "api-unavailable" : "probing")
@@ -3430,7 +3588,7 @@ export function KnowledgeUniverse({
       data-universe-projection-node-budget={timelineProjectionBudget.nodes}
       data-universe-resident-node-budget={residentBudget.nodes}
       data-universe-timeline-phase={timelineJourney.phase}
-      data-universe-visible-bundle-limit={bundleWindow.visibleEventBundles}
+      data-universe-visible-bundle-limit={bundleWindow.eventWindowSize}
       data-universe-transition-headroom={timelineWindowPlan.transitionHeadroomPackages}
       data-universe-visible-bundles={timelineWindow?.visibleBundleIds.length ?? 0}
       data-universe-cached-bundles={timelineWindow?.cacheBundleIds.length ?? 0}
@@ -3659,15 +3817,6 @@ export function KnowledgeUniverse({
             )}
           </AnimatePresence>
           {expandingKey && <Loader2 className="size-3 animate-spin" />}
-          {activationOrigin === "search" && (
-            <span
-              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-500/25 bg-amber-500/10 px-1.5 py-1 text-[9px] text-amber-700 dark:text-amber-300"
-              title={t("searchLocked.description")}
-            >
-              <LockKeyhole className="size-2.5" />
-              <span className="hidden sm:inline">{t("searchLocked.label")}</span>
-            </span>
-          )}
           </div>
         </div>
 
@@ -3677,7 +3826,7 @@ export function KnowledgeUniverse({
               key={viewportLoadProgress.sourceId}
               progress={viewportLoadProgress}
               reducedMotion={Boolean(reducedMotion)}
-              explicitOnly={activationOrigin !== "browse"}
+              explicitOnly={sessionState.mode !== "exploration"}
             />
           )}
         </AnimatePresence>
@@ -3706,11 +3855,20 @@ export function KnowledgeUniverse({
           <span className="min-w-0 truncate whitespace-nowrap text-[10px] text-muted-foreground">
             {contextWorkspace.section === "answer"
               ? t("controls.answerContext", {
-                  count: contextActivationCount,
+                  count: Math.max(
+                    contextActivationCount,
+                    sessionState.evidenceBatchCount,
+                  ),
                   events: contextGraphSessionRef.current ? summary?.events ?? 0 : 0,
                   entities: contextGraphSessionRef.current ? summary?.entities ?? 0 : 0,
                 })
-              : t("controls.searchContext")}
+              : contextWorkspace.section === "search"
+                ? t("controls.searchContext")
+                : t("controls.evidenceContext", {
+                    count: sessionState.evidenceBatchCount,
+                    events: summary?.events ?? 0,
+                    entities: summary?.entities ?? 0,
+                  })}
           </span>
           <Button
             type="button"

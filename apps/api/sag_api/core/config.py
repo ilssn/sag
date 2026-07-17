@@ -143,7 +143,7 @@ class Settings(BaseSettings):
     # ── 知识宇宙 ──────────────────────────────────────────────────────────
     # 服务端统一下发景深门与场景预算，前端不再散落硬编码阈值。
     universe_manifest_source_limit: int = Field(default=256, ge=16, le=2048)
-    universe_timeline_event_page_size: int = Field(default=12, ge=2, le=24)
+    universe_timeline_event_page_size: int = Field(default=20, ge=10, le=50)
     # 时间线只返回事件的一屏事实投影；完整邻域由显式探索分页加载。
     universe_event_entity_limit: int = Field(default=8, ge=4, le=8)
     universe_lod_orbit_px: int = Field(default=72, ge=24, le=240)
@@ -153,10 +153,10 @@ class Settings(BaseSettings):
     universe_lod_debounce_ms: int = Field(default=220, ge=50, le=2000)
     universe_proxy_budget_desktop: int = Field(default=15000, ge=256, le=16000)
     universe_proxy_budget_mobile: int = Field(default=4000, ge=128, le=4800)
-    universe_node_budget_desktop: int = Field(default=240, ge=40, le=240)
-    universe_node_budget_mobile: int = Field(default=120, ge=40, le=120)
-    universe_edge_budget_desktop: int = Field(default=360, ge=64, le=360)
-    universe_edge_budget_mobile: int = Field(default=180, ge=64, le=180)
+    universe_node_budget_desktop: int = Field(default=700, ge=450, le=1200)
+    universe_node_budget_mobile: int = Field(default=520, ge=450, le=800)
+    universe_edge_budget_desktop: int = Field(default=1000, ge=600, le=1800)
+    universe_edge_budget_mobile: int = Field(default=720, ge=600, le=1200)
     universe_planet_radius_min: float = Field(default=42.0, ge=12.0, le=160.0)
     universe_planet_radius_max: float = Field(default=132.0, ge=48.0, le=360.0)
     universe_planet_radius_scale: float = Field(default=22.0, ge=2.0, le=80.0)

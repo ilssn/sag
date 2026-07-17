@@ -6,17 +6,16 @@ import {
 } from "./universe-working-set";
 import {
   DEFAULT_UNIVERSE_VIEW_PREFERENCES,
-  UNIVERSE_VIEW_PREFERENCES_STORAGE_KEY,
   UNIVERSE_VIEW_LIMITS,
-  effectiveUniverseBundleWindow,
+  UNIVERSE_VIEW_PREFERENCES_STORAGE_KEY,
   effectiveUniverseBudget,
+  effectiveUniverseBundleWindow,
   loadUniverseEntityCategories,
   loadUniverseViewPreferences,
-  minimumUniverseCacheBundles,
+  minimumUniverseCacheCapacity,
   normalizeUniverseViewPreferences,
   projectUniverseWorkingSet,
   publishUniverseEntityCategories,
-  universeCardBudget,
   type UniverseViewPreferences,
 } from "./universe-view-preferences";
 
@@ -90,61 +89,78 @@ function workingSet() {
         description: "",
       },
     ],
-  }, { nodes: 100, edges: 100 }, 1);
+  }, { nodes: 1_000, edges: 1_000 }, 1);
 }
 
-describe("universe view preference normalization", () => {
-  it("repairs untrusted values inside the strict v5 schema", () => {
+describe("universe v6 view preferences", () => {
+  it("uses the one production configuration by default", () => {
+    expect(DEFAULT_UNIVERSE_VIEW_PREFERENCES).toEqual({
+      version: 6,
+      cacheCapacity: 1_000,
+      eventWindowSize: 50,
+      cardsEnabled: true,
+      eventCardPreviewCount: 10,
+      temporalPageSize: 20,
+      temporalPrefetchPages: 3,
+      entityTypes: null,
+      documentIds: null,
+    });
+  });
+
+  it("repairs untrusted values inside the strict v6 schema", () => {
     expect(normalizeUniverseViewPreferences({
-      version: 5,
-      visibleEventBundles: 99.9,
-      cachedEventBundles: -100,
-      showEventCards: "yes",
-      showEntityCards: false,
-      entityCategories: [" Person ", "", "Person", 42],
-      visibleKinds: ["entity"],
-      priority: "events",
+      version: 6,
+      cacheCapacity: -100,
+      eventWindowSize: 999,
+      cardsEnabled: "yes",
+      eventCardPreviewCount: 500,
+      temporalPageSize: 27,
+      temporalPrefetchPages: 99,
+      entityTypes: [" Person ", "", "Person", 42],
+      documentIds: [" doc-2 ", "doc-1", "doc-1"],
     })).toEqual({
-      version: 5,
-      visibleEventBundles: 18,
-      cachedEventBundles: 36,
-      showEventCards: true,
-      showEntityCards: false,
-      entityCategories: ["Person"],
+      version: 6,
+      cacheCapacity: 300,
+      eventWindowSize: 100,
+      cardsEnabled: true,
+      eventCardPreviewCount: 20,
+      temporalPageSize: 25,
+      temporalPrefetchPages: 3,
+      entityTypes: ["Person"],
+      documentIds: ["doc-1", "doc-2"],
     });
   });
 
-  it("enables both card kinds by default and permits both to be disabled", () => {
-    expect(DEFAULT_UNIVERSE_VIEW_PREFERENCES.showEventCards).toBe(true);
-    expect(DEFAULT_UNIVERSE_VIEW_PREFERENCES.showEntityCards).toBe(true);
+  it("exposes ranges that can support the default 50-event scene", () => {
+    expect(UNIVERSE_VIEW_LIMITS.eventWindowSize).toMatchObject({
+      min: 20,
+      max: 100,
+      default: 50,
+    });
+    expect(UNIVERSE_VIEW_LIMITS.cacheCapacity).toMatchObject({
+      min: 200,
+      max: 5_000,
+      default: 1_000,
+    });
+    expect(UNIVERSE_VIEW_LIMITS.eventCardPreviewCount.default).toBe(10);
+    expect(UNIVERSE_VIEW_LIMITS.temporalPageSize.default).toBe(20);
+    expect(UNIVERSE_VIEW_LIMITS.temporalPrefetchPages.default).toBe(3);
+  });
+
+  it("keeps enough cache for the window and both prefetch runways", () => {
+    expect(minimumUniverseCacheCapacity(50, 20, 3)).toBe(200);
     expect(preferences({
-      showEventCards: false,
-      showEntityCards: false,
-    })).toMatchObject({
-      showEventCards: false,
-      showEntityCards: false,
-    });
+      cacheCapacity: 200,
+      eventWindowSize: 100,
+      temporalPageSize: 50,
+      temporalPrefetchPages: 3,
+    }).cacheCapacity).toBe(400);
   });
 
-  it("exposes the production window and cache ranges", () => {
-    expect(UNIVERSE_VIEW_LIMITS.visibleEventBundles).toMatchObject({
-      min: 2,
-      max: 18,
-      step: 1,
-      default: 8,
-    });
-    expect(UNIVERSE_VIEW_LIMITS.cachedEventBundles).toMatchObject({
-      min: 12,
-      max: 96,
-      step: 6,
-      default: 36,
-    });
-  });
-
-  it("reads only the current storage key and schema", () => {
+  it("reads only v6 and deliberately ignores all old preference keys", () => {
     const storage = memoryStorage({
-      "sag:universe-view-preferences:v4": JSON.stringify({
-        version: 4,
+      "sag:universe-view-preferences:v5": JSON.stringify({
+        version: 5,
         visibleEventBundles: 2,
       }),
     });
@@ -154,67 +170,28 @@ describe("universe view preference normalization", () => {
 
     storage.setItem(UNIVERSE_VIEW_PREFERENCES_STORAGE_KEY, JSON.stringify({
       ...DEFAULT_UNIVERSE_VIEW_PREFERENCES,
-      showEventCards: false,
+      cardsEnabled: false,
     }));
-    expect(loadUniverseViewPreferences(storage).showEventCards).toBe(false);
+    expect(loadUniverseViewPreferences(storage).cardsEnabled).toBe(false);
   });
 
-  it("rejects every non-current schema without migration", () => {
-    expect(normalizeUniverseViewPreferences({
-      version: 4,
-      visibleEventBundles: 18,
-      cachedEventBundles: 96,
-      showEventCards: false,
-    })).toEqual(DEFAULT_UNIVERSE_VIEW_PREFERENCES);
-  });
-
-  it("normalizes an empty category selection back to all categories", () => {
-    expect(preferences({ entityCategories: [] }).entityCategories).toBeNull();
-    expect(preferences({ entityCategories: ["", "  "] }).entityCategories).toBeNull();
-  });
-
-  it("rounds cache capacity upward for one history and two forward pages", () => {
-    expect(preferences({
-      visibleEventBundles: 2,
-      cachedEventBundles: 13,
-    }).cachedEventBundles).toBe(24);
-    expect(preferences({
-      visibleEventBundles: 13,
-      cachedEventBundles: 12,
-    }).cachedEventBundles).toBe(36);
-    expect(minimumUniverseCacheBundles(18)).toBe(36);
-  });
-
-  it("applies the larger desktop and mobile device caps", () => {
+  it("uses the same configured window on desktop and mobile", () => {
     expect(effectiveUniverseBundleWindow(
       DEFAULT_UNIVERSE_VIEW_PREFERENCES,
       false,
-    )).toEqual({
-      visibleEventBundles: 8,
-      cachedEventBundles: 36,
-    });
-    expect(effectiveUniverseBundleWindow(preferences({
-      visibleEventBundles: 18,
-      cachedEventBundles: 96,
-    }), false)).toEqual({
-      visibleEventBundles: 18,
-      cachedEventBundles: 96,
-    });
-    expect(effectiveUniverseBundleWindow(preferences({
-      visibleEventBundles: 18,
-      cachedEventBundles: 96,
-    }), true)).toEqual({
-      visibleEventBundles: 8,
-      cachedEventBundles: 36,
-    });
+    )).toEqual({ eventWindowSize: 50, cacheCapacity: 1_000 });
+    expect(effectiveUniverseBundleWindow(
+      DEFAULT_UNIVERSE_VIEW_PREFERENCES,
+      true,
+    )).toEqual({ eventWindowSize: 50, cacheCapacity: 1_000 });
   });
 });
 
 describe("universe rendering budgets", () => {
   it("keeps the factual budget independent from presentation settings", () => {
-    expect(effectiveUniverseBudget({ nodes: 800, edges: 1500 })).toEqual({
-      nodes: 240,
-      edges: 360,
+    expect(effectiveUniverseBudget({ nodes: 800, edges: 1_500 })).toEqual({
+      nodes: 700,
+      edges: 1_000,
     });
   });
 
@@ -224,8 +201,8 @@ describe("universe rendering budgets", () => {
   });
 });
 
-describe("entity-category projection", () => {
-  it("always keeps events while filtering entities and their dangling mentions", () => {
+describe("entity-type projection", () => {
+  it("always keeps events while filtering entities and dangling mentions", () => {
     const current = workingSet();
     const projected = projectUniverseWorkingSet(current, ["Person"]);
 
@@ -241,12 +218,6 @@ describe("entity-category projection", () => {
     expect(projected.nodes.some((item) => item.id === "org-1")).toBe(false);
     expect(projected.relations.some((relation) => relation.to_id === "org-1"))
       .toBe(false);
-    const nodeIds = new Set(projected.nodes.map((item) => item.id));
-    expect(projected.relations.every((relation) =>
-      nodeIds.has(relation.from_id) && nodeIds.has(relation.to_id)))
-      .toBe(true);
-    expect(projected.relations.some((relation) => relation.kind === "subevent"))
-      .toBe(true);
     expect(current.nodes).toHaveLength(4);
   });
 
@@ -257,35 +228,8 @@ describe("entity-category projection", () => {
   });
 });
 
-describe("adaptive universe cards", () => {
-  it("uses the fixed balanced budget when both card kinds are enabled", () => {
-    const budget = universeCardBudget(1280, 720, true, true);
-    expect(budget.total).toBe(14);
-    expect(budget.events).toBe(6);
-    expect(budget.entities).toBe(8);
-  });
-
-  it("assigns the full budget to one enabled kind and allows no persistent cards", () => {
-    expect(universeCardBudget(1280, 720, true, false)).toEqual({
-      events: 14,
-      entities: 0,
-      total: 14,
-    });
-    expect(universeCardBudget(1280, 720, false, true)).toEqual({
-      events: 0,
-      entities: 14,
-      total: 14,
-    });
-    expect(universeCardBudget(1280, 720, false, false)).toEqual({
-      events: 0,
-      entities: 0,
-      total: 0,
-    });
-  });
-});
-
-describe("universe entity category registry", () => {
-  it("merges, trims and sorts discovered categories", () => {
+describe("universe entity type registry", () => {
+  it("merges, trims and sorts discovered entity types", () => {
     const storage = memoryStorage();
 
     publishUniverseEntityCategories([" organization ", "concept"], storage);

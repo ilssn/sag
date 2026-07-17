@@ -125,7 +125,10 @@ class UniverseExpandIn(BaseModel):
 class UniverseTimelineIn(BaseModel):
     epoch: int = Field(ge=1)
     source_id: str = Field(min_length=1, max_length=64)
-    limit: int = Field(default=6, ge=1, le=24)
+    # The product UI deliberately exposes a 10–50 range, while the transport
+    # still accepts smaller pages for deterministic pagination probes and
+    # internal callers. The public default remains the production page size.
+    limit: int = Field(default=20, ge=1, le=50)
     direction: UniverseTimelineDirection = "older"
     cursor: str | None = Field(default=None, max_length=2048)
     snapshot_id: str | None = Field(default=None, max_length=2048)

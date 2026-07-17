@@ -213,7 +213,7 @@ async def test_universe_real_store_statistics_and_keyset_cursor():
             assert partition["entity_count"] == 11
             assert partition["relation_count"] == 34
             assert sum(bucket["count"] for bucket in partition["time_buckets"]) == 24
-            assert rebuilt.json()["policy"]["timeline_event_page_size"] == 12
+            assert rebuilt.json()["policy"]["timeline_event_page_size"] == 20
             assert rebuilt.json()["policy"]["event_entity_limit"] == 8
 
             oversized_timeline = await client.post(
@@ -222,7 +222,7 @@ async def test_universe_real_store_statistics_and_keyset_cursor():
                 json={
                     "epoch": 10,
                     "source_id": source_id,
-                    "limit": 25,
+                    "limit": 51,
                 },
             )
             assert oversized_timeline.status_code == 422

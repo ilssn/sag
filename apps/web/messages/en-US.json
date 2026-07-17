@@ -1048,6 +1048,9 @@
       "eventEntitiesComplete": "All {count, plural, one {# entity linked to this event is} other {# entities linked to this event are}} visible.",
       "noEventEntities": "No related entities have been extracted for this event yet."
     },
+    "accumulation": {
+      "noNewEvidence": "This evidence is already present in the current graph; no new events were added."
+    },
     "timeline": {
       "loading": "Loading the adjacent page in time",
       "defaultTitle": "Knowledge timeline",
@@ -1118,6 +1121,7 @@
       "origin": "Return to this galaxy's origin",
       "answerContext": "Incremental clue graph · {events, number} events · {entities, number} entities · {count, number} answer turns",
       "searchContext": "Search result graph · exploration retained",
+      "evidenceContext": "Accumulated clues · {events, number} events · {entities, number} entities · {count, number} batches",
       "returnToExplore": "Return to graph exploration",
       "playTimeline": "Play timeline automatically",
       "pauseTimeline": "Pause timeline playback",
@@ -1134,20 +1138,20 @@
   "GraphSettings": {
     "drawer": {
       "title": "Graph display settings",
-      "description": "Adjust node cards, entity types, and the time window independently. Changes apply to the current graph immediately."
+      "description": "One configuration serves temporal exploration and evidence accumulation. Changes apply immediately."
     },
     "cards": {
       "title": "Node cards",
-      "description": "These options control persistent cards only, not nodes or relationships. Hovering or clicking still reveals the focused node card.",
-      "event": {
-        "title": "Show event cards",
-        "description": "Show event summaries by default. Event stars remain available on hover and click when this is off.",
-        "aria": "Show event cards"
+      "description": "Cards affect readability only, never event, entity, or factual relationship presence.",
+      "enabled": {
+        "title": "Enable event and entity cards",
+        "description": "The complete star network remains when disabled. Hover or lock still reveals the focused relationship.",
+        "aria": "Enable event and entity cards"
       },
-      "entity": {
-        "title": "Show entity cards",
-        "description": "Show entity names by default. Entity glyphs remain available on hover and click when this is off.",
-        "aria": "Show entity cards"
+      "preview": {
+        "title": "Event card previews",
+        "description": "Limit readable event cards in the resting scene. Related entities follow events and focused relationships.",
+        "aria": "Event card preview count"
       }
     },
     "entityTypes": {
@@ -1159,21 +1163,35 @@
     },
     "window": {
       "title": "Exploration window",
-      "description": "Control visible time points separately from reusable cache capacity so long explorations stay bounded."
+      "description": "The window bounds the current graph. The cache stores data only, keeping long exploration bounded."
     },
-    "visibleEventBundles": {
-      "title": "Visible time window",
-      "description": "Cap visible time points. Each time point stays complete with its entities and enters or retires naturally at the edge.",
-      "current": "Configured upper limit",
-      "aria": "Visible time point count",
+    "eventWindow": {
+      "title": "Event window",
+      "description": "Bound events participating in the graph. Entities enter with events and old events retire naturally at the edge.",
+      "aria": "Event window size"
+    },
+    "cacheCapacity": {
+      "title": "Event cache",
+      "description": "Store loaded event, entity, and relationship data only. The oldest admission retires first at capacity.",
+      "aria": "Event cache capacity"
+    },
+    "temporal": {
+      "title": "Temporal exploration",
+      "description": "These affect timeline requests and preparation only, not the on-screen window.",
+      "page": {
+        "title": "Page size",
+        "description": "Events loaded in each timeline request.",
+        "aria": "Temporal exploration page size"
+      },
+      "prefetch": {
+        "title": "Prefetch before and after",
+        "description": "Pages prepared on each side of the current window. Requests remain serial.",
+        "aria": "Temporal exploration prefetch pages"
+      }
+    },
+    "value": {
+      "current": "Current",
       "recommended": "Recommended: {count, number}"
-    },
-    "cachedEventBundles": {
-      "title": "Timeline cache capacity",
-      "description": "This caps the memory used for earlier and later times. Adjacent times are prefetched as needed, and existing cache is reused first.",
-      "current": "Capacity on this device",
-      "aria": "Timeline cache capacity",
-      "runway": "Up to {count, number} time points reserved"
     },
     "reset": {
       "savedLocally": "Changes apply to the current graph immediately and are saved in this browser.",

@@ -152,12 +152,12 @@ function expectBundleInvariants(
 describe("universe working set", () => {
   it("uses bounded production fallbacks when the manifest policy is unavailable", () => {
     expect(UNIVERSE_SCENE_BUDGET).toEqual({
-      desktop: { nodes: 240, edges: 360 },
-      mobile: { nodes: 120, edges: 180 },
+      desktop: { nodes: 700, edges: 1_000 },
+      mobile: { nodes: 520, edges: 720 },
     });
     expect(UNIVERSE_RESIDENT_BUDGET).toEqual({
-      desktop: { nodes: 1_152, edges: 1_152 },
-      mobile: { nodes: 480, edges: 480 },
+      desktop: { nodes: 10_000, edges: 12_000 },
+      mobile: { nodes: 10_000, edges: 12_000 },
     });
   });
 

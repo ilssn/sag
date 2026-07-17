@@ -6,8 +6,8 @@ import type {
 } from "./types";
 
 export const UNIVERSE_SCENE_BUDGET = {
-  desktop: { nodes: 240, edges: 360 },
-  mobile: { nodes: 120, edges: 180 },
+  desktop: { nodes: 700, edges: 1_000 },
+  mobile: { nodes: 520, edges: 720 },
 } as const;
 
 /**
@@ -18,8 +18,8 @@ export const UNIVERSE_SCENE_BUDGET = {
  * using the smaller scene budget because they have no virtual bundle window.
  */
 export const UNIVERSE_RESIDENT_BUDGET = {
-  desktop: { nodes: 1_152, edges: 1_152 },
-  mobile: { nodes: 480, edges: 480 },
+  desktop: { nodes: 10_000, edges: 12_000 },
+  mobile: { nodes: 10_000, edges: 12_000 },
 } as const;
 
 export interface UniverseWorkingNode extends UniverseActivationNode {
