@@ -88,8 +88,12 @@ describe("universe temporal axis", () => {
     expect(Math.hypot(b.normalizedOffset.x, b.normalizedOffset.y)).toBeGreaterThan(0);
   });
 
-  it("derives the lateral angle from package identity alone", () => {
+  it("keeps package lanes deterministic while ordinal advances the spiral", () => {
     const [near] = projectUniverseTemporalAxis(
+      [{ bundleId: "x", ordinal: 1 }],
+      TEN,
+    );
+    const [nearAgain] = projectUniverseTemporalAxis(
       [{ bundleId: "x", ordinal: 1 }],
       TEN,
     );
@@ -98,12 +102,81 @@ describe("universe temporal axis", () => {
       TEN,
     );
 
-    // Age may only push a package further out along its own bearing. If x and y
-    // scale by one factor the bearing held; anything else means the lane swung.
-    const radialGrowth = far.normalizedOffset.x / near.normalizedOffset.x;
-    expect(far.normalizedOffset.y / near.normalizedOffset.y)
-      .toBeCloseTo(radialGrowth, 10);
-    expect(radialGrowth).toBeGreaterThan(1);
+    expect(nearAgain).toEqual(near);
+    expect(far.normalizedOffset.z).toBeLessThan(near.normalizedOffset.z);
+    expect({ x: far.normalizedOffset.x, y: far.normalizedOffset.y })
+      .not.toEqual({ x: near.normalizedOffset.x, y: near.normalizedOffset.y });
+  });
+
+  it("opens the first window quickly, then reserves the widest field for older knowledge", () => {
+    const largeAxis = createUniverseTemporalAxis(586);
+    const ordinals = [0, 1, 3, 7, 35, 292, 585];
+    const projections = projectUniverseTemporalAxis(
+      ordinals.map((ordinal) => ({ bundleId: `event-${ordinal}`, ordinal })),
+      largeAxis,
+      { angularPhase: 0 },
+    );
+    const radii = projections.map(({ normalizedOffset }) => Math.hypot(
+      normalizedOffset.x,
+      normalizedOffset.y / 0.74,
+    ));
+
+    // A large source must not squeeze its first dozen cards into the same tiny
+    // radius merely because their global age is close to zero.
+    expect(radii[3]).toBeGreaterThan(radii[0] * 2.5);
+    // Once displaced, older knowledge keeps making room for newly emerging
+    // data at the core instead of drifting back inward.
+    for (let index = 1; index < radii.length; index += 1) {
+      expect(radii[index]).toBeGreaterThan(radii[index - 1]);
+    }
+    expect(radii.at(-1)).toBeCloseTo(0.78, 8);
+    // Widening the field must never compromise the canonical chronology.
+    projections.forEach((projection, index) => {
+      expect(projection.normalizedOffset.z).toBeCloseTo(
+        -ordinals[index] / 585,
+        10,
+      );
+    });
+  });
+
+  it("fans the first visible batch around the core instead of one vertical lane", () => {
+    const largeAxis = createUniverseTemporalAxis(586);
+    const bundles = Array.from({ length: 8 }, (_, ordinal) => ({
+      bundleId: `event-${ordinal}`,
+      ordinal,
+    }));
+    const projections = projectUniverseTemporalAxis(
+      bundles,
+      largeAxis,
+      { angularPhase: 0 },
+    );
+    const rotated = projectUniverseTemporalAxis(
+      bundles,
+      largeAxis,
+      { angularPhase: 0.83 },
+    );
+    const circularGaps = (items: typeof projections) => {
+      const angles = items.map(({ normalizedOffset }) => {
+        const angle = Math.atan2(normalizedOffset.y / 0.74, normalizedOffset.x);
+        return angle < 0 ? angle + Math.PI * 2 : angle;
+      }).sort((left, right) => left - right);
+      return angles.map((angle, index) => {
+        const next = angles[(index + 1) % angles.length]
+          + (index === angles.length - 1 ? Math.PI * 2 : 0);
+        return next - angle;
+      }).sort((left, right) => left - right);
+    };
+    const gaps = circularGaps(projections);
+    const rotatedGaps = circularGaps(rotated);
+    const quadrants = new Set(projections.map(({ normalizedOffset }) =>
+      `${normalizedOffset.x >= 0 ? "+" : "-"}${normalizedOffset.y >= 0 ? "+" : "-"}`,
+    ));
+
+    expect(quadrants.size).toBe(4);
+    expect(Math.max(...gaps)).toBeLessThan(75 * Math.PI / 180);
+    gaps.forEach((gap, index) => {
+      expect(rotatedGaps[index]).toBeCloseTo(gap, 10);
+    });
   });
 
   it("keeps travel even by default and leaves the curve as a knob", () => {

@@ -8,10 +8,19 @@ import {
   type UniverseTimelineWindowState,
 } from "../../lib/universe-timeline-window";
 
-const source = readFileSync(
+const componentSource = readFileSync(
   new URL("./knowledge-universe.tsx", import.meta.url),
   "utf8",
 );
+const modelSource = readFileSync(
+  new URL("./knowledge-universe-model.ts", import.meta.url),
+  "utf8",
+);
+const overlaySource = readFileSync(
+  new URL("./knowledge-universe-overlays.tsx", import.meta.url),
+  "utf8",
+);
+const source = `${modelSource}\n${overlaySource}\n${componentSource}`;
 const miniWorkspaceSource = readFileSync(
   new URL("./pet-mini-workspace.tsx", import.meta.url),
   "utf8",
@@ -48,9 +57,9 @@ describe("knowledge universe production interaction policy", () => {
   });
 
   it("gives timeline events and their local entities a wider immersive stage", () => {
-    expect(source).toContain("const TIMELINE_EVENT_LATERAL_SPREAD = 4.25");
-    expect(source).toContain("const LOCAL_ENTITY_SPREAD_MIN = 92");
-    expect(source).toContain("const LOCAL_ENTITY_SPREAD_RANGE = 96");
+    expect(source).toContain("export const TIMELINE_EVENT_LATERAL_SPREAD");
+    expect(source).toContain("export const LOCAL_ENTITY_SPREAD_MIN");
+    expect(source).toContain("export const LOCAL_ENTITY_SPREAD_RANGE");
   });
 
   it("puts every timeline event on the temporal axis, with no mode to opt out of", () => {

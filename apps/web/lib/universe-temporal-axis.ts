@@ -36,9 +36,9 @@ export const UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT = 60;
  * axis still owns chronology on Z, while these values give neighbouring
  * packages enough breathing room for their event cards and entities.
  */
-export const UNIVERSE_TEMPORAL_AXIS_NEAR_LATERAL_SPREAD = 0.24;
-export const UNIVERSE_TEMPORAL_AXIS_FAR_LATERAL_SPREAD = 0.58;
-export const UNIVERSE_TEMPORAL_AXIS_VERTICAL_ASPECT = 0.7;
+export const UNIVERSE_TEMPORAL_AXIS_NEAR_LATERAL_SPREAD = 0.14;
+export const UNIVERSE_TEMPORAL_AXIS_FAR_LATERAL_SPREAD = 0.78;
+export const UNIVERSE_TEMPORAL_AXIS_VERTICAL_ASPECT = 0.74;
 
 /**
  * The vestibule: a stretch of axis between the entry pose (flight depth 0)
@@ -55,9 +55,9 @@ export interface UniverseTemporalAxisPolicy {
   /** Normalized lateral radius at the near and far ends of the axis. */
   nearLateralSpread: number;
   farLateralSpread: number;
-  /** Share of the lateral radius that varies per package. */
-  lateralJitter: number;
   verticalAspect: number;
+  /** Stable source-scoped rotation for the low-discrepancy package lanes. */
+  angularPhase: number;
   /** Shapes depth without changing ordering or endpoints. 1 keeps travel even. */
   ageExponent: number;
 }
@@ -81,10 +81,13 @@ export const DEFAULT_UNIVERSE_TEMPORAL_AXIS_POLICY: UniverseTemporalAxisPolicy =
   depthSpan: 1,
   nearLateralSpread: UNIVERSE_TEMPORAL_AXIS_NEAR_LATERAL_SPREAD,
   farLateralSpread: UNIVERSE_TEMPORAL_AXIS_FAR_LATERAL_SPREAD,
-  lateralJitter: 0.45,
   verticalAspect: UNIVERSE_TEMPORAL_AXIS_VERTICAL_ASPECT,
+  angularPhase: 0,
   ageExponent: 1,
 };
+
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+const LOCAL_LATERAL_BURST_EVENTS = 5.5;
 
 function clamp01(value: number) {
   if (!Number.isFinite(value)) return 0;
@@ -168,12 +171,10 @@ export function resolveUniverseTemporalAxisPolicy(
       nearLateralSpread,
       nonNegative(input.farLateralSpread, defaults.farLateralSpread),
     ),
-    lateralJitter: clamp01(
-      Number.isFinite(input.lateralJitter)
-        ? (input.lateralJitter as number)
-        : defaults.lateralJitter,
-    ),
     verticalAspect: nonNegative(input.verticalAspect, defaults.verticalAspect),
+    angularPhase: Number.isFinite(input.angularPhase)
+      ? (input.angularPhase as number)
+      : defaults.angularPhase,
     ageExponent: positive(input.ageExponent, defaults.ageExponent),
   };
 }
@@ -193,16 +194,28 @@ export function projectUniverseTemporalAxis(
   return bundles.map((bundle) => {
     const ageProgress = universeTemporalAxisAgeProgress(axis, bundle.ordinal);
     const curvedAge = Math.pow(ageProgress, policy.ageExponent);
-    // Every package keeps a lateral radius, jittered per package, so packages
-    // never stack onto the axis line itself.
+    const ordinal = Number.isFinite(bundle.ordinal)
+      ? Math.max(0, bundle.ordinal)
+      : 0;
+    // The first handful of packages must already occupy a generous field.
+    // Using only global age makes ordinal 0..11 nearly identical in a 5,000
+    // event source; this bounded local burst opens those packages quickly,
+    // while the smaller age term keeps older knowledge moving outward across
+    // the full journey. Neither term changes temporal Z.
+    const localBurst = 1 - Math.exp(-ordinal / LOCAL_LATERAL_BURST_EVENTS);
+    const lateralProgress = clamp01(localBurst * 0.68 + curvedAge * 0.32);
     const radius = lerp(
       policy.nearLateralSpread,
       policy.farLateralSpread,
-      curvedAge,
-    ) * lerp(1 - policy.lateralJitter, 1, stableUnit(`${bundle.bundleId}:lateral`));
-    // The angle is a pure function of package identity: a package may not swing
-    // sideways because of the direction the camera last travelled.
-    const angle = stableUnit(bundle.bundleId) * Math.PI * 2;
+      lateralProgress,
+    );
+    // Snapshot ordinals form a low-discrepancy spiral, preventing a small
+    // visible window from accidentally collapsing into one vertical column.
+    // Identity contributes only a restrained organic perturbation, so paging
+    // never reflows an existing package.
+    const angle = policy.angularPhase
+      + ordinal * GOLDEN_ANGLE
+      + (stableUnit(`${bundle.bundleId}:angle`) - 0.5) * 0.12;
 
     return {
       bundleId: bundle.bundleId,

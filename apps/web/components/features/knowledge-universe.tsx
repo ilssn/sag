@@ -6,7 +6,6 @@ import { useLocale, useTranslations } from "next-intl";
 import { useTheme } from "next-themes";
 import {
   ArrowDownUp,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   CircleDot,
@@ -62,7 +61,6 @@ import {
 } from "@/lib/universe-working-set";
 import {
   advanceUniverseTimelineWindow,
-  createUniverseTimelineWindow,
   markUniverseTimelineNetworkExhausted,
   projectUniverseBundleWindowWithinBudget,
   queriedUniverseTimelineEventCount,
@@ -79,13 +77,10 @@ import {
   admitUniverseTimelineDequePage,
   resizeUniverseTimelineDeque,
   syncUniverseTimelineWindowToDeque,
-  type UniverseTimelineDequeAdmission,
-  type UniverseTimelineDeque,
 } from "@/lib/universe-timeline-deque";
 import {
   createUniverseTemporalAxis,
   projectUniverseTemporalAxis,
-  UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT,
   UNIVERSE_TEMPORAL_AXIS_VESTIBULE_UNITS,
   universeTemporalAxisDepth,
 } from "@/lib/universe-temporal-axis";
@@ -107,17 +102,59 @@ import { cn } from "@/lib/utils";
 import {
   UniverseScene,
   universeSourceAccent,
-  type UniverseSceneData,
-  type UniverseSceneExplorationView,
-  type UniverseSceneHandle,
-  type UniverseSceneLink,
-  type UniverseSceneNode,
-  type UniverseSceneUnavailableReason,
-  type UniverseSelectionClearOptions,
-  type UniverseTimelineIntentResult,
-  type UniverseTimelineJourney,
-  type UniverseSceneView,
 } from "@/components/features/universe-scene";
+import type {
+  UniverseSceneData,
+  UniverseSceneExplorationView,
+  UniverseSceneHandle,
+  UniverseSceneNode,
+  UniverseSceneUnavailableReason,
+  UniverseSelectionClearOptions,
+  UniverseTimelineIntentResult,
+  UniverseTimelineJourney,
+  UniverseSceneView,
+} from "@/components/features/universe-scene-contract";
+import {
+  EMPTY_TIMELINE_BUNDLE_IDS,
+  ENTITY_EXPANSION_EVENT_LIMIT,
+  EVENT_ENTITY_PROJECTION_LIMIT,
+  LOCAL_ENTITY_SPREAD_MIN,
+  LOCAL_ENTITY_SPREAD_RANGE,
+  PARTITION_RENDER_LIMIT,
+  TEMPORAL_AXIS_UNITS_PER_EVENT,
+  TIMELINE_EVENT_LATERAL_SPREAD,
+  dominantSource,
+  emptySourceBrowseSession,
+  expansionLineageRootKey,
+  isConcreteUniverseNode,
+  stableOffset,
+  stableRootEventOffset,
+  stableSatelliteOffset,
+  stableUnit,
+  synchronizeTimelineWindowWithDeque,
+  timelineProjectionBundleIds,
+  timelineRetentionBundleIds,
+  universeBundleWindowProtection,
+  universeExpansionCacheKey,
+  universeSceneDataSignature,
+  visualNebulaRadius,
+  waitForAbortableDelay,
+  type ActivationSummary,
+  type Position3D,
+  type SourceBrowseSession,
+  type SourceTimelineLoadCause,
+  type SourceTimelineLoadResult,
+  type SourceTimelineRequest,
+  type Universe3DLink,
+  type Universe3DNode,
+  type UniverseConcrete3DNode,
+} from "@/components/features/knowledge-universe-model";
+import {
+  UniverseIconControl as IconControl,
+  UniverseLoadProgressPanel,
+  compactCount,
+  type SourceLoadProgress,
+} from "@/components/features/knowledge-universe-overlays";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -125,62 +162,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-
-interface Universe3DNode extends UniverseSceneNode {
-  root: boolean;
-}
-
-type UniverseConcrete3DNode = Universe3DNode & { kind: "event" | "entity" };
-
-type Universe3DLink = UniverseSceneLink;
-
-interface ActivationSummary {
-  query: string;
-  events: number;
-  entities: number;
-  relations: number;
-}
-
-interface Position3D {
-  x: number;
-  y: number;
-  z: number;
-}
-
-interface SourceTimelinePageState {
-  deque: UniverseTimelineDeque | null;
-  snapshotId: string | null;
-  sourceRevision: string | null;
-  asOf: string | null;
-  /**
-   * Snapshot-stable event total: the counting axis' length. Set by the first
-   * page and constant for the lifetime of the snapshot.
-   */
-  totalEvents: number | null;
-  /** Stable network page size for the lifetime of one source snapshot. */
-  queryPageSize: number | null;
-  preferredDirection: UniverseTimelineDirection;
-  loading: boolean;
-  pausedReason: "capacity" | null;
-  window: UniverseTimelineWindowState;
-}
-
-type SourceTimelineLoadCause = "source-entry" | "prefetch" | "journey";
-type SourceTimelineLoadResult = "blocked" | "loaded";
-
-interface SourceTimelineRequest {
-  sourceId: string;
-  cause: SourceTimelineLoadCause;
-  direction: UniverseTimelineDirection;
-  controller: AbortController;
-  promise: Promise<SourceTimelineLoadResult>;
-}
-
-interface SourceBrowseSession {
-  sourceId: string;
-  working: UniverseWorkingSet;
-  timeline: SourceTimelinePageState;
-}
 
 interface RetainedExploration {
   session: SourceBrowseSession | null;
@@ -212,501 +193,6 @@ interface ExpansionSnapshotContext {
   snapshotId: string;
   sourceRevision: string;
   asOf: string;
-}
-
-interface SourceLoadMetric {
-  loaded: number;
-  total: number;
-  done: boolean;
-  loading: boolean;
-}
-
-interface SourceLoadProgress {
-  sourceId: string;
-  label: string;
-  events: SourceLoadMetric;
-  entities: SourceLoadMetric;
-  allDone: boolean;
-  loading: boolean;
-}
-
-const PARTITION_RENDER_LIMIT = { desktop: 160, mobile: 64 } as const;
-const EVENT_ENTITY_PROJECTION_LIMIT = 8;
-const ENTITY_EXPANSION_EVENT_LIMIT = 4;
-// Keep the original deterministic placement model, but give the visible
-// timeline packages a wider stage so cards do not collapse into the source
-// core. These are bounded world-space multipliers, not a force simulation.
-const TIMELINE_EVENT_LATERAL_SPREAD = 4.25;
-const LOCAL_ENTITY_SPREAD_MIN = 92;
-const LOCAL_ENTITY_SPREAD_RANGE = 96;
-const EMPTY_TIMELINE_BUNDLE_IDS: string[] = [];
-// World length of one event's slice of its source's counting axis. The axis
-// length is event count × this, so the handful of visible packages always
-// spans the same distance whatever the source's size. Deliberately independent
-// of the source's visual radius, and shared with the scene so the nebula
-// corridor and the flight margins live on the same grid.
-const TEMPORAL_AXIS_UNITS_PER_EVENT = UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT;
-
-function emptySourceTimelinePageState(
-  visibleEventBundles: number,
-  cachedEventBundles: number,
-): SourceTimelinePageState {
-  return {
-    deque: null,
-    snapshotId: null,
-    sourceRevision: null,
-    asOf: null,
-    totalEvents: null,
-    queryPageSize: null,
-    preferredDirection: "older",
-    loading: false,
-    pausedReason: null,
-    window: createUniverseTimelineWindow(
-      visibleEventBundles,
-      cachedEventBundles,
-    ),
-  };
-}
-
-function emptySourceBrowseSession(
-  epoch: number,
-  sourceId: string,
-  visibleEventBundles: number,
-  cachedEventBundles: number,
-): SourceBrowseSession {
-  return {
-    sourceId,
-    working: emptyUniverseWorkingSet(epoch),
-    timeline: emptySourceTimelinePageState(
-      visibleEventBundles,
-      cachedEventBundles,
-    ),
-  };
-}
-
-function synchronizeTimelineWindowWithDeque(
-  current: UniverseTimelineWindowState,
-  previousDeque: UniverseTimelineDeque | null,
-  admission: UniverseTimelineDequeAdmission,
-) {
-  const activeBundleId = current.activeIndex >= 0
-    ? current.cacheBundleIds[current.activeIndex] ?? null
-    : null;
-  const anchor = syncUniverseTimelineWindowToDeque(admission.deque, {
-    activeBundleId,
-    activeIndex: current.activeIndex,
-    visibleLimit: current.visibleLimit,
-  });
-  if (!anchor) return null;
-
-  const initial = previousDeque === null;
-  const cacheStartOffset = initial
-    ? 0
-    : Math.max(
-        0,
-        current.cacheStartOffset
-          + admission.evictedNewerBundleIds.length
-          - admission.prependedBundleIds.length,
-      );
-  const rewindStartOffset = initial
-    ? cacheStartOffset + anchor.activeIndex
-    : current.rewindStartOffset;
-  const networkExhausted = !admission.deque.hasOlder;
-  const atOlderEdge = anchor.activeIndex === anchor.cacheBundleIds.length - 1;
-  return {
-    ...current,
-    cacheBundleIds: anchor.cacheBundleIds,
-    activeIndex: anchor.activeIndex,
-    visibleBundleIds: anchor.visibleBundleIds,
-    visitedCount: Math.max(
-      current.visitedCount,
-      cacheStartOffset + anchor.activeIndex + 1,
-    ),
-    queriedCount: Math.max(
-      current.queriedCount,
-      cacheStartOffset + anchor.cacheBundleIds.length,
-    ),
-    networkExhausted,
-    phase: networkExhausted && atOlderEdge ? "complete" as const : current.phase,
-    revision: current.revision + 1,
-    cacheLimit: Math.max(current.visibleLimit, current.cacheLimit),
-    cacheStartOffset,
-    rewindStartOffset,
-  };
-}
-
-function universeExpansionCacheKey(
-  epoch: number,
-  sourceId: string,
-  sourceRevision: string,
-  snapshotId: string,
-  kind: UniverseNodeKind,
-  nodeId: string,
-  cursor: string | null,
-) {
-  return [
-    epoch,
-    sourceId,
-    sourceRevision,
-    snapshotId,
-    kind,
-    nodeId,
-    cursor ?? "root",
-  ].join(":");
-}
-
-function waitForAbortableDelay(duration: number, signal: AbortSignal) {
-  if (signal.aborted) return Promise.resolve();
-  return new Promise<void>((resolve) => {
-    const finish = () => {
-      window.clearTimeout(timer);
-      signal.removeEventListener("abort", finish);
-      resolve();
-    };
-    const timer = window.setTimeout(finish, duration);
-    signal.addEventListener("abort", finish, { once: true });
-  });
-}
-
-function stableUnit(value: string) {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0) / 0xffffffff;
-}
-
-function stableOffset(key: string, radius: number): Position3D {
-  const azimuth = stableUnit(`${key}:azimuth`) * Math.PI * 2;
-  const vertical = stableUnit(`${key}:vertical`) * 2 - 1;
-  const planar = Math.sqrt(Math.max(0, 1 - vertical * vertical));
-  const distance = radius * (0.46 + stableUnit(`${key}:distance`) * 0.5);
-  return {
-    x: Math.cos(azimuth) * planar * distance,
-    y: Math.sin(azimuth) * planar * distance,
-    z: vertical * distance,
-  };
-}
-
-function stableRootEventOffset(
-  sourceId: string,
-  key: string,
-  radius: number,
-  index: number,
-  total: number,
-): Position3D {
-  // Root events define the readable timeline skeleton. A shallow golden-angle
-  // spiral keeps their default camera projection separated while retaining a
-  // small, deterministic Z variation for 3D depth.
-  const count = Math.max(1, total);
-  const progress = (index + 0.65) / count;
-  const distance = radius * (0.62 + Math.sqrt(progress) * 0.5);
-  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
-  const phase = stableUnit(`${sourceId}:root-event-phase`) * Math.PI * 2;
-  const angle = phase + index * goldenAngle;
-  return {
-    x: Math.cos(angle) * distance,
-    y: Math.sin(angle) * distance * 0.82,
-    z: (stableUnit(`${key}:root-event-depth`) - 0.5) * radius * 0.18,
-  };
-}
-
-function timelineProjectionBundleIds(
-  current: UniverseWorkingSet,
-  timelineBundleIds: readonly string[],
-  visibleTimelineBundleIds: readonly string[],
-) {
-  const timelineIds = new Set(timelineBundleIds);
-  const visibleIds = new Set(visibleTimelineBundleIds);
-  const availableNodeKeys = new Set(current.nodes.map((node) =>
-    universeNodeKey(node.kind, node.id, node.source_id)));
-  const visibleNodeKeys = new Set<string>(
-    visibleTimelineBundleIds
-      .flatMap((id) => current.bundles[id]?.node_keys ?? [])
-      .filter((key) => availableNodeKeys.has(key)),
-  );
-  const supportIds = lineageQualifiedExpansionBundleIds(
-    current,
-    visibleNodeKeys,
-  );
-  return current.bundle_order.filter((id) => {
-    if (visibleIds.has(id)) return true;
-    if (timelineIds.has(id)) return false;
-    return supportIds.has(id);
-  });
-}
-
-function lineageQualifiedExpansionBundleIds(
-  current: UniverseWorkingSet,
-  seedNodeKeys: Iterable<string>,
-) {
-  const roots = new Set(seedNodeKeys);
-  const supportIds = new Set<string>();
-  current.bundle_order.forEach((id) => {
-    const bundle = current.bundles[id];
-    if (
-      bundle?.origin === "expansion"
-      && bundle.lineage_root_key
-      && roots.has(bundle.lineage_root_key)
-    ) supportIds.add(id);
-  });
-  return supportIds;
-}
-
-function expansionLineageRootKey(
-  current: UniverseWorkingSet,
-  timelineBundleIds: readonly string[],
-  anchorKey: string,
-) {
-  const timelineNodeKeys = new Set(
-    timelineBundleIds.flatMap((id) => current.bundles[id]?.node_keys ?? []),
-  );
-  if (timelineNodeKeys.has(anchorKey)) return anchorKey;
-  for (let index = current.bundle_order.length - 1; index >= 0; index -= 1) {
-    const bundle = current.bundles[current.bundle_order[index]];
-    if (
-      bundle?.origin === "expansion"
-      && bundle.node_keys.includes(anchorKey)
-      && bundle.lineage_root_key
-      && timelineNodeKeys.has(bundle.lineage_root_key)
-    ) return bundle.lineage_root_key;
-  }
-  return null;
-}
-
-function timelineRetentionBundleIds(
-  current: UniverseWorkingSet,
-  timelineBundleIds: readonly string[],
-) {
-  const timelineIds = new Set(timelineBundleIds);
-  const timelineNodeKeys = new Set(
-    timelineBundleIds.flatMap((id) => current.bundles[id]?.node_keys ?? []),
-  );
-  const supportIds = lineageQualifiedExpansionBundleIds(current, timelineNodeKeys);
-  const anchoredSupportIds = current.bundle_order.filter((id) =>
-    !timelineIds.has(id) && supportIds.has(id));
-  // Cached timeline bundles are the virtual list's data backing and must stay
-  // resident even while off-screen. Expansion payloads remain eligible only
-  // while their stable timeline lineage root is still in that cache.
-  return [...new Set([...timelineBundleIds, ...anchoredSupportIds])];
-}
-
-function universeBundleWindowProtection(
-  current: UniverseWorkingSet,
-  bundleIds: readonly string[],
-) {
-  const nodeKeys = new Set<string>();
-  const relationKeys = new Set<string>();
-  bundleIds.forEach((id) => {
-    const bundle = current.bundles[id];
-    bundle?.node_keys.forEach((key) => nodeKeys.add(key));
-    bundle?.relation_keys.forEach((key) => relationKeys.add(key));
-  });
-  return { nodeKeys: [...nodeKeys], relationKeys: [...relationKeys] };
-}
-
-function compactCount(value: number, locale: string) {
-  return new Intl.NumberFormat(locale, {
-    notation: value >= 10_000 ? "compact" : "standard",
-    maximumFractionDigits: 1,
-  }).format(value);
-}
-
-function universeSceneDataSignature(data: UniverseSceneData) {
-  return JSON.stringify({
-    epoch: data.epoch,
-    windowRevision: data.windowRevision ?? 0,
-    windowChangeCause: data.windowChangeCause ?? "synchronization",
-    windowDirection: data.windowDirection ?? null,
-    temporalFlight: data.temporalFlight ?? null,
-    nodes: data.nodes,
-    links: data.links,
-  });
-}
-
-function LoadProgressRow({
-  label,
-  metric,
-  tone,
-}: {
-  label: string;
-  metric: SourceLoadMetric;
-  tone: "entity" | "event";
-}) {
-  const locale = useLocale();
-  const t = useTranslations("KnowledgeUniverse");
-  const total = Math.max(metric.total, metric.loaded);
-  const progress = total > 0
-    ? Math.min(100, Math.max(0, metric.loaded / total * 100))
-    : metric.done ? 100 : 0;
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between gap-3 text-[10px] leading-none">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="tabular-nums text-foreground/85">
-          {compactCount(metric.loaded, locale)} / {compactCount(total, locale)}
-        </span>
-      </div>
-      <div
-        className="h-1.5 overflow-hidden rounded-full bg-foreground/[0.07]"
-        role="progressbar"
-        aria-label={t("loadProgress.rowAria", { label })}
-        aria-valuemin={0}
-        aria-valuemax={total}
-        aria-valuenow={Math.min(metric.loaded, total)}
-        data-loaded={metric.loaded}
-        data-total={total}
-      >
-        <div
-          data-tone={tone}
-          className={cn(
-            "h-full rounded-full transition-[width,filter] duration-500 ease-out",
-            metric.loading && "brightness-110",
-          )}
-          style={{
-            width: `${progress}%`,
-            backgroundColor: "var(--universe-source-accent)",
-            boxShadow: "0 0 10px color-mix(in srgb, var(--universe-source-accent), transparent 48%)",
-          }}
-        />
-      </div>
-    </div>
-  );
-}
-
-function UniverseLoadProgressPanel({
-  progress,
-  reducedMotion,
-  explicitOnly,
-}: {
-  progress: SourceLoadProgress;
-  reducedMotion: boolean;
-  explicitOnly: boolean;
-}) {
-  const t = useTranslations("KnowledgeUniverse");
-  const started = progress.events.loaded > 0 || progress.entities.loaded > 0;
-  const status = progress.allDone
-    ? t("loadProgress.complete")
-    : progress.loading
-      ? t("loadProgress.loading")
-      : started
-        ? explicitOnly ? t("loadProgress.clickContinue") : t("loadProgress.browseContinue")
-        : explicitOnly ? t("loadProgress.clickStart") : t("loadProgress.browseStart");
-  return (
-    <motion.div
-      data-universe-load-progress="true"
-      data-source-id={progress.sourceId}
-      data-load-state={progress.allDone ? "complete" : progress.loading ? "loading" : "idle"}
-      role="status"
-      aria-live="polite"
-      className="pointer-events-none w-[min(15rem,calc(100vw-1.5rem))] rounded-md border bg-background/76 p-3 shadow-soft backdrop-blur-xl sm:w-60"
-      style={{
-        borderColor: "color-mix(in srgb, var(--universe-source-accent), transparent 62%)",
-      }}
-      initial={reducedMotion ? false : { opacity: 0, y: -6, scale: 0.98 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -4, scale: 0.985 }}
-      transition={{
-        duration: reducedMotion ? 0 : 0.22,
-        ease: [0.22, 1, 0.36, 1],
-      }}
-    >
-      <div className="mb-3 flex min-w-0 items-center justify-between gap-2">
-        <div className="min-w-0">
-          <p className="truncate text-[11px] font-medium text-foreground/90" title={progress.label}>
-            {t("loadProgress.title")}
-          </p>
-          <p className="mt-0.5 truncate text-[9px] text-muted-foreground" title={status}>
-            {status}
-          </p>
-        </div>
-        {progress.allDone ? (
-          <CheckCircle2
-            className="size-3.5 shrink-0"
-            style={{ color: "var(--universe-source-accent)" }}
-            aria-hidden="true"
-          />
-        ) : progress.loading ? (
-          <Loader2
-            className="size-3.5 shrink-0 animate-spin"
-            style={{ color: "var(--universe-source-accent)" }}
-            aria-hidden="true"
-          />
-        ) : (
-          <span
-            className="size-1.5 shrink-0 rounded-full"
-            style={{
-              backgroundColor: "var(--universe-source-accent)",
-              boxShadow: "0 0 7px color-mix(in srgb, var(--universe-source-accent), transparent 40%)",
-            }}
-            aria-hidden="true"
-          />
-        )}
-      </div>
-      <div className="space-y-2.5">
-        <LoadProgressRow label={t("loadProgress.events")} metric={progress.events} tone="event" />
-        <LoadProgressRow label={t("loadProgress.entities")} metric={progress.entities} tone="entity" />
-      </div>
-    </motion.div>
-  );
-}
-
-function isConcreteUniverseNode(
-  node: Universe3DNode | null,
-): node is UniverseConcrete3DNode {
-  return Boolean(node && node.kind !== "source");
-}
-
-function visualNebulaRadius(eventCount: number, entityCount: number, sourceCount: number) {
-  const total = Math.max(1, eventCount + entityCount * 0.72);
-  const dataScale = 54 + Math.min(62, Math.log2(total + 1) * 9.2);
-  const crowdScale = Math.min(
-    1.04,
-    Math.max(0.52, 1.18 - Math.log2(Math.max(2, sourceCount + 1)) * 0.09),
-  );
-  return Math.max(38, dataScale * crowdScale);
-}
-
-function dominantSource(activation: UniverseActivation) {
-  if (activation.source_hits?.[0]?.source_id) return activation.source_hits[0].source_id;
-  const counts = new Map<string, number>();
-  activation.nodes.forEach((node) => {
-    if (!node.source_id || node.kind !== "event") return;
-    counts.set(node.source_id, (counts.get(node.source_id) ?? 0) + 1);
-  });
-  return [...counts].sort((left, right) => right[1] - left[1])[0]?.[0] ?? null;
-}
-
-function IconControl({
-  label,
-  onClick,
-  children,
-  disabled,
-}: {
-  label: string;
-  onClick: () => void;
-  children: React.ReactNode;
-  disabled?: boolean;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          className="size-8 border-border/70 bg-background/75 text-muted-foreground shadow-soft backdrop-blur-md hover:bg-background hover:text-foreground"
-          aria-label={label}
-          onClick={onClick}
-          disabled={disabled}
-        >
-          {children}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="left">{label}</TooltipContent>
-    </Tooltip>
-  );
 }
 
 export function KnowledgeUniverse({
@@ -1981,28 +1467,15 @@ export function KnowledgeUniverse({
               return ordinal === undefined ? [] : [{ bundleId, ordinal }];
             }),
             temporalAxis,
+            {
+              angularPhase: stableUnit(`${browseSessionSourceId}:timeline-phase`)
+                * Math.PI * 2,
+            },
           )
         : []
       ).map((projection) => [projection.bundleId, projection]),
     );
     const temporalBundleByEntityKey = new Map<string, string>();
-    projectedWorking.relations.forEach((relation) => {
-      if (relation.kind !== "mentions") return;
-      const eventBundleId = temporalBundleByEventKey.get(
-        universeNodeKey("event", relation.from_id, relation.source_id),
-      );
-      if (!eventBundleId) return;
-      const entityKey = universeNodeKey("entity", relation.to_id, relation.source_id);
-      const currentBundleId = temporalBundleByEntityKey.get(entityKey);
-      const currentAge = currentBundleId
-        ? temporalProjectionByBundleId.get(currentBundleId)?.ageProgress
-        : Number.POSITIVE_INFINITY;
-      const candidateAge = temporalProjectionByBundleId.get(eventBundleId)?.ageProgress
-        ?? Number.POSITIVE_INFINITY;
-      if (candidateAge < (currentAge ?? Number.POSITIVE_INFINITY)) {
-        temporalBundleByEntityKey.set(entityKey, eventBundleId);
-      }
-    });
     const visibleTimelineNodeKeys = new Set(
       visibleTimelineBundleIds
         .filter((bundleId) => projectedBundleIds.has(bundleId))
@@ -2125,7 +1598,13 @@ export function KnowledgeUniverse({
             rootEventPlacement.index,
             rootEventPlacement.total,
           )
-          : stableOffset(key, radius);
+          : anchor
+            ? stableSatelliteOffset(key, radius, {
+                x: center.x - (partition?.x ?? 0),
+                y: center.y - (partition?.y ?? 0),
+                z: center.z - (partition?.z ?? 0),
+              })
+            : stableOffset(key, radius);
       const position = {
         x: center.x + offset.x,
         y: center.y + offset.y,
@@ -2163,9 +1642,30 @@ export function KnowledgeUniverse({
       exactByRaw.set(key, key);
       positionByRaw.set(key, position);
     };
-    const preferredEntityRelation = (entityKey: string) =>
-      [...(relationsByEntity.get(entityKey) ?? [])]
-        .sort((left, right) => {
+    const preferredEntityRelation = (entityKey: string) => {
+      const candidates = [...(relationsByEntity.get(entityKey) ?? [])];
+      const positioned = candidates.flatMap((relation) => {
+        const position = positionByRaw.get(
+          universeNodeKey("event", relation.from_id, relation.source_id),
+        );
+        return position ? [{ relation, position }] : [];
+      });
+      if (positioned.length > 1) {
+        return positioned
+          .map((candidate) => ({
+            ...candidate,
+            distance: positioned.reduce((total, other) => total + Math.hypot(
+              candidate.position.x - other.position.x,
+              candidate.position.y - other.position.y,
+              candidate.position.z - other.position.z,
+            ), 0),
+          }))
+          .sort((left, right) => left.distance - right.distance
+            || universeRelationKey(left.relation).localeCompare(
+              universeRelationKey(right.relation),
+            ))[0]?.relation;
+      }
+      return candidates.sort((left, right) => {
           const leftPlacement = timelineEventPlacementByKey.get(
             universeNodeKey("event", left.from_id, left.source_id),
           );
@@ -2175,6 +1675,7 @@ export function KnowledgeUniverse({
           return (rightPlacement?.index ?? -1) - (leftPlacement?.index ?? -1)
             || universeRelationKey(left).localeCompare(universeRelationKey(right));
         })[0];
+    };
 
     const rootEvents = visibleNodes.filter((node) => {
       if (node.kind !== "event") return false;
@@ -2184,6 +1685,14 @@ export function KnowledgeUniverse({
       index,
       total: rootEvents.length,
     }));
+    relationsByEntity.forEach((_relations, entityKey) => {
+      const relation = preferredEntityRelation(entityKey);
+      if (!relation) return;
+      const eventBundleId = temporalBundleByEventKey.get(
+        universeNodeKey("event", relation.from_id, relation.source_id),
+      );
+      if (eventBundleId) temporalBundleByEntityKey.set(entityKey, eventBundleId);
+    });
     visibleNodes
       .filter((node) => node.kind === "entity" && isVisualRoot(node))
       .forEach((node) => {
@@ -2742,7 +2251,6 @@ export function KnowledgeUniverse({
       let loadResult: SourceTimelineLoadResult = "blocked";
       const request = (async (): Promise<SourceTimelineLoadResult> => {
         try {
-          const firstPage = state.deque === null;
           const page = await api.universeTimeline(
             {
               epoch,
@@ -2902,16 +2410,6 @@ export function KnowledgeUniverse({
           loadResult = "loaded";
           refreshLoadProgress();
 
-          if (firstPage && admission.committedNodes.length) {
-            const focusEpoch = epoch;
-            cameraFrameRef.current = window.requestAnimationFrame(() => {
-              cameraFrameRef.current = null;
-              focusTimerRef.current = window.setTimeout(() => {
-                focusTimerRef.current = null;
-                if (epochRef.current === focusEpoch) graphRef.current?.focusSource(sourceId);
-              }, reducedMotion ? 40 : 720);
-            });
-          }
           if (activationOriginRef.current === "browse") {
             setSummary({
               query: source?.label ?? t("timeline.defaultTitle"),
@@ -2977,7 +2475,6 @@ export function KnowledgeUniverse({
       manifest,
       pruneExpansionState,
       projectedEntityCategories,
-      reducedMotion,
       refreshLoadProgress,
       sourceById,
       t,
@@ -3148,7 +2645,6 @@ export function KnowledgeUniverse({
       setTimelineWindow(session.timeline.window);
       refreshLoadProgress();
       setActivePartition(sourceId);
-      focusPartition(sourceId);
       void loadSourceTimelinePage(sourceId, "source-entry");
     },
     [
@@ -3156,7 +2652,6 @@ export function KnowledgeUniverse({
       clearCameraSchedule,
       clearTimelineSettle,
       commitWorkingSet,
-      focusPartition,
       loadSourceTimelinePage,
       pruneExpansionState,
       refreshLoadProgress,
@@ -3883,7 +3378,7 @@ export function KnowledgeUniverse({
     <div
       ref={containerRef}
       className={cn(
-        "sag-knowledge-universe absolute inset-0 z-[2] origin-center overflow-hidden transition-[opacity,transform,filter] duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] will-change-[opacity,transform,filter]",
+        "sag-knowledge-universe absolute inset-0 z-[2] origin-center overflow-hidden transition-[opacity,transform,filter] duration-700 ease-smooth will-change-[opacity,transform,filter]",
         interactive
           ? "scale-100 opacity-100 blur-0"
           : "pointer-events-none scale-[0.76] opacity-0 blur-[10px]",

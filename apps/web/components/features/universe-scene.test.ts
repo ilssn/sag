@@ -2,10 +2,19 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-const source = readFileSync(
+const contractSource = readFileSync(
+  new URL("./universe-scene-contract.ts", import.meta.url),
+  "utf8",
+);
+const engineSource = readFileSync(
+  new URL("./universe-scene-engine.ts", import.meta.url),
+  "utf8",
+);
+const componentSource = readFileSync(
   new URL("./universe-scene.tsx", import.meta.url),
   "utf8",
 );
+const source = `${contractSource}\n${engineSource}\n${componentSource}`;
 
 function sourceBetween(start: string, end: string) {
   const startIndex = source.indexOf(start);
@@ -68,6 +77,42 @@ describe("universe scene production invariants", () => {
     expect(labelLayout).toContain("hostRect,");
   });
 
+  it("indexes source nodes once and reuses projection objects in animation hot paths", () => {
+    const dataCommit = sourceBetween(
+      "setData(\n    data: UniverseSceneData",
+      "\n  focusOverview() {",
+    );
+    const clusterForce = sourceBetween(
+      "private makeClusterForce(): ClusterForce",
+      "private createNodeObject(node: ForceNode)",
+    );
+    const projection = sourceBetween(
+      "private projectedSourceRadius(node: ForceNode",
+      "private updateVisualLayout(now: number",
+    );
+    const visualLayout = sourceBetween(
+      "private updateVisualLayout(now: number",
+      "private evaluateLod(now: number)",
+    );
+    const lod = sourceBetween(
+      "private evaluateLod(now: number)",
+      "private startLoop(keepAliveMs = 0)",
+    );
+
+    expect(source).toContain("private sourceNodesById = new Map<string, ForceNode>()");
+    expect(source).toContain("private sourceNodeList: ForceNode[] = []");
+    expect(dataCommit).toContain("this.nodes = nextNodes;\n    this.rebuildSourceNodeIndex()");
+    expect(clusterForce).toContain("this.sourceNodesById.get(node.sourceId)");
+    expect(clusterForce).not.toContain("const sources = new Map(");
+    expect(projection).toContain("this.projectionEdge.set(node.x, node.y, node.z)");
+    expect(visualLayout).toContain("this.sourceNodeList.forEach((node) =>");
+    expect(visualLayout).toContain("this.sourceNodesById.get(");
+    expect(visualLayout).not.toContain("[...this.nodes.values()].find(");
+    expect(visualLayout).not.toContain("new THREE.Vector3(");
+    expect(lod).toContain("this.sourceNodeList.forEach((node) =>");
+    expect(lod).not.toContain("new THREE.Vector3(");
+  });
+
   it("gives the wheel one meaning per context: flight in a source, zoom elsewhere", () => {
     const cameraStart = sourceBetween(
       "private handleControlsStart = () =>",
@@ -113,9 +158,9 @@ describe("universe scene production invariants", () => {
 
     // In a browsed source with an axis the wheel flies; pinch and overview stay
     // native OrbitControls zoom, consumed before the canvas listener ever fires.
-    expect(wheel).toContain(
-      "const flightActive = this.timelineJourney.enabled && this.flightConfig !== null",
-    );
+    expect(wheel).toContain("const flightActive = this.timelineJourney.enabled");
+    expect(wheel).toContain("&& this.flightConfig !== null");
+    expect(wheel).toContain('&& this.sourceNavigationPhase !== "overview"');
     expect(wheel).toContain("hoveredNode?.kind === \"source\"");
     expect(wheel).toContain("this.callbacks.onSourceWheel?.(hoveredNode.sourceId)");
     expect(wheel).toContain("advanceUniverseSourceExitGate(this.sourceExitGate");
@@ -750,7 +795,7 @@ describe("universe scene production invariants", () => {
     expect(renderLoop).not.toContain("highlightFlowing");
   });
 
-  it("retires the source core while keeping a luminous near-field nebula", () => {
+  it("gathers a focused source into a persistent luminous core", () => {
     const nebulaMaterial = sourceBetween(
       "function makeNebulaMaterial(darkTheme: boolean)",
       "class UniverseForceSceneEngine",
@@ -761,7 +806,9 @@ describe("universe scene production invariants", () => {
     );
     expect(source).toContain("sprite.userData.sourceCore = true");
     expect(source).toContain("private sourceMarkerDetailFactor(");
-    expect(source).toContain("return Math.max(0, 1 - detail)");
+    expect(source).toContain("THREE.MathUtils.lerp(1, 0.3, dive)");
+    expect(nebulaMaterial).toContain("float focusedRadius = mix(0.18, 0.08, aEmitter)");
+    expect(nebulaMaterial).toContain("rotatedHeroOffset * mix(1.0, focusedRadius, focusMix)");
     expect(source).toContain("const NEBULA_DETAIL_ALPHA = 1.5");
     expect(source).toContain("const NEBULA_DETAIL_DUST_POINT_SIZE_CSS = 20");
     expect(source).toContain("uDetail: { value: 0 }");
@@ -996,7 +1043,11 @@ describe("universe scene production invariants", () => {
 
     // Entering a browse session flies to the corridor entrance looking down
     // the axis — never a bearing-preserving dolly into a ball of nodes.
-    expect(focus).toContain("this.sourceHeroPose(node, this.appliedFlightDepth)");
+    expect(focus).toContain("this.sourceHeroPose(node, arrivalDepth)");
+    expect(focus).toContain("Math.max(flight.vestibuleDepth, flight.windowNearDepth)");
+    expect(focus).toContain("this.scheduleSourceEntryDive(");
+    expect(source).toContain("private beginSourceEntryDive(");
+    expect(source).toContain("flyUniverseTemporalFlightTo(this.flightState, targetDepth)");
     expect(heroPose).toContain("flight.centerZ - depth");
     expect(heroPose).toContain("CORRIDOR_ENTRY_STANDOFF");
     expect(heroPose).toContain("entryZ - CORRIDOR_ENTRY_LOOK_AHEAD");
@@ -1132,7 +1183,7 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("this.sourceVisualColor(node.sourceId)");
   });
 
-  it("arrives at a nebula-only initial state and explores through the vestibule", () => {
+  it("gathers into a core and automatically emits the first data window", () => {
     const nebulaMaterial = sourceBetween(
       "function makeNebulaMaterial(darkTheme: boolean)",
       "class UniverseForceSceneEngine",
@@ -1154,21 +1205,25 @@ describe("universe scene production invariants", () => {
       "\n  focusOverview() {",
     );
 
-    // Depth 0 is the hero pose: intact galaxy, no event stars, no cards. The
-    // corridor stretch and the packages both materialize only as the camera
-    // crosses the vestibule — and dissolve again on the way back out.
+    // Depth 0 remains a reversible core state, but the initial source entry
+    // continues into the first loaded data window without another gesture.
     expect(source).toContain("vestibuleDepth: number");
     expect(nebulaMaterial).toContain("uniform float uCorridorVestibule");
+    expect(nebulaMaterial).toContain("SOURCE_ENTRY_CONDENSATION_FRACTION.toFixed(2)");
+    expect(nebulaMaterial).toContain("float axialMix = detailFocus * smoothstep(");
+    expect(nebulaMaterial).toContain("float lateralMix = detailFocus * smoothstep(");
     expect(nebulaMaterial).toContain(
-      "? smoothstep(0.0, uCorridorVestibule * 0.85, uFlightDepth)",
+      "float localJourneyDetail = particleDetail * corridorMix",
     );
-    expect(nebulaMaterial).toContain(
-      "float corridorMix = smoothstep(0.12, 0.88, particleDetail) * diveMix",
+    expect(nebulaMaterial).toContain("animatedPosition.z = mix(");
+    expect(nebulaMaterial).toContain("animatedPosition.xy = mix(");
+    expect(presence).toContain(
+      "config.vestibuleDepth * SOURCE_ENTRY_CONDENSATION_FRACTION",
     );
-    expect(presence).toContain("config.vestibuleDepth * 0.85");
-    expect(presence).toContain("const condensation = THREE.MathUtils.lerp(0.14, 1, dive)");
+    expect(presence).toContain("const nodeReveal = THREE.MathUtils.smoothstep(");
+    expect(presence).toContain("const condensation = THREE.MathUtils.lerp(0.06, 1, nodeReveal)");
     expect(presence).toContain("scale = presence.scale * condensation");
-    expect(presence).toContain("opacity = presence.opacity * dive");
+    expect(presence).toContain("opacity = presence.opacity * nodeReveal");
     expect(source).toContain(
       "material.uniforms.uCorridorVestibule.value = config",
     );
@@ -1176,7 +1231,9 @@ describe("universe scene production invariants", () => {
     expect(dataCommit).toContain("this.appliedFlightDepth = this.flightState.depth");
     expect(dataCommit).toContain("this.markSourceOrigin()");
     // The arrival stands back far enough for the hero framing.
-    expect(focus).toContain("this.sourceHeroPose(node, this.appliedFlightDepth)");
+    expect(focus).toContain("this.sourceHeroPose(node, arrivalDepth)");
+    expect(source).toContain("this.host.dataset.universeSourceEntry = \"emitting\"");
+    expect(source).toContain("this.flightState = flyUniverseTemporalFlightTo(");
     expect(heroPose).toContain("const entryZ = flight.centerZ - depth");
     expect(heroPose).toContain("node.sceneNode.radius * NEBULA_SOURCE_RADIUS_SCALE");
     expect(heroPose).toContain("Math.max(CORRIDOR_ENTRY_STANDOFF, nebulaRadius * 3.45)");
@@ -1228,6 +1285,48 @@ describe("universe scene production invariants", () => {
     expect(navigation).toContain("this.markSourceOrigin(now)");
     expect(navigation).toContain("this.applyBrowseGaze()");
     expect(flight).toContain("if (this.sourceReturnMotion) return this.updateSourceReturnMotion(now)");
+  });
+
+  it("preserves automatic source entry across visibility pauses and cancels it on back", () => {
+    const entryLifecycle = sourceBetween(
+      "private cancelSourceEntryDive()",
+      "private markSourceExploring()",
+    );
+    const pause = sourceBetween("  pause() {", "  resume() {");
+    const resume = sourceBetween("  resume() {", "  dispose() {");
+    const navigation = sourceBetween(
+      "  returnToSourceOrigin(sourceId: string):",
+      "\n  focusSource(sourceId: string) {",
+    );
+
+    expect(source).toContain('stage: "holding" | "emitting"');
+    expect(entryLifecycle).toContain('this.sourceNavigationPhase = "entering"');
+    expect(entryLifecycle).toContain("intent.remainingMs = Math.max(");
+    expect(entryLifecycle).toContain("private resumeSourceEntryDive()");
+    expect(entryLifecycle).toContain("flyUniverseTemporalFlightTo(");
+    expect(pause).toContain("this.suspendSourceEntryDive()");
+    expect(pause).not.toContain("this.cancelSourceEntryDive()");
+    expect(resume).toContain("this.resumeSourceEntryDive()");
+    expect(navigation).toContain("this.cancelSourceEntryDive()");
+    expect(navigation).toContain("this.stopCameraMotion()");
+  });
+
+  it("makes initial focus cancellable and prefers the active temporal source", () => {
+    const initialFocus = sourceBetween(
+      "private cancelInitialFocus()",
+      "\n  setData(",
+    );
+    const dataCommit = sourceBetween(
+      "setData(\n    data: UniverseSceneData",
+      "\n  focusOverview() {",
+    );
+
+    expect(initialFocus).toContain("this.initialFocusGeneration += 1");
+    expect(initialFocus).toContain("window.cancelAnimationFrame(this.initialFocusFrame)");
+    expect(initialFocus).toContain("const sourceId = this.flightConfig?.sourceId");
+    expect(initialFocus).toContain("?? this.sourceHits[0]?.source_id");
+    expect(dataCommit).toContain("if (previousFlight && flightSourceChanged)");
+    expect(dataCommit).toContain("this.stopCameraMotion()");
   });
 
   it("snaps the imperceptible detail-morph tail so stable scenes can sleep", () => {
