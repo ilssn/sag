@@ -58,3 +58,24 @@
 - 阴影只有两档：`shadow-soft`（常态）/ `shadow-lift`(hover/浮层)；动效曲线 `ease-smooth`，
   入场 `animate-fade-in`，尊重 `prefers-reduced-motion`（tailwindcss-animate 默认）。
 - 内容列上限：对话/搜索 `max-w-3xl`、设置/详情 `max-w-4xl`——超大屏不摊平。
+
+## 静态导出与桌面宿主约定（ADR-0006/0007/0023）
+
+- **运行时配置**：业务代码只经 `lib/runtime-config` 的 `runtimeConfig()/apiBase()` 读取宿主信息；
+  一切 `process.env.NEXT_PUBLIC_*` 均被 eslint 禁止（配置在构建产物之外：桌面壳 preload 注入
+  `__SAG_RUNTIME_CONFIG__`，web 部署下发 `/config.json`）。模块顶层调用 `runtimeConfig()` 会直接抛错——
+  这是纪律而非缺陷；只有启动门（`components/app-bootstrap`）之后的代码可读。
+- **客户端 i18n**：语言解析全在客户端（`<html lang>` 内联脚本 → cookie → navigator），
+  切换语言用 `useChangeAppLocale()`，禁止 `router.refresh()`（静态导出没有服务端可刷新）。
+  新文案必须同时进 `messages/zh-CN.json` 与 `en-US.json`（`npm run i18n:check` 在 CI 强制）。
+- **查询参数路由**：实体定位一律 `/chat?thread=`、`/knowledge?source=`、`/search?q=`；
+  URL 构造/解析只经 `lib/client-route`（`chatHref/knowledgeHref/searchHref/threadIdFromLocation`），
+  组件读地址用 `hooks/use-url-location`（合流路由钩子与 `sag:pathchange` 广播）。
+  精确路径比较必须先 `normalizePathname`（trailingSlash 导出下 `/chat/` 与 `/chat` 等价）。
+  使用 `useSearchParams` 的组件必须置于 `<React.Suspense>` 边界内。
+
+## 已知拆解跟进
+
+- `components/features/knowledge-universe.tsx`（约 3.8k 行）：探索主组件的 50+ ref/state 深度耦合，
+  无零风险接缝；后续拆解应以「先为目标 hook 补交互级测试，再按 数据装载（expansion 缓存族）/
+  时间线播放 / 场景桥接 三条职责线渐进抽离」推进，禁止无测试的一次性大拆。
