@@ -2,10 +2,10 @@
 
 import * as React from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { toast } from "sonner";
 
+import { useChangeAppLocale } from "@/components/app-bootstrap";
 import { useApp } from "@/components/features/app-shell";
 import { SettingsRow, SettingsSection } from "@/components/features/settings-section";
 import {
@@ -16,7 +16,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { persistLocale } from "@/i18n/client";
 import type { AppLocale } from "@/i18n/config";
 import { THEME_OPTIONS, TIMEZONE_OPTIONS } from "@/lib/settings-config";
 
@@ -137,13 +136,11 @@ function ThemeSegment() {
 function LanguageSegment() {
   const locale = useLocale();
   const t = useTranslations("Language");
-  const router = useRouter();
-  const [pending, startTransition] = React.useTransition();
+  const changeAppLocale = useChangeAppLocale();
 
   const changeLocale = (value: string) => {
-    if (!value || value === locale || pending) return;
-    persistLocale(value as AppLocale);
-    startTransition(() => router.refresh());
+    if (!value || value === locale) return;
+    changeAppLocale(value as AppLocale);
   };
 
   return (
@@ -153,8 +150,6 @@ function LanguageSegment() {
       value={locale}
       onValueChange={changeLocale}
       aria-label={t("label")}
-      aria-busy={pending}
-      disabled={pending}
       className="grid w-full grid-cols-2 sm:inline-flex sm:w-auto"
     >
       <ToggleGroupItem value="zh-CN" aria-label={t("chinese")} className="px-4">

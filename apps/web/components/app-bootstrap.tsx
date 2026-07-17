@@ -1,11 +1,14 @@
 "use client";
 
 import * as React from "react";
-import { useTranslations } from "next-intl";
+import { NextIntlClientProvider, useTranslations } from "next-intl";
 import { RotateCcw } from "lucide-react";
 
 import { loadRuntimeConfig } from "@/lib/runtime-config";
 import { DEFAULT_AGENT_AVATAR, PRODUCT_NAME } from "@/lib/branding";
+import { persistLocale, resolveInitialLocale } from "@/i18n/client";
+import { MESSAGES } from "@/i18n/messages";
+import type { AppLocale } from "@/i18n/config";
 import { PetHeadAvatar } from "@/components/features/pet-head-avatar";
 import { SpaceBackdrop } from "@/components/features/space-backdrop";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -16,16 +19,25 @@ type BootStatus =
   | { phase: "ready" }
   | { phase: "error"; detail: string };
 
+const LocaleControlContext = React.createContext<(next: AppLocale) => void>(() => {});
+
+/** 语言切换入口：写 cookie + <html lang> 后整树重渲，无需服务端参与。 */
+export function useChangeAppLocale() {
+  return React.useContext(LocaleControlContext);
+}
+
 /**
- * 启动门（ADR-0007）：在任何业务 UI 挂载前完成运行时配置解析。
- * 预渲染/静态导出输出的 HTML 即 Splash——门内组件从不参与构建期求值，
- * 因此门后代码可以放心读取 runtimeConfig() 与 window。
+ * 启动门（ADR-0006/0007）：在任何业务 UI 挂载前完成 ① 语言解析（同步）与
+ * ② 运行时配置解析（异步）。预渲染/静态导出输出的 HTML 即 Splash——
+ * 门后组件从不参与构建期求值，可以放心读取 runtimeConfig() 与 window。
  */
 export function AppBootstrap({ children }: { children: React.ReactNode }) {
+  const [locale, setLocale] = React.useState<AppLocale | null>(null);
   const [status, setStatus] = React.useState<BootStatus>({ phase: "loading" });
   const [attempt, setAttempt] = React.useState(0);
 
   React.useEffect(() => {
+    setLocale((current) => current ?? resolveInitialLocale());
     let alive = true;
     loadRuntimeConfig()
       .then(() => {
@@ -44,22 +56,45 @@ export function AppBootstrap({ children }: { children: React.ReactNode }) {
     };
   }, [attempt]);
 
-  if (status.phase === "ready") return <>{children}</>;
-  if (status.phase === "error") {
-    return (
-      <BootError
-        detail={status.detail}
-        onRetry={() => {
-          setStatus({ phase: "loading" });
-          setAttempt((value) => value + 1);
-        }}
-      />
-    );
-  }
-  return <BootSplash />;
+  const changeLocale = React.useCallback((next: AppLocale) => {
+    persistLocale(next);
+    setLocale(next);
+  }, []);
+
+  // 预渲染与挂载前的首帧：语言未定，渲染无文字 Splash。
+  if (!locale) return <BootSplash />;
+
+  return (
+    <NextIntlClientProvider
+      locale={locale}
+      messages={MESSAGES[locale]}
+      onError={(error) => {
+        if (process.env.NODE_ENV !== "production") console.error(error);
+      }}
+      getMessageFallback={({ namespace, key }) =>
+        [namespace, key].filter(Boolean).join(".")
+      }
+    >
+      {status.phase === "ready" ? (
+        <LocaleControlContext.Provider value={changeLocale}>
+          {children}
+        </LocaleControlContext.Provider>
+      ) : status.phase === "error" ? (
+        <BootError
+          detail={status.detail}
+          onRetry={() => {
+            setStatus({ phase: "loading" });
+            setAttempt((value) => value + 1);
+          }}
+        />
+      ) : (
+        <BootSplash />
+      )}
+    </NextIntlClientProvider>
+  );
 }
 
-/** 无文字 Splash：预渲染阶段语言尚未解析，视觉与 AppShell 的 FullLoader 对齐。 */
+/** 无文字 Splash：语言尚未解析的帧也会渲染它，视觉与 AppShell 的 FullLoader 对齐。 */
 function BootSplash() {
   return (
     <div className="bg-space-field grid h-screen place-items-center">
