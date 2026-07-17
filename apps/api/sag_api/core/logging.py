@@ -17,11 +17,12 @@ _CONFIGURED = False
 request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
 
 
-def configure_logging(level: str = "INFO") -> None:
+def configure_logging(level: str = "INFO", *, stream=None) -> None:
+    """配置根日志。sidecar 模式传 stream=sys.stderr,让 stdout 只承载 JSONL 协议。"""
     global _CONFIGURED
     if _CONFIGURED:
         return
-    handler = logging.StreamHandler(sys.stdout)
+    handler = logging.StreamHandler(stream if stream is not None else sys.stdout)
     handler.addFilter(_RequestIdFilter())
     handler.setFormatter(
         logging.Formatter(

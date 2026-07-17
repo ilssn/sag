@@ -28,6 +28,9 @@ dependencies = [
     "tzdata>=2024.1",
 ]
 
+[project.scripts]
+sag-api = "sag_api.sidecar:main"
+
 [project.optional-dependencies]
 postgres = ["asyncpg>=0.29", "zleap-sag[postgres]>=0.7.1"]
 dev = [

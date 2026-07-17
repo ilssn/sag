@@ -14,6 +14,7 @@ Create Date: 2026-07-17
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path, PurePosixPath
 
 import sqlalchemy as sa
@@ -70,9 +71,11 @@ def upgrade() -> None:
     with op.batch_alter_table("documents") as batch:
         batch.alter_column("storage_path", new_column_name="storage_key")
 
+    # stdout 是 sidecar 协议通道（ADR-0017），迁移日志一律走 stderr
     print(
         f"[0002] storage_key 回填完成：converted={converted} "
-        f"recovered={recovered} orphaned={orphaned}"
+        f"recovered={recovered} orphaned={orphaned}",
+        file=sys.stderr,
     )
 
 
