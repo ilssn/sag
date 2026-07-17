@@ -1,0 +1,97 @@
+name: Release Desktop
+
+# 桌面发布（ADR-0019/0020/0021/0023）：tag vX.Y.Z 触发，electron-builder 产出
+# draft release（DMG arm64+x64 / NSIS x64 + electron-updater latest*.yml 清单）。
+# 人工 QA 清单通过后手动 publish draft = 发布门（docs/desktop.md runbook）。
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  web-export:
+    name: 前端静态导出（一次构建，多腿复用）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: 版本一致性门禁
+        run: node apps/desktop/scripts/check-versions.mjs
+      - name: 构建静态导出
+        working-directory: apps/web
+        run: |
+          npm ci
+          npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-out
+          path: apps/web/out
+          retention-days: 3
+
+  desktop:
+    name: 桌面构建（${{ matrix.os }}）
+    needs: web-export
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # electron-builder 在 macos-14（arm64 主机）可同时产出 arm64+x64 DMG
+          - os: macos-14
+          - os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 取回前端产物
+        uses: actions/download-artifact@v4
+        with:
+          name: web-out
+          path: apps/web/out
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 冻结 sidecar（PyInstaller onedir）
+        run: python3 apps/desktop/scripts/build_sidecar.py
+
+      - name: sidecar 冒烟（协议 + 探针；有密钥时含检索回路）
+        env:
+          SMOKE_LLM_API_KEY: ${{ secrets.SMOKE_LLM_API_KEY }}
+          SMOKE_EMBEDDING_API_KEY: ${{ secrets.SMOKE_EMBEDDING_API_KEY }}
+        run: python3 apps/desktop/scripts/smoke_sidecar.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: 组装桌面前端产物
+        working-directory: apps/desktop
+        run: |
+          npm ci
+          npm run stage:frontend
+
+      # 注：macOS 双架构 DMG 共用同一份 x86_64 sidecar 时体验不完整——
+      # arm64 sidecar 需在本腿单独构建；electron-builder 每架构打包前由
+      # afterPack 钩子替换对应 sidecar 属后续优化，V1 先按主机架构产出主 DMG。
+      - name: 构建并上传 draft release
+        working-directory: apps/desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # macOS 签名与公证（缺省时产出未签名构建，仅供内测）
+          CSC_LINK: ${{ secrets.APPLE_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Windows 代码签名留位（ADR-0021）：取得证书后配置 CSC_* 或 azureSignOptions
+        run: npm run build -- --publish always

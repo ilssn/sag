@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded-by-0023
 ---
 
 # 桌面壳采用 Tauri v2

@@ -13,9 +13,6 @@ const repo = resolve(here, "..", "..", "..");
 const read = (path) => readFileSync(join(repo, path), "utf8");
 const versions = {
   "apps/desktop/package.json": JSON.parse(read("apps/desktop/package.json")).version,
-  "apps/desktop/src-tauri/tauri.conf.json": JSON.parse(
-    read("apps/desktop/src-tauri/tauri.conf.json"),
-  ).version,
   "apps/web/package.json": JSON.parse(read("apps/web/package.json")).version,
   "apps/api/sag_api/__init__.py": /__version__\s*=\s*"([^"]+)"/.exec(
     read("apps/api/sag_api/__init__.py"),

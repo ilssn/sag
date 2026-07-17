@@ -3,7 +3,7 @@
  * 组装桌面前端产物 dist-web/（ADR-0006/0007）：
  * 1. 复用 apps/web/out（已有则直接用；否则触发 `npm run build` 生成静态导出）
  * 2. 注入 splash/boot.html（壳的启动/恢复页）
- * 3. 断言产物内不含 config.json —— 桌面配置只允许经 initialization_script 注入,
+ * 3. 断言产物内不含 config.json —— 桌面配置只允许经 preload contextBridge 注入,
  *    残留部署配置会让「注入缺失即硬失败」的保护形同虚设。
  */
 import { cpSync, existsSync, readdirSync, rmSync, statSync } from "node:fs";

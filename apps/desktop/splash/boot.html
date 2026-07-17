@@ -78,8 +78,8 @@
 
 <script>
 (function () {
-  var invoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
-  var listen = window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.listen;
+  var shell = window.sagShell;
+  var invoke = shell ? function (cmd, payload) { return shell.invoke(cmd, payload); } : null;
   var $ = function (id) { return document.getElementById(id); };
 
   var PHASES = {
@@ -132,26 +132,26 @@
     $("phase").textContent = text;
   }
 
-  if (listen) {
-    listen("sag://startup", function (event) {
-      var payload = event.payload || {};
+  if (shell) {
+    shell.on("sag://startup", function (payload) {
+      payload = payload || {};
       if (payload.state === "error") showError(payload);
       else showPhase(payload);
     });
   }
   if (invoke) {
     // 页面加载完成后向壳请求当前状态（避免错过窗口创建前的事件）
-    invoke("boot_status").then(function (payload) {
+    invoke("sag:boot-status").then(function (payload) {
       if (payload) (payload.state === "error" ? showError : showPhase)(payload);
     }).catch(function () {});
-    $("retry").addEventListener("click", function () { invoke("retry_startup").catch(function () {}); });
-    $("quit").addEventListener("click", function () { invoke("quit_app").catch(function () {}); });
-    $("open-logs").addEventListener("click", function () { invoke("open_logs").catch(function () {}); });
+    $("retry").addEventListener("click", function () { invoke("sag:retry-startup").catch(function () {}); });
+    $("quit").addEventListener("click", function () { invoke("sag:quit-app").catch(function () {}); });
+    $("open-logs").addEventListener("click", function () { invoke("sag:open-logs").catch(function () {}); });
     $("save-port").addEventListener("click", function () {
       var port = parseInt($("port").value, 10);
       if (!port || port < 1024 || port > 49151) return;
-      invoke("set_port_preference", { port: port })
-        .then(function () { return invoke("retry_startup"); })
+      invoke("sag:set-port-preference", { port: port })
+        .then(function () { return invoke("sag:retry-startup"); })
         .catch(function () {});
     });
   }

@@ -2,7 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <!-- PyInstaller onedir sidecar：CPython/numpy 等需要 JIT 之外的可写执行内存与自带动态库 -->
+  <!-- Electron/Chromium JIT -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <!-- PyInstaller onedir sidecar：可写执行内存与自带动态库 -->
   <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
   <true/>
   <key>com.apple.security.cs.disable-library-validation</key>

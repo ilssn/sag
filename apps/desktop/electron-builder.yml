@@ -1,0 +1,54 @@
+# SAG 桌面打包（ADR-0021/0023）。发布：GitHub Releases draft（人工 QA 后 publish）。
+appId: com.zleap.sag
+productName: SAG
+copyright: "© Zleap-AI"
+
+directories:
+  buildResources: build
+  output: release
+
+files:
+  - dist-electron/**
+  - package.json
+
+# 静态前端与冻结 sidecar 均为运行期资源（asar 之外，sidecar 需可执行）
+extraResources:
+  - from: dist-web
+    to: web
+  - from: binaries/sidecar
+    to: sidecar
+  - from: build/trayTemplate.png
+    to: trayTemplate.png
+  - from: build/trayTemplate@2x.png
+    to: trayTemplate@2x.png
+
+asar: true
+
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: false # CI 经 APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD/APPLE_TEAM_ID 环境变量开启
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  # V1 暂不签名（ADR-0021）；取得证书后配置 signtoolOptions/azureSignOptions
+
+nsis:
+  oneClick: false
+  perMachine: false # perUser：零 UAC，%LOCALAPPDATA%\Programs（ADR-0021）
+  allowToChangeInstallationDirectory: false
+  deleteAppDataOnUninstall: false
+
+publish:
+  provider: github
+  owner: ilssn
+  repo: sag
+  releaseType: draft

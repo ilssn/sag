@@ -255,15 +255,10 @@ def create_app() -> FastAPI:
         "allow_headers": ["*"],
         "expose_headers": ["X-Request-Id"],
     }
-    # 桌面模式：放行 Tauri WebView origin（macOS tauri://localhost、Windows http(s)://tauri.localhost）
+    # 桌面模式：放行 Electron 壳的自定义协议 origin（app://sag，ADR-0023）
     if settings.runtime_mode == "desktop":
-        for origin in (
-            "tauri://localhost",
-            "http://tauri.localhost",
-            "https://tauri.localhost",
-        ):
-            if origin not in cors_kwargs["allow_origins"]:
-                cors_kwargs["allow_origins"].append(origin)
+        if "app://sag" not in cors_kwargs["allow_origins"]:
+            cors_kwargs["allow_origins"].append("app://sag")
     # 开发环境放行局域网前端（如 http://192.168.x.x:3000），避免本机 IP 访问时 CORS 拦截；
     # desktop 模式不放行 LAN（回环端点只面向本机 WebView 与外部宿主）。
     if settings.environment == "dev" and settings.runtime_mode != "desktop":

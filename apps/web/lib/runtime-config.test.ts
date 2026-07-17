@@ -5,7 +5,7 @@ import {
   RuntimeConfigError,
   apiBase,
   defaultApiBase,
-  isTauriHostOrigin,
+  isDesktopHostOrigin,
   normalizeRuntimeConfig,
   runtimeConfig,
 } from "./runtime-config";
@@ -35,29 +35,28 @@ describe("defaultApiBase", () => {
     );
   });
 
-  it("*.localhost（含 tauri.localhost）不做局域网改写", () => {
-    expect(defaultApiBase({ protocol: "http:", hostname: "tauri.localhost" })).toBe(
+  it("*.localhost 不做局域网改写", () => {
+    expect(defaultApiBase({ protocol: "http:", hostname: "dev.localhost" })).toBe(
       "http://localhost:8000",
     );
   });
 
-  it("非 http(s) 协议（如 tauri:）不做局域网改写", () => {
-    expect(defaultApiBase({ protocol: "tauri:", hostname: "localhost" })).toBe(
+  it("非 http(s) 协议（如 app:）不做局域网改写", () => {
+    expect(defaultApiBase({ protocol: "app:", hostname: "sag" })).toBe(
       "http://localhost:8000",
     );
   });
 });
 
-describe("isTauriHostOrigin", () => {
-  it("识别 macOS 与 Windows 两种 Tauri origin", () => {
-    expect(isTauriHostOrigin({ protocol: "tauri:", hostname: "localhost" })).toBe(true);
-    expect(isTauriHostOrigin({ protocol: "http:", hostname: "tauri.localhost" })).toBe(true);
-    expect(isTauriHostOrigin({ protocol: "https:", hostname: "tauri.localhost" })).toBe(true);
+describe("isDesktopHostOrigin", () => {
+  it("识别 Electron app:// 桌面 origin", () => {
+    expect(isDesktopHostOrigin({ protocol: "app:", hostname: "sag" })).toBe(true);
   });
 
   it("普通 web origin 不误判", () => {
-    expect(isTauriHostOrigin(LOCALHOST)).toBe(false);
-    expect(isTauriHostOrigin({ protocol: "https:", hostname: "sag.example.com" })).toBe(false);
+    expect(isDesktopHostOrigin(LOCALHOST)).toBe(false);
+    expect(isDesktopHostOrigin({ protocol: "https:", hostname: "sag.example.com" })).toBe(false);
+    expect(isDesktopHostOrigin({ protocol: "http:", hostname: "tauri.localhost" })).toBe(false);
   });
 });
 

@@ -26,6 +26,33 @@ jobs:
       - name: 测试（离线全套）
         run: python -m pytest -q
 
+  desktop-check:
+    name: 桌面壳 · tsc + 协议/监督器单测（产物构建见 release.yml）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12" # fake_sidecar 场景脚本
+      - name: 配置校验
+        run: node scripts/check-versions.mjs
+      - name: 安装依赖（跳过 Electron 二进制下载）
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+        run: npm ci
+      - name: 类型检查
+        run: npm run typecheck
+      - name: 单元测试（协议解析 + 监督器状态机 vs fake_sidecar）
+        run: npm test
+
   frontend:
     name: 前端 · tsc + next build
     runs-on: ubuntu-latest

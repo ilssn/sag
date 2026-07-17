@@ -65,14 +65,14 @@ interface LocationLike {
   hostname: string;
 }
 
-/** Tauri WebView origin：macOS 为 tauri://localhost，Windows 为 http(s)://tauri.localhost。 */
-export function isTauriHostOrigin(loc: LocationLike): boolean {
-  return loc.protocol === "tauri:" || loc.hostname === "tauri.localhost";
+/** 桌面壳 origin：Electron 自定义协议 app://sag（ADR-0023）。 */
+export function isDesktopHostOrigin(loc: LocationLike): boolean {
+  return loc.protocol === "app:";
 }
 
 /**
  * 无任何配置时的回退：浏览器通过局域网 IP 打开前端时，自动指向同主机 :8000；
- * 本机（含 *.localhost，避免误改写 Tauri origin）保持 localhost:8000。
+ * 本机（含 *.localhost）保持 localhost:8000。
  */
 export function defaultApiBase(loc: LocationLike): string {
   const isHttp = loc.protocol === "http:" || loc.protocol === "https:";
@@ -179,9 +179,9 @@ export async function loadRuntimeConfig(): Promise<RuntimeConfig> {
     return current;
   }
 
-  // Tauri origin 下注入缺失说明壳启动链路损坏：硬失败进入错误界面，
+  // 桌面 origin 下注入缺失说明壳启动链路损坏：硬失败进入错误界面，
   // 绝不能回退到 localhost:8000 而悄悄指向错误端口。
-  if (isTauriHostOrigin(loc)) {
+  if (isDesktopHostOrigin(loc)) {
     throw new RuntimeConfigError(
       "desktop host did not inject runtime config (__SAG_RUNTIME_CONFIG__ missing)",
     );
