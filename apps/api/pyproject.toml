@@ -19,7 +19,7 @@ dependencies = [
     "httpx>=0.27",
     "litellm>=1.92,<2",
     "orjson>=3.11.6,<4",
-    "zleap-sag>=0.7.1",
+    "zleap-sag>=0.7.1,<0.8",  # 引擎数据版本门禁按发布钉住(ADR-0015)
     "alembic>=1.13",
     "trafilatura>=1.8",
     "markitdown[docx,pdf,pptx,xls,xlsx]>=0.1.6,<0.2",
@@ -55,3 +55,7 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 ignore = ["B008"]  # FastAPI Depends() in defaults
+
+[tool.ruff.lint.per-file-ignores]
+# Alembic autogenerate 产物：允许长行与生成器的导入排布
+"sag_api/db/migrations/versions/*" = ["E501", "I001"]

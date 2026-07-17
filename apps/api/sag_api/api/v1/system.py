@@ -51,8 +51,11 @@ async def health() -> dict:
 
 
 @router.get("/ready")
-async def ready() -> JSONResponse:
-    """就绪探针：数据库可连通才 200，否则 503（供 compose/K8s 健康检查）。"""
+async def ready(request: Request) -> JSONResponse:
+    """就绪探针：启动相位 ready 且数据库可连通才 200（供 compose/K8s/桌面壳）。"""
+    state = request.app.state.runtime
+    if not state.ready:
+        return JSONResponse(status_code=503, content={"status": state.phase, "db": None})
     try:
         async with SessionLocal() as session:
             await session.execute(text("SELECT 1"))
@@ -60,6 +63,17 @@ async def ready() -> JSONResponse:
         log.warning("就绪检查失败：%s", e)
         return JSONResponse(status_code=503, content={"status": "unavailable", "db": False})
     return JSONResponse(content={"status": "ready", "db": True})
+
+
+@router.get("/startup-status")
+async def startup_status(request: Request) -> dict:
+    """启动相位与失败详情（免鉴权）：维护模式下桌面壳/前端据此渲染恢复界面。"""
+    from sag_api import __version__
+
+    snapshot = request.app.state.runtime.snapshot()
+    snapshot["api_version"] = "v1"
+    snapshot["app_version"] = __version__
+    return snapshot
 
 
 @router.get("/capabilities")
