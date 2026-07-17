@@ -151,7 +151,7 @@ class Settings(BaseSettings):
     universe_lod_deep_px: int = Field(default=360, ge=120, le=1200)
     universe_lod_hysteresis_px: int = Field(default=24, ge=4, le=120)
     universe_lod_debounce_ms: int = Field(default=220, ge=50, le=2000)
-    universe_proxy_budget_desktop: int = Field(default=12000, ge=256, le=16000)
+    universe_proxy_budget_desktop: int = Field(default=15000, ge=256, le=16000)
     universe_proxy_budget_mobile: int = Field(default=4000, ge=128, le=4800)
     universe_node_budget_desktop: int = Field(default=240, ge=40, le=240)
     universe_node_budget_mobile: int = Field(default=120, ge=40, le=120)

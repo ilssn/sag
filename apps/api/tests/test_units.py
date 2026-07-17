@@ -372,6 +372,7 @@ def test_prompt_and_citations():
                 chunk_id="c1",
                 title="Acme 宣布创立",
                 summary="张三完成了 Acme 的创立。",
+                content="张三完成公司注册，并正式宣布 Acme 成立。",
                 category="公司事件",
             )
         ],
@@ -384,6 +385,7 @@ def test_prompt_and_citations():
             "id": "event-1",
             "title": "Acme 宣布创立",
             "summary": "张三完成了 Acme 的创立。",
+            "content": "张三完成公司注册，并正式宣布 Acme 成立。",
             "category": "公司事件",
         }
     ]

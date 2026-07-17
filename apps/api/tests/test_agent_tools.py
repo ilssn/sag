@@ -137,6 +137,7 @@ async def test_search_tool_prefers_exact_body_window_over_semantic_boilerplate()
                         chunk_id=sections[0].chunk_id,
                         title="林俊杰官宣恋情",
                         summary="林俊杰于 12 月 29 日公开恋情。",
+                        content="12 月 29 日，林俊杰公开确认恋情，并介绍双方交往情况。",
                         category="娱乐",
                         score=0.95,
                     )
@@ -155,6 +156,7 @@ async def test_search_tool_prefers_exact_body_window_over_semantic_boilerplate()
 
     assert result.citations[0]["chunk_id"] == "body"
     assert result.citations[0]["event_refs"][0]["title"] == "林俊杰官宣恋情"
+    assert result.citations[0]["event_refs"][0]["content"].startswith("12 月 29 日")
     assert "summary" not in result.citations[0]
     assert "12月29日晚" in result.content
     assert result.data["lexical_count"] == 1
@@ -180,6 +182,9 @@ async def test_search_tool_prefers_exact_body_window_over_semantic_boilerplate()
     assert collected_citations[0]["event_refs"][0]["id"] == "event-1"
     assert runtime_result.details["sources"] == [{"id": "source-1", "name": "娱乐新闻"}]
     assert runtime_result.artifacts["citations"][0]["event_refs"][0]["summary"] == ("林俊杰于 12 月 29 日公开恋情。")
+    assert runtime_result.artifacts["citations"][0]["event_refs"][0]["content"].startswith(
+        "12 月 29 日"
+    )
     assert runtime_result.details["matches"][0]["event_refs"][0]["category"] == "娱乐"
 
 

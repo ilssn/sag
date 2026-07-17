@@ -79,6 +79,7 @@ class GraphEventInfo(BaseModel):
     title: str
     source_config_id: str = ""
     summary: str = ""
+    content: str = ""
     category: str = ""
     rank: int = 0
     parent_id: str | None = None

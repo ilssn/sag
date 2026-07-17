@@ -3220,9 +3220,6 @@
 
   /* 读事件是目的：面板更实、字号更大、对比更足——星幕上的文字必须一眼可读。 */
   .sag-universe-node-label {
-    --universe-card-eyebrow-opacity: 1;
-    --universe-card-summary-opacity: 1;
-    --universe-card-summary-y: 0px;
     --universe-card-edge-blur: 0px;
     --universe-label-connector-length: 10px;
     --universe-node-accent: #d6ae63;
@@ -3433,12 +3430,10 @@
     align-items: center;
     gap: 5px;
     overflow: hidden;
-    opacity: var(--universe-card-eyebrow-opacity);
     color: hsl(var(--muted-foreground) / 0.88);
     font-size: 10px;
     line-height: 13px;
     text-overflow: ellipsis;
-    transition: opacity 80ms linear;
     white-space: nowrap;
   }
 
@@ -3477,14 +3472,9 @@
     display: -webkit-box;
     margin-top: 3px;
     overflow: hidden;
-    opacity: var(--universe-card-summary-opacity);
     color: hsl(var(--muted-foreground) / 0.92);
     font-size: 10.5px;
     line-height: 15px;
-    transform: translateY(var(--universe-card-summary-y));
-    transition:
-      opacity 80ms linear,
-      transform 80ms linear;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
   }

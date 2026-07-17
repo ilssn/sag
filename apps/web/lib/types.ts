@@ -66,6 +66,9 @@ export interface Doc {
 export interface CitationEventRef {
   id?: string | null;
   title: string;
+  /** Extracted event body. This is the citation card copy. */
+  content?: string | null;
+  /** Retained for persisted data and non-visual consumers; never used as event body. */
   summary?: string | null;
   category?: string | null;
 }
@@ -81,7 +84,7 @@ export interface Citation {
   summary?: string;
   /** Real extracted events associated with this knowledge chunk, ordered by relevance. */
   event_refs?: CitationEventRef[];
-  /** Source excerpt. It is only shown after the user expands the excerpt control. */
+  /** Source chunk used to locate the original passage; not rendered as event copy. */
   snippet: string;
   score: number;
   source_id: string | null;

@@ -22,13 +22,23 @@ function citation(overrides: Partial<Citation> = {}): Citation {
 }
 
 describe("citation presentation", () => {
-  it("uses only the first real event reference for an internal title and summary", () => {
+  it("uses only the first real event reference for an internal title and body", () => {
     expect(
       citationCopy(
         citation({
           event_refs: [
-            { id: "event-1", title: "AI", summary: "官方宣布产品进入公开测试。" },
-            { id: "event-2", title: "不应默认展示的第二事件", summary: "第二事件摘要。" },
+            {
+              id: "event-1",
+              title: "AI",
+              content: "产品已经完成准备，并正式进入公开测试。",
+              summary: "不应展示的事件摘要。",
+            },
+            {
+              id: "event-2",
+              title: "不应默认展示的第二事件",
+              content: "第二事件正文。",
+              summary: "第二事件摘要。",
+            },
           ],
         }),
         1,
@@ -36,9 +46,8 @@ describe("citation presentation", () => {
     ).toEqual({
       mode: "event",
       title: "AI",
-      summary: "官方宣布产品进入公开测试。",
+      body: "产品已经完成准备，并正式进入公开测试。",
       meta: "",
-      excerpt: "这只是检索命中的原文片段，不能自动成为事件标题或摘要。后续正文。",
     });
   });
 
@@ -48,12 +57,11 @@ describe("citation presentation", () => {
     expect(copy).toEqual({
       mode: "source_only",
       title: "知识库来源 1",
-      summary: "",
+      body: "",
       meta: "项目资料 · 章节：发布记录",
-      excerpt: "这只是检索命中的原文片段，不能自动成为事件标题或摘要。后续正文。",
     });
     expect(copy.title).not.toContain("检索命中");
-    expect(copy.summary).not.toContain("检索命中");
+    expect(copy.body).not.toContain("检索命中");
   });
 
   it("never treats a legacy internal summary or heading as event metadata", () => {
@@ -70,9 +78,8 @@ describe("citation presentation", () => {
     expect(copy).toEqual({
       mode: "source_only",
       title: "知识库来源 1",
-      summary: "",
+      body: "",
       meta: "pdf",
-      excerpt: "产品介绍 Zleap 智跃一体机。后续正文。",
     });
   });
 
@@ -94,9 +101,8 @@ describe("citation presentation", () => {
     ).toEqual({
       mode: "external",
       title: "官方发布说明",
-      summary: "官方确认新版本已经发布。",
+      body: "官方确认新版本已经发布。",
       meta: "Example Research · news.example.com",
-      excerpt: "外部工具返回的更长正文片段。",
     });
   });
 
@@ -116,9 +122,8 @@ describe("citation presentation", () => {
     ).toEqual({
       mode: "external",
       title: "example.com",
-      summary: "",
+      body: "",
       meta: "",
-      excerpt: "不能冒充外部标题或摘要的正文。",
     });
   });
 
@@ -128,7 +133,8 @@ describe("citation presentation", () => {
         event_refs: [
           {
             title: "## 官方更新 □cite□turn17view2",
-            summary: "**已经发布** □cite□turn17view4",
+            content: "**已经发布** □cite□turn17view4",
+            summary: "不应展示的摘要",
           },
         ],
         snippet: "`完整片段` □cite□turn17view5",
@@ -138,8 +144,7 @@ describe("citation presentation", () => {
 
     expect(copy).toMatchObject({
       title: "官方更新",
-      summary: "已经发布",
-      excerpt: "完整片段",
+      body: "已经发布",
     });
     expect(cleanCitationText("## 执行摘要\n**核心结论**见[报告](https://example.com)。")).toBe(
       "执行摘要 核心结论见报告。",
@@ -165,9 +170,24 @@ describe("citation presentation", () => {
     ).toEqual({
       mode: "source_only",
       title: "知识库来源 3",
-      summary: "",
+      body: "",
       meta: "",
-      excerpt: "",
+    });
+  });
+
+  it("does not fall back to an event summary or source chunk when content is missing", () => {
+    const copy = citationCopy(
+      citation({
+        snippet: "检索分块正文",
+        event_refs: [{ title: "真实事项", summary: "压缩摘要" }],
+      }),
+      1,
+    );
+
+    expect(copy).toMatchObject({
+      mode: "event",
+      title: "真实事项",
+      body: "",
     });
   });
 });

@@ -217,6 +217,7 @@ describe("agent run activity", () => {
         {
           id: "event-1",
           title: "真实事件",
+          content: "真实事件正文",
           summary: "真实事件摘要",
           category: "发布",
         },

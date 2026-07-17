@@ -23,7 +23,9 @@ import {
   resolveUniverseDetailSource,
   universeCardMorph,
   universeDeepLoadMilestone,
+  universeNodeEmergence,
   universeVisualDetailProgress,
+  type UniverseNodeEmergence,
 } from "@/lib/universe-presentation";
 import { planUniverseSceneDelta } from "@/lib/universe-scene-transition";
 import {
@@ -114,11 +116,13 @@ export interface ForceNode extends NodeObject {
   presentationScale?: number;
   presentationCardScale?: number;
   presentationOpacity?: number;
-  /** Camera-relative presence along the flight axis, refreshed per frame. */
+  /** Camera-relative depth scale and opacity, refreshed per frame. */
   temporalPresenceScale?: number;
   temporalPresenceOpacity?: number;
-  /** Stable condensation offset, cached after the first reveal calculation. */
+  /** Stable per-node emergence stagger, cached after its first calculation. */
   temporalRevealStart?: number;
+  /** Cached hot-path projection of reversible grain → star → whole-card phases. */
+  emergence?: UniverseNodeEmergence & { availability: number };
   renderedTemporalPresence?: number;
   renderedDetailFactor?: number;
   timelineOpacity?: number;
@@ -248,7 +252,7 @@ const NEBULA_AMBIENT_FRAME_MS_MOBILE = 1000 / 18;
 // overview sources keep a proportional share of the same ceiling.
 // Inside a source the dust is the medium being explored: slightly brighter
 // than the overview, so diving in reads as entering the nebula, not leaving it.
-const NEBULA_DETAIL_ALPHA = 1.5;
+const NEBULA_DETAIL_ALPHA = 1.55;
 // Keep source nebulae generous in the overview. The source marker is a portal
 // into a knowledge cloud, not a pin; a compact minimum avoids three tiny dots
 // when a source has a small radius in the manifest.
@@ -259,9 +263,9 @@ const NEBULA_SOURCE_CORRIDOR_SCALE = 2.35;
 const NEBULA_DETAIL_DUST_POINT_SIZE_CSS = 20;
 const NEBULA_CORRIDOR_DUST_POINT_SIZE_CSS = 5.5;
 const NEBULA_CORRIDOR_GLOW_POINT_SIZE_CSS = 9;
-const NEBULA_CORRIDOR_DUST_ALPHA = 0.5;
-const NEBULA_CORRIDOR_WALL_ALPHA = 0.16;
-const NEBULA_CORRIDOR_LOADED_ALPHA = 0.4;
+const NEBULA_CORRIDOR_DUST_ALPHA = 0.62;
+const NEBULA_CORRIDOR_WALL_ALPHA = 0.22;
+const NEBULA_CORRIDOR_LOADED_ALPHA = 0.52;
 /**
  * Glow pockets are accents, not weather: the brand galaxy is built purely
  * from sharp grains, so oversized haze sprites read as noise smeared over it.
@@ -307,11 +311,15 @@ const SOURCE_ENTRY_DIVE_KEEP_ALIVE_MS = 1_800;
 const SOURCE_ENTRY_CONDENSATION_FRACTION = 0.9;
 /** Below this flight speed (units/s) cards are fully expanded. */
 const FLIGHT_CARD_CALM_SPEED = 240;
-/** Above this flight speed cards have fully collapsed into star points. */
+/** Above this speed cards stay compact, but never disappear while approaching. */
 const FLIGHT_CARD_HIDE_SPEED = 760;
+const FLIGHT_CARD_TRAVEL_MIN = 0.46;
 /** Cards duck quickly when speed picks up and re-expand a beat after settling. */
 const FLIGHT_CARD_COLLAPSE_MS = 110;
 const FLIGHT_CARD_RECOVER_MS = 300;
+/** Matches the travelled-package ember floor in universe-temporal-flight. */
+/** One restrained filter budget shared by edge and depth-of-field blur. */
+const CARD_DEPTH_BLUR_CSS = 3.2;
 /** Corridor lateral spread mirrors the package axis policy. */
 const NEBULA_CORRIDOR_NEAR_SPREAD = UNIVERSE_TEMPORAL_AXIS_NEAR_LATERAL_SPREAD;
 const NEBULA_CORRIDOR_FAR_SPREAD = UNIVERSE_TEMPORAL_AXIS_FAR_LATERAL_SPREAD;
@@ -759,10 +767,12 @@ function makeNebulaMaterial(darkTheme: boolean) {
         // other nebula recedes into the dark instead of competing for light —
         // deep enough that their white-hot cores cannot smudge the corridor.
         vAlpha *= mix(1.0, 0.03, uDetail * (1.0 - sourceMatch));
-        // Focusing first gathers the cloud into a luminous core. Detail bloom
-        // belongs to the subsequent journey, otherwise a focused flat spiral
-        // becomes an oversized bright plate before it has begun to emit data.
-        vAlpha *= mix(1.0, 1.28, focusMix * aEmitter);
+        // Focusing gathers the SAME cloud into a luminous core. Every selected
+        // grain receives a restrained lift, while the sparse emitter grains
+        // carry a little more light. This reads as energy concentrating rather
+        // than a new, brighter particle system popping into existence.
+        vAlpha *= mix(1.0, 1.08, focusMix);
+        vAlpha *= mix(1.0, 1.12, focusMix * aEmitter);
         vDetail = 0.0;
         vShape = aShape;
         float wave = 0.5 + 0.5 * sin(uTime * (0.72 + aTwinkle * 1.38) + aPhase);
@@ -847,7 +857,7 @@ function makeNebulaMaterial(darkTheme: boolean) {
         // Atmospheric haze with distance ahead keeps the vastness readable
         // without ever going fully dark.
         float aheadUnits = wrappedDepth - uFlightDepth;
-        float depthHaze = 1.0 - smoothstep(900.0, 1800.0, aheadUnits) * 0.55;
+        float depthHaze = 1.0 - smoothstep(900.0, 1800.0, aheadUnits) * 0.42;
         float axisFade = entryFade * horizonFade * (1.0 - overEnd) * depthHaze;
         // Where the loaded window already condensed into real packages, the
         // corridor dust steps aside instead of double-exposing them.
@@ -870,7 +880,7 @@ function makeNebulaMaterial(darkTheme: boolean) {
         // vast, with no visible wall.
         float glowParticle = step(0.001, vGlow);
         float originalGlowParticle = step(0.001, aGlow);
-        vAlpha *= mix(1.0, 0.04, streamMix * originalGlowParticle);
+        vAlpha *= mix(1.0, 0.14, streamMix * originalGlowParticle);
         vAlpha *= mix(1.0, axisFade, streamMix);
         // The explored graph is the foreground. Corridor dust remains only as
         // a restrained depth cue; distant wall grains recede almost entirely.
@@ -938,7 +948,7 @@ function makeNebulaMaterial(darkTheme: boolean) {
           // A faint warm pocket of light — an accent between the grains,
           // never a fog bank smeared over them.
           float haze = radial * mix(0.55, 0.95, radial);
-          shapeAlpha = haze * mix(0.12, 0.2, vDetail) * vGlow;
+          shapeAlpha = haze * mix(0.15, 0.24, vDetail) * vGlow;
         } else {
           float softDot = smoothstep(0.5, 0.04, distanceFromCenter);
           float rayX = smoothstep(0.09, 0.0, abs(centered.x))
@@ -951,7 +961,7 @@ function makeNebulaMaterial(darkTheme: boolean) {
         if (shapeAlpha < 0.008) discard;
         float whiteMix = vDetail * (0.08 + vShape * 0.18);
         vec3 luminousColor = mix(vColor, vec3(1.0), whiteMix);
-        float detailBloom = mix(1.0, 1.28, vDetail);
+        float detailBloom = mix(1.04, 1.28, vDetail);
         gl_FragColor = vec4(
           luminousColor,
           min(1.0, shapeAlpha * vAlpha * vPulse * uThemeAlpha * detailBloom)
@@ -961,6 +971,7 @@ function makeNebulaMaterial(darkTheme: boolean) {
     transparent: true,
     depthWrite: false,
     depthTest: true,
+    toneMapped: false,
     // Brand look: density carries the light — the white-hot heart comes from
     // sheer particle count, not additive bloom.
     blending: THREE.NormalBlending,
@@ -1772,7 +1783,10 @@ export class UniverseForceSceneEngine {
         arc,
         opacityFrom: previousVisual?.opacity ?? 0,
         opacityTo: 1,
-        scaleFrom: previousVisual?.scale ?? (condenseInPlace ? 0.4 : 0.12),
+        // Birth size belongs exclusively to nodeEmergence(). Timeline motion
+        // owns position and opacity; a second scale curve caused stars to grow
+        // twice and made reverse paging visibly pulse.
+        scaleFrom: 1,
         scaleTo: 1,
         presentationScaleFrom: previousVisual?.presentationScale
           ?? presentationScale(node.presentationScale),
@@ -2006,7 +2020,7 @@ export class UniverseForceSceneEngine {
         * Math.tan(THREE.MathUtils.degToRad(exitCamera.fov) / 2);
       const side = this.timelineExitSide(node);
       const currentOpacity = node.timelineOpacity ?? 1;
-      const currentScale = node.timelineScale ?? 1;
+      const currentScale = 1;
       node.entry = undefined;
       node.entryOpacity = undefined;
       node.timelineRetiring = true;
@@ -2044,12 +2058,9 @@ export class UniverseForceSceneEngine {
             ),
         opacityFrom: currentOpacity,
         opacityTo: 0,
-        scaleFrom: currentScale,
-        scaleTo: dissolveInPlace
-          ? Math.max(0.3, currentScale * 0.6)
-          : windowDirection === "previous"
-            ? 0.12
-            : Math.max(0.08, currentScale * 0.42),
+        // Emergence owns the reversible star size in both directions.
+        scaleFrom: 1,
+        scaleTo: 1,
         presentationScaleFrom: currentNodePresentationScale(node),
         presentationScaleTo: currentNodePresentationScale(node),
         presentationCardScaleFrom: currentNodePresentationCardScale(node),
@@ -3458,6 +3469,7 @@ export class UniverseForceSceneEngine {
       halo.renderOrder = 3;
       halo.userData.eventHalo = true;
       halo.userData.baseOpacity = haloMaterial.opacity;
+      halo.userData.baseVisualScale = haloSize;
       group.add(halo);
 
       const coreMaterial = new THREE.SpriteMaterial({
@@ -3477,6 +3489,7 @@ export class UniverseForceSceneEngine {
       sprite.userData.eventStar = true;
       sprite.userData.eventCore = true;
       sprite.userData.baseOpacity = coreMaterial.opacity;
+      sprite.userData.baseVisualScale = coreSize;
       group.add(sprite);
       // The star stays visually small, while this transparent volume gives it
       // a stable pointer target across camera distance and device pixel ratio.
@@ -3857,13 +3870,86 @@ export class UniverseForceSceneEngine {
     this.applyHighlight();
   }
 
+  /**
+   * One reversible availability curve drives every concrete-node entrance:
+   * initial source dive, incremental expansion, timeline paging and the same
+   * motions in reverse. The halo is the last grains gathering; the core star
+   * resolves next; then one complete DOM card grows with no internal staging.
+   */
+  private nodeEmergence(node: ForceNode) {
+    const motionAvailability = THREE.MathUtils.clamp(
+      (node.entryOpacity ?? 1) * (node.timelineOpacity ?? 1),
+      0,
+      1,
+    );
+    const availability = node.kind === "source"
+      ? motionAvailability
+      : Math.min(
+          motionAvailability,
+          THREE.MathUtils.clamp(
+            node.temporalPresenceOpacity ?? 1,
+            0,
+            1,
+          ),
+        );
+    const cached = node.emergence;
+    if (cached && Math.abs(cached.availability - availability) < 0.001) {
+      return cached;
+    }
+    if (node.kind === "source") {
+      const sourceState = cached ?? {
+        availability: 0,
+        grain: 0,
+        star: 0,
+        card: 0,
+        cloudScale: 0.28,
+        starScale: 0.28,
+        cardScale: 1,
+        blur: 0,
+      };
+      sourceState.availability = availability;
+      sourceState.grain = availability;
+      sourceState.star = availability;
+      sourceState.card = availability;
+      sourceState.starScale = 0.28 + easeOutCubic(availability) * 0.72;
+      sourceState.cloudScale = sourceState.starScale;
+      sourceState.cardScale = 1;
+      sourceState.blur = 0;
+      node.emergence = sourceState;
+      return sourceState;
+    }
+    const motionGroupId = node.sceneNode.timelineBundleId ?? node.id;
+    const stagger = node.temporalRevealStart ??= (
+      stableUnit(`${motionGroupId}:emergence`) * 0.72
+      + stableUnit(`${node.id}:emergence-detail`) * 0.28
+    );
+    const next = cached ?? {
+      availability,
+      grain: 0,
+      star: 0,
+      card: 0,
+      cloudScale: 0.22,
+      starScale: 0.08,
+      cardScale: 0.36,
+      blur: 7,
+    };
+    universeNodeEmergence(availability, node.kind, stagger, next);
+    next.availability = availability;
+    node.emergence = next;
+    return next;
+  }
+
   private setObjectOpacity(node: ForceNode, opacity: number, emphasized: boolean) {
     const entryOpacity = (node.entryOpacity ?? 1) * (node.timelineOpacity ?? 1);
+    const emergence = this.nodeEmergence(node);
     const dataScale = currentNodePresentationScale(node);
     const dataOpacity = currentNodePresentationOpacity(node);
     const presenceScale = node.temporalPresenceScale ?? 1;
-    const presenceOpacity = node.temporalPresenceOpacity ?? 1;
-    const presenceKey = presenceScale * 4096 + presenceOpacity;
+    const atmosphereOpacity = this.nodeAtmosphereOpacity(node);
+    const presenceKey = presenceScale * 4096
+      + (node.temporalPresenceOpacity ?? 1) * 64
+      + emergence.star * 8
+      + emergence.grain;
     const entityDetail = node.kind === "entity"
       && node.sourceId === this.visualSourceId
       && !emphasized
@@ -3887,12 +3973,12 @@ export class UniverseForceSceneEngine {
     node.renderedDetailFactor = entityDetail;
     const object = node.object;
     if (!object) return;
-    const entryScale = 0.28 + easeOutCubic(entryOpacity) * 0.72;
+    const entryScale = emergence.cloudScale;
     // A transient hover is a glance, not a commitment: the network answers
     // with a whisper of scale. Only a locked focus earns the firm pop —
     // reading is the point, and jumping stars under the cursor break it.
     const emphasisScale = emphasized
-      ? this.transientHoverFocusId() ? 1.04 : 1.12
+      ? node.id === this.transientHoverFocusId() ? 1 : 1.12
       : 1;
     object.scale.setScalar(
       emphasisScale
@@ -3905,11 +3991,19 @@ export class UniverseForceSceneEngine {
     object.traverse((child) => {
       if (child.userData.hitArea) {
         if (node.kind !== "source") {
-          child.visible = entryOpacity * dataOpacity * presenceOpacity > 0.16;
+          child.visible = emergence.star >= 0.72
+            && emergence.star * dataOpacity * atmosphereOpacity > 0.16;
         }
         return;
       }
+      const haloStage = Boolean(
+        child.userData.eventHalo || child.userData.entityHalo,
+      );
+      const emergenceOpacity = node.kind === "source"
+        ? emergence.star
+        : haloStage ? emergence.grain : emergence.star;
       let detailOpacity = 1;
+      let detailScale = 1;
       if (node.kind === "entity" && entityDetail > 0) {
         const root = node.sceneNode.root;
         const isHalo = Boolean(child.userData.entityHalo);
@@ -3920,15 +4014,15 @@ export class UniverseForceSceneEngine {
           ? root ? 0.65 : 0.58
           : root ? 0.78 : 0.72;
         detailOpacity = THREE.MathUtils.lerp(1, targetOpacity, entityDetail);
-        const baseVisualScale = child.userData.baseVisualScale;
-        if (typeof baseVisualScale === "number") {
-          child.scale.setScalar(
-            baseVisualScale * THREE.MathUtils.lerp(1, targetScale, entityDetail),
-          );
-        }
-      } else if (node.kind === "entity") {
-        const baseVisualScale = child.userData.baseVisualScale;
-        if (typeof baseVisualScale === "number") child.scale.setScalar(baseVisualScale);
+        detailScale = THREE.MathUtils.lerp(1, targetScale, entityDetail);
+      }
+      const baseVisualScale = child.userData.baseVisualScale;
+      if (typeof baseVisualScale === "number") {
+        const coreStageScale = node.kind !== "source"
+          && !haloStage
+          ? emergence.starScale / Math.max(0.001, emergence.cloudScale)
+          : 1;
+        child.scale.setScalar(baseVisualScale * detailScale * coreStageScale);
       }
       const candidate = child as THREE.Object3D & {
         material?: THREE.Material | THREE.Material[];
@@ -3947,17 +4041,27 @@ export class UniverseForceSceneEngine {
             ? node.sceneNode.root ? 1 : 0.9
             : node.sceneNode.root ? 0.9 : 0.7);
         const detailFactor = this.sourceMarkerDetailFactor(node, child);
-        material.opacity = entryOpacity <= 0.001
+        material.opacity = emergenceOpacity <= 0.001
           ? 0
           : Math.max(
               child.userData.sourceAura
                 ? 0
-                : 0.035 * entryOpacity * dataOpacity * presenceOpacity,
-              base * opacity * entryOpacity * detailFactor
-                * detailOpacity * dataOpacity * presenceOpacity,
+                : 0.035 * emergenceOpacity * dataOpacity
+                  * atmosphereOpacity,
+              base * opacity * emergenceOpacity * detailFactor
+                * detailOpacity * dataOpacity * atmosphereOpacity,
             );
       });
     });
+  }
+
+  private nodeAtmosphereOpacity(node: ForceNode) {
+    if (node.kind === "source") return 1;
+    return THREE.MathUtils.lerp(
+      0.62,
+      1,
+      THREE.MathUtils.clamp(node.temporalPresenceOpacity ?? 1, 0, 1),
+    );
   }
 
   private nodeProjectionScale(node: ForceNode) {
@@ -3998,7 +4102,10 @@ export class UniverseForceSceneEngine {
   private nodeMorphScale(node: ForceNode) {
     if (node.kind === "source") return 1;
     const progress = node.sourceId === this.visualSourceId ? this.visualDetailMix : 0;
-    return (0.82 + easeOutCubic(progress) * 0.18) * this.nodeProjectionScale(node);
+    const projectionScale = this.flightConfig?.sourceId === node.sourceId
+      ? 1
+      : this.nodeProjectionScale(node);
+    return (0.82 + easeOutCubic(progress) * 0.18) * projectionScale;
   }
 
   private sourceMarkerDetailFactor(node: ForceNode, child: THREE.Object3D) {
@@ -4041,11 +4148,11 @@ export class UniverseForceSceneEngine {
     this.lastNodeMorphAt = now;
     this.nodes.forEach((node) => {
       if (!node.object) return;
-      const entryOpacity = (node.entryOpacity ?? 1) * (node.timelineOpacity ?? 1);
-      const entryScale = 0.28 + easeOutCubic(entryOpacity) * 0.72;
+      const emergence = this.nodeEmergence(node);
+      const entryScale = emergence.cloudScale;
       const dataScale = currentNodePresentationScale(node);
       const emphasisScale = node.visuallyEmphasized
-        ? this.transientHoverFocusId() ? 1.04 : 1.12
+        ? node.id === this.transientHoverFocusId() ? 1 : 1.12
         : 1;
       node.object.scale.setScalar(
         emphasisScale
@@ -4120,7 +4227,7 @@ export class UniverseForceSceneEngine {
     const configuredBudget = mobile
       ? this.policy.proxy_budget_mobile
       : this.policy.proxy_budget_desktop;
-    const budgetCap = mobile ? 4_000 : 12_000;
+    const budgetCap = mobile ? 4_000 : 16_000;
     const budget = Math.min(
       budgetCap,
       Math.max(0, Number.isFinite(configuredBudget) ? configuredBudget : 0),
@@ -4128,10 +4235,11 @@ export class UniverseForceSceneEngine {
     this.host.dataset.universeNebulaConfiguredBudget = String(configuredBudget);
     this.host.dataset.universeNebulaBudgetCap = String(budgetCap);
     this.host.dataset.universeNebulaBudget = String(budget);
-    // The browsed source owns the sky while inside it: it takes a heavier
-    // share of the particle budget, rebuilt once per session entry/exit.
-    const browsedSourceId = this.flightConfig?.sourceId ?? null;
-    const signature = `${mobile ? "mobile" : "desktop"}:${budget}:${browsedSourceId ?? "none"}:` + sources
+    // One stable particle field owns the entire overview → source → corridor
+    // journey. Selection must never reassign six times as many grains to one
+    // source: that made the entrance look like a particle explosion instead
+    // of the existing galaxy naturally opening into data.
+    const signature = `${mobile ? "mobile" : "desktop"}:${budget}:` + sources
       .map((node) => `${node.id}:${Math.round(node.sceneNode.radius)}:${node.sceneNode.eventCount}:${node.sceneNode.entityCount}`)
       .join("|");
     if (signature === this.sourceSignature && this.nebulaPoints) {
@@ -4146,8 +4254,7 @@ export class UniverseForceSceneEngine {
       sources.map((source, index) => [source.sourceId, index]),
     );
     const weights = sources.map((source) =>
-      Math.max(1, Math.log2(source.sceneNode.eventCount + source.sceneNode.entityCount + 2))
-        * (source.sourceId === browsedSourceId ? 6 : 1),
+      Math.max(1, Math.log2(source.sceneNode.eventCount + source.sceneNode.entityCount + 2)),
     );
     const totalWeight = weights.reduce((sum, value) => sum + value, 0);
     const baseCount = Math.max(
@@ -4252,13 +4359,13 @@ export class UniverseForceSceneEngine {
           emitter: emitterParticle,
           radial: Math.min(1, radial),
           alpha: haloParticle
-            ? 0.035 + stableUnit(`${key}:alpha`) * 0.1
+            ? 0.05 + stableUnit(`${key}:alpha`) * 0.11
             : diffuseParticle
-            ? 0.08 + stableUnit(`${key}:alpha`) * 0.18
-            : (coreParticle ? 0.5 : 0.26)
-              + stableUnit(`${key}:alpha`) * (coreParticle ? 0.5 : 0.56),
+            ? 0.12 + stableUnit(`${key}:alpha`) * 0.2
+            : (coreParticle ? 0.58 : 0.32)
+              + stableUnit(`${key}:alpha`) * (coreParticle ? 0.42 : 0.54),
           glow: glowSeed < glowChance
-            ? 0.46 + stableUnit(`${key}:glow-strength`) * 0.34
+            ? 0.5 + stableUnit(`${key}:glow-strength`) * 0.32
             : 0,
           phase,
           twinkle,
@@ -4486,10 +4593,10 @@ export class UniverseForceSceneEngine {
     const persistentAnchor = this.nodes.get(
       this.lockedId ?? this.selectedId ?? this.keyboardFocusedId ?? "",
     );
-    const hovered = this.hoveredId ? this.nodes.get(this.hoveredId) : undefined;
-    // Hovering a concrete node must not make unrelated stars/nebulae vanish.
-    // Source hover remains an overview affordance; selection remains deliberate.
-    const anchor = persistentAnchor ?? (hovered?.kind === "source" ? hovered : undefined);
+    // Source hover and source entry share the shader's continuous focus morph.
+    // Rewriting every particle alpha on pointer exit made the selected galaxy
+    // dim once while every background galaxy flashed before fading again.
+    const anchor = persistentAnchor;
     const contextKey = anchor
       ? `anchor:${anchor.kind}:${anchor.sourceId}`
       : this.sourceHits.length
@@ -4508,7 +4615,7 @@ export class UniverseForceSceneEngine {
       if (anchor?.kind === "source") {
         multiplier = anchor.sourceId === particle.sourceId ? 1.28 : 0.14;
       } else if (anchor) {
-        multiplier = anchor.sourceId === particle.sourceId ? 0.48 : 0.1;
+        multiplier = anchor.sourceId === particle.sourceId ? 0.76 : 0.08;
       }
       else if (hitRank.size) {
         const rank = hitRank.get(particle.sourceId);
@@ -4672,15 +4779,16 @@ export class UniverseForceSceneEngine {
     const source = this.nodes.get(link.sourceId);
     const target = this.nodes.get(link.targetId);
     const dataOpacity = presentationOpacity(link.sceneLink.presentationOpacity);
-    // A link is only as present as its dimmer endpoint on the flight axis.
+    // A relation is only as mature as its dimmer endpoint. Consuming the same
+    // star phase prevents a line from drawing through empty space before its
+    // two condensed stars exist.
     const presenceOpacity = Math.min(
-      source?.temporalPresenceOpacity ?? 1,
-      target?.temporalPresenceOpacity ?? 1,
+      (source ? this.nodeEmergence(source).star : 1)
+        * (source ? this.nodeAtmosphereOpacity(source) : 1),
+      (target ? this.nodeEmergence(target).star : 1)
+        * (target ? this.nodeAtmosphereOpacity(target) : 1),
     );
-    const timelineOpacity = Math.min(
-      (source?.entryOpacity ?? 1) * (source?.timelineOpacity ?? 1),
-      (target?.entryOpacity ?? 1) * (target?.timelineOpacity ?? 1),
-    ) * dataOpacity * presenceOpacity;
+    const timelineOpacity = dataOpacity * presenceOpacity;
     if (!link.visible) {
       return { color: this.darkTheme ? "#5b747a" : "#70898e", opacity: 0 };
     }
@@ -5302,18 +5410,15 @@ export class UniverseForceSceneEngine {
     const placed: Array<{ left: number; top: number; right: number; bottom: number }> = [];
     let visibleEventLabels = 0;
     let visibleEntityLabels = 0;
-    // Flight speed collapses cards through their own morph stages: full card →
-    // eyebrow-only strip → bare star, and back once the camera settles.
-    const cardMorph = universeCardMorph(this.visualDetailMix * this.flightCardPresence);
+    // Flight speed scales the complete card as one object. Internal content
+    // never stages independently, so the board cannot jump between layouts.
+    const cardMorphProgress = this.visualDetailMix * this.flightCardPresence;
+    const globalCardMorph = universeCardMorph(cardMorphProgress);
     const sourceReveal = 1 - THREE.MathUtils.smoothstep(this.visualDetailMix, 0, 0.72);
     const labelFocusId = this.labelFocusId();
     const transientHover = labelFocusId !== null
       && labelFocusId === this.transientHoverFocusId();
     const overviewCardOverride = Boolean(labelFocusId && this.visualDetailMix < 0.5);
-    const nodeCardReveal = overviewCardOverride ? 1 : cardMorph.reveal;
-    const nodeCardScale = overviewCardOverride ? 1 : cardMorph.scale;
-    const nodeCardEyebrow = overviewCardOverride ? 1 : cardMorph.eyebrow;
-    const nodeCardSummary = overviewCardOverride ? 1 : cardMorph.summary;
     const labelFocusNeighbors = labelFocusId
       ? this.adjacency.get(labelFocusId) ?? new Set<string>()
       : null;
@@ -5328,9 +5433,11 @@ export class UniverseForceSceneEngine {
     // hover/click interaction.
     const eventStarRadius = mobile ? 8 : 10;
     const eventStarRects = [...this.nodes.values()].flatMap((node) => {
+      const emergence = this.nodeEmergence(node);
       if (
         node.kind !== "event"
         || node.sourceId !== labelSourceId
+        || emergence.star <= 0.16
         || (node.entryOpacity ?? 1)
           * (node.timelineOpacity ?? 1)
           * currentNodePresentationOpacity(node) <= 0.16
@@ -5339,7 +5446,9 @@ export class UniverseForceSceneEngine {
         || !Number.isFinite(node.z)
       ) return [];
       const scaledEventStarRadius = eventStarRadius
-        * currentNodePresentationScale(node);
+        * currentNodePresentationScale(node)
+        * emergence.starScale
+        * (node.temporalPresenceScale ?? 1);
       const projected = new THREE.Vector3(node.x, node.y, node.z).project(camera);
       const screen = this.graph.graph2ScreenCoords(node.x, node.y, node.z);
       if (
@@ -5367,9 +5476,20 @@ export class UniverseForceSceneEngine {
         label.element.style.transform = "translate3d(-9999px, -9999px, 0)";
         return;
       }
-      const belongsToLabelSource = node.sourceId === labelSourceId;
+      const emergence = this.nodeEmergence(node);
       const requiredFocusCard = label.kind === "node"
         && Boolean(focusCardIds?.has(node.id));
+      const forceCardDetail = overviewCardOverride || requiredFocusCard;
+      // Focus may bypass global LOD, never a node's own birth/death. Keeping
+      // emergence.card in every branch prevents a selected far package from
+      // becoming a fully formed ghost card before its star arrives.
+      const nodeCardReveal = emergence.card
+        * (forceCardDetail ? 1 : globalCardMorph.reveal);
+      const nodeCardScale = forceCardDetail ? 1 : globalCardMorph.scale;
+      const depthScale = node.kind === "source" || requiredFocusCard
+        ? 1
+        : 0.5 + (node.temporalPresenceScale ?? 1) * 0.5;
+      const belongsToLabelSource = node.sourceId === labelSourceId;
       const kindPlacementFull = label.kind === "node" && !requiredFocusCard && (
         visibleEventLabels + visibleEntityLabels >= this.labelPlacementBudget.total
         || (node.kind === "event"
@@ -5398,23 +5518,11 @@ export class UniverseForceSceneEngine {
         : belongsToLabelSource && belongsToFocusNetwork
           ? nodeCardReveal
           : belongsToLabelSource && transientHover ? nodeCardReveal * 0.35 : 0;
-      // Ember-level presence keeps the star but never a ghost card: remap so
-      // cards are gone by the time a package has clearly been passed.
-      const presenceForCards = THREE.MathUtils.clamp(
-        ((node.temporalPresenceOpacity ?? 1) - 0.18) / 0.82,
-        0,
-        1,
-      );
       const dataOpacity = currentNodePresentationOpacity(node)
-        * (label.kind === "node" ? presenceForCards : 1);
-      const entryReveal = label.kind === "node"
-        ? THREE.MathUtils.clamp((
-            (node.entryOpacity ?? 1) * (node.timelineOpacity ?? 1) - 0.16
-          ) / 0.84, 0, 1)
-        : 1;
-      const calculatedOpacity = layoutOpacity * entryReveal * dataOpacity;
+        * (label.kind === "node" ? this.nodeAtmosphereOpacity(node) : 1);
+      const calculatedOpacity = layoutOpacity * dataOpacity;
       let visibleOpacity = requiredFocusCard
-        ? Math.max(0.72, calculatedOpacity)
+        ? Math.max(0.72 * emergence.card, calculatedOpacity)
         : calculatedOpacity;
       if (visibleOpacity <= 0.01) {
         label.element.hidden = true;
@@ -5438,9 +5546,24 @@ export class UniverseForceSceneEngine {
         ? THREE.MathUtils.smoothstep(edgeDistance, 64, 184)
         : 1;
       visibleOpacity *= edgePresence;
+      const blurAllowed = !mobile && !this.reducedMotion;
+      const edgeBlur = blurAllowed
+        ? (1 - edgePresence) * CARD_DEPTH_BLUR_CSS
+        : 0;
+      const depthBlur = label.kind === "node"
+        && !requiredFocusCard
+        && blurAllowed
+        ? Math.min(
+            CARD_DEPTH_BLUR_CSS,
+            emergence.blur * 0.32 + (1 - depthScale) * 2.2,
+          )
+        : 0;
+      const combinedBlur = Math.round(
+        Math.max(edgeBlur, depthBlur) * 2,
+      ) / 2;
       label.element.style.setProperty(
         "--universe-card-edge-blur",
-        `${((1 - edgePresence) * 3.2).toFixed(2)}px`,
+        `${combinedBlur.toFixed(1)}px`,
       );
       if (visibleOpacity <= 0.01) {
         label.element.hidden = true;
@@ -5518,12 +5641,22 @@ export class UniverseForceSceneEngine {
         : mobile
           ? expanded ? 82 : 70
           : expanded ? 100 : 86;
+      const dataCardScale = label.kind === "source"
+        ? 1
+        : currentNodePresentationCardScale(node);
       const labelScale = label.kind === "source"
         ? 1
-        : nodeCardScale * currentNodePresentationCardScale(node);
-      const labelWidth = baseLabelWidth * labelScale;
-      const labelHeight = baseLabelHeight * labelScale;
-      const labelGap = 3 + labelScale * 7;
+        : nodeCardScale
+          * dataCardScale
+          * emergence.cardScale
+          * depthScale;
+      // Reserve the card's final footprint while only its transform grows.
+      // Collision choices therefore remain stable through particle → star →
+      // card resolution instead of jumping sides as the rectangle expands.
+      const layoutScale = label.kind === "source" ? 1 : dataCardScale;
+      const labelWidth = baseLabelWidth * layoutScale;
+      const labelHeight = baseLabelHeight * layoutScale;
+      const labelGap = 3 + layoutScale * 7;
       type LabelSide = "right" | "left" | "top" | "bottom" | "center";
       type LabelRect = {
         left: number;
@@ -5732,18 +5865,6 @@ export class UniverseForceSceneEngine {
           translateX -= (baseLabelWidth - labelWidth) / 2;
           translateY -= baseLabelHeight - labelHeight;
         }
-        label.element.style.setProperty(
-          "--universe-card-eyebrow-opacity",
-          nodeCardEyebrow.toFixed(3),
-        );
-        label.element.style.setProperty(
-          "--universe-card-summary-opacity",
-          nodeCardSummary.toFixed(3),
-        );
-        label.element.style.setProperty(
-          "--universe-card-summary-y",
-          `${((1 - nodeCardSummary) * 3).toFixed(2)}px`,
-        );
         label.element.style.transform = `translate3d(${translateX}px, ${translateY}px, 0) scale(${labelScale})`;
       }
       if (visibleOpacity >= 0.22) placed.push(rect);
@@ -6300,24 +6421,13 @@ export class UniverseForceSceneEngine {
           nodeDepth - this.appliedFlightDepth,
           config.unitsPerEvent,
         );
-        // The graph is born from the same dust field in a readable order:
-        // event stars resolve first, their entity satellites a beat later.
-        // Stable per-bundle overlap keeps the handoff organic without making
-        // the whole first window pop in on one frame. Reversing the flight
-        // follows the same curve back into the core.
-        const revealStart = node.temporalRevealStart ??= 0.08
-          + stableUnit(
-            `${node.sceneNode.timelineBundleId ?? node.id}:condensation`,
-          ) * 0.12
-          + (node.kind === "entity" ? 0.13 : 0);
-        const nodeReveal = THREE.MathUtils.smoothstep(
-          dive,
-          revealStart,
-          revealStart + (node.kind === "event" ? 0.46 : 0.5),
-        );
-        const condensation = THREE.MathUtils.lerp(0.06, 1, nodeReveal);
-        scale = presence.scale * condensation;
-        opacity = presence.opacity * nodeReveal;
+        // This method supplies only camera depth and the source's global dive.
+        // nodeEmergence() then turns that availability into the same reversible
+        // grain → star → card phases used by ordinary and timeline entrances.
+        // Keeping depth separate prevents two unrelated birth-scale curves
+        // from shrinking the same node twice.
+        scale = presence.scale;
+        opacity = presence.opacity * dive;
       }
       if (
         Math.abs((node.temporalPresenceScale ?? 1) - scale) < 0.004
@@ -6387,7 +6497,7 @@ export class UniverseForceSceneEngine {
       this.flightSpeed,
       FLIGHT_CARD_CALM_SPEED,
       FLIGHT_CARD_HIDE_SPEED,
-    );
+    ) * (1 - FLIGHT_CARD_TRAVEL_MIN);
     const cardResponse = 1 - Math.exp(-elapsedMs / (
       cardTarget < this.flightCardPresence
         ? FLIGHT_CARD_COLLAPSE_MS
@@ -6677,6 +6787,9 @@ export class UniverseForceSceneEngine {
           * (node.timelineOpacity ?? 1)
           * currentNodePresentationOpacity(node) <= 0.12
       ) return false;
+      if (node.kind !== "source" && this.nodeEmergence(node).star < 0.72) {
+        return false;
+      }
       if (!inViewport(node)) return false;
       if (!detailSourceId) return true;
       return node.kind !== "source"

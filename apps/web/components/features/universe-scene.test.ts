@@ -254,6 +254,8 @@ describe("universe scene production invariants", () => {
     // lookat and fly-out choreography remains only for non-flight transitions.
     expect(dataCommit).toContain("const condenseInPlace = this.flightConfig !== null");
     expect(dataCommit).toContain("const dissolveInPlace = this.flightConfig !== null");
+    expect(dataCommit.match(/scaleFrom: 1/g)).toHaveLength(2);
+    expect(dataCommit.match(/scaleTo: 1/g)?.length).toBeGreaterThanOrEqual(2);
     expect(dataCommit).toContain("? destination.clone()");
     expect(dataCommit).toContain("collapseTarget");
     expect(dataCommit).toContain("if (topologyChanged) {");
@@ -459,7 +461,7 @@ describe("universe scene production invariants", () => {
     expect(layout).toContain("const requiredFocusCard =");
     expect(layout).toContain("Boolean(focusCardIds?.has(node.id))");
     expect(layout).toContain("new Set([labelFocusId, ...(labelFocusNeighbors ?? [])])");
-    expect(layout).toContain("Math.max(0.72, calculatedOpacity)");
+    expect(layout).toContain("Math.max(0.72 * emergence.card, calculatedOpacity)");
     expect(layout).toContain("const timelineEventCard = label.kind === \"node\"");
     expect(layout).toContain("const distributedCard = requiredFocusCard || timelineEventCard");
     expect(layout).toContain("const clampedCandidates = requiredFocusCard");
@@ -655,13 +657,14 @@ describe("universe scene production invariants", () => {
     // mesh scale and opacity, the DOM card, and both link endpoints. Missing
     // one layer leaves stars dim while their cards glow, or vice versa.
     expect(objectVisual).toContain("const presenceScale = node.temporalPresenceScale ?? 1");
-    expect(objectVisual).toContain("* dataOpacity * presenceOpacity");
+    expect(objectVisual).toContain("const atmosphereOpacity = this.nodeAtmosphereOpacity(node)");
+    expect(objectVisual).toContain("* dataOpacity * atmosphereOpacity");
     expect(objectVisual).toContain("* presenceScale");
     expect(objectVisual).toContain("node.renderedTemporalPresence === presenceKey");
     expect(morphScale).toContain("* (node.temporalPresenceScale ?? 1)");
 
     expect(labels).toContain("* dataOpacity");
-    expect(labels).toContain("node.temporalPresenceOpacity ?? 1");
+    expect(labels).toContain("this.nodeAtmosphereOpacity(node)");
     expect(labels).toContain(
       "currentNodePresentationCardScale(node)",
     );
@@ -669,8 +672,9 @@ describe("universe scene production invariants", () => {
     expect(linkStyle).toContain(
       "presentationOpacity(link.sceneLink.presentationOpacity)",
     );
-    expect(linkStyle).toContain(") * dataOpacity * presenceOpacity");
-    expect(linkStyle).toContain("source?.temporalPresenceOpacity ?? 1");
+    expect(linkStyle).toContain("const timelineOpacity = dataOpacity * presenceOpacity");
+    expect(linkStyle).toContain("this.nodeEmergence(source).star");
+    expect(linkStyle).toContain("this.nodeAtmosphereOpacity(source)");
   });
 
   it("renders every entity as a layered, minimum-size interactive glyph", () => {
@@ -701,13 +705,15 @@ describe("universe scene production invariants", () => {
     expect(objectVisual).toContain('const entityDetail = node.kind === "entity"');
     expect(objectVisual).toContain("THREE.MathUtils.smoothstep(this.visualDetailMix, 0.42, 0.82)");
     expect(objectVisual).toContain("if (child.userData.hitArea) {");
-    expect(objectVisual).toContain("child.visible = entryOpacity * dataOpacity * presenceOpacity > 0.16");
+    expect(objectVisual).toContain("child.visible = emergence.star >= 0.72");
+    expect(objectVisual).toContain("emergence.star * dataOpacity * atmosphereOpacity > 0.16");
     expect(objectVisual).toContain("return;");
     expect(objectVisual).toContain("const targetOpacity = isHalo");
     expect(objectVisual).toContain("const targetScale = isHalo");
     expect(objectVisual).toContain("detailOpacity = THREE.MathUtils.lerp(1, targetOpacity, entityDetail)");
-    expect(objectVisual).toContain("baseVisualScale * THREE.MathUtils.lerp(1, targetScale, entityDetail)");
-    expect(objectVisual).toContain("* detailOpacity * dataOpacity * presenceOpacity");
+    expect(objectVisual).toContain("detailScale = THREE.MathUtils.lerp(1, targetScale, entityDetail)");
+    expect(objectVisual).toContain("baseVisualScale * detailScale * coreStageScale");
+    expect(objectVisual).toContain("* detailOpacity * dataOpacity * atmosphereOpacity");
     expect(objectVisual.indexOf("if (child.userData.hitArea)"))
       .toBeLessThan(objectVisual.indexOf("const targetScale = isHalo"));
   });
@@ -809,7 +815,7 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("THREE.MathUtils.lerp(1, 0.3, dive)");
     expect(nebulaMaterial).toContain("float focusedRadius = mix(0.18, 0.08, aEmitter)");
     expect(nebulaMaterial).toContain("rotatedHeroOffset * mix(1.0, focusedRadius, focusMix)");
-    expect(source).toContain("const NEBULA_DETAIL_ALPHA = 1.5");
+    expect(source).toContain("const NEBULA_DETAIL_ALPHA = 1.55");
     expect(source).toContain("const NEBULA_DETAIL_DUST_POINT_SIZE_CSS = 20");
     expect(source).toContain("uDetail: { value: 0 }");
     expect(source).toContain("uDetailAlpha: { value: NEBULA_DETAIL_ALPHA }");
@@ -821,7 +827,8 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("material.uniforms.uDetail.value = this.visualDetailMix");
     expect(source).toContain("material.uniforms.uDetailSource.value");
     expect(nebulaMaterial).toContain("float sourceMatch =");
-    expect(nebulaMaterial).toContain("float detailBloom = mix(1.0, 1.28, vDetail)");
+    expect(nebulaMaterial).toContain("float detailBloom = mix(1.04, 1.28, vDetail)");
+    expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 1.08, focusMix)");
     expect(nebulaMaterial).toContain("float haze = radial * mix(0.55, 0.95, radial)");
     expect(nebulaMaterial).toContain("if (vGlow > 0.001)");
     expect(nebulaMaterial).toContain("gl_PointSize = min(");
@@ -902,6 +909,10 @@ describe("universe scene production invariants", () => {
       "private rebuildNebula()",
       "private updateNebulaPositions()",
     );
+    const nebulaAlpha = sourceBetween(
+      "private updateNebulaAlphas(force = false)",
+      "private nebulaMotionStrength()",
+    );
 
     // The corridor is the second form of the same particles: the vertex shader
     // blends galaxy → corridor with the existing detail mix, so diving into a
@@ -917,7 +928,7 @@ describe("universe scene production invariants", () => {
     // Dust yields inside the loaded window band, where real packages condensed.
     expect(nebulaMaterial).toContain("uniform float uCorridorNearZ");
     expect(nebulaMaterial).toContain("float loadedBand = smoothstep(");
-    expect(source).toContain("const NEBULA_CORRIDOR_LOADED_ALPHA = 0.4");
+    expect(source).toContain("const NEBULA_CORRIDOR_LOADED_ALPHA = 0.52");
     expect(nebulaMaterial).toContain(
       "${NEBULA_CORRIDOR_LOADED_ALPHA.toFixed(2)}",
     );
@@ -955,7 +966,7 @@ describe("universe scene production invariants", () => {
     );
     expect(nebulaMaterial).toContain("float originalGlowParticle = step(0.001, aGlow)");
     expect(nebulaMaterial).toContain(
-      "vAlpha *= mix(1.0, 0.04, streamMix * originalGlowParticle)",
+      "vAlpha *= mix(1.0, 0.14, streamMix * originalGlowParticle)",
     );
     expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, axisFade, streamMix)");
     expect(nebulaMaterial).toContain("* detailScale * glowScale * corridorBoost");
@@ -967,8 +978,8 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("const NEBULA_WALL_LATERAL_MAX = 3.8");
     expect(source).toContain("const NEBULA_CORRIDOR_DUST_POINT_SIZE_CSS = 5.5");
     expect(source).toContain("const NEBULA_CORRIDOR_GLOW_POINT_SIZE_CSS = 9");
-    expect(source).toContain("const NEBULA_CORRIDOR_DUST_ALPHA = 0.5");
-    expect(source).toContain("const NEBULA_CORRIDOR_WALL_ALPHA = 0.16");
+    expect(source).toContain("const NEBULA_CORRIDOR_DUST_ALPHA = 0.62");
+    expect(source).toContain("const NEBULA_CORRIDOR_WALL_ALPHA = 0.22");
     expect(nebulaBuild).toContain("NEBULA_WALL_LATERAL_MIN");
     expect(nebulaMaterial).toContain("#define aCorridorWall aMotion.w");
     expect(nebulaBuild).toContain('geometry.setAttribute("aMotion"');
@@ -985,11 +996,16 @@ describe("universe scene production invariants", () => {
     expect(nebulaMaterial).toContain("float capSelect = glowParticle;");
 
     // While inside one source the rest of the sky recedes deep enough that a
-    // white-hot core cannot smudge the corridor, and the browsed source claims
-    // a heavier share of the fixed particle budget.
+    // white-hot core cannot smudge the corridor. Source selection must not
+    // rebuild or reassign the field: the same grains become the corridor.
     expect(nebulaMaterial).toContain("vAlpha *= mix(1.0, 0.03, uDetail * (1.0 - sourceMatch))");
-    expect(nebulaBuild).toContain("source.sourceId === browsedSourceId ? 6 : 1");
-    expect(nebulaBuild).toContain("const browsedSourceId = this.flightConfig?.sourceId ?? null");
+    expect(nebulaBuild).not.toContain("browsedSourceId");
+    expect(nebulaBuild).not.toContain("source.sourceId === browsedSourceId ? 6 : 1");
+    expect(nebulaBuild).toContain(
+      'const signature = `${mobile ? "mobile" : "desktop"}:${budget}:`',
+    );
+    expect(nebulaAlpha).not.toContain("this.hoveredId");
+    expect(nebulaAlpha).toContain("const anchor = persistentAnchor");
   });
 
   it("clamps browsing rotation to a forward gaze cone that cannot flip the nebula", () => {
@@ -1057,19 +1073,27 @@ describe("universe scene production invariants", () => {
     expect(flight).toContain("const instantSpeed = Math.abs(delta)");
     expect(flight).toContain("FLIGHT_CARD_COLLAPSE_MS");
     expect(flight).toContain("return moving || cardsSettling");
-    expect(labels).toContain(
-      "universeCardMorph(this.visualDetailMix * this.flightCardPresence)",
-    );
-    // Passed packages keep an ember star but never a ghost card.
-    expect(labels).toContain("((node.temporalPresenceOpacity ?? 1) - 0.18) / 0.82");
+    expect(labels).toContain("const cardMorphProgress = this.visualDetailMix * this.flightCardPresence");
+    expect(labels).toContain("const globalCardMorph = universeCardMorph(cardMorphProgress)");
+    expect(labels).toContain("* (forceCardDetail ? 1 : globalCardMorph.reveal)");
+    expect(labels).not.toContain("--universe-card-eyebrow-opacity");
+    expect(labels).not.toContain("--universe-card-summary-opacity");
+    expect(flight).toContain("(1 - FLIGHT_CARD_TRAVEL_MIN)");
+    // Passed and far packages reverse through card → star → grain while near
+    // cards retain true depth scale and restrained depth-of-field.
+    expect(source).toContain("private nodeAtmosphereOpacity(node: ForceNode)");
+    expect(labels).toContain("* emergence.cardScale");
+    expect(labels).toContain("0.72 * emergence.card");
+    expect(labels).toContain("emergence.blur * 0.32");
+    expect(labels).toContain("const blurAllowed = !mobile && !this.reducedMotion");
 
     // Reading is the point: a transient hover dims unrelated cards in place
-    // (no reflow, no board jump) — only a locked focus clears the stage — and
-    // the network answers a glance with a whisper of scale, not a pop.
+    // (no reflow, no board jump) — only a locked focus clears the stage. Hover
+    // no longer changes geometry scale, eliminating pointer-edge size jumps.
     expect(labels).toContain(
       "belongsToLabelSource && transientHover ? nodeCardReveal * 0.35 : 0",
     );
-    expect(source).toContain("? this.transientHoverFocusId() ? 1.04 : 1.12");
+    expect(source).toContain("? node.id === this.transientHoverFocusId() ? 1 : 1.12");
   });
 
   it("debounces pointer label rebuilds and restores defaults", () => {
@@ -1115,6 +1139,7 @@ describe("universe scene production invariants", () => {
     expect(keyboard).toContain("if (!detailSourceId) return true");
     expect(keyboard).toContain('return node.kind !== "source"');
     expect(keyboard).toContain("node.sourceId === detailSourceId");
+    expect(keyboard).toContain("this.nodeEmergence(node).star < 0.72");
     expect(keyboard).not.toContain("showEventCards");
     expect(keyboard).not.toContain("showEntityCards");
     expect(keyboard).toContain("nextUniverseKeyboardNodeId(");
@@ -1129,10 +1154,38 @@ describe("universe scene production invariants", () => {
       "private updateNebulaPositions()",
     );
 
-    expect(nebula).toContain("const budgetCap = mobile ? 4_000 : 12_000");
+    expect(nebula).toContain("const budgetCap = mobile ? 4_000 : 16_000");
     expect(nebula).toContain("const budget = Math.min(");
     expect(nebula).toContain("this.host.dataset.universeNebulaBudgetCap");
     expect(nebula).toContain("this.host.dataset.universeNebulaBudget");
+    expect(source.match(/new THREE\.Points/g)).toHaveLength(1);
+    expect(source).toContain("toneMapped: false");
+  });
+
+  it("packs particle scalars below the WebGL vertex-attribute floor", () => {
+    const nebulaMaterial = sourceBetween(
+      "function makeNebulaMaterial(darkTheme: boolean)",
+      "class UniverseForceSceneEngine",
+    );
+    const nebula = sourceBetween(
+      "private rebuildNebula()",
+      "private updateNebulaPositions()",
+    );
+    const customAttributes = nebulaMaterial.match(
+      /attribute\s+\w+\s+\w+\s*;/g,
+    ) ?? [];
+
+    // WebGL guarantees only 16 vertex slots. The points geometry uses the
+    // built-in position plus these eight custom attributes, leaving headroom
+    // for conservative Chrome/ANGLE implementations.
+    expect(customAttributes).toHaveLength(8);
+    expect(nebulaMaterial).toContain("attribute vec4 aVisual");
+    expect(nebulaMaterial).toContain("attribute vec4 aMotion");
+    expect(nebulaMaterial).not.toContain("attribute float aTwinkle");
+    expect(nebulaMaterial).not.toContain("attribute float aGlow");
+    expect(nebula).toContain('geometry.setAttribute("aVisual"');
+    expect(nebula).toContain('geometry.setAttribute("aMotion"');
+    expect(nebula).not.toContain('geometry.setAttribute("aTwinkle"');
   });
 
   it("mixes brand-gold event grains with each source's accent colour", () => {
@@ -1220,10 +1273,10 @@ describe("universe scene production invariants", () => {
     expect(presence).toContain(
       "config.vestibuleDepth * SOURCE_ENTRY_CONDENSATION_FRACTION",
     );
-    expect(presence).toContain("const nodeReveal = THREE.MathUtils.smoothstep(");
-    expect(presence).toContain("const condensation = THREE.MathUtils.lerp(0.06, 1, nodeReveal)");
-    expect(presence).toContain("scale = presence.scale * condensation");
-    expect(presence).toContain("opacity = presence.opacity * nodeReveal");
+    expect(presence).toContain("scale = presence.scale");
+    expect(presence).toContain("opacity = presence.opacity * dive");
+    expect(source).toContain("private nodeEmergence(node: ForceNode)");
+    expect(source).toContain("universeNodeEmergence(availability, node.kind, stagger, next)");
     expect(source).toContain(
       "material.uniforms.uCorridorVestibule.value = config",
     );
