@@ -1,3 +1,5 @@
 .next
+.next-dev
+out
 node_modules
 next-env.d.ts
