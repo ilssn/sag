@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from contextlib import AsyncExitStack, asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request
@@ -19,6 +18,7 @@ from sag_api.core.db import SessionLocal, dispose_db, init_db
 from sag_api.core.errors import ApiError
 from sag_api.core.litellm_policy import install_litellm_policy, uninstall_litellm_policy
 from sag_api.core.logging import RequestContextMiddleware, configure_logging, get_logger
+from sag_api.core.paths import ensure_data_layout, log_runtime_summary
 from sag_api.generation import LLMClient
 from sag_api.jobs import InProcessAsyncQueue
 from sag_api.sag import EngineManager
@@ -41,8 +41,8 @@ async def lifespan(app: FastAPI):
         raise RuntimeError(
             "生产环境禁止使用默认 SAG_SECRET_KEY。请设置强随机值（≥32 字节），例如：openssl rand -hex 32"
         )
-    os.makedirs(settings.data_dir, exist_ok=True)
-    os.makedirs(settings.upload_dir, exist_ok=True)
+    paths = ensure_data_layout(settings)
+    log_runtime_summary(settings, paths)
 
     await init_db()
 

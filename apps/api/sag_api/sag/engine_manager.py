@@ -43,6 +43,7 @@ from sag_api.sag.dto import (
     UniverseTimelineBundleInfo,
     UniverseTimelineInfo,
 )
+from sag_api.sag.env_hygiene import disable_zleap_dotenv
 from sag_api.sag.errors import map_sag_errors
 from sag_api.sag.incremental_processor import IncrementalDocumentProcessor
 
@@ -204,6 +205,8 @@ class _EngineLifecycleGate:
 
 class EngineManager:
     def __init__(self, settings: Settings):
+        # 引擎实例化前禁用 zleap 的 .env 向上装载（ADR-0012 环境卫生）。
+        disable_zleap_dotenv()
         self._settings = settings
         self._slots: dict[str, _Slot] = {}
         self._create_lock = asyncio.Lock()

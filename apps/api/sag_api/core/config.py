@@ -13,11 +13,13 @@
 from __future__ import annotations
 
 import json
+import os
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from sag_api.core.model_providers import ModelProviderId, get_model_provider
@@ -25,11 +27,21 @@ from sag_api.enums import SearchStrategy, normalize_search_strategy
 
 _DEFAULT_LLM_PROVIDER = get_model_provider("openai")
 
+def dotenv_disabled(value: str | None) -> bool:
+    """SAG_DISABLE_DOTENV 开关语义（sidecar 由宿主传参时置 1，防工作目录 .env 覆盖）。"""
+    return (value or "").strip().lower() in {"1", "true", "yes"}
+
+
+# sidecar/受控环境可禁用 .env 装载（ADR-0012：宿主提供的配置不得被工作目录文件覆盖）。
+_ENV_FILE = None if dotenv_disabled(os.environ.get("SAG_DISABLE_DOTENV")) else ".env"
+
+_SQLITE_URL_PREFIX = "sqlite+aiosqlite:///"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="SAG_",
-        env_file=".env",
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
@@ -38,6 +50,8 @@ class Settings(BaseSettings):
     # ── 应用 ────────────────────────────────────────────────────────────
     app_name: str = "sag"
     environment: Literal["dev", "prod"] = "dev"
+    # standard：现有 web/自托管形态；desktop：Tauri sidecar（收紧安全默认，见下方 validator）。
+    runtime_mode: Literal["standard", "desktop"] = "standard"
     debug: bool = True
     secret_key: str = "dev-insecure-secret-change-me-in-production-0123456789"
     access_token_expire_minutes: int = 60 * 24 * 7  # 7 天
@@ -52,6 +66,10 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./.data/sag.db"
 
     # ── 存储 ────────────────────────────────────────────────────────────
+    # 单根数据目录（ADR-0012）：设置后 database_url / data_dir / upload_dir
+    # 未显式提供时统一从该根派生（{root}/sag.db、{root}/engine、{root}/uploads）。
+    # Tauri 壳经 --data-dir 传入 appLocalDataDir；显式的三项环境变量仍最高优先。
+    data_root: str | None = None
     data_dir: str = "./.data/engine"  # zleap-sag data_dir（LanceDB + SQLite）
     upload_dir: str = "./.data/uploads"  # 上传原始文件落盘
     max_upload_mb: int = 25  # 单文件上传上限
@@ -195,6 +213,60 @@ class Settings(BaseSettings):
         except (ZoneInfoNotFoundError, ValueError) as error:
             raise ValueError("timezone 必须是有效的 IANA 时区") from error
         return normalized
+
+    @model_validator(mode="after")
+    def _resolve_storage_paths(self) -> Settings:
+        """路径解析（ADR-0012）：单根派生 + 启动即绝对化。
+
+        1. data_root 存在时，为未显式配置的三个存储项派生绝对路径；
+        2. 无论如何，把 data_dir / upload_dir / SQLite database_url 归一为绝对路径
+           （锚 = 构造时 CWD），杜绝进程中途 chdir 或宿主 CWD 不可控导致数据散落。
+        dev 场景（make api，CWD=apps/api）行为逐字节不变。
+        """
+        provided = self.model_fields_set
+        if self.data_root:
+            root = Path(self.data_root).expanduser().resolve()
+            object.__setattr__(self, "data_root", str(root))
+            if "database_url" not in provided:
+                object.__setattr__(
+                    self, "database_url", f"{_SQLITE_URL_PREFIX}{root / 'sag.db'}"
+                )
+            if "data_dir" not in provided:
+                object.__setattr__(self, "data_dir", str(root / "engine"))
+            if "upload_dir" not in provided:
+                object.__setattr__(self, "upload_dir", str(root / "uploads"))
+
+        object.__setattr__(
+            self, "data_dir", str(Path(self.data_dir).expanduser().resolve())
+        )
+        object.__setattr__(
+            self, "upload_dir", str(Path(self.upload_dir).expanduser().resolve())
+        )
+        if self.database_url.startswith(_SQLITE_URL_PREFIX):
+            raw_path = self.database_url[len(_SQLITE_URL_PREFIX) :]
+            if raw_path and raw_path != ":memory:":
+                resolved = Path(raw_path).expanduser().resolve()
+                object.__setattr__(
+                    self, "database_url", f"{_SQLITE_URL_PREFIX}{resolved}"
+                )
+
+        # desktop 模式安全默认：未显式配置时收紧（dev/标准部署不受影响）。
+        if self.runtime_mode == "desktop":
+            if "allow_registration" not in provided:
+                object.__setattr__(self, "allow_registration", False)
+            if "debug" not in provided:
+                object.__setattr__(self, "debug", False)
+        return self
+
+    @property
+    def sqlite_db_path(self) -> Path | None:
+        """SQLite 元数据库文件的绝对路径；非 SQLite 后端返回 None。"""
+        if not self.database_url.startswith(_SQLITE_URL_PREFIX):
+            return None
+        raw_path = self.database_url[len(_SQLITE_URL_PREFIX) :]
+        if not raw_path or raw_path == ":memory:":
+            return None
+        return Path(raw_path)
 
     @property
     def llm_configured(self) -> bool:
