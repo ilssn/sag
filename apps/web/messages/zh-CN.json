@@ -7,6 +7,11 @@
     "configErrorBody": "无法加载运行时配置。请确认服务可达、部署的 config.json 合法后重试。",
     "retry": "重试"
   },
+  "NotFound": {
+    "title": "页面不存在",
+    "description": "该地址不存在，或已随新导航结构迁移。",
+    "backToChat": "回到对话"
+  },
   "Common": {
     "cancel": "取消",
     "confirm": "确认",

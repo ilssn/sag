@@ -7,6 +7,11 @@
     "configErrorBody": "The runtime configuration could not be loaded. Check that the service is reachable and the deployed config.json is valid, then retry.",
     "retry": "Retry"
   },
+  "NotFound": {
+    "title": "Page not found",
+    "description": "This address does not exist or has moved with the new navigation.",
+    "backToChat": "Back to chat"
+  },
   "Common": {
     "cancel": "Cancel",
     "confirm": "Confirm",

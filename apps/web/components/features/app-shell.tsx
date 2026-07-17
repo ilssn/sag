@@ -719,7 +719,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     onOpenChange={setSidebarOpen}
                     className={cn(windowed ? "h-full min-h-full" : "h-svh min-h-svh")}
                   >
-                    <AppSidebar contained={windowed} />
+                    <React.Suspense fallback={null}><AppSidebar contained={windowed} /></React.Suspense>
                     <SidebarInset className="min-w-0">
                       <SiteHeader />
                       <ContentArea>{children}</ContentArea>

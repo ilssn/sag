@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { TriangleAlert } from "lucide-react";
 
 import { PRODUCT_NAME } from "@/lib/branding";
+import { normalizePathname } from "@/lib/client-route";
 import {
   workspaceSectionFromPathname,
 } from "@/lib/workspace";
@@ -31,7 +32,8 @@ function sectionLabel(
 ): string {
   const workspaceSection = workspaceSectionFromPathname(pathname);
   if (workspaceSection) return labels[workspaceSection];
-  if (pathname === "/settings" || pathname.startsWith("/settings/")) return labels.settings;
+  const normalized = normalizePathname(pathname);
+  if (normalized === "/settings" || normalized.startsWith("/settings/")) return labels.settings;
   return PRODUCT_NAME;
 }
 

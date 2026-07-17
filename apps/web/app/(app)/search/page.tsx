@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
+import { chatHref } from "@/lib/client-route";
 import { useApp } from "@/components/features/app-shell";
 import { SearchPanel } from "@/components/features/search/search-panel";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -18,7 +19,7 @@ function SearchPageContent() {
       initialQuery={params.get("q")?.trim() ?? ""}
       initialSourceId={params.get("source")}
       showCancel
-      onCancel={() => (window.history.length > 1 ? router.back() : router.push("/chat"))}
+      onCancel={() => (window.history.length > 1 ? router.back() : router.push(chatHref()))}
     />
   );
 }

@@ -57,7 +57,8 @@ import {
   readUniverseContext,
 } from "@/lib/universe-events";
 import { cn } from "@/lib/utils";
-import type { WorkspaceSection } from "@/lib/workspace";
+import { chatHref } from "@/lib/client-route";
+import { workspaceSectionFromPathname, type WorkspaceSection } from "@/lib/workspace";
 import { useApp } from "@/components/features/app-shell";
 import {
   useOptionalConversationIndex,
@@ -561,7 +562,7 @@ export function Pet({
     ? threads.find((thread) => thread.id === activity.threadId) ?? null
     : null;
   const answerVisible =
-    (appMode === "normal" && (pathname === "/chat" || pathname.startsWith("/chat/")))
+    (appMode === "normal" && workspaceSectionFromPathname(pathname) === "answer")
     || (appMode === "explore" && workspaceSection === "answer");
   const canAct = !motionReduced && !activity.streaming && characterState.motion === "idle";
 
@@ -1190,7 +1191,7 @@ export function Pet({
             onPointerDown={(event) => event.stopPropagation()}
             onClick={() =>
               characterState.speech?.threadId &&
-              router.push(`/chat/${characterState.speech.threadId}`)
+              router.push(chatHref(characterState.speech.threadId))
             }
             className={cn(
               "absolute flex w-60 max-w-[calc(100vw-2rem)] items-center gap-2 rounded-lg border bg-popover px-3 py-2 text-left shadow-lift",
@@ -1222,6 +1223,7 @@ export function Pet({
 
 
         {!ambient && appMode === "explore" && open && (
+          <React.Suspense fallback={null}>
           <PetMiniWorkspace
             character={character}
             panelClassName={cn(panelVertical, panelSide)}
@@ -1234,6 +1236,7 @@ export function Pet({
               setOpen(false);
             }}
           />
+          </React.Suspense>
         )}
 
         {!ambient && petOverlay === "actions" && (

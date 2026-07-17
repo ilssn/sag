@@ -2,9 +2,11 @@
 
 import * as React from "react";
 import { useTranslations } from "next-intl";
-import { useParams, usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 import { DEFAULT_AGENT_AVATAR } from "@/lib/branding";
+import { CHAT_PATH, chatHref, normalizePathname, threadUrlForReplaceState } from "@/lib/client-route";
+import { useRouteThreadId } from "@/hooks/use-url-location";
 import { useApp } from "@/components/features/app-shell";
 import {
   useConversationRuntime,
@@ -12,17 +14,15 @@ import {
 } from "@/components/features/chat/conversation-provider";
 import { ConversationPanel } from "@/components/features/chat/conversation-panel";
 import { PetHeadAvatar } from "@/components/features/pet-head-avatar";
+import { Skeleton } from "@/components/ui/skeleton";
 
 /** 对话主入口；会话数据与迷你问答共享，仅保留完整工作台外壳。 */
-export default function ChatPage() {
+function ChatPageContent() {
   const t = useTranslations("ChatPage");
-  const { id } = useParams<{ id?: string | string[] }>();
-  const pathname = usePathname();
   const router = useRouter();
   const { agent, appMode } = useApp();
   const runtime = useConversationRuntime();
-  const routeThreadId =
-    (Array.isArray(id) ? id[0] : id) ?? pathname.match(/^\/chat\/([^/]+)/)?.[1] ?? null;
+  const routeThreadId = useRouteThreadId();
   const [sessionId, setSessionId] = React.useState<string | null>(null);
   const preferredDraftRef = React.useRef<string | null>(null);
   const session = useConversationSession(sessionId);
@@ -49,7 +49,10 @@ export default function ChatPage() {
       const next = runtime.createDraft({ activate: true });
       preferredDraftRef.current = next;
       setSessionId(next);
-      if (window.location.pathname !== "/chat") router.push("/chat");
+      const { pathname, search } = window.location;
+      if (normalizePathname(pathname) !== CHAT_PATH || search) {
+        router.push(chatHref());
+      }
     };
     window.addEventListener("sag:new-chat", onNewChat);
     return () => window.removeEventListener("sag:new-chat", onNewChat);
@@ -58,10 +61,11 @@ export default function ChatPage() {
   React.useEffect(() => {
     const threadId = session?.threadId;
     if (!threadId || routeThreadId) return;
-    const nextPath = `/chat/${threadId}`;
-    if (window.location.pathname === nextPath) return;
+    const nextUrl = threadUrlForReplaceState(threadId);
+    const currentUrl = `${window.location.pathname}${window.location.search}`;
+    if (currentUrl === nextUrl) return;
     // 不触发路由卸载，确保创建线程后的流式回答持续由同一 runtime 托管。
-    window.history.replaceState(window.history.state, "", nextPath);
+    window.history.replaceState(window.history.state, "", nextUrl);
     window.dispatchEvent(new Event("sag:pathchange"));
   }, [routeThreadId, session?.threadId]);
 
@@ -95,5 +99,19 @@ export default function ChatPage() {
         placeholder={t("placeholder", { name: agent.name })}
       />
     </div>
+  );
+}
+
+export default function ChatPage() {
+  return (
+    <React.Suspense
+      fallback={(
+        <div className="p-6">
+          <Skeleton className="h-12 rounded-lg" />
+        </div>
+      )}
+    >
+      <ChatPageContent />
+    </React.Suspense>
   );
 }

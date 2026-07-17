@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useParams, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   FileText,
@@ -41,16 +41,17 @@ import {
 } from "@/components/ui/tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { KNOWLEDGE_PATH, SETTINGS_PATH, searchHref } from "@/lib/client-route";
 import { cn } from "@/lib/utils";
 
 type ContentView = "list" | "graph" | "graph3d";
 
-export default function SourceDetailPage() {
+/** 信源详情（/knowledge?source=…）；由 knowledge/page.tsx 按查询参数分发。 */
+export function SourceDetailView({ sourceId }: { sourceId: string }) {
   const t = useTranslations("Knowledge");
-  const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { capabilities } = useApp();
-  const { source, documents, refresh, notFound } = useSourceContent(id);
+  const { source, documents, refresh, notFound } = useSourceContent(sourceId);
   const [contentView, setContentView] = React.useState<ContentView>("list");
   const graphViewActive = contentView !== "list";
 
@@ -70,7 +71,7 @@ export default function SourceDetailPage() {
   };
 
   React.useEffect(() => {
-    if (notFound) router.replace("/knowledge");
+    if (notFound) router.replace(KNOWLEDGE_PATH);
   }, [notFound, router]);
 
   const [addOpen, setAddOpen] = React.useState(false);
@@ -87,7 +88,7 @@ export default function SourceDetailPage() {
       <div className="flex shrink-0 flex-wrap items-start justify-between gap-4 border-b px-4 py-5 md:px-6">
         <div className="min-w-0">
           <Link
-            href="/knowledge"
+            href={KNOWLEDGE_PATH}
             className="mb-2 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
           >
             <ArrowLeft className="size-3.5" />
@@ -156,7 +157,7 @@ export default function SourceDetailPage() {
                 aria-label={t("searchSource")}
                 title={t("searchSource")}
               >
-                <Link href={source ? `/search?source=${source.id}` : "/search"}>
+                <Link href={searchHref(source ? { source: source.id } : undefined)}>
                   <Search className="size-4" />
                 </Link>
               </Button>
@@ -185,7 +186,7 @@ export default function SourceDetailPage() {
               <strong>{t("qa")}</strong>
               {t("modelWarningSettings")}
               <Link
-                href="/settings"
+                href={SETTINGS_PATH}
                 className="font-medium underline underline-offset-2"
               >
                 {t("settings")}
@@ -274,7 +275,7 @@ export default function SourceDetailPage() {
             />
           ) : (
             <DocumentList
-              sourceId={id}
+              sourceId={sourceId}
               documents={documents}
               onChange={refresh}
             />
@@ -297,7 +298,7 @@ export default function SourceDetailPage() {
           {source &&
             (source.connector_kind === "file_upload" ? (
               <UploadZone
-                sourceId={id}
+                sourceId={sourceId}
                 onUploaded={() => {
                   setAddOpen(false);
                   void refresh();
@@ -307,7 +308,7 @@ export default function SourceDetailPage() {
               />
             ) : (
               <SyncPanel
-                sourceId={id}
+                sourceId={sourceId}
                 onSynced={() => {
                   setAddOpen(false);
                   void refresh();

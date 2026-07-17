@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
   Archive,
   ChevronDown,
@@ -17,11 +17,13 @@ import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
 import { PRODUCT_NAME } from "@/lib/branding";
+import { chatHref, threadIdFromLocation } from "@/lib/client-route";
 import { relativeTime } from "@/lib/format";
 import {
   WORKSPACE_SECTIONS,
   workspaceSectionFromPathname,
 } from "@/lib/workspace";
+import { useUrlLocation } from "@/hooks/use-url-location";
 import { useApp } from "@/components/features/app-shell";
 import { useConversationIndex } from "@/components/features/chat/conversation-provider";
 import { WorkspaceSectionIcon } from "@/components/features/workspace-section-icon";
@@ -54,7 +56,7 @@ function Brand() {
     <SidebarMenu>
       <SidebarMenuItem>
         <SidebarMenuButton size="lg" className="h-14" asChild>
-          <Link href="/chat">
+          <Link href={chatHref()}>
             <div className="flex aspect-square size-10 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-primary/85 text-primary-foreground">
               <span className="text-base font-semibold">S</span>
             </div>
@@ -130,7 +132,6 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
   const t = useTranslations("AppSidebar");
   const nav = useTranslations("Navigation");
   const locale = useLocale();
-  const routePath = usePathname();
   const router = useRouter();
   const {
     agent,
@@ -154,27 +155,16 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
     [conversationIndex.sessions],
   );
 
-  // replaceState（新会话接管 URL 不打断流式）不会触发 usePathname —— 监听自定义事件补齐
-  const [pathname, setPathname] = React.useState(routePath);
-  React.useEffect(() => setPathname(routePath), [routePath]);
-  React.useEffect(() => {
-    const sync = () => setPathname(window.location.pathname);
-    window.addEventListener("sag:pathchange", sync);
-    window.addEventListener("popstate", sync);
-    return () => {
-      window.removeEventListener("sag:pathchange", sync);
-      window.removeEventListener("popstate", sync);
-    };
-  }, []);
-
-  const activeThreadId = pathname.startsWith("/chat/") ? pathname.split("/")[2] : null;
+  // replaceState（新会话接管 URL 不打断流式）不会触发路由钩子 —— useUrlLocation 合流广播事件
+  const { pathname, search } = useUrlLocation();
+  const activeThreadId = threadIdFromLocation(pathname, search);
 
   async function archiveThread(tid: string) {
     if (!agent) return;
     try {
       await api.updateThread(agent.id, tid, { archived: true });
       await refreshThreads();
-      if (activeThreadId === tid) router.push("/chat");
+      if (activeThreadId === tid) router.push(chatHref());
       toast.success(t("archived"));
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : t("archiveFailed"));
@@ -232,7 +222,7 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
                   type="button"
                   onClick={() => {
                     window.dispatchEvent(new Event("sag:new-chat"));
-                    router.push("/chat");
+                    router.push(chatHref());
                   }}
                   aria-label={t("newChat")}
                   className="grid size-6 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring"
@@ -254,7 +244,7 @@ export function AppSidebar({ contained = false }: { contained?: boolean }) {
               return (
                 <SidebarMenuItem key={thread.id}>
                   <SidebarMenuButton asChild isActive={thread.id === activeThreadId}>
-                    <Link href={`/chat/${thread.id}`} aria-label={thread.title}>
+                    <Link href={chatHref(thread.id)} aria-label={thread.title}>
                       <span className="min-w-0 flex-1 truncate">{thread.title}</span>
                       {isLive ? (
                         <Spinner

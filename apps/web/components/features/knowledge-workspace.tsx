@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 
+import { knowledgeHref } from "@/lib/client-route";
 import { relativeTime } from "@/lib/format";
 import type { Source } from "@/lib/types";
 import { dispatchUniverseSourceFocus } from "@/lib/universe-events";
@@ -40,7 +41,7 @@ function SourceRow({ source, first }: { source: Source; first: boolean }) {
   const { timezone } = useApp();
   return (
     <Link
-      href={`/knowledge/${source.id}`}
+      href={knowledgeHref(source.id)}
       className={cn(
         "flex items-center gap-3 px-4 py-3 text-sm outline-none transition-colors hover:bg-muted/50 focus-visible:bg-muted/60",
         !first && "border-t",

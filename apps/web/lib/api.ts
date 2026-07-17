@@ -1,4 +1,5 @@
 import { clearToken, getToken } from "./auth";
+import { redirectToLogin } from "./client-route";
 import { apiBase } from "./runtime-config";
 import { readClientLocale } from "../i18n/client";
 import { clientErrorMessage, serverErrorMessage } from "../i18n/client-errors";
@@ -163,7 +164,7 @@ async function streamGlobalSearch(
 
   if (response.status === 401 && typeof window !== "undefined") {
     clearToken();
-    window.location.href = "/login";
+    redirectToLogin();
   }
   if (!response.ok || !response.body) {
     clearStreamTimeout();
@@ -358,7 +359,7 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
     !path.includes("/auth/")
   ) {
     clearToken();
-    window.location.href = "/login";
+    redirectToLogin();
   }
 
   if (!res.ok) {

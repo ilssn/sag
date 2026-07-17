@@ -7,6 +7,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
+import { knowledgeHref } from "@/lib/client-route";
 import type { Source } from "@/lib/types";
 import { relativeTime } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -34,7 +35,7 @@ export function SourceCard({ source, onChanged }: { source: Source; onChanged?: 
   return (
     <div className="group/source relative h-full min-w-0">
       <Link
-        href={`/knowledge/${source.id}`}
+        href={knowledgeHref(source.id)}
         className="flex h-full min-w-0 flex-col rounded-lg border bg-card p-5 shadow-soft transition-all duration-150 ease-smooth hover:border-foreground/15 hover:shadow-lift focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <div className="flex min-w-0 items-start justify-between gap-3 pr-20">

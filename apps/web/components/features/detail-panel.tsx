@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import { api, ApiError } from "@/lib/api";
+import { knowledgeHref, normalizePathname } from "@/lib/client-route";
 import { getToken } from "@/lib/auth";
 import type { Doc } from "@/lib/types";
 import { formatBytes, formatTokenCount, relativeTime } from "@/lib/format";
@@ -99,7 +100,7 @@ export function DetailPanelProvider({ children }: { children: React.ReactNode })
   }, []);
 
   // 切换主导航（/chat ↔ /search ↔ /knowledge…）时收起面板
-  const section = pathname.split("/")[1];
+  const section = normalizePathname(pathname).split("/")[1];
   const prevSection = React.useRef(section);
   React.useEffect(() => {
     if (prevSection.current !== section) {
@@ -213,7 +214,7 @@ function ChunkView({
         <div className="min-w-0">
           <h3 className="font-display text-base font-medium">{meta?.heading}</h3>
           <Link
-            href={`/knowledge/${target.sourceId}`}
+            href={knowledgeHref(target.sourceId)}
             className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
           >
             {t("chunk.from", { source: meta?.sourceName ?? target.sourceName ?? t("chunk.source") })}

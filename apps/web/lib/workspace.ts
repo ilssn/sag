@@ -20,9 +20,14 @@ export function isWorkspaceSection(value: unknown): value is WorkspaceSection {
 }
 
 export function workspaceSectionFromPathname(pathname: string): WorkspaceSection | null {
-  if (pathname === "/search" || pathname.startsWith("/search/")) return "search";
-  if (pathname === "/chat" || pathname.startsWith("/chat/")) return "answer";
-  if (pathname === "/knowledge" || pathname.startsWith("/knowledge/")) return "knowledge";
+  // 静态导出 trailingSlash 下 usePathname 可能返回 "/chat/"，统一裁剪后比较。
+  const normalized =
+    pathname.length > 1 && pathname.endsWith("/")
+      ? pathname.replace(/\/+$/, "") || "/"
+      : pathname;
+  if (normalized === "/search" || normalized.startsWith("/search/")) return "search";
+  if (normalized === "/chat" || normalized.startsWith("/chat/")) return "answer";
+  if (normalized === "/knowledge" || normalized.startsWith("/knowledge/")) return "knowledge";
   return null;
 }
 

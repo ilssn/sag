@@ -7,8 +7,9 @@ import { ArrowRight, Github, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, ApiError } from "@/lib/api";
-import { setToken } from "@/lib/auth";
+import { getToken, setToken } from "@/lib/auth";
 import { PRODUCT_NAME } from "@/lib/branding";
+import { chatHref } from "@/lib/client-route";
 import { LanguageToggle } from "@/components/features/language-toggle";
 import { ThemeToggle } from "@/components/features/theme-toggle";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,12 @@ export default function LaunchPage() {
   const router = useRouter();
   const [name, setName] = React.useState("");
   const [loading, setLoading] = React.useState(false);
+  // 静态导出下没有 middleware：已登录访问 /login 由客户端反弹（页面只在启动门之后渲染，cookie 可同步读取）。
+  const [bounced] = React.useState(() => Boolean(getToken()));
+
+  React.useEffect(() => {
+    if (bounced) router.replace(chatHref());
+  }, [bounced, router]);
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -31,13 +38,15 @@ export default function LaunchPage() {
       const response = await api.login({ name: nextName });
       setToken(response.access_token);
       toast.success(t("welcome", { name: response.user.name }));
-      router.replace("/chat");
+      router.replace(chatHref());
     } catch (error) {
       const message = error instanceof ApiError ? error.message : t("failed");
       toast.error(message);
       setLoading(false);
     }
   }
+
+  if (bounced) return null; // 已登录用户不闪现登录表单
 
   return (
     <main className="relative flex min-h-[100svh] w-full flex-col px-5 py-5 sm:px-9 sm:py-7">

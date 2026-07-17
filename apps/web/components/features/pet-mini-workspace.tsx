@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { usePathname } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import {
   ArrowLeft,
@@ -51,6 +50,7 @@ import {
   WORKSPACE_SECTIONS,
   type WorkspaceSection,
 } from "@/lib/workspace";
+import { useRouteThreadId } from "@/hooks/use-url-location";
 import { useApp } from "@/components/features/app-shell";
 import { AgentSettingsCard } from "@/components/features/agent-settings-card";
 import type { AgentActivityMatch } from "@/components/features/chat/agent-activity-timeline";
@@ -295,7 +295,6 @@ export function PetMiniWorkspace({
     knowledgeNode: t("detail.knowledgeNode"),
     eventDetail: t("detail.eventDetail"),
   }), [t]);
-  const pathname = usePathname();
   const conversationRuntime = useConversationRuntime();
   const {
     agent,
@@ -307,7 +306,7 @@ export function PetMiniWorkspace({
     timezone,
   } = useApp();
   const searchWorkspace = useSearchWorkspace();
-  const routeThreadId = pathname.match(/^\/chat\/([^/]+)/)?.[1] ?? null;
+  const routeThreadId = useRouteThreadId();
   const [answerSessionId, setAnswerSessionId] = React.useState<string | null>(null);
   const answerSnapshot = useConversationSession(answerSessionId);
   const [answerHistoryOpen, setAnswerHistoryOpen] = React.useState(false);
