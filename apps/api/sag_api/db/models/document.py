@@ -20,7 +20,8 @@ class Document(IDMixin, TimestampMixin, Base):
     filename: Mapped[str] = mapped_column(String(512))
     content_type: Mapped[str] = mapped_column(String(128), default="application/octet-stream")
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
-    storage_path: Mapped[str] = mapped_column(String(1024))
+    # 相对存储根的 posix key（ADR-0013）；磁盘访问一律经 core/storage 解析校验。
+    storage_key: Mapped[str] = mapped_column(String(1024))
     status: Mapped[DocumentStatus] = mapped_column(
         SAEnum(DocumentStatus, native_enum=False, length=16), default=DocumentStatus.PENDING
     )

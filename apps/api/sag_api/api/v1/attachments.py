@@ -13,10 +13,10 @@ import uuid
 from fastapi import APIRouter, Depends, UploadFile
 from fastapi.responses import FileResponse
 
-from sag_api.core.config import settings
 from sag_api.core.db import get_session
 from sag_api.core.deps import get_current_user
 from sag_api.core.errors import NotFoundError, ValidationError
+from sag_api.core.storage import get_storage
 from sag_api.db.models import User
 
 router = APIRouter(prefix="/attachments", tags=["attachments"])
@@ -27,18 +27,12 @@ _MAX_MB = 10
 _ID_RE = re.compile(r"^[0-9a-f]{32}\.(png|jpe?g|webp|gif)$")
 
 
-def _dir() -> str:
-    path = os.path.join(settings.upload_dir, "attachments")
-    os.makedirs(path, exist_ok=True)
-    return path
-
-
 def attachment_path(attachment_id: str) -> str | None:
     """id → 磁盘路径（校验失败/不存在返回 None）。供生成层复用。"""
     if not _ID_RE.match(attachment_id or ""):
         return None
-    path = os.path.join(_dir(), attachment_id)
-    return path if os.path.isfile(path) else None
+    path = get_storage().resolve_existing(f"attachments/{attachment_id}")
+    return str(path) if path is not None else None
 
 
 @router.post("", status_code=201)
@@ -55,8 +49,8 @@ async def upload(
     if len(data) > _MAX_MB * 1024 * 1024:
         raise ValidationError(f"图片过大（上限 {_MAX_MB}MB）")
     attachment_id = f"{uuid.uuid4().hex}{ext}"
-    with open(os.path.join(_dir(), attachment_id), "wb") as f:
-        f.write(data)
+    storage = get_storage()
+    storage.save(storage.key_for("attachments", attachment_id), data)
     return {"id": attachment_id, "name": file.filename or attachment_id, "media_type": media_type}
 
 

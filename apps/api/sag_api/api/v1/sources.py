@@ -79,13 +79,11 @@ async def delete_(
     engine_manager: EngineManager = Depends(get_engine_manager),
     job_queue: JobQueue = Depends(get_job_queue),
 ) -> Ok:
-    from sag_api.core.config import settings
 
     await delete_source(
         session,
         source_id,
         engine_manager=engine_manager,
-        upload_dir=settings.upload_dir,
         job_queue=job_queue,
     )
     return Ok(detail="信源已删除")

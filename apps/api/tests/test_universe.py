@@ -403,7 +403,7 @@ async def test_universe_overview_expand_detail_and_reset_contract():
                             filename="universe.md",
                             content_type="text/markdown",
                             size_bytes=64,
-                            storage_path="/tmp/universe.md",
+                            storage_key="/tmp/universe.md",
                             status=DocumentStatus.READY,
                             chunk_count=1,
                             event_count=1,

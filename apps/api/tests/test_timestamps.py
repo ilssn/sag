@@ -21,7 +21,7 @@ async def test_sqlite_document_timestamp_serializes_as_utc():
             filename="timestamp.md",
             content_type="text/markdown",
             size_bytes=1,
-            storage_path="/tmp/timestamp.md",
+            storage_key="/tmp/timestamp.md",
         )
         session.add(document)
         await session.commit()

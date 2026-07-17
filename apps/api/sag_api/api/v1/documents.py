@@ -9,6 +9,7 @@ from sag_api.core.config import settings
 from sag_api.core.db import get_session
 from sag_api.core.deps import get_current_user, get_engine_manager, get_job_queue
 from sag_api.core.errors import ConflictError, NotFoundError, ValidationError
+from sag_api.core.storage import get_storage
 from sag_api.db.models import User
 from sag_api.enums import DocumentStatus
 from sag_api.jobs import JobQueue
@@ -78,7 +79,6 @@ async def upload(
         filename=file.filename or "upload",
         content_type=file.content_type or "application/octet-stream",
         data=data,
-        upload_dir=settings.upload_dir,
         job_queue=job_queue,
     )
     return DocumentOut.model_validate(document)
@@ -100,7 +100,6 @@ async def ingest(
         text=body.text,
         title=body.title,
         messages=[m.model_dump() for m in body.messages] if body.messages else None,
-        upload_dir=settings.upload_dir,
         job_queue=job_queue,
     )
     return DocumentOut.model_validate(document)
@@ -125,7 +124,6 @@ async def get_file(
     session: AsyncSession = Depends(get_session),
 ):
     """原始文件（预览/下载）。文件已被清理时返回 404。"""
-    import os
 
     from fastapi.responses import FileResponse
 
@@ -133,10 +131,11 @@ async def get_file(
 
     source = await get_source(session, source_id)
     document = await get_document(session, source, document_id)
-    if not document.storage_path or not os.path.isfile(document.storage_path):
+    path = get_storage().resolve_existing(document.storage_key)
+    if path is None:
         raise NotFoundError("原始文件不存在或已被清理")
     return FileResponse(
-        document.storage_path,
+        str(path),
         media_type=document.content_type or "application/octet-stream",
         filename=document.filename,
         content_disposition_type="inline",
@@ -151,17 +150,17 @@ async def get_preview(
     session: AsyncSession = Depends(get_session),
 ):
     """返回浏览器可直接消费的预览；文本统一转为 UTF-8，下载仍保留原字节。"""
-    import os
 
     from fastapi.responses import FileResponse, Response
 
     source = await get_source(session, source_id)
     document = await get_document(session, source, document_id)
-    if not document.storage_path or not os.path.isfile(document.storage_path):
+    path = get_storage().resolve_existing(document.storage_key)
+    if path is None:
         raise NotFoundError("原始文件不存在或已被清理")
     if is_text_preview(document.filename, document.content_type):
         try:
-            decoded = await asyncio.to_thread(read_text_file, document.storage_path)
+            decoded = await asyncio.to_thread(read_text_file, str(path))
         except TextDecodingError as error:
             raise ValidationError(f"文本预览编码识别失败：{error}") from error
         return Response(
@@ -170,7 +169,7 @@ async def get_preview(
             headers={"X-Muse-Source-Encoding": decoded.encoding},
         )
     return FileResponse(
-        document.storage_path,
+        str(path),
         media_type=document.content_type or "application/octet-stream",
         filename=document.filename,
         content_disposition_type="inline",

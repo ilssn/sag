@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import shutil
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,6 +9,7 @@ from sag_api.connectors import registry
 from sag_api.core.config import settings
 from sag_api.core.errors import ApiError, NotFoundError, ValidationError
 from sag_api.core.logging import get_logger
+from sag_api.core.storage import get_storage
 from sag_api.db.base import new_id
 from sag_api.db.models import AgentBinding, Job, Source
 from sag_api.enums import CONNECTOR_SOURCE_TYPE, BindingTargetType, JobStatus, JobType, SourceType
@@ -128,7 +126,6 @@ async def delete_source(
     source_id: str,
     *,
     engine_manager: EngineManager,
-    upload_dir: str,
     job_queue: JobQueue | None = None,
 ) -> None:
     """删除信源并收尾：移除悬挂绑定、关闭引擎槽、清理上传文件。"""
@@ -147,7 +144,10 @@ async def delete_source(
 
     # 引擎槽关闭 + 上传目录清理（尽力而为，不阻断删除）
     await engine_manager.release(sag_id)
-    shutil.rmtree(os.path.join(upload_dir, source_id), ignore_errors=True)
+    try:
+        get_storage().delete_prefix(source_id)
+    except Exception:  # noqa: BLE001 —— 键非法/目录缺失不阻断删除流程
+        pass
     from sag_api.services.universe_service import schedule_universe_refresh
 
     await schedule_universe_refresh(

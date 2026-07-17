@@ -404,7 +404,7 @@ async def test_document_job_sends_parsed_markdown_to_engine(monkeypatch):
         id="doc-1",
         source_id="source-1",
         filename="original.pdf",
-        storage_path="/uploads/original.pdf",
+        storage_key="source-1/original.pdf",
         status=None,
         error=None,
         chunk_count=0,
@@ -484,7 +484,9 @@ async def test_document_job_sends_parsed_markdown_to_engine(monkeypatch):
     engine = FakeEngineManager()
     await tasks.process_document(FakeSession(), job, engine_manager=engine)
 
-    assert prepared_calls == ["/uploads/original.pdf"]
+    from sag_api.core.storage import get_storage
+
+    assert prepared_calls == [str(get_storage().resolve("source-1/original.pdf"))]
     assert engine.seen_path.endswith(".md")
     assert document.status.value == "ready"
     assert document.chunk_count == 2 and document.event_count == 1

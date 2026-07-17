@@ -8,6 +8,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sag_api.core.errors import ConflictError, NotFoundError
+from sag_api.core.storage import get_storage
 from sag_api.db.base import new_id
 from sag_api.db.models import Document, Job, Source
 from sag_api.enums import DocumentStatus, JobStatus, JobType
@@ -36,16 +37,13 @@ async def create_document_from_upload(
     filename: str,
     content_type: str,
     data: bytes,
-    upload_dir: str,
     job_queue: JobQueue,
 ) -> tuple[Document, Job]:
     doc_id = new_id()
     safe_name = os.path.basename(filename) or "upload"
-    dest_dir = os.path.join(upload_dir, source.id)
-    os.makedirs(dest_dir, exist_ok=True)
-    storage_path = os.path.join(dest_dir, f"{doc_id}_{safe_name}")
-    with open(storage_path, "wb") as f:
-        f.write(data)
+    storage = get_storage()
+    storage_key = storage.key_for(source.id, f"{doc_id}_{safe_name}")
+    storage.save(storage_key, data)
 
     document = Document(
         id=doc_id,
@@ -53,7 +51,7 @@ async def create_document_from_upload(
         filename=safe_name,
         content_type=content_type or "application/octet-stream",
         size_bytes=len(data),
-        storage_path=storage_path,
+        storage_key=storage_key,
         status=DocumentStatus.PENDING,
     )
     session.add(document)
@@ -91,7 +89,6 @@ async def ingest_content(
     text: str | None = None,
     title: str | None = None,
     messages: list[dict] | None = None,
-    upload_dir: str,
     job_queue: JobQueue,
 ) -> Document:
     """统一写入：把文本 / 一批消息归一为文档 → 复用 ingest/extract 管线（持续写入）。"""
@@ -112,7 +109,6 @@ async def ingest_content(
         filename=filename,
         content_type="text/markdown",
         data=content.encode("utf-8"),
-        upload_dir=upload_dir,
         job_queue=job_queue,
     )
     return document
@@ -291,7 +287,7 @@ async def delete_document(
     job_queue: JobQueue | None = None,
 ) -> None:
     document = await get_document(session, source, document_id)
-    path = document.storage_path
+    path = get_storage().resolve_existing(document.storage_key)
     sag_source_id = document.sag_source_id
 
     active_jobs = list(
@@ -322,10 +318,10 @@ async def delete_document(
     await session.flush()
     await _refresh_source_counts(session, source)
     await session.commit()
-    if path:
+    if path is not None:
         from sag_api.parsing.service import parsed_sidecar_paths
 
-        for candidate in [path, *parsed_sidecar_paths(path)]:
+        for candidate in [str(path), *parsed_sidecar_paths(str(path))]:
             try:
                 if os.path.exists(candidate):
                     os.remove(candidate)

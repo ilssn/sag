@@ -18,6 +18,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
+from sag_api.core.storage import get_storage
 from sag_api.services.retrieval_service import retrieve_relevant_sections
 
 if TYPE_CHECKING:
@@ -432,12 +433,12 @@ def build_source_mcp(*, stateless_http: bool = False) -> FastMCP:
         if match is None:
             return "（未找到该文档）"
         document, source = match
-        import os
 
-        if not document.storage_path or not os.path.isfile(document.storage_path):
+        _doc_path = get_storage().resolve_existing(document.storage_key)
+        if _doc_path is None:
             return "（原始文件不存在或已清理）"
         try:
-            with open(document.storage_path, encoding="utf-8", errors="replace") as file:
+            with open(_doc_path, encoding="utf-8", errors="replace") as file:
                 lines = file.readlines()
         except OSError:
             return "（文件读取失败）"
