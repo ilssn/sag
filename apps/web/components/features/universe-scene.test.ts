@@ -14,11 +14,19 @@ const texturesSource = readFileSync(
   new URL("./universe-scene-textures.ts", import.meta.url),
   "utf8",
 );
+const subsystemSources = [
+  "./universe-scene-internals.ts",
+  "./universe-scene-parallax.ts",
+  "./universe-scene-keyboard.ts",
+  "./universe-scene-temporal.ts",
+  "./universe-scene-nebula.ts",
+  "./universe-scene-labels.ts",
+].map((path) => readFileSync(new URL(path, import.meta.url), "utf8")).join("\n");
 const componentSource = readFileSync(
   new URL("./universe-scene.tsx", import.meta.url),
   "utf8",
 );
-const source = `${contractSource}\n${texturesSource}\n${engineSource}\n${componentSource}`;
+const source = `${contractSource}\n${texturesSource}\n${subsystemSources}\n${engineSource}\n${componentSource}`;
 
 function sourceBetween(start: string, end: string) {
   const startIndex = source.indexOf(start);
@@ -60,11 +68,11 @@ describe("universe scene production invariants", () => {
       "private handlePointerMove = (event: PointerEvent)",
     );
     const labelLayout = sourceBetween(
-      "private updateLabels(now: number",
-      "private miniPanelRect(",
+      "export function updateLabels(engine",
+      "export class UniverseForceSceneEngine",
     );
     const pixelRatio = sourceBetween(
-      "private updatePixelRatio()",
+      "updatePixelRatio()",
       "private handleResize = () =>",
     );
 
@@ -76,8 +84,8 @@ describe("universe scene production invariants", () => {
     expect(cameraChange).toContain("this.updateLabels(now)");
     expect(cameraChange).not.toContain("this.updateLabels(now, true)");
     expect(cameraChange).not.toContain("this.armNebulaAnimation(");
-    expect(labelLayout.match(/this\.host\.getBoundingClientRect\(\)/g)).toHaveLength(1);
-    expect(labelLayout).toContain("this.miniPanelRect(hostRect)");
+    expect(labelLayout.match(/engine\.host\.getBoundingClientRect\(\)/g)).toHaveLength(1);
+    expect(labelLayout).toContain("engine.miniPanelRect(hostRect)");
     expect(labelLayout).toContain("hostRect,");
   });
 
@@ -92,19 +100,19 @@ describe("universe scene production invariants", () => {
     );
     const projection = sourceBetween(
       "private projectedSourceRadius(node: ForceNode",
-      "private updateVisualLayout(now: number",
+      "updateVisualLayout(now: number",
     );
     const visualLayout = sourceBetween(
-      "private updateVisualLayout(now: number",
-      "private evaluateLod(now: number)",
+      "updateVisualLayout(now: number",
+      "evaluateLod(now: number)",
     );
     const lod = sourceBetween(
-      "private evaluateLod(now: number)",
-      "private startLoop(keepAliveMs = 0)",
+      "evaluateLod(now: number)",
+      "startLoop(keepAliveMs = 0)",
     );
 
-    expect(source).toContain("private sourceNodesById = new Map<string, ForceNode>()");
-    expect(source).toContain("private sourceNodeList: ForceNode[] = []");
+    expect(source).toContain("sourceNodesById = new Map<string, ForceNode>()");
+    expect(source).toContain("sourceNodeList: ForceNode[] = []");
     expect(dataCommit).toContain("this.nodes = nextNodes;\n    this.rebuildSourceNodeIndex()");
     expect(clusterForce).toContain("this.sourceNodesById.get(node.sourceId)");
     expect(clusterForce).not.toContain("const sources = new Map(");
@@ -139,8 +147,8 @@ describe("universe scene production invariants", () => {
       "private handleControlsStart = () =>",
     );
     const flight = sourceBetween(
-      "private updateTemporalFlight(now: number)",
-      "private timelineWheelSurface(target: EventTarget | null)",
+      "export function updateTemporalFlight(engine",
+      " * 星云子系统",
     );
     const intent = sourceBetween(
       "async moveTimeline(",
@@ -189,7 +197,7 @@ describe("universe scene production invariants", () => {
     // and no pointer-vs-wheel gesture classifier is needed.
     expect(pointer).toContain("brakeUniverseTemporalFlight");
     expect(flight).toContain("camera.position.z -= delta");
-    expect(flight).toContain("this.controls.target.z -= delta");
+    expect(flight).toContain("engine.controls.target.z -= delta");
     expect(flight).toContain("planUniverseTemporalFlightFollow(");
     // The camera never waits for data: paging along is fire-and-forget.
     expect(flight).not.toContain("await ");
@@ -337,15 +345,15 @@ describe("universe scene production invariants", () => {
       "private pruneRetiringTimelineElements()",
     );
     const labelInteraction = sourceBetween(
-      "private bindLabelInteraction(",
-      "private updateLabels(now: number",
+      "export function bindLabelInteraction(engine",
+      "export function updateLabels(engine",
     );
     const keyboard = sourceBetween(
       "private handleKeyDown = (event: KeyboardEvent)",
-      "private updatePixelRatio()",
+      "updatePixelRatio()",
     );
     expect(diagnostics).toContain("label.primary.disabled = busy");
-    expect(labelInteraction).toContain("if (this.timelineIsBusy()) return");
+    expect(labelInteraction).toContain("if (engine.timelineIsBusy()) return");
     expect(keyboard).toContain('this.timelineIsBusy() && event.key !== "Escape"');
     expect(keyboard).toContain('event.key.startsWith("Arrow")');
   });
@@ -353,7 +361,7 @@ describe("universe scene production invariants", () => {
   it("routes Escape through reading focus and then the owner's two-stage back action", () => {
     const keyboard = sourceBetween(
       "private handleKeyDown = (event: KeyboardEvent)",
-      "private updatePixelRatio()",
+      "updatePixelRatio()",
     );
 
     expect(source).toContain("onBackRequest?: () => void");
@@ -420,21 +428,21 @@ describe("universe scene production invariants", () => {
 
   it("reveals the unique one-hop event and entity card group for hover and lock", () => {
     const labels = sourceBetween(
-      "private rebuildLabels()",
-      "private sortLabelsForLayout()",
+      "export function rebuildLabels(engine",
+      "export function sortLabelsForLayout(engine",
     );
     const layout = sourceBetween(
-      "private updateLabels(now: number",
-      "private miniPanelRect(",
+      "export function updateLabels(engine",
+      "export class UniverseForceSceneEngine",
     );
     expect(source).toContain('import { planUniverseFocusCards } from "@/lib/universe-focus-cards"');
     expect(labels).toContain("const focusCardPlan = planUniverseFocusCards(");
     expect(labels).not.toContain("ids: [focusNode.id]");
     expect(labels).toContain("const focusCardIds = new Set(focusCardPlan.ids)");
-    expect(labels).toContain("this.host.dataset.universeFocusCardCount");
-    expect(labels).toContain("const showEventCards = this.viewPreferences.showEventCards");
+    expect(labels).toContain("engine.host.dataset.universeFocusCardCount");
+    expect(labels).toContain("const showEventCards = engine.viewPreferences.showEventCards");
     expect(labels).toContain("|| hasConcreteFocus");
-    expect(labels).toContain("const showEntityCards = this.viewPreferences.showEntityCards");
+    expect(labels).toContain("const showEntityCards = engine.viewPreferences.showEntityCards");
     expect(labels).toContain("const cardBudget = universeCardBudget(");
     expect(labels).toContain('&& (node.kind === "event" ? showEventCards : showEntityCards)');
     expect(labels).toContain("const eventLimit = showEventCards");
@@ -454,8 +462,8 @@ describe("universe scene production invariants", () => {
     expect(labels).toContain(": Math.min(60, entityLimit * 3)");
     expect(labels).toContain("const totalCandidateLimit = hasConcreteFocus");
     expect(labels).toContain("? focusCardPlan.ids.length");
-    expect(labels).toContain("this.labelPlacementBudget = {");
-    expect(labels).toContain("this.host.dataset.universeEntityLabelCandidateCount");
+    expect(labels).toContain("engine.labelPlacementBudget = {");
+    expect(labels).toContain("engine.host.dataset.universeEntityLabelCandidateCount");
     expect(labels).toContain("const existingLabels = new Map(");
     expect(labels).toContain("const nextLabels: SceneLabel[] = []");
     expect(labels).toContain("existingLabels.forEach((label) => label.element.remove())");
@@ -471,8 +479,8 @@ describe("universe scene production invariants", () => {
     expect(layout).toContain("const clampedCandidates = requiredFocusCard");
     expect(layout).not.toContain("focusGridCandidates");
     expect(layout).toContain("requiredFocusCard || emphasized");
-    expect(source).toContain("visibleEntityLabels >= this.labelPlacementBudget.entities");
-    expect(source).toContain("this.host.dataset.universeEntityLabelCount");
+    expect(source).toContain("visibleEntityLabels >= engine.labelPlacementBudget.entities");
+    expect(source).toContain("engine.host.dataset.universeEntityLabelCount");
     expect(labels).toContain('title.removeAttribute("title")');
     expect(labels).toContain('summary.removeAttribute("title")');
     expect(labels).not.toContain("title.title =");
@@ -497,12 +505,12 @@ describe("universe scene production invariants", () => {
 
   it("shows related exploration progress directly on the hovered event or entity card", () => {
     const labels = sourceBetween(
-      "private rebuildLabels()",
-      "private sortLabelsForLayout()",
+      "export function rebuildLabels(engine",
+      "export function sortLabelsForLayout(engine",
     );
     const labelInteraction = sourceBetween(
-      "private bindLabelInteraction(",
-      "private updateLabels(now: number",
+      "export function bindLabelInteraction(engine",
+      "export function updateLabels(engine",
     );
 
     // The scene receives already-derived resident progress. Hover must remain
@@ -517,31 +525,31 @@ describe("universe scene production invariants", () => {
     expect(labels).toContain("node.sceneNode.relatedCount");
     expect(labels).toContain("node.sceneNode.canExploreMore");
     expect(labels).toContain("const hintVisible = node.id === focusId");
-    expect(labels).toContain("&& !this.lockedId");
+    expect(labels).toContain("&& !engine.lockedId");
     expect(labels).toContain("exploreHint.hidden = !hintVisible");
     expect(labels).toContain("relatedProgress >= relatedTotal");
-    expect(labels).toContain("this.text.explorationProgress(");
-    expect(labelInteraction).toContain("this.handleNodeHover(node, true)");
-    expect(labelInteraction).toContain("this.callbacks.onNodeClick(node.sceneNode)");
+    expect(labels).toContain("engine.text.explorationProgress(");
+    expect(labelInteraction).toContain("engine.handleNodeHover(node, true)");
+    expect(labelInteraction).toContain("engine.callbacks.onNodeClick(node.sceneNode)");
     expect(labelInteraction).not.toMatch(/expandNode|requestExpansion|onTimelineIntent|fetch\(|api\./);
   });
 
   it("keeps locked-card actions semantic and lets wheel travel unlock without dismissing context", () => {
     const labels = sourceBetween(
-      "private rebuildLabels()",
-      "private sortLabelsForLayout()",
+      "export function rebuildLabels(engine",
+      "export function sortLabelsForLayout(engine",
     );
     const nodeInteraction = sourceBetween(
-      "private bindNodeLabelInteraction(",
-      "private updateLabels(now: number",
+      "export function bindNodeLabelInteraction(engine",
+      "export function updateLabels(engine",
     );
     const wheel = sourceBetween(
       "private handleTimelineWheel = (event: WheelEvent) =>",
       "private handlePointerDown = (event: PointerEvent) =>",
     );
     const labelLayout = sourceBetween(
-      "private updateLabels(now: number",
-      "private miniPanelRect(",
+      "export function updateLabels(engine",
+      "export class UniverseForceSceneEngine",
     );
     const safeViewport = sourceBetween(
       "private safeViewportCenter()",
@@ -554,8 +562,8 @@ describe("universe scene production invariants", () => {
     expect(labels).not.toContain("primary.append(primary, actions)");
     expect(labels).toContain('button.dataset.universeNodeAction = index === 0 ? "explore-more" : "ask-ai"');
     expect(labels).toContain("actions.hidden = !locked");
-    expect(nodeInteraction).toContain("this.callbacks.onExploreMore?.(node.sceneNode)");
-    expect(nodeInteraction).toContain("this.callbacks.onAskNode?.(node.sceneNode)");
+    expect(nodeInteraction).toContain("engine.callbacks.onExploreMore?.(node.sceneNode)");
+    expect(nodeInteraction).toContain("engine.callbacks.onAskNode?.(node.sceneNode)");
     expect(wheel).not.toContain("this.callbacks.onUserInteraction?.()");
     expect(wheel).toContain("this.callbacks.onSelectionClear({ dismissWorkspace: false })");
     expect(wheel.indexOf("this.callbacks.onSelectionClear({ dismissWorkspace: false })"))
@@ -598,8 +606,8 @@ describe("universe scene production invariants", () => {
       "private pinNode(node: ForceNode)",
     );
     const labelLayout = sourceBetween(
-      "private updateLabels(now: number",
-      "private miniPanelRect(",
+      "export function updateLabels(engine",
+      "export class UniverseForceSceneEngine",
     );
 
     expect(nodeObject).toContain("map: this.eventTexture");
@@ -624,16 +632,16 @@ describe("universe scene production invariants", () => {
 
   it("carries optional temporal presentation through mesh, card and link layers", () => {
     const objectVisual = sourceBetween(
-      "private setObjectOpacity(node: ForceNode",
+      "setObjectOpacity(node: ForceNode",
       "private nodeProjectionScale(node: ForceNode)",
     );
     const morphScale = sourceBetween(
-      "private updateNodeMorphScales(",
+      "updateNodeMorphScales(",
       "private updateSourceAuraOpacities()",
     );
     const labels = sourceBetween(
-      "private updateLabels(now: number",
-      "private miniPanelRect(",
+      "export function updateLabels(engine",
+      "export class UniverseForceSceneEngine",
     );
     const linkStyle = sourceBetween(
       "private linkVisualStyle(link: ForceLink)",
@@ -668,7 +676,7 @@ describe("universe scene production invariants", () => {
     expect(morphScale).toContain("* (node.temporalPresenceScale ?? 1)");
 
     expect(labels).toContain("* dataOpacity");
-    expect(labels).toContain("this.nodeAtmosphereOpacity(node)");
+    expect(labels).toContain("engine.nodeAtmosphereOpacity(node)");
     expect(labels).toContain(
       "currentNodePresentationCardScale(node)",
     );
@@ -687,7 +695,7 @@ describe("universe scene production invariants", () => {
       "private pinNode(node: ForceNode)",
     );
     const objectVisual = sourceBetween(
-      "private setObjectOpacity(node: ForceNode",
+      "setObjectOpacity(node: ForceNode",
       "private nodeProjectionScale(node: ForceNode)",
     );
 
@@ -728,7 +736,7 @@ describe("universe scene production invariants", () => {
       "\n  focusOverview() {",
     );
     const highlight = sourceBetween(
-      "private applyHighlight()",
+      "\n  applyHighlight()",
       "private updateObjectOpacities()",
     );
     const linkStyle = sourceBetween(
@@ -778,7 +786,7 @@ describe("universe scene production invariants", () => {
       .toBeLessThan(detach.indexOf("candidate.geometry = undefined"));
     expect(source).toContain("link.lineMaterial = undefined");
     expect(source).toContain(
-      "visibleEventLabels + visibleEntityLabels >= this.labelPlacementBudget.total",
+      "visibleEventLabels + visibleEntityLabels >= engine.labelPlacementBudget.total",
     );
     expect(source).toContain("private syncGraphObjectPositions()");
     expect(source).toContain("node.object?.position.set(node.x, node.y, node.z)");
@@ -811,8 +819,8 @@ describe("universe scene production invariants", () => {
       "class UniverseForceSceneEngine",
     );
     const nebulaAlpha = sourceBetween(
-      "private updateNebulaAlphas(force = false)",
-      "private nebulaMotionStrength()",
+      "export function updateNebulaAlphas(engine",
+      "export function nebulaMotionStrength(engine",
     );
     expect(source).toContain("sprite.userData.sourceCore = true");
     expect(source).toContain("private sourceMarkerDetailFactor(");
@@ -828,7 +836,7 @@ describe("universe scene production invariants", () => {
     expect(source).toContain("attribute float aSourceIndex");
     expect(source).toContain('geometry.setAttribute("aVisual"');
     expect(source).toContain('geometry.setAttribute("aSourceIndex"');
-    expect(source).toContain("material.uniforms.uDetail.value = this.visualDetailMix");
+    expect(source).toContain("material.uniforms.uDetail.value = engine.visualDetailMix");
     expect(source).toContain("material.uniforms.uDetailSource.value");
     expect(nebulaMaterial).toContain("float sourceMatch =");
     expect(nebulaMaterial).toContain("float detailBloom = mix(1.04, 1.28, vDetail)");
@@ -842,9 +850,9 @@ describe("universe scene production invariants", () => {
       "particle.sourceId === this.visualSourceId",
     );
     expect(source).toContain("THREE.DynamicDrawUsage");
-    expect(source).toContain('this.host.dataset.universeNebulaAlphaMode = "gpu-detail"');
+    expect(source).toContain('engine.host.dataset.universeNebulaAlphaMode = "gpu-detail"');
     expect(source).toContain("this.host.dataset.universeNebulaPointSizeCap");
-    expect(source).toContain("this.host.dataset.universeNebulaDetailFactor");
+    expect(source).toContain("engine.host.dataset.universeNebulaDetailFactor");
     expect(source).toContain("this.updateNebulaAlphas();");
   });
 
@@ -863,30 +871,30 @@ describe("universe scene production invariants", () => {
 
   it("runs overview breathing on a throttled ticker while the main loop sleeps", () => {
     const ambient = sourceBetween(
-      "private nebulaAmbientEligible()",
-      "private clearNebula()",
+      "export function nebulaAmbientEligible(engine",
+      "export function clearNebula(engine",
     );
 
     expect(source).toContain("const NEBULA_AMBIENT_FRAME_MS_DESKTOP = 1000 / 24");
     expect(source).toContain("const NEBULA_AMBIENT_FRAME_MS_MOBILE = 1000 / 18");
     expect(ambient).toContain("window.setInterval(() => {");
-    expect(ambient).toContain("this.updateNebulaAnimation(performance.now())");
-    expect(ambient).toContain("this.nebulaAnimationElapsed += elapsed / 1000");
-    expect(ambient).toContain("return active && this.nebulaAmbientTimer === null");
+    expect(ambient).toContain("updateNebulaAnimation(engine, performance.now())");
+    expect(ambient).toContain("engine.nebulaAnimationElapsed += elapsed / 1000");
+    expect(ambient).toContain("return active && engine.nebulaAmbientTimer === null");
   });
 
   it("lets the browse session own the detail latch and calms the sky under gestures", () => {
     const layout = sourceBetween(
-      "private updateVisualLayout(now: number",
-      "private evaluateLod(now: number)",
+      "updateVisualLayout(now: number",
+      "evaluateLod(now: number)",
     );
     const controls = sourceBetween(
       "private handleControlsStart = () =>",
       "private handlePointerMove = (event: PointerEvent)",
     );
     const motionStrength = sourceBetween(
-      "private nebulaMotionStrength()",
-      "private shouldAnimateNebula(",
+      "export function nebulaMotionStrength(engine",
+      "export function shouldAnimateNebula(engine",
     );
 
     // The radius heuristic measures distance to the source's centre, but the
@@ -901,7 +909,7 @@ describe("universe scene production invariants", () => {
     // Camera gestures freeze the ambient drift instead of igniting it.
     expect(controls).not.toContain("this.armNebulaAnimation(");
     expect(controls.match(/cameraCalmUntil = /g)?.length).toBe(2);
-    expect(motionStrength).toContain("performance.now() < this.cameraCalmUntil");
+    expect(motionStrength).toContain("performance.now() < engine.cameraCalmUntil");
   });
 
   it("stretches a browsed source's nebula into its exploration corridor on the GPU", () => {
@@ -910,12 +918,12 @@ describe("universe scene production invariants", () => {
       "class UniverseForceSceneEngine",
     );
     const nebulaBuild = sourceBetween(
-      "private rebuildNebula()",
-      "private updateNebulaPositions()",
+      "export function rebuildNebula(engine",
+      "export function updateNebulaPositions(engine",
     );
     const nebulaAlpha = sourceBetween(
-      "private updateNebulaAlphas(force = false)",
-      "private nebulaMotionStrength()",
+      "export function updateNebulaAlphas(engine",
+      "export function nebulaMotionStrength(engine",
     );
 
     // The corridor is the second form of the same particles: the vertex shader
@@ -939,7 +947,7 @@ describe("universe scene production invariants", () => {
     // Corridor depth lives on the same counting grid as packages and flight.
     expect(nebulaBuild).toContain("UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT");
     expect(nebulaBuild).toContain('geometry.setAttribute("aCorridor"');
-    expect(source).toContain("private syncNebulaCorridorUniforms()");
+    expect(source).toContain("syncNebulaCorridorUniforms()");
     expect(source).toContain("material.uniforms.uCorridorNearZ.value = config");
     expect(source).toContain("const NEBULA_CORRIDOR_BAND_OFF = 1e8");
 
@@ -958,7 +966,7 @@ describe("universe scene production invariants", () => {
     expect(nebulaMaterial).toContain("float entryFade = smoothstep(-220.0, -40.0, wrappedDepth)");
     expect(nebulaMaterial).toContain("float horizonFade = 1.0 - smoothstep(0.82, 1.0, endProgress) * 0.8");
     expect(source).toContain(
-      "material.uniforms.uFlightDepth.value = config ? this.appliedFlightDepth : 0",
+      "material.uniforms.uFlightDepth.value = config ? engine.appliedFlightDepth : 0",
     );
 
     // Glow pockets belong to the intact hero. Once the source stretches into
@@ -1050,15 +1058,15 @@ describe("universe scene production invariants", () => {
     );
     const heroPose = sourceBetween(
       "private sourceHeroPose(node: ForceNode, depth: number)",
-      "private markSourceExploring()",
+      "markSourceExploring()",
     );
     const flight = sourceBetween(
-      "private updateTemporalFlight(now: number)",
-      "private timelineWheelSurface(target: EventTarget | null)",
+      "export function updateTemporalFlight(engine",
+      " * 星云子系统",
     );
     const labels = sourceBetween(
-      "private updateLabels(now: number",
-      "private miniPanelRect(",
+      "export function updateLabels(engine",
+      "export class UniverseForceSceneEngine",
     );
 
     // Entering a browse session flies to the corridor entrance looking down
@@ -1077,7 +1085,7 @@ describe("universe scene production invariants", () => {
     expect(flight).toContain("const instantSpeed = Math.abs(delta)");
     expect(flight).toContain("FLIGHT_CARD_COLLAPSE_MS");
     expect(flight).toContain("return moving || cardsSettling");
-    expect(labels).toContain("const cardMorphProgress = this.visualDetailMix * this.flightCardPresence");
+    expect(labels).toContain("const cardMorphProgress = engine.visualDetailMix * engine.flightCardPresence");
     expect(labels).toContain("const globalCardMorph = universeCardMorph(cardMorphProgress)");
     expect(labels).toContain("* (forceCardDetail ? 1 : globalCardMorph.reveal)");
     expect(labels).not.toContain("--universe-card-eyebrow-opacity");
@@ -1085,11 +1093,11 @@ describe("universe scene production invariants", () => {
     expect(flight).toContain("(1 - FLIGHT_CARD_TRAVEL_MIN)");
     // Passed and far packages reverse through card → star → grain while near
     // cards retain true depth scale and restrained depth-of-field.
-    expect(source).toContain("private nodeAtmosphereOpacity(node: ForceNode)");
+    expect(source).toContain("nodeAtmosphereOpacity(node: ForceNode)");
     expect(labels).toContain("* emergence.cardScale");
     expect(labels).toContain("0.72 * emergence.card");
     expect(labels).toContain("emergence.blur * 0.32");
-    expect(labels).toContain("const blurAllowed = !mobile && !this.reducedMotion");
+    expect(labels).toContain("const blurAllowed = !mobile && !engine.reducedMotion");
 
     // Reading is the point: a transient hover dims unrelated cards in place
     // (no reflow, no board jump) — only a locked focus clears the stage. Hover
@@ -1102,34 +1110,38 @@ describe("universe scene production invariants", () => {
 
   it("debounces pointer label rebuilds and restores defaults", () => {
     const hover = sourceBetween(
-      "private scheduleHoverLabelRebuild(",
-      "private applyHighlight()",
+      "export function scheduleHoverLabelRebuild(engine",
+      "export function hoverLabelOpacityFactor(engine",
     );
     const labelLayout = sourceBetween(
-      "private updateLabels(now: number",
-      "private miniPanelRect(",
+      "export function updateLabels(engine",
+      "export class UniverseForceSceneEngine",
     );
     expect(hover).toContain("HOVER_LABEL_SETTLE_MS");
-    expect(hover).toContain("HOVER_CLEAR_GRACE_MS");
-    expect(hover).toContain("this.scheduleHoverLabelRebuild()");
+    expect(source).toContain("HOVER_CLEAR_GRACE_MS"); // hover 清除宽限逻辑留在引擎 handleNodeHover
+    expect(source).toContain("this.scheduleHoverLabelRebuild(");  // hover 入口在引擎 handleNodeHover,经委托触发去抖重建
     expect(hover).toContain("if (immediate || focusId === null) queueFrame()");
     expect(labelLayout).toContain(
       'const compact = label.kind === "node" && node.kind === "entity"',
     );
     expect(labelLayout).toContain("node.id === labelFocusId");
-    expect(source).toContain("this.scheduleHoverLabelRebuild(true)");
+    expect(source).toContain("engine.scheduleHoverLabelRebuild(true)");
     expect(source).toContain("this.cancelHoverLabelRebuild();");
     expect(source).toContain("this.cancelHoverClear();");
   });
 
   it("keeps one canvas tab stop and roves without moving or loading graph data", () => {
     const keyboard = sourceBetween(
-      "private keyboardCandidates()",
-      "private updatePixelRatio()",
+      "export function keyboardCandidates(engine",
+      " * 时间飞行子系统",
+    );
+    const keyHandling = sourceBetween(
+      "private handleKeyDown = (event: KeyboardEvent)",
+      "updatePixelRatio()",
     );
     const labelBinding = sourceBetween(
-      "private bindLabelInteraction(",
-      "private updateLabels(now: number",
+      "export function bindLabelInteraction(engine",
+      "export function updateLabels(engine",
     );
 
     expect(source).toContain("tabIndex={interactive ? 0 : -1}");
@@ -1143,25 +1155,25 @@ describe("universe scene production invariants", () => {
     expect(keyboard).toContain("if (!detailSourceId) return true");
     expect(keyboard).toContain('return node.kind !== "source"');
     expect(keyboard).toContain("node.sourceId === detailSourceId");
-    expect(keyboard).toContain("this.nodeEmergence(node).star < 0.72");
+    expect(keyboard).toContain("engine.nodeEmergence(node).star < 0.72");
     expect(keyboard).not.toContain("showEventCards");
     expect(keyboard).not.toContain("showEntityCards");
-    expect(keyboard).toContain("nextUniverseKeyboardNodeId(");
-    expect(keyboard).toContain("this.callbacks.onNodeClick(node.sceneNode)");
+    expect(keyHandling).toContain("nextUniverseKeyboardNodeId(");
+    expect(keyHandling).toContain("this.callbacks.onNodeClick(node.sceneNode)");
     expect(keyboard).not.toMatch(/focusNode\(|focusSource\(|setData\(|fetch\(|api\./);
     expect(keyboard).not.toMatch(/node\.[fxyz]{1,2}\s*=/);
   });
 
   it("hard-caps nebula proxy budgets on the client", () => {
     const nebula = sourceBetween(
-      "private rebuildNebula()",
-      "private updateNebulaPositions()",
+      "export function rebuildNebula(engine",
+      "export function updateNebulaPositions(engine",
     );
 
     expect(nebula).toContain("const budgetCap = mobile ? 4_000 : 16_000");
     expect(nebula).toContain("const budget = Math.min(");
-    expect(nebula).toContain("this.host.dataset.universeNebulaBudgetCap");
-    expect(nebula).toContain("this.host.dataset.universeNebulaBudget");
+    expect(nebula).toContain("engine.host.dataset.universeNebulaBudgetCap");
+    expect(nebula).toContain("engine.host.dataset.universeNebulaBudget");
     expect(source.match(/new THREE\.Points/g)).toHaveLength(1);
     expect(source).toContain("toneMapped: false");
   });
@@ -1172,8 +1184,8 @@ describe("universe scene production invariants", () => {
       "class UniverseForceSceneEngine",
     );
     const nebula = sourceBetween(
-      "private rebuildNebula()",
-      "private updateNebulaPositions()",
+      "export function rebuildNebula(engine",
+      "export function updateNebulaPositions(engine",
     );
     const customAttributes = nebulaMaterial.match(
       /attribute\s+\w+\s+\w+\s*;/g,
@@ -1198,8 +1210,8 @@ describe("universe scene production invariants", () => {
       "class UniverseForceSceneEngine",
     );
     const nebula = sourceBetween(
-      "private rebuildNebula()",
-      "private updateNebulaPositions()",
+      "export function rebuildNebula(engine",
+      "export function updateNebulaPositions(engine",
     );
 
     // Gold is the stable event field; source-tinted grains preview the entities
@@ -1211,7 +1223,7 @@ describe("universe scene production invariants", () => {
     expect(nebula).toContain("const eventGrain = stableUnit(");
     expect(nebula).toContain("const color = eventGrain");
     expect(nebula).toContain("? NEBULA_BRAND_GOLD.clone()");
-    expect(nebula).toContain(": this.sourceVisualColor(particle.sourceId)");
+    expect(nebula).toContain(": engine.sourceVisualColor(particle.sourceId)");
     expect(nebula).toContain("const whiteMix = particle.core");
     expect(nebula).toContain("color.lerp(WHITE, whiteMix);");
     expect(source).toContain("export function universeSourceAccent(sourceId: string");
@@ -1251,11 +1263,11 @@ describe("universe scene production invariants", () => {
     );
     const heroPose = sourceBetween(
       "private sourceHeroPose(node: ForceNode, depth: number)",
-      "private markSourceExploring()",
+      "markSourceExploring()",
     );
     const presence = sourceBetween(
-      "private updateTemporalPresence()",
-      "private updateTemporalFlight(now: number)",
+      "export function updateTemporalPresence(engine",
+      "export function updateTemporalFlight(engine",
     );
     const dataCommit = sourceBetween(
       "setData(\n    data: UniverseSceneData",
@@ -1279,7 +1291,7 @@ describe("universe scene production invariants", () => {
     );
     expect(presence).toContain("scale = presence.scale");
     expect(presence).toContain("opacity = presence.opacity * dive");
-    expect(source).toContain("private nodeEmergence(node: ForceNode)");
+    expect(source).toContain("nodeEmergence(node: ForceNode)");
     expect(source).toContain("universeNodeEmergence(availability, node.kind, stagger, next)");
     expect(source).toContain(
       "material.uniforms.uCorridorVestibule.value = config",
@@ -1303,8 +1315,8 @@ describe("universe scene production invariants", () => {
       "\n  focusSource(sourceId: string) {",
     );
     const flight = sourceBetween(
-      "private updateTemporalFlight(now: number)",
-      "private timelineWheelSurface(target: EventTarget | null)",
+      "export function updateTemporalFlight(engine",
+      " * 星云子系统",
     );
 
     // At origin the handle reports that stage one is already complete, which
@@ -1341,13 +1353,13 @@ describe("universe scene production invariants", () => {
     expect(navigation).toContain("this.updateTemporalPresence()");
     expect(navigation).toContain("this.markSourceOrigin(now)");
     expect(navigation).toContain("this.applyBrowseGaze()");
-    expect(flight).toContain("if (this.sourceReturnMotion) return this.updateSourceReturnMotion(now)");
+    expect(flight).toContain("if (engine.sourceReturnMotion) return engine.updateSourceReturnMotion(now)");
   });
 
   it("preserves automatic source entry across visibility pauses and cancels it on back", () => {
     const entryLifecycle = sourceBetween(
       "private cancelSourceEntryDive()",
-      "private markSourceExploring()",
+      "markSourceExploring()",
     );
     const pause = sourceBetween("  pause() {", "  resume() {");
     const resume = sourceBetween("  resume() {", "  dispose() {");
@@ -1398,7 +1410,7 @@ describe("universe scene production invariants", () => {
 
   it("throttles projection morph scales on the camera path without stalling motion", () => {
     const morphScale = sourceBetween(
-      "private updateNodeMorphScales(",
+      "updateNodeMorphScales(",
       "private updateSourceAuraOpacities()",
     );
     const cameraChange = sourceBetween(
@@ -1406,7 +1418,7 @@ describe("universe scene production invariants", () => {
       "private handlePointerMove = (event: PointerEvent)",
     );
     const objectVisual = sourceBetween(
-      "private setObjectOpacity(node: ForceNode",
+      "setObjectOpacity(node: ForceNode",
       "private nodeProjectionScale(node: ForceNode)",
     );
 
@@ -1421,7 +1433,7 @@ describe("universe scene production invariants", () => {
 
   it("waits for camera damping to fall quiet before sleeping the renderer", () => {
     const wake = sourceBetween(
-      "private wakeRendering(settleMs = 1800)",
+      "wakeRendering(settleMs = 1800)",
       "private loop = (now: number)",
     );
     const cameraChange = sourceBetween(

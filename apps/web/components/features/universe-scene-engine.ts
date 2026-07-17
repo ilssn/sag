@@ -11,17 +11,13 @@ import type {
 import type { SearchSourceHit, UniversePolicy } from "@/lib/types";
 import {
   nextUniverseKeyboardNodeId,
-  orderUniverseKeyboardCandidates,
   type UniverseKeyboardDirection,
 } from "@/lib/universe-keyboard-navigation";
-import { planUniverseFocusCards } from "@/lib/universe-focus-cards";
 import {
-  universeCardBudget,
   type UniverseViewPreferences,
 } from "@/lib/universe-view-preferences";
 import {
   resolveUniverseDetailSource,
-  universeCardMorph,
   universeDeepLoadMilestone,
   universeNodeEmergence,
   universeVisualDetailProgress,
@@ -29,10 +25,6 @@ import {
 } from "@/lib/universe-presentation";
 import { planUniverseSceneDelta } from "@/lib/universe-scene-transition";
 import {
-  UNIVERSE_TEMPORAL_AXIS_FAR_LATERAL_SPREAD,
-  UNIVERSE_TEMPORAL_AXIS_NEAR_LATERAL_SPREAD,
-  UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT,
-  UNIVERSE_TEMPORAL_AXIS_VERTICAL_ASPECT,
 } from "@/lib/universe-temporal-axis";
 import {
   advanceUniverseSourceExitGate,
@@ -42,25 +34,68 @@ import {
   createUniverseSourceExitGate,
   createUniverseTemporalFlightState,
   flyUniverseTemporalFlightTo,
-  planUniverseTemporalFlightFollow,
-  stepUniverseTemporalFlight,
   UNIVERSE_FLIGHT_SETTLE_EPSILON,
-  universeTemporalFlightPresence,
   type UniverseSourceExitGate,
   type UniverseTemporalFlightState,
 } from "@/lib/universe-temporal-flight";
 import { UNIVERSE_SCENE_BUDGET } from "@/lib/universe-working-set";
 import {
+  bindLabelInteraction,
+  bindNodeLabelInteraction,
+  cancelHoverLabelRebuild,
+  hoverLabelOpacityFactor,
+  labelFocusId,
+  rebuildLabels,
+  scheduleHoverLabelRebuild,
+  sortLabelsForLayout,
+  updateHoverLabelState,
+  updateLabels,
+} from "@/components/features/universe-scene-labels";
+import {
+  NEBULA_AMBIENT_MOTION_MS,
+  NEBULA_SOURCE_RADIUS_MIN,
+  NEBULA_SOURCE_RADIUS_SCALE,
+  armNebulaAnimation,
+  clearNebula,
+  nebulaAmbientEligible,
+  nebulaMotionStrength,
+  rebuildNebula,
+  shouldAnimateNebula,
+  stopNebulaAmbientTicker,
+  syncNebulaAmbientTicker,
+  syncNebulaCorridorUniforms,
+  updateNebulaAlphas,
+  updateNebulaAnimation,
+  updateNebulaMotionState,
+  updateNebulaPositions,
+} from "@/components/features/universe-scene-nebula";
+import {
+  updateTemporalFlight,
+  updateTemporalPresence,
+} from "@/components/features/universe-scene-temporal";
+import {
+  clearKeyboardFocus,
+  keyboardCandidates,
+  setKeyboardFocus,
+  updateKeyboardStatus,
+} from "@/components/features/universe-scene-keyboard";
+import {
+  updatePointerParallax,
+} from "@/components/features/universe-scene-parallax";
+import {
+  WHITE,
+  currentNodePresentationCardScale,
+  currentNodePresentationOpacity,
+  currentNodePresentationScale,
+  presentationOpacity,
+  presentationScale,
+  stableUnit,
+} from "@/components/features/universe-scene-internals";
+import {
   makeEntityCoreTexture,
   makeEventCoreTexture,
-  makeNebulaMaterial,
   makeSpriteTexture,
-  NEBULA_BRAND_GOLD,
-  NEBULA_CORRIDOR_BAND_OFF,
-  NEBULA_CORRIDOR_WRAP_SPAN,
-  NEBULA_DETAIL_ALPHA,
   NEBULA_GLOW_POINT_SIZE_CSS_DESKTOP,
-  SOURCE_ENTRY_CONDENSATION_FRACTION,
 } from "@/components/features/universe-scene-textures";
 
 export { UNIVERSE_BRAND_GOLD } from "@/components/features/universe-scene-textures";
@@ -176,7 +211,7 @@ export interface ForceLink extends LinkObject<ForceNode> {
   lineMaterial?: THREE.MeshBasicMaterial;
 }
 
-interface NebulaParticle {
+export interface NebulaParticle {
   sourceId: string;
   sourceIndex: number;
   offset: THREE.Vector3;
@@ -190,7 +225,7 @@ interface NebulaParticle {
   radial: number;
 }
 
-interface SceneLabel {
+export interface SceneLabel {
   nodeId: string;
   kind: "source" | "node";
   element: HTMLElement;
@@ -244,7 +279,6 @@ interface ClusterForce {
 
 const EVENT_COLOR = new THREE.Color("#ffd166");
 const EVENT_LIGHT_COLOR = new THREE.Color("#b77b0b");
-const WHITE = new THREE.Color("#ffffff");
 /**
  * A source marker is the colour authority for its nebula. The particle field
  * stores that entry hue and only moves a little toward white for the luminous
@@ -253,12 +287,8 @@ const WHITE = new THREE.Color("#ffffff");
  */
 const DETAIL_MORPH_RESPONSE_MS = 92;
 const DETAIL_MORPH_SETTLE_EPSILON = 0.01;
-const HOVER_LABEL_SETTLE_MS = 72;
 const HOVER_CLEAR_GRACE_MS = 84;
 const MAX_PLACEMENT_MEMORY = 512;
-const NEBULA_AMBIENT_MOTION_MS = 5_000;
-const NEBULA_AMBIENT_FRAME_MS_DESKTOP = 1000 / 24;
-const NEBULA_AMBIENT_FRAME_MS_MOBILE = 1000 / 18;
 // Keep the focused source luminous while retaining a bounded per-device
 // particle budget. Detail gives the selected source most of that budget;
 // overview sources keep a proportional share of the same ceiling.
@@ -267,10 +297,7 @@ const NEBULA_AMBIENT_FRAME_MS_MOBILE = 1000 / 18;
 // Keep source nebulae generous in the overview. The source marker is a portal
 // into a knowledge cloud, not a pin; a compact minimum avoids three tiny dots
 // when a source has a small radius in the manifest.
-const NEBULA_SOURCE_RADIUS_MIN = 88;
-const NEBULA_SOURCE_RADIUS_SCALE = 2.25;
 const NEBULA_SOURCE_FRAME_RATIO = 0.76;
-const NEBULA_SOURCE_CORRIDOR_SCALE = 2.35;
 /**
  * Glow pockets are accents, not weather: the brand galaxy is built purely
  * from sharp grains, so oversized haze sprites read as noise smeared over it.
@@ -288,9 +315,6 @@ const BROWSE_GAZE_AZIMUTH_RAD = 0.3;
 const BROWSE_GAZE_POLAR_RAD = 0.22;
 const BROWSE_GAZE_ROTATE_SPEED = 0.22;
 /** Pointer parallax: the view leans faintly toward the cursor, brand-style. */
-const BROWSE_PARALLAX_X = 12;
-const BROWSE_PARALLAX_Y = 7;
-const BROWSE_PARALLAX_RESPONSE = 0.055;
 const BROWSE_GAZE_PAN_SPEED = 0.4;
 const UNIVERSE_ROTATE_SPEED = 0.42;
 const UNIVERSE_PAN_SPEED = 0.52;
@@ -312,28 +336,16 @@ const CORRIDOR_ENTRY_MS = 920;
 const SOURCE_ENTRY_CORE_HOLD_MS = 140;
 const SOURCE_ENTRY_DIVE_KEEP_ALIVE_MS = 1_800;
 /** Below this flight speed (units/s) cards are fully expanded. */
-const FLIGHT_CARD_CALM_SPEED = 240;
 /** Above this speed cards stay compact, but never disappear while approaching. */
-const FLIGHT_CARD_HIDE_SPEED = 760;
-const FLIGHT_CARD_TRAVEL_MIN = 0.46;
 /** Cards duck quickly when speed picks up and re-expand a beat after settling. */
-const FLIGHT_CARD_COLLAPSE_MS = 110;
-const FLIGHT_CARD_RECOVER_MS = 300;
 /** Matches the travelled-package ember floor in universe-temporal-flight. */
 /** One restrained filter budget shared by edge and depth-of-field blur. */
-const CARD_DEPTH_BLUR_CSS = 3.2;
 /** Corridor lateral spread mirrors the package axis policy. */
-const NEBULA_CORRIDOR_NEAR_SPREAD = UNIVERSE_TEMPORAL_AXIS_NEAR_LATERAL_SPREAD;
-const NEBULA_CORRIDOR_FAR_SPREAD = UNIVERSE_TEMPORAL_AXIS_FAR_LATERAL_SPREAD;
-const NEBULA_CORRIDOR_VERTICAL_ASPECT = UNIVERSE_TEMPORAL_AXIS_VERTICAL_ASPECT;
 /**
  * Most corridor dust becomes the distant canyon walls: pushed far out
  * laterally it barely parallaxes under a gaze turn, so the nebula reads as a
  * vast illuminated surrounding instead of debris sweeping past the camera.
  */
-const NEBULA_WALL_SHARE = 0.46;
-const NEBULA_WALL_LATERAL_MIN = 1.6;
-const NEBULA_WALL_LATERAL_MAX = 3.8;
 /**
  * Corridor dust is camera-anchored: it repeats modulo this span around the
  * flight depth, so density near the camera is constant no matter whether the
@@ -370,14 +382,6 @@ const SOURCE_PALETTE = [
   "#c98ba7",
 ];
 
-function stableUnit(value: string) {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0) / 0xffffffff;
-}
 
 function stableDirection(key: string) {
   const azimuth = stableUnit(`${key}:azimuth`) * Math.PI * 2;
@@ -452,30 +456,10 @@ function easeTimelineMotion(value: number) {
     : 1 - Math.pow(-2 * value + 2, 3) / 2;
 }
 
-function presentationScale(value: number | undefined) {
-  return typeof value === "number" && Number.isFinite(value)
-    ? Math.max(0, value)
-    : 1;
-}
 
-function presentationOpacity(value: number | undefined) {
-  return typeof value === "number" && Number.isFinite(value)
-    ? THREE.MathUtils.clamp(value, 0, 1)
-    : 1;
-}
 
-function currentNodePresentationScale(node: ForceNode) {
-  return node.presentationScale ?? presentationScale(node.sceneNode.presentationScale);
-}
 
-function currentNodePresentationCardScale(node: ForceNode) {
-  return node.presentationCardScale
-    ?? presentationScale(node.sceneNode.presentationCardScale);
-}
 
-function currentNodePresentationOpacity(node: ForceNode) {
-  return node.presentationOpacity ?? presentationOpacity(node.sceneNode.presentationOpacity);
-}
 
 function sourceColor(sourceId: string) {
   return new THREE.Color(
@@ -499,15 +483,15 @@ function endpointId(value: string | ForceNode) {
 }
 
 export class UniverseForceSceneEngine {
-  private graph: ForceGraph3DInstance<ForceNode, ForceLink>;
-  private host: HTMLDivElement;
-  private keyboardStatusElement: HTMLElement;
+  graph: ForceGraph3DInstance<ForceNode, ForceLink>;
+  host: HTMLDivElement;
+  keyboardStatusElement: HTMLElement;
   private rendererCanvas: HTMLCanvasElement;
-  private controls: GraphControls;
+  controls: GraphControls;
   private resizeObserver: ResizeObserver;
-  private policy: UniversePolicy;
-  private viewPreferences: UniverseViewPreferences;
-  private callbacks: SceneCallbacks = {
+  policy: UniversePolicy;
+  viewPreferences: UniverseViewPreferences;
+  callbacks: SceneCallbacks = {
     onNodeClick: () => undefined,
     onHover: () => undefined,
     onViewChange: () => undefined,
@@ -524,10 +508,10 @@ export class UniverseForceSceneEngine {
     onUnavailable: () => undefined,
   };
   private unavailableNotified = false;
-  private nodes = new Map<string, ForceNode>();
+  nodes = new Map<string, ForceNode>();
   /** Stable source lookup shared by layout, LOD and force hot paths. */
-  private sourceNodesById = new Map<string, ForceNode>();
-  private sourceNodeList: ForceNode[] = [];
+  sourceNodesById = new Map<string, ForceNode>();
+  sourceNodeList: ForceNode[] = [];
   private placementTargets = new Map<string, THREE.Vector3>();
   private links: ForceLink[] = [];
   private linkStart = new THREE.Vector3();
@@ -536,41 +520,41 @@ export class UniverseForceSceneEngine {
   private projectionCameraRight = new THREE.Vector3();
   private projectionPoint = new THREE.Vector3();
   private projectionEdge = new THREE.Vector3();
-  private adjacency = new Map<string, Set<string>>();
+  adjacency = new Map<string, Set<string>>();
   private visibleEdgeIds = new Set<string>();
-  private sourceHits: SearchSourceHit[] = [];
-  private selectedId: string | null = null;
-  private lockedId: string | null = null;
-  private hoveredId: string | null = null;
-  private hoveredFromLabel = false;
-  private keyboardFocusedId: string | null = null;
-  private keyboardActive = false;
-  private darkTheme = false;
-  private interactive = true;
-  private reducedMotion = false;
-  private paused = true;
-  private renderingAwake = false;
+  sourceHits: SearchSourceHit[] = [];
+  selectedId: string | null = null;
+  lockedId: string | null = null;
+  hoveredId: string | null = null;
+  hoveredFromLabel = false;
+  keyboardFocusedId: string | null = null;
+  keyboardActive = false;
+  darkTheme = false;
+  interactive = true;
+  reducedMotion = false;
+  paused = true;
+  renderingAwake = false;
   private sleepTimer: number | null = null;
-  private pointerX = 0;
-  private pointerY = 0;
-  private pointerActive = false;
+  pointerX = 0;
+  pointerY = 0;
+  pointerActive = false;
   private forwardedTimelineWheelEvents = new WeakSet<Event>();
-  private flightConfig: UniverseSceneTemporalFlight | null = null;
-  private flightState: UniverseTemporalFlightState =
+  flightConfig: UniverseSceneTemporalFlight | null = null;
+  flightState: UniverseTemporalFlightState =
     createUniverseTemporalFlightState();
   /** Depth already translated into the camera; deltas compose with orbiting. */
-  private appliedFlightDepth = 0;
-  private lastFlightStepAt = 0;
-  private flightOwnWindowChange = false;
-  private flightFollowCooldownUntil = 0;
-  private sourceNavigationPhase:
+  appliedFlightDepth = 0;
+  lastFlightStepAt = 0;
+  flightOwnWindowChange = false;
+  flightFollowCooldownUntil = 0;
+  sourceNavigationPhase:
     | "overview"
     | "origin"
     | "entering"
     | "exploring"
     | "returning" = "overview";
   private sourceExitGate: UniverseSourceExitGate = createUniverseSourceExitGate();
-  private sourceReturnMotion: {
+  sourceReturnMotion: {
     sourceId: string;
     startedAt: number;
     duration: number;
@@ -590,24 +574,24 @@ export class UniverseForceSceneEngine {
   private highlightFlowSprites = new Map<string, THREE.Sprite>();
   private highlightFlowTimer: number | null = null;
   private lastHighlightFlowAt = 0;
-  private nebulaPoints: THREE.Points | null = null;
-  private nebulaParticles: NebulaParticle[] = [];
-  private nebulaSourceIndices = new Map<string, number>();
-  private nebulaAlphaKey = "";
-  private nebulaAlphaUploads = 0;
-  private lastNebulaAnimationAt = 0;
-  private nebulaAnimationElapsed = 0;
-  private nebulaAmbientTimer: number | null = null;
+  nebulaPoints: THREE.Points | null = null;
+  nebulaParticles: NebulaParticle[] = [];
+  nebulaSourceIndices = new Map<string, number>();
+  nebulaAlphaKey = "";
+  nebulaAlphaUploads = 0;
+  lastNebulaAnimationAt = 0;
+  nebulaAnimationElapsed = 0;
+  nebulaAmbientTimer: number | null = null;
   /** While in the future, the ambient nebula drift holds still (camera gestures). */
-  private cameraCalmUntil = 0;
+  cameraCalmUntil = 0;
   /** Low-passed flight speed in units/s, fed by actual per-frame depth travel. */
-  private flightSpeed = 0;
+  flightSpeed = 0;
   /** 1 = cards fully expanded; eases toward 0 as flight speed rises. */
-  private flightCardPresence = 1;
+  flightCardPresence = 1;
   /** True while rotation is clamped to the corridor's forward gaze cone. */
-  private browseGazeApplied = false;
+  browseGazeApplied = false;
   /** Applied pointer-parallax lean, in world units along camera right/up. */
-  private parallaxApplied = { x: 0, y: 0 };
+  parallaxApplied = { x: 0, y: 0 };
   private browseGazeTimer: number | null = null;
   private sourceEntryTimer: number | null = null;
   private sourceEntryIntent: {
@@ -617,27 +601,27 @@ export class UniverseForceSceneEngine {
     remainingMs: number;
     dueAt: number;
   } | null = null;
-  private sourceSignature = "";
-  private labelLayer: HTMLDivElement;
-  private labels: SceneLabel[] = [];
-  private labelPlacementBudget = { events: 0, entities: 0, total: 0 };
-  private renderedLabelFocusId: string | null = null;
-  private hoverLabelTimer: number | null = null;
-  private hoverLabelFrame: number | null = null;
+  sourceSignature = "";
+  labelLayer: HTMLDivElement;
+  labels: SceneLabel[] = [];
+  labelPlacementBudget = { events: 0, entities: 0, total: 0 };
+  renderedLabelFocusId: string | null = null;
+  hoverLabelTimer: number | null = null;
+  hoverLabelFrame: number | null = null;
   private hoverClearTimer: number | null = null;
-  private rebuildingLabels = false;
+  rebuildingLabels = false;
   private loopFrame: number | null = null;
   private loopKeepAliveUntil = 0;
-  private lastLabelAt = 0;
+  lastLabelAt = 0;
   private lastLodAt = 0;
   private lastVisualLodAt = 0;
   private lastNodeMorphAt = 0;
   private lastControlsChangeAt = 0;
   private latchedDetailSourceId: string | null = null;
-  private visualSourceId: string | null = null;
-  private visualDetailMix = 0;
+  visualSourceId: string | null = null;
+  visualDetailMix = 0;
   private visualDetailTarget = 0;
-  private reportedViewSourceId: string | null = null;
+  reportedViewSourceId: string | null = null;
   private requestedSourceId: string | null = null;
   private overviewRequested = true;
   private lodLevels = new Map<string, 0 | 1 | 2 | 3>();
@@ -650,7 +634,7 @@ export class UniverseForceSceneEngine {
     notify: boolean;
   } | null = null;
   private lodArmed = false;
-  private timelineJourney: UniverseTimelineJourney = {
+  timelineJourney: UniverseTimelineJourney = {
     enabled: false,
     phase: "idle",
     hasNext: false,
@@ -670,14 +654,14 @@ export class UniverseForceSceneEngine {
   private timelineRevisionWatchTimer: number | null = null;
   private currentPixelRatio: number | null = null;
   private clusterNodes: ForceNode[] = [];
-  private dataReady = false;
+  dataReady = false;
   private initialFocusTimer: number | null = null;
   private initialFocusFrame: number | null = null;
   private initialFocusGeneration = 0;
   private resizePending = false;
   private didInitialFocus = false;
   private dataEpoch = 0;
-  private text: UniverseSceneText;
+  text: UniverseSceneText;
 
   constructor(
     host: HTMLDivElement,
@@ -1977,7 +1961,7 @@ export class UniverseForceSceneEngine {
     );
   }
 
-  private markSourceOrigin(now = performance.now()) {
+  markSourceOrigin(now = performance.now()) {
     this.cancelSourceEntryDive();
     this.sourceNavigationPhase = "origin";
     this.host.dataset.universeSourceNavigation = "origin";
@@ -2082,7 +2066,7 @@ export class UniverseForceSceneEngine {
     );
   }
 
-  private markSourceExploring() {
+  markSourceExploring() {
     if (!this.flightConfig) return;
     this.cancelSourceEntryDive();
     this.sourceReturnMotion = null;
@@ -2135,7 +2119,7 @@ export class UniverseForceSceneEngine {
     return "moved";
   }
 
-  private updateSourceReturnMotion(now: number) {
+  updateSourceReturnMotion(now: number) {
     const motion = this.sourceReturnMotion;
     if (!motion) return false;
     const progress = motion.duration <= 0
@@ -2686,7 +2670,7 @@ export class UniverseForceSceneEngine {
     );
   }
 
-  private timelineIsBusy() {
+  timelineIsBusy() {
     return this.timelineIntentPending
       || this.timelineMotionPhase !== "idle"
       || this.timelineJourney.phase === "loading"
@@ -3169,13 +3153,8 @@ export class UniverseForceSceneEngine {
    * committed layout change and is allowed to reveal its one-hop network.
    */
   private labelFocusId() {
-    const focusId = this.lockedId
-      ?? this.selectedId
-      ?? this.keyboardFocusedId;
-    return focusId && this.nodes.get(focusId)?.kind !== "source" ? focusId : null;
+    return labelFocusId(this);
   }
-
-  /** Focus used by WebGL/link highlighting; unlike layout focus it includes a transient hover. */
   private interactionFocusId() {
     const focusId = this.lockedId
       ?? this.selectedId
@@ -3184,7 +3163,7 @@ export class UniverseForceSceneEngine {
     return focusId && this.nodes.get(focusId)?.kind !== "source" ? focusId : null;
   }
 
-  private transientHoverFocusId() {
+  transientHoverFocusId() {
     if (
       this.lockedId
       || this.selectedId
@@ -3196,37 +3175,19 @@ export class UniverseForceSceneEngine {
   }
 
   private cancelHoverLabelRebuild() {
-    if (this.hoverLabelTimer !== null) window.clearTimeout(this.hoverLabelTimer);
-    if (this.hoverLabelFrame !== null) cancelAnimationFrame(this.hoverLabelFrame);
-    this.hoverLabelTimer = null;
-    this.hoverLabelFrame = null;
+    return cancelHoverLabelRebuild(this);
   }
 
-  private cancelHoverClear() {
+  cancelHoverClear() {
     if (this.hoverClearTimer !== null) window.clearTimeout(this.hoverClearTimer);
     this.hoverClearTimer = null;
   }
 
-  private scheduleHoverLabelRebuild(immediate = false) {
-    const focusId = this.labelFocusId();
-    this.cancelHoverLabelRebuild();
-    if (focusId === this.renderedLabelFocusId) return;
-    const queueFrame = () => {
-      this.hoverLabelTimer = null;
-      this.hoverLabelFrame = requestAnimationFrame(() => {
-        this.hoverLabelFrame = null;
-        if (
-          this.labelFocusId() !== focusId
-          || this.renderedLabelFocusId === focusId
-        ) return;
-        this.rebuildLabels();
-      });
-    };
-    if (immediate || focusId === null) queueFrame();
-    else this.hoverLabelTimer = window.setTimeout(queueFrame, HOVER_LABEL_SETTLE_MS);
+  scheduleHoverLabelRebuild(immediate = false) {
+    return scheduleHoverLabelRebuild(this, immediate);
   }
 
-  private handleNodeHover(
+  handleNodeHover(
     node: ForceNode | null,
     fromLabel = false,
     immediateClear = false,
@@ -3274,7 +3235,7 @@ export class UniverseForceSceneEngine {
     });
   }
 
-  private applyHighlight() {
+  applyHighlight() {
     const anchorId = this.interactionFocusId();
     const layoutFocusId = this.labelFocusId();
     const anchor = anchorId ? this.nodes.get(anchorId) : undefined;
@@ -3347,43 +3308,11 @@ export class UniverseForceSceneEngine {
   }
 
   private updateHoverLabelState() {
-    const transientId = this.transientHoverFocusId();
-    const emphasizedId = this.lockedId
-      ?? this.selectedId
-      ?? this.keyboardFocusedId
-      ?? this.hoveredId;
-    this.labels.forEach((label) => {
-      const node = this.nodes.get(label.nodeId);
-      if (!node) return;
-      const hovered = node.id === this.hoveredId;
-      const emphasized = node.id === emphasizedId;
-      label.element.dataset.hovered = String(hovered);
-      label.element.dataset.highlighted = String(
-        emphasized || this.sourceHits.some((hit) => hit.source_id === node.sourceId),
-      );
-      const baseOpacity = Number(label.element.dataset.baseOpacity);
-      if (Number.isFinite(baseOpacity)) {
-        label.element.style.opacity = String(
-          baseOpacity * this.hoverLabelOpacityFactor(node),
-        );
-      }
-      label.element.dataset.expanded = String(
-        node.kind === "event"
-          && node.id === this.labelFocusId()
-          && !transientId,
-      );
-      label.element.style.zIndex = emphasized
-        ? "4"
-        : label.kind === "node" ? "2" : "1";
-    });
+    return updateHoverLabelState(this);
   }
 
   private hoverLabelOpacityFactor(node: ForceNode) {
-    const anchorId = this.transientHoverFocusId();
-    if (!anchorId || node.kind === "source") return 1;
-    if (node.id === anchorId) return 1;
-    if (this.adjacency.get(anchorId)?.has(node.id)) return 0.76;
-    return 0.16;
+    return hoverLabelOpacityFactor(this, node);
   }
 
   private updateObjectOpacities() {
@@ -3396,7 +3325,7 @@ export class UniverseForceSceneEngine {
    * motions in reverse. The halo is the last grains gathering; the core star
    * resolves next; then one complete DOM card grows with no internal staging.
    */
-  private nodeEmergence(node: ForceNode) {
+  nodeEmergence(node: ForceNode) {
     const motionAvailability = THREE.MathUtils.clamp(
       (node.entryOpacity ?? 1) * (node.timelineOpacity ?? 1),
       0,
@@ -3459,7 +3388,7 @@ export class UniverseForceSceneEngine {
     return next;
   }
 
-  private setObjectOpacity(node: ForceNode, opacity: number, emphasized: boolean) {
+  setObjectOpacity(node: ForceNode, opacity: number, emphasized: boolean) {
     const entryOpacity = (node.entryOpacity ?? 1) * (node.timelineOpacity ?? 1);
     const emergence = this.nodeEmergence(node);
     const dataScale = currentNodePresentationScale(node);
@@ -3575,7 +3504,7 @@ export class UniverseForceSceneEngine {
     });
   }
 
-  private nodeAtmosphereOpacity(node: ForceNode) {
+  nodeAtmosphereOpacity(node: ForceNode) {
     if (node.kind === "source") return 1;
     return THREE.MathUtils.lerp(
       0.62,
@@ -3660,7 +3589,7 @@ export class UniverseForceSceneEngine {
   // OrbitControls emits change synchronously without rAF coalescing. Throttling to
   // the visual-refresh cadence is safe for animating nodes: setObjectOpacity
   // applies the same formula every frame while a timelineMotion is in flight.
-  private updateNodeMorphScales(now = performance.now(), force = false) {
+  updateNodeMorphScales(now = performance.now(), force = false) {
     const elapsed = this.lastNodeMorphAt > 0
       ? Math.max(1, now - this.lastNodeMorphAt)
       : 32;
@@ -3742,286 +3671,8 @@ export class UniverseForceSceneEngine {
   }
 
   private rebuildNebula() {
-    const sources = this.sourceNodeList;
-    const mobile = this.host.clientWidth < 768;
-    const configuredBudget = mobile
-      ? this.policy.proxy_budget_mobile
-      : this.policy.proxy_budget_desktop;
-    const budgetCap = mobile ? 4_000 : 16_000;
-    const budget = Math.min(
-      budgetCap,
-      Math.max(0, Number.isFinite(configuredBudget) ? configuredBudget : 0),
-    );
-    this.host.dataset.universeNebulaConfiguredBudget = String(configuredBudget);
-    this.host.dataset.universeNebulaBudgetCap = String(budgetCap);
-    this.host.dataset.universeNebulaBudget = String(budget);
-    // One stable particle field owns the entire overview → source → corridor
-    // journey. Selection must never reassign six times as many grains to one
-    // source: that made the entrance look like a particle explosion instead
-    // of the existing galaxy naturally opening into data.
-    const signature = `${mobile ? "mobile" : "desktop"}:${budget}:` + sources
-      .map((node) => `${node.id}:${Math.round(node.sceneNode.radius)}:${node.sceneNode.eventCount}:${node.sceneNode.entityCount}`)
-      .join("|");
-    if (signature === this.sourceSignature && this.nebulaPoints) {
-      this.updateNebulaPositions();
-      this.updateNebulaAlphas();
-      return;
-    }
-    this.sourceSignature = signature;
-    this.clearNebula();
-    if (!sources.length) return;
-    this.nebulaSourceIndices = new Map(
-      sources.map((source, index) => [source.sourceId, index]),
-    );
-    const weights = sources.map((source) =>
-      Math.max(1, Math.log2(source.sceneNode.eventCount + source.sceneNode.entityCount + 2)),
-    );
-    const totalWeight = weights.reduce((sum, value) => sum + value, 0);
-    const baseCount = Math.max(
-      0,
-      Math.min(mobile ? 10 : 14, Math.floor(budget / Math.max(1, sources.length))),
-    );
-    const weightedBudget = Math.max(0, budget - baseCount * sources.length);
-    const particles: NebulaParticle[] = [];
-    const spinAxesBySource = new Map<string, THREE.Vector3>();
-    const spinRatesBySource = new Map<string, number>();
-    sources.forEach((source, sourceIndex) => {
-      const count = baseCount + Math.floor(
-        (weightedBudget * weights[sourceIndex]) / Math.max(1, totalWeight),
-      );
-      // A bounded spiral nebula, not a flat plate and not random point fog.
-      // Tight arm lanes make the silhouette readable from the overview; real
-      // z-thickness and restrained inter-arm dust keep the approach spatial.
-      const radius = Math.max(
-        NEBULA_SOURCE_RADIUS_MIN,
-        source.sceneNode.radius * NEBULA_SOURCE_RADIUS_SCALE,
-      );
-      const tiltDirection = stableUnit(`${source.id}:tilt-direction`) < 0.5 ? -1 : 1;
-      const rotation = new THREE.Euler(
-        THREE.MathUtils.degToRad(
-          (52 + stableUnit(`${source.id}:tilt`) * 16) * tiltDirection,
-        ),
-        THREE.MathUtils.degToRad(
-          (stableUnit(`${source.id}:yaw`) - 0.5) * 24,
-        ),
-        stableUnit(`${source.id}:roll`) * Math.PI * 2,
-        "ZXY",
-      );
-      spinAxesBySource.set(
-        source.sourceId,
-        new THREE.Vector3(0, 0, 1).applyEuler(rotation).normalize(),
-      );
-      const spinDirection = stableUnit(`${source.id}:spin-direction`) < 0.5 ? -1 : 1;
-      spinRatesBySource.set(
-        source.sourceId,
-        (0.007 + stableUnit(`${source.id}:spin-rate`) * 0.0045) * spinDirection,
-      );
-      const armCount = 2 + Math.floor(stableUnit(`${source.id}:arm-count`) * 2);
-      const winding = Math.PI * (
-        2.65 + stableUnit(`${source.id}:arm-winding`) * 0.7
-      );
-      for (let index = 0; index < count; index += 1) {
-        const key = `${source.id}:dust:${index}`;
-        const population = stableUnit(`${key}:population`);
-        const coreParticle = population < 0.3;
-        const haloParticle = population >= 0.92;
-        const diffuseParticle = population >= 0.72 && !haloParticle;
-        const phase = stableUnit(`${key}:phase`) * Math.PI * 2;
-        const radial = haloParticle
-          ? 0.78 + Math.pow(stableUnit(`${key}:radius`), 0.8) * 0.38
-          : Math.pow(
-              stableUnit(`${key}:radius`),
-              coreParticle ? 3.05 : diffuseParticle ? 0.74 : 0.64,
-            );
-        const armIndex = Math.min(
-          armCount - 1,
-          Math.floor(stableUnit(`${key}:arm-index`) * armCount),
-        );
-        const laneSeed = stableUnit(`${key}:arm-lane`) * 2 - 1;
-        const laneWidth = coreParticle
-          ? 1.05
-          : haloParticle
-            ? Math.PI
-          : diffuseParticle
-            ? 1.15
-            : 0.17 + radial * 0.24;
-        const laneOffset = Math.sign(laneSeed)
-          * Math.pow(Math.abs(laneSeed), 1.75)
-          * laneWidth;
-        const angle = haloParticle
-          ? stableUnit(`${key}:halo-angle`) * Math.PI * 2
-          : (armIndex / armCount) * Math.PI * 2
-            + radial * winding
-            + laneOffset;
-        const planarRadius = radius * Math.min(1.16, radial);
-        const thickness = radius
-          * (coreParticle ? 0.2 : haloParticle ? 0.12 : diffuseParticle ? 0.11 : 0.085)
-          * (1 - radial * 0.32);
-        const offset = new THREE.Vector3(
-          Math.cos(angle) * planarRadius * 1.08,
-          Math.sin(angle) * planarRadius * 0.92,
-          (stableUnit(`${key}:depth`) * 2 - 1) * thickness
-            + Math.sin(angle * 1.8 + phase) * radius * 0.045 * (1 - radial),
-        );
-        offset.applyEuler(rotation);
-        const twinkle = Math.pow(stableUnit(`${key}:twinkle`), 1.18);
-        const glowSeed = stableUnit(`${key}:glow`);
-        const emitterParticle = coreParticle
-          ? stableUnit(`${key}:emitter`) < 0.18
-          : stableUnit(`${key}:emitter`) < 0.025;
-        // Sparse light pockets punctuate fine grain; no oversized fog blobs.
-        const glowChance = coreParticle ? 0.018 : 0.006;
-        particles.push({
-          sourceId: source.sourceId,
-          sourceIndex,
-          offset,
-          core: coreParticle,
-          emitter: emitterParticle,
-          radial: Math.min(1, radial),
-          alpha: haloParticle
-            ? 0.05 + stableUnit(`${key}:alpha`) * 0.11
-            : diffuseParticle
-            ? 0.12 + stableUnit(`${key}:alpha`) * 0.2
-            : (coreParticle ? 0.58 : 0.32)
-              + stableUnit(`${key}:alpha`) * (coreParticle ? 0.42 : 0.54),
-          glow: glowSeed < glowChance
-            ? 0.5 + stableUnit(`${key}:glow-strength`) * 0.32
-            : 0,
-          phase,
-          twinkle,
-        });
-      }
-    });
-    this.host.dataset.universeParticleCount = String(particles.length);
-    this.nebulaParticles = particles;
-    const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(particles.length * 3);
-    const corridors = new Float32Array(particles.length * 3);
-    const colors = new Float32Array(particles.length * 3);
-    const alphas = new Float32Array(particles.length);
-    const sourceIndices = new Float32Array(particles.length);
-    const sourceCenters = new Float32Array(particles.length * 3);
-    const spinAxes = new Float32Array(particles.length * 3);
-    const visuals = new Float32Array(particles.length * 4);
-    const motions = new Float32Array(particles.length * 4);
-    const axisDepthBySource = new Map(sources.map((source) => [
-      source.sourceId,
-      Math.max(0, source.sceneNode.eventCount - 1)
-        * UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT,
-    ]));
-    const lateralBySource = new Map(sources.map((source) => [
-      source.sourceId,
-      Math.max(96, source.sceneNode.radius) * NEBULA_SOURCE_CORRIDOR_SCALE,
-    ]));
-    particles.forEach((particle, index) => {
-      // The cloud previews the graph before any card exists: gold grains are
-      // future event stars; accent grains are future entities. Because the
-      // same particles become the corridor, this semantic colour continuity
-      // survives the entire outside → inside → graph transition.
-      const eventGrain = stableUnit(`${particle.sourceId}:${index}:semantic`)
-        < (particle.core ? 0.48 : 0.36);
-      const color = eventGrain
-        ? NEBULA_BRAND_GOLD.clone()
-        : this.sourceVisualColor(particle.sourceId);
-      const whiteMix = particle.core
-        ? 0.08 + (1 - particle.radial) * 0.18
-        : stableUnit(`${particle.sourceId}:${index}:white`)
-          * (this.darkTheme ? 0.07 : 0.05);
-      color.lerp(WHITE, whiteMix);
-      colors[index * 3] = color.r;
-      colors[index * 3 + 1] = color.g;
-      colors[index * 3 + 2] = color.b;
-      // Brand grain: fine dust, a denser bright heart carried by size too.
-      const visualOffset = index * 4;
-      visuals[visualOffset] = 0.95
-        + stableUnit(`${particle.sourceId}:${index}:size`) * 2.2
-        + (particle.twinkle > 0.8 ? 0.6 : 0)
-        + (eventGrain ? 0.16 : 0)
-        + (particle.core ? (1 - particle.radial) * 0.8 : 0);
-      alphas[index] = particle.alpha;
-      visuals[visualOffset + 1] = particle.glow;
-      visuals[visualOffset + 2] = particle.glow === 0
-        && (particle.twinkle > 0.9 || (eventGrain && particle.twinkle > 0.66))
-        ? 1
-        : 0;
-      visuals[visualOffset + 3] = 0.18 + particle.twinkle * 0.82;
-      sourceIndices[index] = particle.sourceIndex;
-      const source = sources[particle.sourceIndex];
-      const spinAxis = spinAxesBySource.get(particle.sourceId)
-        ?? new THREE.Vector3(0, 0, 1);
-      sourceCenters[index * 3] = source?.x ?? 0;
-      sourceCenters[index * 3 + 1] = source?.y ?? 0;
-      sourceCenters[index * 3 + 2] = source?.z ?? 0;
-      spinAxes[index * 3] = spinAxis.x;
-      spinAxes[index * 3 + 1] = spinAxis.y;
-      spinAxes[index * 3 + 2] = spinAxis.z;
-      motions[visualOffset] = particle.phase;
-      motions[visualOffset + 1] = spinRatesBySource.get(particle.sourceId) ?? 0.008;
-      motions[visualOffset + 2] = particle.emitter ? 1 : 0;
-      // The corridor form: the same dust, laid out along ONE wrap span of the
-      // counting axis. The shader repeats it modulo the span around the
-      // flight depth, so a fixed budget gives the same density beside the
-      // camera whether the source holds 12 events or 5,000.
-      const key = `${particle.sourceId}:corridor:${index}`;
-      const axisDepth = axisDepthBySource.get(particle.sourceId) ?? 0;
-      const depth = stableUnit(`${key}:depth`)
-        * Math.min(Math.max(1, axisDepth), NEBULA_CORRIDOR_WRAP_SPAN);
-      // Two shells: sparse wisps you fly through, and the canyon walls — a
-      // fine star field framing the corridor, far enough to barely parallax
-      // under a gaze turn but near enough to live inside the field of view.
-      const wall = !particle.emitter
-        && particle.glow === 0
-        && stableUnit(`${key}:shell`) < NEBULA_WALL_SHARE;
-      const lateralScale = wall
-        ? NEBULA_WALL_LATERAL_MIN
-          + stableUnit(`${key}:wall-radius`)
-            * (NEBULA_WALL_LATERAL_MAX - NEBULA_WALL_LATERAL_MIN)
-        : 0.35 + stableUnit(`${key}:radius`) * 0.85;
-      // A stable per-particle radius seed: under the camera wrap a particle's
-      // distance keeps changing, so the cross-section is a textured tube, not
-      // a cone that could saw-tooth at the wrap boundary.
-      const lateral = (NEBULA_CORRIDOR_NEAR_SPREAD
-        + (NEBULA_CORRIDOR_FAR_SPREAD - NEBULA_CORRIDOR_NEAR_SPREAD)
-          * stableUnit(`${key}:spread`))
-        * (lateralBySource.get(particle.sourceId) ?? 130)
-        * lateralScale;
-      const angle = stableUnit(`${key}:angle`) * Math.PI * 2;
-      motions[visualOffset + 3] = wall ? 1 : 0;
-      corridors[index * 3] = Math.cos(angle) * lateral - particle.offset.x;
-      corridors[index * 3 + 1] = Math.sin(angle) * lateral
-        * NEBULA_CORRIDOR_VERTICAL_ASPECT - particle.offset.y;
-      corridors[index * 3 + 2] = -depth - particle.offset.z;
-    });
-    const positionAttribute = new THREE.BufferAttribute(positions, 3)
-      .setUsage(THREE.DynamicDrawUsage);
-    const alphaAttribute = new THREE.BufferAttribute(alphas, 1)
-      .setUsage(THREE.DynamicDrawUsage);
-    geometry.setAttribute("position", positionAttribute);
-    geometry.setAttribute("aCorridor", new THREE.BufferAttribute(corridors, 3));
-    geometry.setAttribute("aColor", new THREE.BufferAttribute(colors, 3));
-    geometry.setAttribute("aVisual", new THREE.BufferAttribute(visuals, 4));
-    geometry.setAttribute("aMotion", new THREE.BufferAttribute(motions, 4));
-    geometry.setAttribute("aAlpha", alphaAttribute);
-    geometry.setAttribute("aSourceIndex", new THREE.BufferAttribute(sourceIndices, 1));
-    geometry.setAttribute("aSourceCenter", new THREE.BufferAttribute(sourceCenters, 3));
-    geometry.setAttribute("aSpinAxis", new THREE.BufferAttribute(spinAxes, 3));
-    this.nebulaPoints = new THREE.Points(geometry, makeNebulaMaterial(this.darkTheme));
-    this.nebulaPoints.name = "sag-source-nebulae";
-    this.nebulaPoints.frustumCulled = false;
-    this.graph.scene().add(this.nebulaPoints);
-    this.updatePixelRatio();
-    this.updateNebulaPositions();
-    this.updateNebulaAlphas(true);
-    this.syncNebulaCorridorUniforms();
-    this.updateNebulaMotionState();
-    this.armNebulaAnimation();
+    return rebuildNebula(this);
   }
-
-  /**
-   * Clamps rotation to a forward gaze cone while browsing: a bounded glance
-   * around the corridor, never an orbit that flips the nebula over. The axis
-   * is world-aligned, so azimuth 0 already faces down the corridor.
-   */
   private applyBrowseGaze() {
     this.controls.minAzimuthAngle = -BROWSE_GAZE_AZIMUTH_RAD;
     this.controls.maxAzimuthAngle = BROWSE_GAZE_AZIMUTH_RAD;
@@ -4053,223 +3704,55 @@ export class UniverseForceSceneEngine {
    * Points the corridor's loaded-window band at the browsed source's visible
    * depth range so dust yields exactly where real packages condensed.
    */
-  private syncNebulaCorridorUniforms() {
-    const material = this.nebulaPoints?.material as THREE.ShaderMaterial | undefined;
-    if (!material) return;
-    const config = this.flightConfig;
-    material.uniforms.uCorridorNearZ.value = config
-      ? config.centerZ - config.windowNearDepth
-      : NEBULA_CORRIDOR_BAND_OFF;
-    material.uniforms.uCorridorFarZ.value = config
-      ? config.centerZ - config.windowFarDepth
-      : NEBULA_CORRIDOR_BAND_OFF;
-    // The dust wrap re-anchors to wherever the camera is on the axis, so it
-    // must ride the flight depth every frame it changes.
-    material.uniforms.uFlightDepth.value = config ? this.appliedFlightDepth : 0;
-    material.uniforms.uCorridorAxisDepth.value = config
-      ? Math.max(0, config.maxDepth)
-      : 0;
-    material.uniforms.uCorridorCenterZ.value = config ? config.centerZ : 0;
-    material.uniforms.uCorridorVestibule.value = config
-      ? Math.max(0, config.vestibuleDepth)
-      : 0;
+  syncNebulaCorridorUniforms() {
+    return syncNebulaCorridorUniforms(this);
   }
 
   private updateNebulaPositions() {
-    if (!this.nebulaPoints) return;
-    const position = this.nebulaPoints.geometry.getAttribute("position") as THREE.BufferAttribute;
-    const sourceCenter = this.nebulaPoints.geometry.getAttribute(
-      "aSourceCenter",
-    ) as THREE.BufferAttribute;
-    this.nebulaParticles.forEach((particle, index) => {
-      const source = this.sourceNodesById.get(particle.sourceId);
-      if (!source) return;
-      position.setXYZ(
-        index,
-        source.x + particle.offset.x,
-        source.y + particle.offset.y,
-        source.z + particle.offset.z,
-      );
-      sourceCenter.setXYZ(index, source.x, source.y, source.z);
-    });
-    position.needsUpdate = true;
-    sourceCenter.needsUpdate = true;
+    return updateNebulaPositions(this);
   }
 
   private updateNebulaAlphas(force = false) {
-    if (!this.nebulaPoints) return;
-    const material = this.nebulaPoints.material as THREE.ShaderMaterial;
-    material.uniforms.uDetail.value = this.visualDetailMix;
-    material.uniforms.uDetailSource.value = this.visualSourceId
-      ? this.nebulaSourceIndices.get(this.visualSourceId) ?? -1
-      : -1;
-    const detailFactor = THREE.MathUtils.lerp(
-      1,
-      NEBULA_DETAIL_ALPHA,
-      THREE.MathUtils.smoothstep(this.visualDetailMix, 0.18, 0.78),
-    );
-    this.host.dataset.universeNebulaDetailFactor = detailFactor.toFixed(2);
-    this.host.dataset.universeNebulaAlphaMode = "gpu-detail";
-    const persistentAnchor = this.nodes.get(
-      this.lockedId ?? this.selectedId ?? this.keyboardFocusedId ?? "",
-    );
-    // Source hover and source entry share the shader's continuous focus morph.
-    // Rewriting every particle alpha on pointer exit made the selected galaxy
-    // dim once while every background galaxy flashed before fading again.
-    const anchor = persistentAnchor;
-    const contextKey = anchor
-      ? `anchor:${anchor.kind}:${anchor.sourceId}`
-      : this.sourceHits.length
-        ? `hits:${this.sourceHits.map((hit) => hit.source_id).join("|")}`
-        : "default";
-    const modeKey = contextKey;
-    if (!force && modeKey === this.nebulaAlphaKey) return;
-    this.nebulaAlphaKey = modeKey;
-    const alpha = this.nebulaPoints.geometry.getAttribute("aAlpha") as THREE.BufferAttribute;
-    const hitRank = new Map(this.sourceHits.map((hit, index) => [hit.source_id, index]));
-    // Context changes are rare CPU buffer updates. The source-detail morph is
-    // handled continuously by shader uniforms above, avoiding repeated uploads
-    // of the full alpha attribute while the camera moves into a nebula.
-    this.nebulaParticles.forEach((particle, index) => {
-      let multiplier = 1;
-      if (anchor?.kind === "source") {
-        multiplier = anchor.sourceId === particle.sourceId ? 1.28 : 0.14;
-      } else if (anchor) {
-        multiplier = anchor.sourceId === particle.sourceId ? 0.76 : 0.08;
-      }
-      else if (hitRank.size) {
-        const rank = hitRank.get(particle.sourceId);
-        multiplier = rank === 0 ? 1 : rank !== undefined ? 0.52 : 0.12;
-      }
-      alpha.setX(index, particle.alpha * multiplier);
-    });
-    alpha.needsUpdate = true;
-    this.nebulaAlphaUploads += 1;
-    this.host.dataset.universeNebulaAlphaUploads = String(this.nebulaAlphaUploads);
+    return updateNebulaAlphas(this, force);
   }
 
   private nebulaMotionStrength() {
-    if (
-      !this.nebulaPoints
-      || !this.interactive
-      || this.reducedMotion
-      || this.reportedViewSourceId
-      || performance.now() < this.cameraCalmUntil
-      || document.visibilityState !== "visible"
-    ) return 0;
-    return THREE.MathUtils.clamp((0.52 - this.visualDetailMix) / 0.22, 0, 1);
+    return nebulaMotionStrength(this);
   }
 
   private nebulaAmbientEligible() {
-    return Boolean(
-      this.nebulaPoints
-      && this.interactive
-      && !this.paused
-      && !this.reducedMotion
-      && !this.reportedViewSourceId
-      && this.visualDetailMix < 0.52
-      && document.visibilityState === "visible"
-    );
+    return nebulaAmbientEligible(this);
   }
 
   private shouldAnimateNebula() {
-    return this.nebulaAmbientEligible() && this.nebulaMotionStrength() > 0.01;
+    return shouldAnimateNebula(this);
   }
 
   private stopNebulaAmbientTicker() {
-    if (this.nebulaAmbientTimer !== null) {
-      window.clearInterval(this.nebulaAmbientTimer);
-      this.nebulaAmbientTimer = null;
-    }
-    this.lastNebulaAnimationAt = 0;
+    return stopNebulaAmbientTicker(this);
   }
 
   private syncNebulaAmbientTicker() {
-    if (!this.nebulaAmbientEligible()) {
-      this.stopNebulaAmbientTicker();
-      return;
-    }
-    if (this.nebulaAmbientTimer !== null) return;
-    const interval = this.host.clientWidth < 768
-      ? NEBULA_AMBIENT_FRAME_MS_MOBILE
-      : NEBULA_AMBIENT_FRAME_MS_DESKTOP;
-    this.nebulaAmbientTimer = window.setInterval(() => {
-      if (!this.nebulaAmbientEligible()) {
-        this.stopNebulaAmbientTicker();
-        return;
-      }
-      this.updateNebulaAnimation(performance.now());
-    }, interval);
+    return syncNebulaAmbientTicker(this);
   }
 
   private armNebulaAnimation(duration = NEBULA_AMBIENT_MOTION_MS) {
-    if (this.paused || !this.nebulaAmbientEligible()) return;
-    this.updateNebulaMotionState();
-    this.wakeRendering(Math.min(duration + 120, 1_200));
-    this.startLoop(Math.min(duration + 120, 900));
+    return armNebulaAnimation(this, duration);
   }
 
   private updateNebulaMotionState() {
-    const strength = this.nebulaMotionStrength();
-    const active = this.shouldAnimateNebula();
-    this.host.dataset.universeNebulaMotion = active ? "active" : "idle";
-    this.syncNebulaAmbientTicker();
-    if (!this.nebulaPoints) return;
-    const material = this.nebulaPoints.material as THREE.ShaderMaterial;
-    material.uniforms.uMotion.value = strength;
+    return updateNebulaMotionState(this);
   }
 
   private updateNebulaAnimation(now: number) {
-    const strength = this.nebulaMotionStrength();
-    const active = this.shouldAnimateNebula();
-    if (!this.nebulaPoints) return false;
-    const material = this.nebulaPoints.material as THREE.ShaderMaterial;
-    material.uniforms.uMotion.value = strength;
-    if (!active) {
-      this.host.dataset.universeNebulaMotion = "idle";
-      return false;
-    }
-    this.host.dataset.universeNebulaMotion = "active";
-    const frameInterval = this.host.clientWidth < 768
-      ? NEBULA_AMBIENT_FRAME_MS_MOBILE
-      : NEBULA_AMBIENT_FRAME_MS_DESKTOP;
-    if (now - this.lastNebulaAnimationAt >= frameInterval) {
-      const elapsed = this.lastNebulaAnimationAt > 0
-        ? Math.min(100, now - this.lastNebulaAnimationAt)
-        : 0;
-      this.lastNebulaAnimationAt = now;
-      this.nebulaAnimationElapsed += elapsed / 1000;
-      material.uniforms.uTime.value = this.nebulaAnimationElapsed;
-      if (!this.renderingAwake) {
-        this.graph.renderer().render(this.graph.scene(), this.graph.camera());
-      }
-    }
-    // A dedicated low-frequency ticker owns ambient overview motion. The main
-    // interaction loop can therefore sleep instead of polling at display Hz.
-    return active && this.nebulaAmbientTimer === null;
+    return updateNebulaAnimation(this, now);
   }
 
   private clearNebula() {
-    this.nebulaParticles = [];
-    this.nebulaSourceIndices.clear();
-    this.nebulaAlphaKey = "";
-    this.nebulaAlphaUploads = 0;
-    this.stopNebulaAmbientTicker();
-    this.nebulaAnimationElapsed = 0;
-    this.host.dataset.universeNebulaMotion = "idle";
-    this.host.dataset.universeNebulaAlphaUploads = "0";
-    this.host.dataset.universeParticleCount = "0";
-    if (!this.nebulaPoints) {
-      return;
-    }
-    this.graph.scene().remove(this.nebulaPoints);
-    this.nebulaPoints.geometry.dispose();
-    const material = this.nebulaPoints.material;
-    (Array.isArray(material) ? material : [material]).forEach((item) => item.dispose());
-    this.nebulaPoints = null;
+    return clearNebula(this);
   }
 
-  private sourceVisualColor(sourceId: string) {
+  sourceVisualColor(sourceId: string) {
     return themedSourceColor(sourceId, this.darkTheme);
   }
 
@@ -4352,7 +3835,7 @@ export class UniverseForceSceneEngine {
     return link.lineMaterial;
   }
 
-  private updateLinkVisuals() {
+  updateLinkVisuals() {
     this.links.forEach((link) => {
       const material = this.ensureLinkMaterial(link);
       const style = this.linkVisualStyle(link);
@@ -4492,371 +3975,15 @@ export class UniverseForceSceneEngine {
   }
 
   private rebuildLabels() {
-    const focusId = this.labelFocusId();
-    const transientHover = focusId !== null && focusId === this.transientHoverFocusId();
-    this.cancelHoverLabelRebuild();
-    const retainedLabelRank = new Map(
-      this.labels
-        .filter((label) => label.kind === "node")
-        .map((label, index) => [label.nodeId, index]),
-    );
-    this.rebuildingLabels = true;
-    const existingLabels = new Map(
-      this.labels.map((label) => [`${label.kind}:${label.nodeId}`, label]),
-    );
-    const nextLabels: SceneLabel[] = [];
-    let reusedLabelCount = 0;
-    const mobile = this.host.clientWidth < 768;
-    const sourceRank = new Map(this.sourceHits.map((hit, index) => [hit.source_id, index]));
-    const focusNeighbors = focusId ? this.adjacency.get(focusId) ?? new Set<string>() : null;
-    const labelSourceId = focusId
-      ? this.nodes.get(focusId)?.sourceId ?? this.visualSourceId
-      : this.visualSourceId;
-    this.renderedLabelFocusId = focusId;
-    this.host.dataset.universeLabelFocus = focusId ?? "";
-    this.host.dataset.universeLabelNeighborCount = String(focusNeighbors?.size ?? 0);
-    const sources = [...this.sourceNodeList]
-      .sort((left, right) => {
-        const leftRank = sourceRank.get(left.sourceId);
-        const rightRank = sourceRank.get(right.sourceId);
-        if (leftRank !== undefined || rightRank !== undefined) {
-          return (leftRank ?? 10_000) - (rightRank ?? 10_000);
-        }
-        return right.sceneNode.importance - left.sceneNode.importance;
-      })
-      .slice(0, mobile ? 8 : 18);
-    const focusCardPlan = planUniverseFocusCards(
-      [...this.nodes.values()]
-        .filter((node): node is ForceNode & { kind: "event" | "entity" } =>
-          node.kind === "event" || node.kind === "entity"),
-      focusId,
-      focusNeighbors ?? [],
-      labelSourceId,
-    );
-    const focusCardIds = new Set(focusCardPlan.ids);
-    const hasConcreteFocus = focusCardIds.size > 0;
-    this.host.dataset.universeFocusCardCount = String(focusCardPlan.ids.length);
-    this.host.dataset.universeFocusEventCardCount = String(focusCardPlan.eventCount);
-    this.host.dataset.universeFocusEntityCardCount = String(focusCardPlan.entityCount);
-    // Card preferences control the resting scene. Hover, keyboard focus and
-    // click lock all reveal the complete factual one-hop group.
-    const showEventCards = this.viewPreferences.showEventCards || hasConcreteFocus;
-    const showEntityCards = this.viewPreferences.showEntityCards || hasConcreteFocus;
-    const cardBudget = universeCardBudget(
-      Math.max(1, this.host.clientWidth),
-      Math.max(1, this.host.clientHeight),
-      showEventCards,
-      showEntityCards,
-    );
-    const prioritize = (left: ForceNode, right: ForceNode) => {
-      const emphasisRank = (node: ForceNode) => {
-        if (node.id === this.lockedId) return 0;
-        if (node.id === this.selectedId) return 1;
-        if (node.id === this.keyboardFocusedId) return 2;
-        if (node.id === this.hoveredId) return 3;
-        return 4;
-      };
-      const emphasisDifference = emphasisRank(left) - emphasisRank(right);
-      if (emphasisDifference) return emphasisDifference;
-      const leftConnected = Boolean(focusNeighbors?.has(left.id));
-      const rightConnected = Boolean(focusNeighbors?.has(right.id));
-      if (leftConnected !== rightConnected) return leftConnected ? -1 : 1;
-      const leftTimelineOrder = left.sceneNode.timelineOrder;
-      const rightTimelineOrder = right.sceneNode.timelineOrder;
-      if ((leftTimelineOrder !== undefined) !== (rightTimelineOrder !== undefined)) {
-        return leftTimelineOrder !== undefined ? -1 : 1;
-      }
-      if (leftTimelineOrder !== undefined && rightTimelineOrder !== undefined) {
-        const timelineDifference = leftTimelineOrder - rightTimelineOrder;
-        if (timelineDifference) return timelineDifference;
-      }
-      if (left.sceneNode.root !== right.sceneNode.root) return left.sceneNode.root ? -1 : 1;
-      const importanceDifference = right.sceneNode.importance - left.sceneNode.importance;
-      if (importanceDifference) return importanceDifference;
-      const leftRetained = retainedLabelRank.has(left.id);
-      const rightRetained = retainedLabelRank.has(right.id);
-      if (leftRetained !== rightRetained) return leftRetained ? -1 : 1;
-      const retainedDifference = (retainedLabelRank.get(left.id) ?? Number.MAX_SAFE_INTEGER)
-        - (retainedLabelRank.get(right.id) ?? Number.MAX_SAFE_INTEGER);
-      return retainedDifference || left.id.localeCompare(right.id);
-    };
-    const candidates = [...this.nodes.values()].filter((node) =>
-      node.kind !== "source"
-      && (node.kind === "event" ? showEventCards : showEntityCards)
-      && (node.sceneNode.state === "active" || focusCardIds.has(node.id))
-      && node.sourceId === labelSourceId
-      && (!focusId || focusCardIds.has(node.id))
-    );
-    const eventLimit = showEventCards
-      ? Math.max(cardBudget.events, focusCardPlan.eventCount)
-      : 0;
-    const entityLimit = showEntityCards
-      ? Math.max(cardBudget.entities, focusCardPlan.entityCount)
-      : 0;
-    const totalLimit = hasConcreteFocus
-      ? Math.max(cardBudget.total, focusCardPlan.ids.length)
-      : cardBudget.total;
-    this.labelPlacementBudget = {
-      events: Math.min(eventLimit, totalLimit),
-      entities: Math.min(entityLimit, totalLimit),
-      total: totalLimit,
-    };
-    const eventCandidateLimit = hasConcreteFocus
-      ? focusCardPlan.eventCount
-      : Math.min(60, eventLimit * 3);
-    const entityCandidateLimit = hasConcreteFocus
-      ? focusCardPlan.entityCount
-      : Math.min(60, entityLimit * 3);
-    const totalCandidateLimit = hasConcreteFocus
-      ? focusCardPlan.ids.length
-      : Math.min(60, totalLimit * 3);
-    const activeNodes = [
-      ...candidates
-        .filter((node) => node.kind === "event")
-        .sort(prioritize)
-        .slice(0, eventCandidateLimit),
-      ...candidates
-        .filter((node) => node.kind === "entity")
-        .sort(prioritize)
-        .slice(0, entityCandidateLimit),
-    ]
-      .sort(prioritize)
-      .slice(0, totalCandidateLimit);
-
-    sources.forEach((node) => {
-      const labelKey = `source:${node.id}`;
-      const retained = existingLabels.get(labelKey);
-      const element = retained?.primary ?? document.createElement("button");
-      if (retained) {
-        reusedLabelCount += 1;
-        existingLabels.delete(labelKey);
-      } else {
-        element.type = "button";
-        element.className = "sag-nebula-label";
-        const marker = document.createElement("span");
-        marker.className = "sag-nebula-label__marker";
-        const copy = document.createElement("span");
-        copy.append(document.createElement("strong"), document.createElement("small"));
-        element.append(marker, copy);
-        this.bindLabelInteraction(element, node);
-        this.labelLayer.appendChild(element);
-      }
-      element.dataset.universeNodeId = node.id;
-      element.disabled = this.timelineIsBusy();
-      element.setAttribute("aria-label", this.text.exploreSource(node.sceneNode.label));
-      element.style.setProperty(
-        "--nebula-color",
-        `#${this.sourceVisualColor(node.sourceId).getHexString()}`,
-      );
-      element.style.setProperty(
-        "--nebula-phase",
-        `${(-1.2 - stableUnit(`${node.id}:beacon-phase`) * 4.8).toFixed(2)}s`,
-      );
-      const title = element.querySelector("strong") as HTMLElement;
-      title.textContent = node.sceneNode.label;
-      const meta = element.querySelector("small") as HTMLElement;
-      meta.textContent = node.sceneNode.statsReady
-        ? this.text.sourceStats(node.sceneNode.eventCount, node.sceneNode.entityCount)
-        : this.text.sourceStatsBuilding(node.sceneNode.eventCount);
-      nextLabels.push({
-        nodeId: node.id,
-        kind: "source",
-        element,
-        primary: element,
-        actionButtons: [],
-      });
-    });
-    activeNodes.forEach((node) => {
-      const nodeKind = node.kind === "event" ? "event" : "entity";
-      const labelKey = `node:${node.id}`;
-      const retained = existingLabels.get(labelKey);
-      const element = retained?.element ?? document.createElement("div");
-      const primary = retained?.primary ?? document.createElement("button");
-      const actionButtons = retained?.actionButtons ?? [
-        document.createElement("button"),
-        document.createElement("button"),
-      ];
-      if (retained) {
-        reusedLabelCount += 1;
-        existingLabels.delete(labelKey);
-      } else {
-        element.className = "sag-universe-node-label";
-        primary.type = "button";
-        primary.className = "sag-universe-node-label__primary";
-        const eyebrow = document.createElement("span");
-        eyebrow.className = "sag-universe-node-label__eyebrow";
-        const marker = document.createElement("span");
-        marker.className = "sag-universe-node-label__marker";
-        eyebrow.append(marker, document.createElement("span"));
-        const exploreHint = document.createElement("span");
-        exploreHint.className = "sag-universe-node-label__explore";
-        exploreHint.dataset.universeNodeExploreHint = "true";
-        primary.append(
-          eyebrow,
-          document.createElement("strong"),
-          document.createElement("p"),
-          exploreHint,
-        );
-        const actions = document.createElement("div");
-        actions.className = "sag-universe-node-label__actions";
-        actions.dataset.universeNodeActions = "true";
-        actionButtons.forEach((button, index) => {
-          button.type = "button";
-          button.className = "sag-universe-node-label__action";
-          button.dataset.universeNodeAction = index === 0 ? "explore-more" : "ask-ai";
-        });
-        actions.append(...actionButtons);
-        element.append(primary, actions);
-        this.bindNodeLabelInteraction(element, primary, actionButtons, node);
-        this.labelLayer.appendChild(element);
-      }
-      element.dataset.universeNodeId = node.id;
-      primary.disabled = this.timelineIsBusy();
-      actionButtons.forEach((button, index) => {
-        button.disabled = this.timelineIsBusy() || (
-          index === 0 && node.sceneNode.canExploreMore === false
-        );
-      });
-      element.dataset.kind = node.kind;
-      if (node.kind === "entity") {
-        element.style.setProperty(
-          "--universe-node-accent",
-          `#${this.sourceVisualColor(node.sourceId).getHexString()}`,
-        );
-      } else {
-        element.style.removeProperty("--universe-node-accent");
-      }
-      const locked = node.id === this.lockedId;
-      element.dataset.locked = String(locked);
-      element.dataset.expanded = String(
-        locked || (node.kind === "event" && node.id === focusId && !transientHover),
-      );
-      element.dataset.compact = String(node.kind === "entity" && !locked);
-      primary.setAttribute(
-        "aria-label",
-        this.text.exploreNode(nodeKind, node.sceneNode.label),
-      );
-      const eyebrowText = primary.querySelector(
-        ".sag-universe-node-label__eyebrow > span:last-child",
-      ) as HTMLElement;
-      eyebrowText.textContent = `${this.text.kind(nodeKind)} · ${node.sceneNode.category}`;
-      const title = primary.querySelector("strong") as HTMLElement;
-      title.textContent = node.sceneNode.label;
-      title.removeAttribute("title");
-      const summary = primary.querySelector("p") as HTMLElement;
-      const summaryText = node.sceneNode.description || (node.kind === "entity"
-        ? this.text.relatedEvents(node.sceneNode.relatedCount, node.sceneNode.category)
-        : node.sceneNode.category || this.text.extractedEvent);
-      summary.textContent = summaryText;
-      summary.removeAttribute("title");
-      let exploreHint = primary.querySelector<HTMLElement>(
-        "[data-universe-node-explore-hint]",
-      );
-      if (!exploreHint) {
-        exploreHint = document.createElement("span");
-        exploreHint.className = "sag-universe-node-label__explore";
-        exploreHint.dataset.universeNodeExploreHint = "true";
-        primary.appendChild(exploreHint);
-      }
-      const relatedProgress = Math.max(0, node.sceneNode.relatedProgress ?? 0);
-      const relatedTotal = node.sceneNode.relatedCountKnown
-        ? Math.max(relatedProgress, node.sceneNode.relatedCount)
-        : "?";
-      const hintVisible = node.id === focusId
-        && !this.lockedId
-        && !this.selectedId;
-      exploreHint.hidden = !hintVisible;
-      exploreHint.textContent = node.sceneNode.canExploreMore
-        ? this.text.continueExploring(relatedProgress, relatedTotal)
-        : typeof relatedTotal === "number" && relatedProgress >= relatedTotal
-          ? this.text.explorationComplete(relatedProgress, relatedTotal)
-          : this.text.explorationProgress(relatedProgress, relatedTotal);
-      const actions = element.querySelector<HTMLElement>("[data-universe-node-actions]");
-      if (actions) actions.hidden = !locked;
-      const exploreMoreAction = this.text.exploreMoreAction ?? "Explore more";
-      const askAiAction = this.text.askAiAction ?? "Ask AI";
-      actionButtons[0].textContent = exploreMoreAction;
-      actionButtons[0].setAttribute("aria-label", exploreMoreAction);
-      actionButtons[1].textContent = askAiAction;
-      actionButtons[1].setAttribute("aria-label", askAiAction);
-      nextLabels.push({
-        nodeId: node.id,
-        kind: "node",
-        element,
-        primary,
-        actionButtons,
-      });
-    });
-    existingLabels.forEach((label) => label.element.remove());
-    this.labels = nextLabels;
-    this.host.dataset.universeReusedLabelCount = String(reusedLabelCount);
-    this.host.dataset.universeEventLabelCandidateCount = String(
-      activeNodes.filter((node) => node.kind === "event").length,
-    );
-    this.host.dataset.universeEntityLabelCandidateCount = String(
-      activeNodes.filter((node) => node.kind === "entity").length,
-    );
-    this.sortLabelsForLayout();
-    this.updateLabels(performance.now(), true);
-    this.rebuildingLabels = false;
+    return rebuildLabels(this);
   }
 
   private sortLabelsForLayout() {
-    const focusId = this.labelFocusId();
-    const focusNeighbors = focusId
-      ? this.adjacency.get(focusId) ?? new Set<string>()
-      : null;
-    this.labels.sort((left, right) => {
-      const layoutRank = (label: SceneLabel) => {
-        if (label.nodeId === this.lockedId) return 0;
-        if (label.nodeId === this.selectedId) return 1;
-        if (label.nodeId === this.keyboardFocusedId) return 2;
-        if (label.nodeId === this.hoveredId) return 3;
-        if (focusNeighbors?.has(label.nodeId)) return 4;
-        return label.kind === "source" ? 5 : 6;
-      };
-      const rankDifference = layoutRank(left) - layoutRank(right);
-      if (rankDifference) return rankDifference;
-      const leftOrder = this.nodes.get(left.nodeId)?.sceneNode.timelineOrder;
-      const rightOrder = this.nodes.get(right.nodeId)?.sceneNode.timelineOrder;
-      if ((leftOrder !== undefined) !== (rightOrder !== undefined)) {
-        return leftOrder !== undefined ? -1 : 1;
-      }
-      if (leftOrder !== undefined && rightOrder !== undefined) {
-        const timelineDifference = leftOrder - rightOrder;
-        if (timelineDifference) return timelineDifference;
-      }
-      return left.nodeId.localeCompare(right.nodeId);
-    });
+    return sortLabelsForLayout(this);
   }
 
   private bindLabelInteraction(element: HTMLButtonElement, node: ForceNode) {
-    element.tabIndex = -1;
-    const stopPointerPropagation = (event: PointerEvent) => event.stopPropagation();
-    const holdCanvasFocus = (event: PointerEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-    };
-    const focusNode = (event: PointerEvent) => {
-      this.pointerActive = true;
-      this.pointerX = event.clientX;
-      this.pointerY = event.clientY;
-      this.handleNodeHover(node, true);
-    };
-    element.addEventListener("click", (event) => {
-      event.stopPropagation();
-      if (this.timelineIsBusy()) return;
-      this.clearKeyboardFocus(false);
-      this.callbacks.onNodeClick(node.sceneNode);
-    });
-    element.addEventListener("pointerdown", holdCanvasFocus);
-    element.addEventListener("pointerup", stopPointerPropagation);
-    element.addEventListener("pointercancel", stopPointerPropagation);
-    element.addEventListener("pointerenter", focusNode);
-    element.addEventListener("pointermove", focusNode, { passive: true });
-    element.addEventListener("pointerleave", () => {
-      if (!this.rebuildingLabels) this.handleNodeHover(null);
-    });
+    return bindLabelInteraction(this, element, node);
   }
 
   private bindNodeLabelInteraction(
@@ -4865,543 +3992,18 @@ export class UniverseForceSceneEngine {
     actionButtons: HTMLButtonElement[],
     node: ForceNode,
   ) {
-    primary.tabIndex = -1;
-    const stopPointerPropagation = (event: PointerEvent) => event.stopPropagation();
-    const holdCanvasFocus = (event: PointerEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-    };
-    const focusNode = (event: PointerEvent) => {
-      this.pointerActive = true;
-      this.pointerX = event.clientX;
-      this.pointerY = event.clientY;
-      this.handleNodeHover(node, true);
-    };
-    primary.addEventListener("click", (event) => {
-      event.stopPropagation();
-      if (this.timelineIsBusy()) return;
-      this.clearKeyboardFocus(false);
-      this.callbacks.onNodeClick(node.sceneNode);
-    });
-    primary.addEventListener("pointerdown", holdCanvasFocus);
-    primary.addEventListener("pointerup", stopPointerPropagation);
-    primary.addEventListener("pointercancel", stopPointerPropagation);
-    actionButtons.forEach((button, index) => {
-      button.addEventListener("pointerdown", stopPointerPropagation);
-      button.addEventListener("pointerup", stopPointerPropagation);
-      button.addEventListener("pointercancel", stopPointerPropagation);
-      button.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        if (this.timelineIsBusy() || node.id !== this.lockedId) return;
-        this.clearKeyboardFocus(false);
-        if (index === 0) this.callbacks.onExploreMore?.(node.sceneNode);
-        else this.callbacks.onAskNode?.(node.sceneNode);
-      });
-    });
-    container.addEventListener("pointerenter", focusNode);
-    container.addEventListener("pointermove", focusNode, { passive: true });
-    container.addEventListener("pointerleave", () => {
-      if (!this.rebuildingLabels) this.handleNodeHover(null);
-    });
+    return bindNodeLabelInteraction(this, container, primary, actionButtons, node);
   }
 
-  private updateLabels(now: number, force = false) {
-    if (!force && now - this.lastLabelAt < 32) return;
-    this.lastLabelAt = now;
-    const width = Math.max(1, this.host.clientWidth);
-    const height = Math.max(1, this.host.clientHeight);
-    const mobile = width < 768;
-    const camera = this.graph.camera();
-    // One layout read per pass. Previously each overlay lookup re-read the host
-    // bounds, forcing repeated layout flushes while the camera was moving.
-    const hostRect = this.host.getBoundingClientRect();
-    const panelRect = this.miniPanelRect(hostRect);
-    const summaryRect = this.relativeOverlayRect(
-      "[data-universe-summary='true']",
-      8,
-      hostRect,
-    );
-    const progressRect = this.relativeOverlayRect(
-      "[data-universe-load-progress='true']",
-      8,
-      hostRect,
-    );
-    const placed: Array<{ left: number; top: number; right: number; bottom: number }> = [];
-    let visibleEventLabels = 0;
-    let visibleEntityLabels = 0;
-    // Flight speed scales the complete card as one object. Internal content
-    // never stages independently, so the board cannot jump between layouts.
-    const cardMorphProgress = this.visualDetailMix * this.flightCardPresence;
-    const globalCardMorph = universeCardMorph(cardMorphProgress);
-    const sourceReveal = 1 - THREE.MathUtils.smoothstep(this.visualDetailMix, 0, 0.72);
-    const labelFocusId = this.labelFocusId();
-    const transientHover = labelFocusId !== null
-      && labelFocusId === this.transientHoverFocusId();
-    const overviewCardOverride = Boolean(labelFocusId && this.visualDetailMix < 0.5);
-    const labelFocusNeighbors = labelFocusId
-      ? this.adjacency.get(labelFocusId) ?? new Set<string>()
-      : null;
-    const focusCardIds = labelFocusId
-      ? new Set([labelFocusId, ...(labelFocusNeighbors ?? [])])
-      : null;
-    const labelSourceId = labelFocusId
-      ? this.nodes.get(labelFocusId)?.sourceId ?? this.visualSourceId
-      : this.visualSourceId;
-    // DOM labels sit above WebGL. Reserve a small screen-space target around
-    // every visible event so an entity card cannot cover the star or steal its
-    // hover/click interaction.
-    const eventStarRadius = mobile ? 8 : 10;
-    const eventStarRects = [...this.nodes.values()].flatMap((node) => {
-      const emergence = this.nodeEmergence(node);
-      if (
-        node.kind !== "event"
-        || node.sourceId !== labelSourceId
-        || emergence.star <= 0.16
-        || (node.entryOpacity ?? 1)
-          * (node.timelineOpacity ?? 1)
-          * currentNodePresentationOpacity(node) <= 0.16
-        || !Number.isFinite(node.x)
-        || !Number.isFinite(node.y)
-        || !Number.isFinite(node.z)
-      ) return [];
-      const scaledEventStarRadius = eventStarRadius
-        * currentNodePresentationScale(node)
-        * emergence.starScale
-        * (node.temporalPresenceScale ?? 1);
-      const projected = new THREE.Vector3(node.x, node.y, node.z).project(camera);
-      const screen = this.graph.graph2ScreenCoords(node.x, node.y, node.z);
-      if (
-        projected.z <= -1
-        || projected.z >= 1
-        || screen.x <= 0
-        || screen.x >= width
-        || screen.y <= 0
-        || screen.y >= height
-      ) return [];
-      return [{
-        nodeId: node.id,
-        left: screen.x - scaledEventStarRadius,
-        top: screen.y - scaledEventStarRadius,
-        right: screen.x + scaledEventStarRadius,
-        bottom: screen.y + scaledEventStarRadius,
-      }];
-    });
-
-    this.labels.forEach((label) => {
-      const node = this.nodes.get(label.nodeId);
-      if (!node || !Number.isFinite(node.x) || !Number.isFinite(node.y) || !Number.isFinite(node.z)) {
-        label.element.hidden = true;
-        label.element.style.display = "none";
-        label.element.style.transform = "translate3d(-9999px, -9999px, 0)";
-        return;
-      }
-      const emergence = this.nodeEmergence(node);
-      const requiredFocusCard = label.kind === "node"
-        && Boolean(focusCardIds?.has(node.id));
-      const forceCardDetail = overviewCardOverride || requiredFocusCard;
-      // Focus may bypass global LOD, never a node's own birth/death. Keeping
-      // emergence.card in every branch prevents a selected far package from
-      // becoming a fully formed ghost card before its star arrives.
-      const nodeCardReveal = emergence.card
-        * (forceCardDetail ? 1 : globalCardMorph.reveal);
-      const nodeCardScale = forceCardDetail ? 1 : globalCardMorph.scale;
-      const depthScale = node.kind === "source" || requiredFocusCard
-        ? 1
-        : 0.5 + (node.temporalPresenceScale ?? 1) * 0.5;
-      const belongsToLabelSource = node.sourceId === labelSourceId;
-      const kindPlacementFull = label.kind === "node" && !requiredFocusCard && (
-        visibleEventLabels + visibleEntityLabels >= this.labelPlacementBudget.total
-        || (node.kind === "event"
-          ? visibleEventLabels >= this.labelPlacementBudget.events
-          : visibleEntityLabels >= this.labelPlacementBudget.entities)
-      );
-      if (kindPlacementFull) {
-        label.element.hidden = true;
-        label.element.style.display = "none";
-        label.element.style.pointerEvents = "none";
-        label.element.style.transform = "translate3d(-9999px, -9999px, 0)";
-        return;
-      }
-      const sourceHovered = label.kind === "source"
-        && !this.lockedId
-        && !this.selectedId
-        && node.id === (this.keyboardFocusedId ?? this.hoveredId);
-      const belongsToFocusNetwork = !labelFocusId
-        ? true
-        : Boolean(focusCardIds?.has(node.id));
-      // A transient hover must not reflow the board: unrelated cards dim but
-      // keep their place, so the eye can keep reading. Only a locked focus
-      // (a click — a commitment) clears the stage to its network.
-      const layoutOpacity = label.kind === "source"
-        ? sourceReveal
-        : belongsToLabelSource && belongsToFocusNetwork
-          ? nodeCardReveal
-          : belongsToLabelSource && transientHover ? nodeCardReveal * 0.35 : 0;
-      const dataOpacity = currentNodePresentationOpacity(node)
-        * (label.kind === "node" ? this.nodeAtmosphereOpacity(node) : 1);
-      const calculatedOpacity = layoutOpacity * dataOpacity;
-      let visibleOpacity = requiredFocusCard
-        ? Math.max(0.72 * emergence.card, calculatedOpacity)
-        : calculatedOpacity;
-      if (visibleOpacity <= 0.01) {
-        label.element.hidden = true;
-        label.element.style.display = "none";
-        label.element.style.pointerEvents = "none";
-        label.element.style.transform = "translate3d(-9999px, -9999px, 0)";
-        return;
-      }
-      const projected = new THREE.Vector3(node.x, node.y, node.z).project(camera);
-      const screen = this.graph.graph2ScreenCoords(node.x, node.y, node.z);
-      // Approaching information resolves at the centre, stays readable in the
-      // middle field, then loses focus before crossing the viewport edge. A
-      // locked network is exempt because its actions must remain dependable.
-      const edgeDistance = Math.min(
-        screen.x,
-        width - screen.x,
-        screen.y,
-        height - screen.y,
-      );
-      const edgePresence = label.kind === "node" && !requiredFocusCard
-        ? THREE.MathUtils.smoothstep(edgeDistance, 64, 184)
-        : 1;
-      visibleOpacity *= edgePresence;
-      const blurAllowed = !mobile && !this.reducedMotion;
-      const edgeBlur = blurAllowed
-        ? (1 - edgePresence) * CARD_DEPTH_BLUR_CSS
-        : 0;
-      const depthBlur = label.kind === "node"
-        && !requiredFocusCard
-        && blurAllowed
-        ? Math.min(
-            CARD_DEPTH_BLUR_CSS,
-            emergence.blur * 0.32 + (1 - depthScale) * 2.2,
-          )
-        : 0;
-      const combinedBlur = Math.round(
-        Math.max(edgeBlur, depthBlur) * 2,
-      ) / 2;
-      label.element.style.setProperty(
-        "--universe-card-edge-blur",
-        `${combinedBlur.toFixed(1)}px`,
-      );
-      if (visibleOpacity <= 0.01) {
-        label.element.hidden = true;
-        label.element.style.display = "none";
-        label.element.style.pointerEvents = "none";
-        label.element.style.transform = "translate3d(-9999px, -9999px, 0)";
-        return;
-      }
-      const nodeAnchorInFrame = projected.z > -1
-        && projected.z < 1
-        && screen.x > 0
-        && screen.x < width
-        && screen.y > 0
-        && screen.y < height;
-      const inFrame = requiredFocusCard
-        ? nodeAnchorInFrame
-        : projected.z > -1
-        && projected.z < 1
-        && screen.x > 10
-        && screen.x < width - (label.kind === "source" ? 16 : 68)
-        && screen.y > (label.kind === "source" ? 48 : 64)
-        && screen.y < height - 48;
-      if (!inFrame) {
-        label.element.hidden = true;
-        label.element.style.display = "none";
-        label.element.style.transform = "translate3d(-9999px, -9999px, 0)";
-        return;
-      }
-
-      const emphasized = node.id === (
-        this.lockedId
-        ?? this.selectedId
-        ?? this.keyboardFocusedId
-        ?? this.hoveredId
-      );
-      const locked = label.kind === "node" && node.id === this.lockedId;
-      const expanded = locked || (node.kind === "event"
-        && node.id === labelFocusId
-        && !transientHover);
-      const compact = label.kind === "node" && node.kind === "entity" && !locked;
-      label.element.dataset.locked = String(locked);
-      label.element.dataset.expanded = String(expanded);
-      label.element.dataset.compact = String(compact);
-      // Timeline events arrive in a tight temporal corridor. Give their
-      // bounded card set a few screen-space escape routes so overlap guards do
-      // not make a full page look like only two or three events were loaded.
-      const timelineEventCard = label.kind === "node"
-        && node.kind === "event"
-        && Boolean(node.sceneNode.timelineBundleId)
-        && node.sceneNode.root;
-      const distributedCard = requiredFocusCard || timelineEventCard;
-      const actions = label.kind === "node"
-        ? label.element.querySelector<HTMLElement>("[data-universe-node-actions]")
-        : null;
-      if (actions) actions.hidden = !locked;
-      const sourceBeaconSize = mobile ? 44 : 48;
-      const sourceInfoWidth = mobile ? 138 : 154;
-      const sourceInfoHeight = mobile ? 40 : 44;
-      const sourceInfoGap = 8;
-      const baseLabelWidth = label.kind === "source"
-        ? sourceBeaconSize
-        : locked
-          ? mobile ? 224 : 264
-        : compact
-          ? mobile ? 108 : 132
-        : mobile
-          ? expanded ? 204 : 184
-          : expanded ? 252 : 232;
-      const baseLabelHeight = label.kind === "source"
-        ? sourceBeaconSize
-        : locked
-          ? mobile ? 112 : 126
-        : compact
-          ? mobile ? 24 : 28
-        : mobile
-          ? expanded ? 82 : 70
-          : expanded ? 100 : 86;
-      const dataCardScale = label.kind === "source"
-        ? 1
-        : currentNodePresentationCardScale(node);
-      const labelScale = label.kind === "source"
-        ? 1
-        : nodeCardScale
-          * dataCardScale
-          * emergence.cardScale
-          * depthScale;
-      // Reserve the card's final footprint while only its transform grows.
-      // Collision choices therefore remain stable through particle → star →
-      // card resolution instead of jumping sides as the rectangle expands.
-      const layoutScale = label.kind === "source" ? 1 : dataCardScale;
-      const labelWidth = baseLabelWidth * layoutScale;
-      const labelHeight = baseLabelHeight * layoutScale;
-      const labelGap = 3 + layoutScale * 7;
-      type LabelSide = "right" | "left" | "top" | "bottom" | "center";
-      type LabelRect = {
-        left: number;
-        top: number;
-        right: number;
-        bottom: number;
-        side: LabelSide;
-      };
-      const makeRect = (
-        left: number,
-        top: number,
-        rectWidth: number,
-        rectHeight: number,
-        side: LabelSide,
-      ): LabelRect => ({
-        left,
-        top,
-        right: left + rectWidth,
-        bottom: top + rectHeight,
-        side,
-      });
-      const sourceMarkerRect = makeRect(
-        screen.x - sourceBeaconSize / 2,
-        screen.y - sourceBeaconSize / 2,
-        sourceBeaconSize,
-        sourceBeaconSize,
-        "center",
-      );
-      const focusGapStep = compact
-        ? 20
-        : Math.min(68, Math.max(36, labelWidth * 0.22));
-      const nodeLabelGaps = compact || distributedCard
-        ? [
-            labelGap,
-            labelGap + focusGapStep,
-            labelGap + focusGapStep * 2,
-          ]
-        : [labelGap];
-      const nodeCandidates = nodeLabelGaps.flatMap((gap) => [
-        makeRect(
-          screen.x + gap,
-          screen.y - labelHeight / 2,
-          labelWidth,
-          labelHeight,
-          "right",
-        ),
-        makeRect(
-          screen.x - labelWidth - gap,
-          screen.y - labelHeight / 2,
-          labelWidth,
-          labelHeight,
-          "left",
-        ),
-        makeRect(
-          screen.x - labelWidth / 2,
-          screen.y + gap,
-          labelWidth,
-          labelHeight,
-          "bottom",
-        ),
-        makeRect(
-          screen.x - labelWidth / 2,
-          screen.y - labelHeight - gap,
-          labelWidth,
-          labelHeight,
-          "top",
-        ),
-      ]);
-      const candidates: LabelRect[] = label.kind === "source"
-        ? sourceHovered
-          ? [
-              makeRect(
-                screen.x - sourceBeaconSize / 2,
-                screen.y - sourceBeaconSize / 2,
-                sourceBeaconSize + sourceInfoGap + sourceInfoWidth,
-                Math.max(sourceBeaconSize, sourceInfoHeight),
-                "right",
-              ),
-              makeRect(
-                screen.x - sourceBeaconSize / 2 - sourceInfoGap - sourceInfoWidth,
-                screen.y - sourceBeaconSize / 2,
-                sourceBeaconSize + sourceInfoGap + sourceInfoWidth,
-                Math.max(sourceBeaconSize, sourceInfoHeight),
-                "left",
-              ),
-              makeRect(
-                screen.x - sourceInfoWidth / 2,
-                screen.y - sourceBeaconSize / 2,
-                sourceInfoWidth,
-                sourceBeaconSize + sourceInfoGap + sourceInfoHeight,
-                "bottom",
-              ),
-            ]
-          : [sourceMarkerRect]
-        : nodeCandidates;
-      if (label.kind === "node" && screen.x >= width / 2) {
-        [candidates[0], candidates[1]] = [candidates[1], candidates[0]];
-      }
-      const blockedByViewportOrPanel = (rect: LabelRect) => {
-        const outside = rect.left < 10
-          || rect.right > width - 10
-          || rect.top < 58
-          || rect.bottom > height - 42;
-        const overlapsPanel = [
-          panelRect,
-          summaryRect,
-          progressRect,
-        ].some((overlay) => overlay
-          ? rect.left < overlay.right
-            && rect.right > overlay.left
-            && rect.top < overlay.bottom
-            && rect.bottom > overlay.top
-          : false);
-        return outside || overlapsPanel;
-      };
-      const overlapsPlacedLabel = (rect: LabelRect) => placed.some((other) =>
-        rect.left < other.right + 7
-        && rect.right > other.left - 7
-        && rect.top < other.bottom + 6
-        && rect.bottom > other.top - 6);
-      const overlapsEventStar = (rect: LabelRect) => label.kind === "node"
-        && eventStarRects.some((star) => star.nodeId !== label.nodeId
-          && rect.left < star.right
-          && rect.right > star.left
-          && rect.top < star.bottom
-          && rect.bottom > star.top);
-      const clampedCandidates = requiredFocusCard
-        ? candidates.map((candidate) => {
-            const maxLeft = Math.max(10, width - labelWidth - 10);
-            const maxTop = Math.max(58, height - labelHeight - 42);
-            return makeRect(
-              THREE.MathUtils.clamp(candidate.left, 10, maxLeft),
-              THREE.MathUtils.clamp(candidate.top, 58, maxTop),
-              labelWidth,
-              labelHeight,
-              candidate.side,
-            );
-          })
-        : [];
-      const isOpenPlacement = (candidate: LabelRect) =>
-        !blockedByViewportOrPanel(candidate)
-        && !overlapsPlacedLabel(candidate)
-        && !overlapsEventStar(candidate);
-      const rect = candidates.find(isOpenPlacement)
-        ?? clampedCandidates.find(isOpenPlacement)
-        ?? (requiredFocusCard || emphasized
-          ? [...clampedCandidates, ...candidates]
-              .find((candidate) => !blockedByViewportOrPanel(candidate))
-            ?? clampedCandidates[0]
-            ?? candidates[0]
-          : null);
-      if (!rect) {
-        label.element.hidden = true;
-        label.element.style.display = "none";
-        label.element.style.pointerEvents = "none";
-        label.element.style.transform = "translate3d(-9999px, -9999px, 0)";
-        return;
-      }
-      label.element.hidden = false;
-      label.element.style.display = "flex";
-      label.element.dataset.side = rect.side;
-      label.element.dataset.hovered = String(sourceHovered);
-      label.element.dataset.highlighted = String(emphasized || this.sourceHits.some(
-        (hit) => hit.source_id === node.sourceId,
-      ));
-      const baseLabelOpacity = visibleOpacity * (
-        emphasized ? 1 : label.kind === "source" ? 0.94 : 0.84
-      );
-      label.element.dataset.baseOpacity = baseLabelOpacity.toFixed(3);
-      label.element.style.opacity = String(
-        baseLabelOpacity * this.hoverLabelOpacityFactor(node),
-      );
-      label.element.style.pointerEvents = label.kind === "source"
-        ? visibleOpacity >= 0.58 ? "auto" : "none"
-        : nodeCardReveal >= 0.72 && visibleOpacity >= 0.22 ? "auto" : "none";
-      label.element.style.zIndex = emphasized ? "4" : label.kind === "node" ? "2" : "1";
-      if (label.kind === "source") {
-        label.element.style.transformOrigin = "center";
-        label.element.style.transform = `translate3d(${screen.x}px, ${screen.y}px, 0) translate(-50%, -50%)`;
-      } else {
-        const connectorLength = rect.side === "right"
-          ? rect.left - screen.x
-          : rect.side === "left"
-            ? screen.x - rect.right
-            : rect.side === "bottom"
-              ? rect.top - screen.y
-              : screen.y - rect.bottom;
-        label.element.style.setProperty(
-          "--universe-label-connector-length",
-          `${Math.max(10, connectorLength).toFixed(1)}px`,
-        );
-        let translateX = rect.left;
-        let translateY = rect.top;
-        if (rect.side === "right") {
-          label.element.style.transformOrigin = "left center";
-          translateY -= (baseLabelHeight - labelHeight) / 2;
-        } else if (rect.side === "left") {
-          label.element.style.transformOrigin = "right center";
-          translateX -= baseLabelWidth - labelWidth;
-          translateY -= (baseLabelHeight - labelHeight) / 2;
-        } else if (rect.side === "bottom") {
-          label.element.style.transformOrigin = "center top";
-          translateX -= (baseLabelWidth - labelWidth) / 2;
-        } else {
-          label.element.style.transformOrigin = "center bottom";
-          translateX -= (baseLabelWidth - labelWidth) / 2;
-          translateY -= baseLabelHeight - labelHeight;
-        }
-        label.element.style.transform = `translate3d(${translateX}px, ${translateY}px, 0) scale(${labelScale})`;
-      }
-      if (visibleOpacity >= 0.22) placed.push(rect);
-      if (label.kind === "node") {
-        if (node.kind === "event") visibleEventLabels += 1;
-        else visibleEntityLabels += 1;
-      }
-    });
-    this.host.dataset.universeEventLabelCount = String(visibleEventLabels);
-    this.host.dataset.universeEntityLabelCount = String(visibleEntityLabels);
+  updateLabels(now: number, force = false) {
+    return updateLabels(this, now, force);
   }
 
-  private miniPanelRect(hostRect?: DOMRectReadOnly) {
+  miniPanelRect(hostRect?: DOMRectReadOnly) {
     return this.relativeOverlayRect("[data-mini-workspace='true']", 10, hostRect);
   }
 
-  private relativeOverlayRect(
+  relativeOverlayRect(
     selector: string,
     padding: number,
     measuredHostRect?: DOMRectReadOnly,
@@ -5514,7 +4116,7 @@ export class UniverseForceSceneEngine {
     return Number.isFinite(radiusPx) ? radiusPx : null;
   }
 
-  private updateVisualLayout(now: number, force = false, refresh = true) {
+  updateVisualLayout(now: number, force = false, refresh = true) {
     const elapsed = this.lastVisualLodAt > 0
       ? Math.max(1, now - this.lastVisualLodAt)
       : 32;
@@ -5733,7 +4335,7 @@ export class UniverseForceSceneEngine {
     } else this.updateLabels(now, true);
   }
 
-  private evaluateLod(now: number) {
+  evaluateLod(now: number) {
     if (!this.interactive || !this.lodArmed || now - this.lastLodAt < 110) return;
     this.lastLodAt = now;
     const camera = this.graph.camera();
@@ -5802,7 +4404,7 @@ export class UniverseForceSceneEngine {
     }, this.policy.lod_debounce_ms);
   }
 
-  private startLoop(keepAliveMs = 0) {
+  startLoop(keepAliveMs = 0) {
     if (keepAliveMs > 0) {
       this.loopKeepAliveUntil = Math.max(
         this.loopKeepAliveUntil,
@@ -5814,7 +4416,7 @@ export class UniverseForceSceneEngine {
     this.loopFrame = requestAnimationFrame(this.loop);
   }
 
-  private wakeRendering(settleMs = 1800) {
+  wakeRendering(settleMs = 1800) {
     if (this.paused) return;
     if (!this.renderingAwake) {
       // resumeAnimation synchronously emits a controls change, so arm the guard first.
@@ -5879,198 +4481,13 @@ export class UniverseForceSceneEngine {
    * with the user's own drags. Bounded to a whisper — alive, never floaty.
    */
   private updatePointerParallax() {
-    const target = this.controls.target;
-    if (!target) return false;
-    const width = Math.max(1, this.host.clientWidth);
-    const height = Math.max(1, this.host.clientHeight);
-    const active = this.browseGazeApplied
-      && !this.reducedMotion
-      && this.pointerActive
-      && !this.paused;
-    const ndcX = THREE.MathUtils.clamp((this.pointerX / width - 0.5) * 2, -1, 1);
-    const ndcY = THREE.MathUtils.clamp((this.pointerY / height - 0.5) * 2, -1, 1);
-    const desiredX = active ? ndcX * BROWSE_PARALLAX_X : 0;
-    const desiredY = active ? -ndcY * BROWSE_PARALLAX_Y : 0;
-    const nextX = THREE.MathUtils.lerp(
-      this.parallaxApplied.x,
-      desiredX,
-      BROWSE_PARALLAX_RESPONSE,
-    );
-    const nextY = THREE.MathUtils.lerp(
-      this.parallaxApplied.y,
-      desiredY,
-      BROWSE_PARALLAX_RESPONSE,
-    );
-    const dx = nextX - this.parallaxApplied.x;
-    const dy = nextY - this.parallaxApplied.y;
-    if (Math.abs(dx) < 0.002 && Math.abs(dy) < 0.002) return false;
-    this.parallaxApplied = { x: nextX, y: nextY };
-    const camera = this.graph.camera();
-    camera.updateMatrixWorld();
-    const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
-    const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1).normalize();
-    target.addScaledVector(right, dx).addScaledVector(up, dy);
-    return true;
+    return updatePointerParallax(this);
   }
-
-  /**
-   * Camera-relative presence along the flight axis. Whatever the camera
-   * reaches is fully present; ahead thins atmospherically toward a visible
-   * floor, behind fades out. This is the moving-camera replacement for static
-   * age-based dimming, which would leave a reached package forever dark.
-   */
   private updateTemporalPresence() {
-    const config = this.flightConfig;
-    let linksDirty = false;
-    // Before the camera has crossed the vestibule, the source is still the
-    // intact nebula: no event stars, no cards — the initial state. They
-    // condense in as the dive progresses and dissolve on the way back out.
-    const dive = config && config.vestibuleDepth > 0
-      ? THREE.MathUtils.smoothstep(
-          this.appliedFlightDepth,
-          0,
-          config.vestibuleDepth * SOURCE_ENTRY_CONDENSATION_FRACTION,
-        )
-      : 1;
-    this.nodes.forEach((node) => {
-      let scale = 1;
-      let opacity = 1;
-      if (config && node.kind !== "source" && node.sourceId === config.sourceId) {
-        const nodeDepth = config.centerZ - node.z;
-        const presence = universeTemporalFlightPresence(
-          nodeDepth - this.appliedFlightDepth,
-          config.unitsPerEvent,
-        );
-        // This method supplies only camera depth and the source's global dive.
-        // nodeEmergence() then turns that availability into the same reversible
-        // grain → star → card phases used by ordinary and timeline entrances.
-        // Keeping depth separate prevents two unrelated birth-scale curves
-        // from shrinking the same node twice.
-        scale = presence.scale;
-        opacity = presence.opacity * dive;
-      }
-      if (
-        Math.abs((node.temporalPresenceScale ?? 1) - scale) < 0.004
-        && Math.abs((node.temporalPresenceOpacity ?? 1) - opacity) < 0.004
-      ) return;
-      node.temporalPresenceScale = scale;
-      node.temporalPresenceOpacity = opacity;
-      linksDirty = true;
-      this.setObjectOpacity(
-        node,
-        node.visualOpacity ?? 1,
-        node.visuallyEmphasized ?? false,
-      );
-    });
-    if (linksDirty) this.updateLinkVisuals();
+    return updateTemporalPresence(this);
   }
-
-  /**
-   * Advances the flight each frame: integrates the state, translates camera and
-   * orbit target together by the depth delta, and pages the window when the
-   * camera nears its edge. The camera never waits for data — a page that isn't
-   * loaded yet simply condenses in once it lands.
-   */
   private updateTemporalFlight(now: number) {
-    if (this.sourceReturnMotion) return this.updateSourceReturnMotion(now);
-    if (
-      this.sourceNavigationPhase === "origin"
-      || this.sourceNavigationPhase === "overview"
-    ) {
-      this.lastFlightStepAt = now;
-      return false;
-    }
-    const config = this.flightConfig;
-    if (!config || !this.timelineJourney.enabled || !this.interactive) {
-      this.lastFlightStepAt = now;
-      return false;
-    }
-    const elapsedMs = this.lastFlightStepAt > 0 ? now - this.lastFlightStepAt : 16;
-    this.lastFlightStepAt = now;
-    const { state, moving } = stepUniverseTemporalFlight(this.flightState, {
-      elapsedMs,
-      maxDepth: config.maxDepth,
-      reducedMotion: this.reducedMotion,
-    });
-    this.flightState = state;
-    const delta = state.depth - this.appliedFlightDepth;
-    if (delta !== 0) {
-      this.appliedFlightDepth = state.depth;
-      const camera = this.graph.camera();
-      camera.position.z -= delta;
-      if (this.controls.target) this.controls.target.z -= delta;
-      this.syncNebulaCorridorUniforms();
-      this.wakeRendering(600);
-      this.updateTemporalPresence();
-      this.updateVisualLayout(now);
-      this.updateNodeMorphScales(now);
-      this.updateLabels(now);
-      this.evaluateLod(now);
-    }
-    // Cards duck while the camera streaks past and re-expand once it settles.
-    // Speed comes from actual depth travel, so wheel inertia and button glides
-    // behave identically.
-    const instantSpeed = Math.abs(delta) / Math.max(1, elapsedMs) * 1000;
-    this.flightSpeed += (instantSpeed - this.flightSpeed)
-      * (1 - Math.exp(-elapsedMs / 140));
-    const cardTarget = 1 - THREE.MathUtils.smoothstep(
-      this.flightSpeed,
-      FLIGHT_CARD_CALM_SPEED,
-      FLIGHT_CARD_HIDE_SPEED,
-    ) * (1 - FLIGHT_CARD_TRAVEL_MIN);
-    const cardResponse = 1 - Math.exp(-elapsedMs / (
-      cardTarget < this.flightCardPresence
-        ? FLIGHT_CARD_COLLAPSE_MS
-        : FLIGHT_CARD_RECOVER_MS
-    ));
-    const nextCardPresence = THREE.MathUtils.lerp(
-      this.flightCardPresence,
-      cardTarget,
-      cardResponse,
-    );
-    const cardsSettling = Math.abs(nextCardPresence - this.flightCardPresence) > 0.002;
-    if (cardsSettling) {
-      this.flightCardPresence = nextCardPresence;
-      this.host.dataset.universeFlightCardPresence = nextCardPresence.toFixed(2);
-      if (delta === 0) this.updateLabels(now);
-    }
-    this.host.dataset.universeFlightDepth = state.depth.toFixed(1);
-    this.host.dataset.universeFlightVelocity = state.velocity.toFixed(1);
-    if (!moving && this.host.dataset.universeSourceEntry === "emitting") {
-      this.host.dataset.universeSourceEntry = "ready";
-      this.markSourceExploring();
-    }
-    if (
-      !moving
-      && state.depth <= UNIVERSE_FLIGHT_SETTLE_EPSILON
-    ) {
-      // Depth zero is a real journey stop: restore the intact source nebula
-      // before accepting a separate outward gesture back to the overview.
-      this.markSourceOrigin(now);
-    }
-    const follow = now >= this.flightFollowCooldownUntil
-      ? planUniverseTemporalFlightFollow({
-          depth: state.depth,
-          windowNearDepth: config.windowNearDepth,
-          windowFarDepth: config.windowFarDepth,
-          marginUnits: config.unitsPerEvent * 1.5,
-          // Fast flight pages ahead of arrival: the corridor must keep
-          // condensing in front of the camera, not behind it.
-          velocity: state.velocity,
-          busy: this.timelineIsBusy(),
-          hasNext: this.timelineJourney.hasNext,
-          hasPrevious: this.timelineJourney.hasPrevious,
-        })
-      : null;
-    if (follow) {
-      this.flightOwnWindowChange = true;
-      void Promise.resolve(this.moveTimeline(follow)).then((result) => {
-        if (result === "advanced") return;
-        this.flightOwnWindowChange = false;
-        this.flightFollowCooldownUntil = performance.now() + 500;
-      });
-    }
-    return moving || cardsSettling;
+    return updateTemporalFlight(this, now);
   }
 
   private timelineWheelSurface(target: EventTarget | null): "canvas" | "label" | null {
@@ -6283,102 +4700,19 @@ export class UniverseForceSceneEngine {
   };
 
   private keyboardCandidates() {
-    const detailSourceId = this.visualDetailMix >= 0.5 ? this.visualSourceId : null;
-    const camera = this.graph.camera();
-    camera.updateMatrixWorld();
-    const width = Math.max(1, this.host.clientWidth);
-    const height = Math.max(1, this.host.clientHeight);
-    const inViewport = (node: ForceNode) => {
-      if (!Number.isFinite(node.x) || !Number.isFinite(node.y) || !Number.isFinite(node.z)) {
-        return false;
-      }
-      const projected = new THREE.Vector3(node.x, node.y, node.z).project(camera);
-      const screen = this.graph.graph2ScreenCoords(node.x, node.y, node.z);
-      return projected.z > -1
-        && projected.z < 1
-        && screen.x >= 0
-        && screen.x <= width
-        && screen.y >= 0
-        && screen.y <= height;
-    };
-    const candidates = [...this.nodes.values()].filter((node) => {
-      if (
-        (node.entryOpacity ?? 1)
-          * (node.timelineOpacity ?? 1)
-          * currentNodePresentationOpacity(node) <= 0.12
-      ) return false;
-      if (node.kind !== "source" && this.nodeEmergence(node).star < 0.72) {
-        return false;
-      }
-      if (!inViewport(node)) return false;
-      if (!detailSourceId) return true;
-      return node.kind !== "source"
-        && node.sourceId === detailSourceId;
-    });
-    const candidatesById = new Map(candidates.map((node) => [node.id, node]));
-    return orderUniverseKeyboardCandidates(candidates.map((node) => ({
-      id: node.id,
-      sourceId: node.sourceId,
-      kind: node.kind,
-      root: node.sceneNode.root,
-      importance: node.sceneNode.importance,
-    }))).map((candidate) => candidatesById.get(candidate.id) as ForceNode);
+    return keyboardCandidates(this);
   }
 
   private updateKeyboardStatus(candidates = this.keyboardCandidates()) {
-    const node = this.keyboardFocusedId
-      ? this.nodes.get(this.keyboardFocusedId)
-      : undefined;
-    const index = node ? candidates.findIndex((candidate) => candidate.id === node.id) : -1;
-    this.host.dataset.universeKeyboardCandidateCount = String(candidates.length);
-    this.host.dataset.universeKeyboardIndex = index >= 0 ? String(index + 1) : "";
-    if (!node || index < 0) {
-      this.keyboardStatusElement.textContent = "";
-      return;
-    }
-    const label = node.kind === "source"
-      ? this.text.exploreSource(node.sceneNode.label)
-      : this.text.exploreNode(node.kind, node.sceneNode.label);
-    this.keyboardStatusElement.textContent = this.text.keyboardStatus(
-      label,
-      index + 1,
-      candidates.length,
-    );
+    return updateKeyboardStatus(this, candidates);
   }
 
-  private clearKeyboardFocus(notify = true, refresh = true) {
-    if (!this.keyboardFocusedId) {
-      this.updateKeyboardStatus([]);
-      return;
-    }
-    this.keyboardFocusedId = null;
-    this.host.dataset.universeKeyboardNodeId = "";
-    this.updateKeyboardStatus([]);
-    if (notify) this.callbacks.onHover(null);
-    if (!refresh || !this.dataReady) return;
-    this.applyHighlight();
-    this.scheduleHoverLabelRebuild(true);
+  clearKeyboardFocus(notify = true, refresh = true) {
+    return clearKeyboardFocus(this, notify, refresh);
   }
 
   private setKeyboardFocus(nodeId: string, candidates: ForceNode[]) {
-    const node = this.nodes.get(nodeId);
-    if (!node) return;
-    this.cancelHoverClear();
-    this.hoveredId = null;
-    this.hoveredFromLabel = false;
-    this.keyboardFocusedId = nodeId;
-    this.host.dataset.universeKeyboardNodeId = nodeId;
-    this.wakeRendering(700);
-    this.applyHighlight();
-    this.scheduleHoverLabelRebuild(true);
-    this.updateKeyboardStatus(candidates);
-    const screen = this.graph.graph2ScreenCoords(node.x, node.y, node.z);
-    const hostRect = this.host.getBoundingClientRect();
-    this.callbacks.onHover({
-      node: node.sceneNode,
-      x: hostRect.left + screen.x,
-      y: hostRect.top + screen.y,
-    });
+    return setKeyboardFocus(this, nodeId, candidates);
   }
 
   private handleCanvasFocus = () => {
@@ -6462,7 +4796,7 @@ export class UniverseForceSceneEngine {
     else if (!hadKeyboardFocus) this.callbacks.onBackRequest?.();
   };
 
-  private updatePixelRatio() {
+  updatePixelRatio() {
     const mobile = this.host.clientWidth < 768;
     const concreteNodes = [...this.nodes.values()].filter((node) => node.kind !== "source").length;
     const qualityCap = this.reducedMotion
