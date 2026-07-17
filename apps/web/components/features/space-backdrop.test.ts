@@ -46,11 +46,23 @@ describe("space backdrop interaction isolation", () => {
     );
     expect(viewEffect).toContain('backdrop.dataset.universeView = nextView');
     expect(viewEffect).toContain(
-      'backdrop.dataset.ambientMotion = ambientMotionPaused || detail ? "paused" : "active"',
+      'backdrop.dataset.ambientMotion = backdropMotionPaused || detail ? "paused" : "active"',
     );
     expect(viewEffect).toContain('cursorMeteorRef.current.dataset.active = "false"');
     expect(viewEffect).not.toMatch(/style\.|transform|translate|rotate|scale/);
     expect(source).not.toContain("useTransform");
+  });
+
+  it("keeps accumulated evidence static without changing exploration decoration", () => {
+    expect(source).toContain("UNIVERSE_PRESENTATION_EVENT");
+    expect(source).toContain(
+      'universePresentation === "accumulation"',
+    );
+    expect(source).toContain("{!accumulationPresentation && (");
+    expect(source).toContain("reducedMotion={backdropMotionPaused}");
+    expect(source).toContain(
+      'data-universe-presentation={variant === "universe" ? universePresentation : "fixed"}',
+    );
   });
 
   it("resets the visual atmosphere when explore is entered again", () => {

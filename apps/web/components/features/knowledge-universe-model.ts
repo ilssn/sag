@@ -293,6 +293,23 @@ export function stableRootEventOffset(
   };
 }
 
+/**
+ * Places accumulated evidence in one stable 3D field. The coordinate depends
+ * only on the canonical node key, so adding another answer never reorders or
+ * shifts the clues the user has already seen.
+ */
+export function stableAccumulationEventOffset(key: string): Position3D {
+  const azimuth = stableUnit(`${key}:accumulation-azimuth`) * Math.PI * 2;
+  const vertical = stableUnit(`${key}:accumulation-vertical`) * 1.5 - 0.75;
+  const planar = Math.sqrt(Math.max(0, 1 - vertical * vertical));
+  const distance = 76 + stableUnit(`${key}:accumulation-radius`) * 112;
+  return {
+    x: Math.cos(azimuth) * planar * distance,
+    y: Math.sin(azimuth) * planar * distance * 0.86,
+    z: vertical * distance * 0.72,
+  };
+}
+
 function lineageQualifiedExpansionBundleIds(
   current: UniverseWorkingSet,
   seedNodeKeys: Iterable<string>,

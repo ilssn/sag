@@ -1098,6 +1098,7 @@
       "description": "搜索结果中滚轮仅用于缩放；锁定节点后，可在详情中选择“探索更多”"
     },
     "nodeActions": {
+      "viewDetails": "查看详情",
       "exploreMore": "探索更多",
       "askAi": "AI 问答"
     },

@@ -106,7 +106,9 @@ describe("knowledge universe production interaction policy", () => {
   });
 
   it("hands the scene a flight config bound to the browsed source's axis", () => {
-    expect(source).toContain("const temporalFlight = temporalAxis && browseSessionSourceId");
+    expect(source).toContain(
+      "const temporalFlight = !accumulationMode && temporalAxis && browseSessionSourceId",
+    );
     expect(source).toContain("unitsPerEvent: TEMPORAL_AXIS_UNITS_PER_EVENT");
     expect(source).toContain("maxDepth: temporalAxisDepth");
     // The window's depth band comes from the same projections that place the
@@ -780,7 +782,9 @@ describe("knowledge universe production interaction policy", () => {
     expect(graph).toContain("const visibleTimelineNodeKeys = new Set(");
     expect(graph).toContain("const isVisualRoot =");
     expect(graph).toContain("if (!timelineBrowseActive) return node.root");
-    expect(graph).toContain("root: isVisualRoot(node)");
+    expect(graph).toContain(
+      'root: accumulationMode ? node.kind === "event" : isVisualRoot(node)',
+    );
     expect(graph).toContain("timelineSupportBundleIds = timelineProjectionIds.filter");
     expect(graph).toContain("!visibleTimelineSet.has(id)).reverse()");
   });
@@ -981,6 +985,26 @@ describe("knowledge universe production interaction policy", () => {
     expect(prefetch).not.toContain("session.sourceId !== activePartition");
     expect(graph).toContain("const timelineBrowseActive = Boolean(browseSessionSourceId)");
     expect(graph).not.toContain("sourceSessionRef.current?.sourceId === activePartition");
+  });
+
+  it("projects accumulated answers separately from source exploration", () => {
+    const graph = sourceBetween(
+      "const graphData = React.useMemo(() => {",
+      "const visibleGraphCounts = React.useMemo(",
+    );
+
+    expect(source).toContain(
+      'const sceneStrategy: UniverseSceneStrategy = activationOrigin === "browse"',
+    );
+    expect(graph).toContain(
+      'const accumulationMode = sceneStrategy === "accumulation"',
+    );
+    expect(graph).toContain(
+      "const nodes: Universe3DNode[] = accumulationMode ? []",
+    );
+    expect(graph).toContain("stableAccumulationEventOffset(key)");
+    expect(source).toContain("strategy={sceneStrategy}");
+    expect(source).toContain("dispatchUniversePresentation(sceneStrategy)");
   });
 
   it("keeps WebGL fallback, budget lock release and manifest invalidation", () => {

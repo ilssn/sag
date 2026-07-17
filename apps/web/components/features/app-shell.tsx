@@ -46,6 +46,7 @@ import {
   UNIVERSE_ASK_EVENT,
   UNIVERSE_DETAIL_EVENT,
   dispatchUniverseActivation,
+  dispatchUniverseReset,
 } from "@/lib/universe-events";
 import { cn } from "@/lib/utils";
 import {
@@ -335,6 +336,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const nextSection = section
       ?? workspaceSectionFromPathname(pathname)
       ?? workspaceSection;
+    if (appMode !== "explore") {
+      // Entering from search/answer is a fresh visit to the universe home.
+      // Context results remain in their panels; the graph starts at overview
+      // and only enters a source after the user deliberately selects one.
+      dispatchUniverseReset("explore-home");
+    }
     setWorkspaceSection(nextSection);
     setAppMode("explore");
     persistAppMode(window.localStorage, "explore", nextSection);

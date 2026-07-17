@@ -36,6 +36,7 @@ import {
   UNIVERSE_FOCUS_EVENT,
   dispatchUniverseDetail,
   dispatchUniverseInteraction,
+  dispatchUniversePresentation,
   dispatchUniverseResume,
   readUniverseContext,
   UNIVERSE_RESET_EVENT,
@@ -108,6 +109,7 @@ import type {
   UniverseSceneExplorationView,
   UniverseSceneHandle,
   UniverseSceneNode,
+  UniverseSceneStrategy,
   UniverseSceneUnavailableReason,
   UniverseSelectionClearOptions,
   UniverseTimelineIntentResult,
@@ -128,6 +130,7 @@ import {
   expansionLineageRootKey,
   isConcreteUniverseNode,
   stableOffset,
+  stableAccumulationEventOffset,
   stableRootEventOffset,
   stableSatelliteOffset,
   stableUnit,
@@ -295,6 +298,9 @@ export function KnowledgeUniverse({
   const [moreHint, setMoreHint] = React.useState("");
   const [activationOrigin, setActivationOrigin] =
     React.useState<UniverseActivationOrigin>("browse");
+  const sceneStrategy: UniverseSceneStrategy = activationOrigin === "browse"
+    ? "exploration"
+    : "accumulation";
   const [, setLoadProgressRevision] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
   const [rebuilding, setRebuilding] = React.useState(false);
@@ -316,6 +322,11 @@ export function KnowledgeUniverse({
     window.addEventListener(UNIVERSE_CONTEXT_EVENT, onContext);
     return () => window.removeEventListener(UNIVERSE_CONTEXT_EVENT, onContext);
   }, []);
+
+  React.useEffect(() => {
+    if (!interactive) return;
+    dispatchUniversePresentation(sceneStrategy);
+  }, [interactive, sceneStrategy]);
 
   // The loaded browse session is the data authority for timeline paging.
   // `activePartition` is intentionally kept as camera/presentation state so
@@ -1328,6 +1339,7 @@ export function KnowledgeUniverse({
   ]);
 
   const graphData = React.useMemo(() => {
+    const accumulationMode = sceneStrategy === "accumulation";
     const visualRadiusBySource = new Map(
       renderedSourcePartitions.map((partition) => [
         partition.source_id,
@@ -1338,7 +1350,7 @@ export function KnowledgeUniverse({
         ),
       ]),
     );
-    const nodes: Universe3DNode[] = renderedSourcePartitions.map((partition) => ({
+    const nodes: Universe3DNode[] = accumulationMode ? [] : renderedSourcePartitions.map((partition) => ({
       id: `partition:${partition.source_id}`,
       kind: "source",
       rawId: partition.id,
@@ -1546,7 +1558,9 @@ export function KnowledgeUniverse({
       const sourceId = resolvedSource(node.kind, node.id, node.source_id);
       const key = universeNodeKey(node.kind, node.id, sourceId);
       const partition = sourceById.get(sourceId);
-      const center = anchor ?? {
+      const center = accumulationMode && !anchor
+        ? { x: 0, y: 0, z: 0 }
+        : anchor ?? {
         x: partition?.x ?? 0,
         y: partition?.y ?? 0,
         z: partition?.z ?? 0,
@@ -1568,7 +1582,11 @@ export function KnowledgeUniverse({
         : Math.max(relatedProgress, node.related_count);
       const expansionExhausted = expandedAnchorsRef.current.has(key)
         && !cursorsRef.current.has(key);
-      const offset = timelinePlacement
+      const offset = accumulationMode
+        ? anchor
+          ? stableSatelliteOffset(key, radius, center)
+          : stableAccumulationEventOffset(key)
+        : timelinePlacement
         // An expansion-discovered event is placed but off the time axis: only
         // visible timeline packages carry a temporal projection.
         ? temporalProjection
@@ -1631,7 +1649,7 @@ export function KnowledgeUniverse({
         importance: node.importance ?? 0.5,
         statsReady: true,
         state: node.state ?? "active",
-        root: isVisualRoot(node),
+        root: accumulationMode ? node.kind === "event" : isVisualRoot(node),
         // Depth presence (scale/opacity along the axis) is the camera's story
         // now: the scene computes it per frame from the flight depth, so a
         // package the camera reaches is always fully present.
@@ -1679,7 +1697,7 @@ export function KnowledgeUniverse({
 
     const rootEvents = visibleNodes.filter((node) => {
       if (node.kind !== "event") return false;
-      return isVisualRoot(node);
+      return accumulationMode || isVisualRoot(node);
     });
     rootEvents.forEach((node, index) => addExactNode(node, undefined, {
       index,
@@ -1760,7 +1778,7 @@ export function KnowledgeUniverse({
       windowNearAge = Math.min(windowNearAge, projection.ageProgress);
       windowFarAge = Math.max(windowFarAge, projection.ageProgress);
     });
-    const temporalFlight = temporalAxis && browseSessionSourceId
+    const temporalFlight = !accumulationMode && temporalAxis && browseSessionSourceId
       ? {
           sourceId: browseSessionSourceId,
           centerZ: sourceById.get(browseSessionSourceId)?.z ?? 0,
@@ -1798,6 +1816,7 @@ export function KnowledgeUniverse({
     return stableData;
   }, [
     activePartition,
+    sceneStrategy,
     browseSessionSourceId,
     manifest?.version,
     renderedSourcePartitions,
@@ -3043,17 +3062,26 @@ export function KnowledgeUniverse({
         clearSelection();
         return;
       }
-      // A deliberate card activation is the explicit affordance that brings
-      // the contextual pet workspace back after a canvas gesture closed it.
+      // Primary card activation only locks the reading focus. Opening the
+      // contextual workspace belongs to the explicit "View details" action.
+      lockNodeForReading(concreteNode);
+    },
+    [activatePartition, clearSelection, lockNodeForReading],
+  );
+
+  const handleViewDetails = React.useCallback(
+    (node: UniverseSceneNode) => {
+      if (node.kind === "source") return;
+      const concreteNode = node as UniverseConcrete3DNode;
+      lockNodeForReading(concreteNode);
       dispatchUniverseDetail(
         concreteNode.kind,
         concreteNode.rawId,
         concreteNode.sourceId,
         timelineNavigationForNode(concreteNode),
       );
-      lockNodeForReading(concreteNode);
     },
-    [activatePartition, clearSelection, lockNodeForReading, timelineNavigationForNode],
+    [lockNodeForReading, timelineNavigationForNode],
   );
 
   const moveTimelineManually = React.useCallback((direction: "next" | "previous") => {
@@ -3392,6 +3420,7 @@ export function KnowledgeUniverse({
       data-universe-mode={interactive ? "explore" : "normal"}
       data-universe-view={viewportSourceId ? "detail" : "overview"}
       data-universe-activation-origin={activationOrigin}
+      data-universe-scene-strategy={sceneStrategy}
       data-universe-search-locked={activationOrigin === "search"}
       data-universe-engine={
         sceneUnavailableReason
@@ -3412,6 +3441,7 @@ export function KnowledgeUniverse({
             key={`universe-scene:${sceneAttempt}`}
             ref={graphRef}
             data={graphData}
+            strategy={sceneStrategy}
             policy={manifest.policy}
             sourceHits={sourceHits}
             selectedId={selectedKey}
@@ -3431,9 +3461,11 @@ export function KnowledgeUniverse({
             onBackRequest={requestSourceBack}
             onBackgroundClick={handleSceneBackgroundClick}
             actionLabels={{
+              viewDetails: t("nodeActions.viewDetails"),
               exploreMore: t("nodeActions.exploreMore"),
               askAi: t("nodeActions.askAi"),
             }}
+            onViewDetails={handleViewDetails}
             onExploreMore={handleExploreMore}
             onAskNode={handleAskNode}
             onUserInteraction={handleSceneInteraction}

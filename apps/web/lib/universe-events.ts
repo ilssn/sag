@@ -19,6 +19,9 @@ export const UNIVERSE_CONTEXT_EVENT = "sag:universe-context";
 export const UNIVERSE_PATCH_EVENT = "sag:universe-patch";
 export const UNIVERSE_PATCH_RESET_EVENT = "sag:universe-patch-reset";
 export const UNIVERSE_VIEW_EVENT = "sag:universe-view";
+export const UNIVERSE_PRESENTATION_EVENT = "sag:universe-presentation";
+
+export type UniversePresentationMode = "exploration" | "accumulation";
 
 export interface UniverseViewState {
   mode: "overview" | "detail";
@@ -75,6 +78,7 @@ let currentUniverseContext: UniverseContextState = {
   active: false,
   section: null,
 };
+let currentUniversePresentation: UniversePresentationMode = "exploration";
 
 export function readUniverseView() {
   return currentUniverseView;
@@ -82,6 +86,22 @@ export function readUniverseView() {
 
 export function readUniverseContext() {
   return currentUniverseContext;
+}
+
+export function readUniversePresentation() {
+  return currentUniversePresentation;
+}
+
+export function dispatchUniversePresentation(mode: UniversePresentationMode) {
+  if (mode === currentUniversePresentation) return currentUniversePresentation;
+  currentUniversePresentation = mode;
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent<UniversePresentationMode>(
+      UNIVERSE_PRESENTATION_EVENT,
+      { detail: mode },
+    ));
+  }
+  return currentUniversePresentation;
 }
 
 export function dispatchUniverseContext(context: UniverseContextState) {

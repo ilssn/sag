@@ -8,6 +8,7 @@ import {
   dominantSource,
   emptySourceBrowseSession,
   stableOffset,
+  stableAccumulationEventOffset,
   stableRootEventOffset,
   stableSatelliteOffset,
 } from "./knowledge-universe-model";
@@ -38,6 +39,17 @@ describe("knowledge universe model", () => {
       stableRootEventOffset("source-a", "event-a", 120, 3, 12),
     );
     expect(stableOffset("entity-a", 120)).not.toEqual(stableOffset("entity-b", 120));
+  });
+
+  it("keeps accumulated event coordinates stable as later answers arrive", () => {
+    const first = stableAccumulationEventOffset("event:source-a:event-a");
+    expect(first).toEqual(
+      stableAccumulationEventOffset("event:source-a:event-a"),
+    );
+    expect(first).not.toEqual(
+      stableAccumulationEventOffset("event:source-a:event-b"),
+    );
+    expect(Math.hypot(first.x, first.y, first.z)).toBeGreaterThan(45);
   });
 
   it("keeps entity satellites local to their event's temporal plane", () => {

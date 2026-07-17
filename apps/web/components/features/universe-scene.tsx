@@ -28,6 +28,7 @@ export type {
   UniverseSceneNode,
   UniverseSceneNodeKind,
   UniverseSceneProps,
+  UniverseSceneStrategy,
   UniverseSceneTemporalFlight,
   UniverseSceneUnavailableReason,
   UniverseSceneView,
@@ -41,6 +42,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
   function UniverseScene(
     {
       data,
+      strategy,
       policy,
       sourceHits,
       selectedId,
@@ -58,6 +60,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
       onBackRequest,
       onBackgroundClick,
       actionLabels,
+      onViewDetails,
       onExploreMore,
       onAskNode,
       onUserInteraction,
@@ -91,15 +94,23 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
       explorationProgress: (progress, total) => t("explorationProgress", { progress, total }),
       explorationComplete: (progress, total) => t("explorationComplete", { progress, total }),
       extractedEvent: t("extractedEvent"),
+      viewDetailsAction: actionLabels?.viewDetails,
       exploreMoreAction: actionLabels?.exploreMore,
       askAiAction: actionLabels?.askAi,
-    }), [actionLabels?.askAi, actionLabels?.exploreMore, locale, t]);
+    }), [
+      actionLabels?.askAi,
+      actionLabels?.exploreMore,
+      actionLabels?.viewDetails,
+      locale,
+      t,
+    ]);
     const keyboardInstructionsId = React.useId();
     const hostRef = React.useRef<HTMLDivElement>(null);
     const keyboardStatusRef = React.useRef<HTMLSpanElement>(null);
     const engineRef = React.useRef<UniverseForceSceneEngine | null>(null);
     const latestRef = React.useRef({
       data,
+      strategy,
       policy,
       sourceHits,
       selectedId,
@@ -116,6 +127,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
       onSelectionClear,
       onBackRequest,
       onBackgroundClick,
+      onViewDetails,
       onExploreMore,
       onAskNode,
       onUserInteraction,
@@ -126,6 +138,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
     });
     latestRef.current = {
       data,
+      strategy,
       policy,
       sourceHits,
       selectedId,
@@ -142,6 +155,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
       onSelectionClear,
       onBackRequest,
       onBackgroundClick,
+      onViewDetails,
       onExploreMore,
       onAskNode,
       onUserInteraction,
@@ -201,6 +215,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
             onSelectionClear: current.onSelectionClear,
             onBackRequest: current.onBackRequest,
             onBackgroundClick: current.onBackgroundClick,
+            onViewDetails: current.onViewDetails,
             onExploreMore: current.onExploreMore,
             onAskNode: current.onAskNode,
             onUserInteraction: current.onUserInteraction ?? (() => undefined),
@@ -210,6 +225,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
           });
           engine.setOptions({
             interactive: current.interactive,
+            strategy: current.strategy,
             reducedMotion: current.reducedMotion,
             darkTheme: current.darkTheme,
             viewPreferences: current.viewPreferences,
@@ -258,6 +274,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
         onSelectionClear,
         onBackRequest,
         onBackgroundClick,
+        onViewDetails,
         onExploreMore,
         onAskNode,
         onUserInteraction: onUserInteraction ?? (() => undefined),
@@ -270,6 +287,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
       onAskNode,
       onBackRequest,
       onBackgroundClick,
+      onViewDetails,
       onExploreMore,
       onHover,
       onNodeClick,
@@ -285,6 +303,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
     React.useLayoutEffect(() => {
       engineRef.current?.setOptions({
         interactive,
+        strategy,
         reducedMotion,
         darkTheme,
         viewPreferences,
@@ -294,6 +313,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
     }, [
       darkTheme,
       interactive,
+      strategy,
       reducedMotion,
       text,
       timelineJourney,
@@ -307,7 +327,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
       engine.setData(data, policy, sourceHits);
       engine.setSelection(latestRef.current.selectedId);
       engine.resume();
-    }, [data, interactive, policy, sourceHits]);
+    }, [data, interactive, policy, sourceHits, strategy]);
 
     React.useLayoutEffect(() => {
       if (!interactive) return;
@@ -345,6 +365,7 @@ export const UniverseScene = React.forwardRef<UniverseSceneHandle, UniverseScene
           data-universe-scene="three"
           data-universe-engine="loading"
           data-universe-active={interactive}
+          data-universe-strategy={strategy}
           data-universe-paused={!interactive}
           data-universe-node-count={data.nodes.length}
           data-universe-link-count={data.links.length}

@@ -2,6 +2,7 @@ import type { SearchSourceHit, UniversePolicy } from "@/lib/types";
 import type { UniverseViewPreferences } from "@/lib/universe-view-preferences";
 
 export type UniverseSceneNodeKind = "source" | "event" | "entity";
+export type UniverseSceneStrategy = "exploration" | "accumulation";
 
 export interface UniverseSceneNode {
   id: string;
@@ -153,6 +154,11 @@ export interface UniverseSelectionClearOptions {
 
 export interface UniverseSceneProps {
   data: UniverseSceneData;
+  /**
+   * Exploration owns source nebulae and temporal flight. Accumulation is a
+   * stable, source-agnostic evidence graph and must never mutate browse state.
+   */
+  strategy: UniverseSceneStrategy;
   policy: UniversePolicy;
   sourceHits: SearchSourceHit[];
   selectedId: string | null;
@@ -171,9 +177,11 @@ export interface UniverseSceneProps {
   onBackRequest?: () => void;
   onBackgroundClick?: () => void;
   actionLabels?: {
+    viewDetails: string;
     exploreMore: string;
     askAi: string;
   };
+  onViewDetails?: (node: UniverseSceneNode) => void;
   onExploreMore?: (node: UniverseSceneNode) => void;
   onAskNode?: (node: UniverseSceneNode) => void;
   /** Notifies the owner about a dismissing pointer/keyboard gesture, never scene animation. */

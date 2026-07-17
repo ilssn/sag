@@ -57,6 +57,7 @@ import type {
   UniverseSceneLink,
   UniverseSceneNode,
   UniverseSceneNodeKind,
+  UniverseSceneStrategy,
   UniverseSceneTemporalFlight,
   UniverseSceneUnavailableReason,
   UniverseSceneView,
@@ -81,6 +82,7 @@ export interface UniverseSceneText {
   explorationProgress: (progress: number, total: number | string) => string;
   explorationComplete: (progress: number, total: number | string) => string;
   extractedEvent: string;
+  viewDetailsAction?: string;
   exploreMoreAction?: string;
   askAiAction?: string;
 }
@@ -193,6 +195,7 @@ interface SceneCallbacks {
   onSelectionClear: (options?: UniverseSelectionClearOptions) => void;
   onBackRequest?: () => void;
   onBackgroundClick?: () => void;
+  onViewDetails?: (node: UniverseSceneNode) => void;
   onExploreMore?: (node: UniverseSceneNode) => void;
   onAskNode?: (node: UniverseSceneNode) => void;
   onUserInteraction?: () => void;
@@ -996,6 +999,7 @@ export class UniverseForceSceneEngine {
     onSelectionClear: () => undefined,
     onBackRequest: () => undefined,
     onBackgroundClick: () => undefined,
+    onViewDetails: () => undefined,
     onExploreMore: () => undefined,
     onAskNode: () => undefined,
     onUserInteraction: () => undefined,
@@ -1117,6 +1121,8 @@ export class UniverseForceSceneEngine {
   private visualSourceId: string | null = null;
   private visualDetailMix = 0;
   private visualDetailTarget = 0;
+  private strategy: UniverseSceneStrategy = "exploration";
+  private strategyChangedSinceData = false;
   private reportedViewSourceId: string | null = null;
   private requestedSourceId: string | null = null;
   private overviewRequested = true;
@@ -1236,6 +1242,7 @@ export class UniverseForceSceneEngine {
         if (this.timelineIsBusy()) return;
         if (
           node.kind !== "source"
+          && this.strategy === "exploration"
           && (this.visualDetailMix < 0.5 || node.sourceId !== this.visualSourceId)
         ) return;
         this.pointerActive = true;
@@ -1358,6 +1365,7 @@ export class UniverseForceSceneEngine {
 
   setOptions(options: {
     interactive: boolean;
+    strategy: UniverseSceneStrategy;
     reducedMotion: boolean;
     darkTheme: boolean;
     viewPreferences: UniverseViewPreferences;
@@ -1365,6 +1373,7 @@ export class UniverseForceSceneEngine {
     text: UniverseSceneText;
   }) {
     const themeChanged = this.darkTheme !== options.darkTheme;
+    const strategyChanged = this.strategy !== options.strategy;
     const motionChanged = this.reducedMotion !== options.reducedMotion;
     const timelineDisabled = this.timelineJourney.enabled && !options.timelineJourney.enabled;
     const cardPreferencesChanged =
@@ -1372,15 +1381,18 @@ export class UniverseForceSceneEngine {
       || this.viewPreferences.showEntityCards !== options.viewPreferences.showEntityCards;
     const leavingInteractiveMode = this.interactive && !options.interactive;
     const labelTextChanged = this.text.locale !== options.text.locale
+      || this.text.viewDetailsAction !== options.text.viewDetailsAction
       || this.text.exploreMoreAction !== options.text.exploreMoreAction
       || this.text.askAiAction !== options.text.askAiAction;
     this.darkTheme = options.darkTheme;
+    this.strategy = options.strategy;
     this.interactive = options.interactive;
     this.reducedMotion = options.reducedMotion;
     this.viewPreferences = options.viewPreferences;
     this.timelineJourney = options.timelineJourney;
     this.text = options.text;
     this.host.dataset.universeReducedMotion = String(options.reducedMotion);
+    this.host.dataset.universeStrategy = options.strategy;
     this.host.dataset.universeEventCards = String(options.viewPreferences.showEventCards);
     this.host.dataset.universeEntityCards = String(options.viewPreferences.showEntityCards);
     this.syncTimelineDiagnostics();
@@ -1395,6 +1407,27 @@ export class UniverseForceSceneEngine {
       this.flightState = brakeUniverseTemporalFlight(this.flightState);
       this.cancelTimelineTransition(true);
     }
+    if (strategyChanged) {
+      this.strategyChangedSinceData = true;
+      this.didInitialFocus = false;
+      this.cancelInitialFocus();
+      this.releaseBrowseGaze();
+      this.cancelSourceEntryDive();
+      this.sourceReturnMotion = null;
+      this.sourceSignature = "";
+      if (options.strategy === "accumulation") {
+        this.flightState = brakeUniverseTemporalFlight(this.flightState);
+        this.cancelTimelineTransition(true);
+        this.clearNebula();
+        this.latchedDetailSourceId = null;
+        this.visualSourceId = null;
+        this.reportedViewSourceId = null;
+        this.requestedSourceId = null;
+        this.visualDetailMix = 0;
+        this.visualDetailTarget = 0;
+        this.callbacks.onViewChange({ mode: "overview", sourceId: null, progress: 0 });
+      }
+    }
     if (leavingInteractiveMode) this.resetOverview();
     if (!options.interactive) this.pause();
     this.updatePixelRatio();
@@ -1406,7 +1439,10 @@ export class UniverseForceSceneEngine {
       this.updateLinkVisuals();
     }
     if (motionChanged) this.syncHighlightFlowSprites();
-    if (this.dataReady && (cardPreferencesChanged || labelTextChanged)) this.rebuildLabels();
+    if (
+      this.dataReady
+      && (strategyChanged || cardPreferencesChanged || labelTextChanged)
+    ) this.rebuildLabels();
     const keyboardCandidates = this.keyboardCandidates();
     if (
       this.keyboardFocusedId
@@ -1465,6 +1501,10 @@ export class UniverseForceSceneEngine {
           || this.paused
         ) return;
         this.didInitialFocus = true;
+        if (this.strategy === "accumulation") {
+          this.frameAccumulation(this.reducedMotion ? 0 : 480, false);
+          return;
+        }
         const sourceId = this.flightConfig?.sourceId
           ?? this.sourceHits[0]?.source_id;
         if (sourceId) this.focusSource(sourceId);
@@ -1479,6 +1519,8 @@ export class UniverseForceSceneEngine {
     sourceHits: SearchSourceHit[],
   ) {
     this.policy = policy;
+    const resetLayoutForStrategy = this.strategyChangedSinceData;
+    this.strategyChangedSinceData = false;
     const epochChanged = data.epoch !== this.dataEpoch;
     const nextWindowRevision = data.windowRevision ?? 0;
     const windowChanged = !epochChanged
@@ -1581,7 +1623,12 @@ export class UniverseForceSceneEngine {
     const searchFocusSourceId = previousSearchSignature !== nextSearchSignature
       ? sourceHits[0]?.source_id
       : undefined;
-    const oldNodes = this.nodes;
+    // A strategy boundary is a scene boundary. Reusing the old force nodes
+    // would leak source-cluster coordinates into the accumulated evidence
+    // graph (or vice versa) even when canonical node ids happen to match.
+    const oldNodes = resetLayoutForStrategy
+      ? new Map<string, ForceNode>()
+      : this.nodes;
     const persistentAnchor = oldNodes.get(this.lockedId ?? this.selectedId ?? "");
     const nextNodes = new Map<string, ForceNode>();
     const sceneNodesById = new Map(data.nodes.map((node) => [node.id, node]));
@@ -2211,7 +2258,15 @@ export class UniverseForceSceneEngine {
     if (this.timelineMotionPhase === "entering" && timelineMovingCount === 0) {
       this.finishTimelineMotionPhase();
     }
-    if (!this.paused && nextFlight && flightSourceChanged) {
+    if (
+      !this.paused
+      && this.strategy === "accumulation"
+      && topologyChanged
+      && !this.lockedId
+    ) {
+      this.didInitialFocus = true;
+      this.frameAccumulation(this.reducedMotion ? 0 : 420, false);
+    } else if (!this.paused && nextFlight && flightSourceChanged) {
       this.didInitialFocus = true;
       this.focusSource(nextFlight.sourceId);
     } else if (!this.paused && searchFocusSourceId && !this.lockedId) {
@@ -2366,6 +2421,10 @@ export class UniverseForceSceneEngine {
   }
 
   private frameOverview(duration: number, canonical: boolean) {
+    if (this.strategy === "accumulation") {
+      this.frameAccumulation(duration, canonical);
+      return;
+    }
     this.requestedSourceId = null;
     this.overviewRequested = true;
     this.host.dataset.universeCameraTarget = "overview";
@@ -2415,6 +2474,42 @@ export class UniverseForceSceneEngine {
       bounds.min.z.toFixed(1),
       bounds.max.z.toFixed(1),
     ].join(",");
+    this.moveCamera(center, distance, duration, false, canonical);
+  }
+
+  private frameAccumulation(duration: number, canonical: boolean) {
+    this.requestedSourceId = null;
+    this.overviewRequested = true;
+    this.host.dataset.universeCameraTarget = "accumulation";
+    const concreteNodes = [...this.nodes.values()].filter((node) =>
+      node.kind !== "source"
+      && Number.isFinite(node.x)
+      && Number.isFinite(node.y)
+      && Number.isFinite(node.z));
+    if (!concreteNodes.length) return;
+    const bounds = new THREE.Box3();
+    concreteNodes.forEach((node) => {
+      const position = node.entry?.to ?? node;
+      const padding = node.kind === "event" ? 26 : 14;
+      bounds.expandByPoint(new THREE.Vector3(
+        position.x - padding,
+        position.y - padding,
+        position.z - padding,
+      ));
+      bounds.expandByPoint(new THREE.Vector3(
+        position.x + padding,
+        position.y + padding,
+        position.z + padding,
+      ));
+    });
+    const center = bounds.getCenter(new THREE.Vector3());
+    const size = bounds.getSize(new THREE.Vector3());
+    const camera = this.graph.camera() as THREE.PerspectiveCamera;
+    const halfFov = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+    const aspect = Math.max(0.4, this.host.clientWidth / Math.max(1, this.host.clientHeight));
+    const distanceY = size.y / Math.max(0.01, 2 * halfFov);
+    const distanceX = size.x / Math.max(0.01, 2 * halfFov * aspect);
+    const distance = Math.max(190, distanceX, distanceY, size.z * 1.28) * 1.12;
     this.moveCamera(center, distance, duration, false, canonical);
   }
 
@@ -2790,6 +2885,10 @@ export class UniverseForceSceneEngine {
   }
 
   focusResult() {
+    if (this.strategy === "accumulation") {
+      this.frameAccumulation(this.reducedMotion ? 0 : 520, false);
+      return;
+    }
     const primarySource = this.sourceHits[0]?.source_id;
     if (primarySource) {
       this.focusSource(primarySource);
@@ -3660,7 +3759,11 @@ export class UniverseForceSceneEngine {
     const focusId = this.lockedId
       ?? this.selectedId
       ?? this.keyboardFocusedId
-      ?? (this.visualDetailMix >= 0.5 ? this.hoveredId : null);
+      ?? (
+        this.strategy === "accumulation" || this.visualDetailMix >= 0.5
+          ? this.hoveredId
+          : null
+      );
     return focusId && this.nodes.get(focusId)?.kind !== "source" ? focusId : null;
   }
 
@@ -3669,7 +3772,7 @@ export class UniverseForceSceneEngine {
       this.lockedId
       || this.selectedId
       || this.keyboardFocusedId
-      || this.visualDetailMix < 0.5
+      || (this.strategy === "exploration" && this.visualDetailMix < 0.5)
     ) return null;
     const node = this.hoveredId ? this.nodes.get(this.hoveredId) : undefined;
     return node && node.kind !== "source" ? node.id : null;
@@ -3725,6 +3828,7 @@ export class UniverseForceSceneEngine {
     } else this.cancelHoverClear();
     if (
       node?.kind !== "source"
+      && this.strategy === "exploration"
       && (this.visualDetailMix < 0.5 || node?.sourceId !== this.visualSourceId)
     ) {
       node = null;
@@ -3761,7 +3865,9 @@ export class UniverseForceSceneEngine {
     const neighbors = anchorId ? this.adjacency.get(anchorId) ?? new Set<string>() : null;
     const transientHoverId = this.transientHoverFocusId();
     const transientHover = anchorId !== null && anchorId === transientHoverId;
-    const hitRank = new Map(this.sourceHits.map((hit, index) => [hit.source_id, index]));
+    const hitRank = this.strategy === "accumulation"
+      ? new Map<string, number>()
+      : new Map(this.sourceHits.map((hit, index) => [hit.source_id, index]));
     let relationCount = 0;
     this.links.forEach((link) => {
       const source = link.sourceId || endpointId(link.source);
@@ -3790,7 +3896,9 @@ export class UniverseForceSceneEngine {
         else if (neighbors?.has(node.id)) opacity = transientHover ? 0.76 : 0.92;
         else if (node.kind === "source" && anchor?.sourceId === node.sourceId) {
           opacity = transientHover ? 0.28 : 0.38;
-        } else opacity = transientHover ? 0.12 : 0.18;
+        } else opacity = transientHover
+          ? this.strategy === "accumulation" ? 0.38 : 0.12
+          : 0.18;
       }
       const overviewSourceHovered = node.kind === "source"
         && this.visualDetailMix < 0.5
@@ -3863,7 +3971,7 @@ export class UniverseForceSceneEngine {
     if (!anchorId || node.kind === "source") return 1;
     if (node.id === anchorId) return 1;
     if (this.adjacency.get(anchorId)?.has(node.id)) return 0.76;
-    return 0.16;
+    return this.strategy === "accumulation" ? 0.42 : 0.16;
   }
 
   private updateObjectOpacities() {
@@ -4222,6 +4330,13 @@ export class UniverseForceSceneEngine {
   }
 
   private rebuildNebula() {
+    if (this.strategy === "accumulation") {
+      this.sourceSignature = "";
+      this.clearNebula();
+      this.host.dataset.universeNebulaBudget = "0";
+      this.host.dataset.universeParticleCount = "0";
+      return;
+    }
     const sources = this.sourceNodeList;
     const mobile = this.host.clientWidth < 768;
     const configuredBudget = mobile
@@ -5064,7 +5179,7 @@ export class UniverseForceSceneEngine {
       node.kind !== "source"
       && (node.kind === "event" ? showEventCards : showEntityCards)
       && (node.sceneNode.state === "active" || focusCardIds.has(node.id))
-      && node.sourceId === labelSourceId
+      && (this.strategy === "accumulation" || node.sourceId === labelSourceId)
       && (!focusId || focusCardIds.has(node.id))
     );
     const eventLimit = showEventCards
@@ -5152,7 +5267,10 @@ export class UniverseForceSceneEngine {
       const retained = existingLabels.get(labelKey);
       const element = retained?.element ?? document.createElement("div");
       const primary = retained?.primary ?? document.createElement("button");
-      const actionButtons = retained?.actionButtons ?? [
+      const actionButtons = retained?.actionButtons?.length === 3
+        ? retained.actionButtons
+        : [
+        document.createElement("button"),
         document.createElement("button"),
         document.createElement("button"),
       ];
@@ -5177,16 +5295,19 @@ export class UniverseForceSceneEngine {
           document.createElement("p"),
           exploreHint,
         );
+        actionButtons[0].type = "button";
+        actionButtons[0].className = "sag-universe-node-label__detail-action";
+        actionButtons[0].dataset.universeNodeAction = "view-details";
         const actions = document.createElement("div");
         actions.className = "sag-universe-node-label__actions";
         actions.dataset.universeNodeActions = "true";
-        actionButtons.forEach((button, index) => {
+        actionButtons.slice(1).forEach((button, index) => {
           button.type = "button";
           button.className = "sag-universe-node-label__action";
           button.dataset.universeNodeAction = index === 0 ? "explore-more" : "ask-ai";
         });
-        actions.append(...actionButtons);
-        element.append(primary, actions);
+        actions.append(...actionButtons.slice(1));
+        element.append(primary, actionButtons[0], actions);
         this.bindNodeLabelInteraction(element, primary, actionButtons, node);
         this.labelLayer.appendChild(element);
       }
@@ -5194,7 +5315,7 @@ export class UniverseForceSceneEngine {
       primary.disabled = this.timelineIsBusy();
       actionButtons.forEach((button, index) => {
         button.disabled = this.timelineIsBusy() || (
-          index === 0 && node.sceneNode.canExploreMore === false
+          index === 1 && node.sceneNode.canExploreMore === false
         );
       });
       element.dataset.kind = node.kind;
@@ -5253,12 +5374,16 @@ export class UniverseForceSceneEngine {
           : this.text.explorationProgress(relatedProgress, relatedTotal);
       const actions = element.querySelector<HTMLElement>("[data-universe-node-actions]");
       if (actions) actions.hidden = !locked;
+      const viewDetailsAction = this.text.viewDetailsAction ?? "View details";
       const exploreMoreAction = this.text.exploreMoreAction ?? "Explore more";
       const askAiAction = this.text.askAiAction ?? "Ask AI";
-      actionButtons[0].textContent = exploreMoreAction;
-      actionButtons[0].setAttribute("aria-label", exploreMoreAction);
-      actionButtons[1].textContent = askAiAction;
-      actionButtons[1].setAttribute("aria-label", askAiAction);
+      actionButtons[0].hidden = !(locked || node.id === focusId);
+      actionButtons[0].textContent = viewDetailsAction;
+      actionButtons[0].setAttribute("aria-label", viewDetailsAction);
+      actionButtons[1].textContent = exploreMoreAction;
+      actionButtons[1].setAttribute("aria-label", exploreMoreAction);
+      actionButtons[2].textContent = askAiAction;
+      actionButtons[2].setAttribute("aria-label", askAiAction);
       nextLabels.push({
         nodeId: node.id,
         kind: "node",
@@ -5373,9 +5498,13 @@ export class UniverseForceSceneEngine {
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        if (this.timelineIsBusy() || node.id !== this.lockedId) return;
+        if (
+          this.timelineIsBusy()
+          || (index !== 0 && node.id !== this.lockedId)
+        ) return;
         this.clearKeyboardFocus(false);
-        if (index === 0) this.callbacks.onExploreMore?.(node.sceneNode);
+        if (index === 0) this.callbacks.onViewDetails?.(node.sceneNode);
+        else if (index === 1) this.callbacks.onExploreMore?.(node.sceneNode);
         else this.callbacks.onAskNode?.(node.sceneNode);
       });
     });
@@ -5412,9 +5541,12 @@ export class UniverseForceSceneEngine {
     let visibleEntityLabels = 0;
     // Flight speed scales the complete card as one object. Internal content
     // never stages independently, so the board cannot jump between layouts.
-    const cardMorphProgress = this.visualDetailMix * this.flightCardPresence;
+    const presentationDetailMix = this.strategy === "accumulation"
+      ? 1
+      : this.visualDetailMix;
+    const cardMorphProgress = presentationDetailMix * this.flightCardPresence;
     const globalCardMorph = universeCardMorph(cardMorphProgress);
-    const sourceReveal = 1 - THREE.MathUtils.smoothstep(this.visualDetailMix, 0, 0.72);
+    const sourceReveal = 1 - THREE.MathUtils.smoothstep(presentationDetailMix, 0, 0.72);
     const labelFocusId = this.labelFocusId();
     const transientHover = labelFocusId !== null
       && labelFocusId === this.transientHoverFocusId();
@@ -5436,7 +5568,7 @@ export class UniverseForceSceneEngine {
       const emergence = this.nodeEmergence(node);
       if (
         node.kind !== "event"
-        || node.sourceId !== labelSourceId
+        || (this.strategy === "exploration" && node.sourceId !== labelSourceId)
         || emergence.star <= 0.16
         || (node.entryOpacity ?? 1)
           * (node.timelineOpacity ?? 1)
@@ -5489,7 +5621,8 @@ export class UniverseForceSceneEngine {
       const depthScale = node.kind === "source" || requiredFocusCard
         ? 1
         : 0.5 + (node.temporalPresenceScale ?? 1) * 0.5;
-      const belongsToLabelSource = node.sourceId === labelSourceId;
+      const belongsToLabelSource = this.strategy === "accumulation"
+        || node.sourceId === labelSourceId;
       const kindPlacementFull = label.kind === "node" && !requiredFocusCard && (
         visibleEventLabels + visibleEntityLabels >= this.labelPlacementBudget.total
         || (node.kind === "event"
@@ -5619,6 +5752,12 @@ export class UniverseForceSceneEngine {
         ? label.element.querySelector<HTMLElement>("[data-universe-node-actions]")
         : null;
       if (actions) actions.hidden = !locked;
+      if (label.kind === "node") {
+        const detailAction = label.actionButtons?.[0];
+        if (detailAction) {
+          detailAction.hidden = !(locked || node.id === labelFocusId);
+        }
+      }
       const sourceBeaconSize = mobile ? 44 : 48;
       const sourceInfoWidth = mobile ? 138 : 154;
       const sourceInfoHeight = mobile ? 40 : 44;
@@ -6000,6 +6139,20 @@ export class UniverseForceSceneEngine {
       : 32;
     if (!force && elapsed < 24) return;
     this.lastVisualLodAt = now;
+    if (this.strategy === "accumulation") {
+      this.latchedDetailSourceId = null;
+      this.visualSourceId = null;
+      this.reportedViewSourceId = null;
+      this.requestedSourceId = null;
+      this.visualDetailMix = 0;
+      this.visualDetailTarget = 0;
+      this.host.dataset.universeVisualMode = "overview";
+      this.host.dataset.universeDetailSource = "";
+      this.host.dataset.universeDetailLatched = "";
+      this.host.dataset.universeDetailMix = "0.00";
+      this.host.dataset.universeDetailTarget = "0.00";
+      return;
+    }
     const camera = this.graph.camera();
     camera.updateMatrixWorld();
     const width = Math.max(1, this.host.clientWidth);

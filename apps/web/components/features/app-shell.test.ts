@@ -34,4 +34,23 @@ describe("app shell viewport stage", () => {
       '{appMode !== "explore" && <SpaceBackdrop />}',
     );
   });
+
+  it("enters exploration from panels through a fresh universe home", () => {
+    const start = appShellSource.indexOf(
+      "const enterExploreMode = React.useCallback",
+    );
+    const end = appShellSource.indexOf(
+      "const exitExploreMode = React.useCallback",
+      start,
+    );
+    const enterExploreMode = appShellSource.slice(start, end);
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    expect(appShellSource).toContain("dispatchUniverseReset,");
+    expect(enterExploreMode).toContain('if (appMode !== "explore")');
+    expect(enterExploreMode).toContain('dispatchUniverseReset("explore-home")');
+    expect(enterExploreMode.indexOf('dispatchUniverseReset("explore-home")'))
+      .toBeLessThan(enterExploreMode.indexOf('setAppMode("explore")'));
+  });
 });

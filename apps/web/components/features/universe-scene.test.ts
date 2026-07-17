@@ -487,7 +487,10 @@ describe("universe scene production invariants", () => {
       "\n  setSelection(selectedId: string | null)",
     );
     expect(options).toContain("const cardPreferencesChanged =");
-    expect(options).toContain("if (this.dataReady && (cardPreferencesChanged || labelTextChanged)) this.rebuildLabels()");
+    expect(options).toContain(
+      "&& (strategyChanged || cardPreferencesChanged || labelTextChanged)",
+    );
+    expect(options).toContain(") this.rebuildLabels()");
     expect(options).not.toContain("graphData(");
   });
 
@@ -546,8 +549,8 @@ describe("universe scene production invariants", () => {
 
     expect(labels).toContain('const element = retained?.element ?? document.createElement("div")');
     expect(labels).toContain('const primary = retained?.primary ?? document.createElement("button")');
-    expect(labels).toContain("element.append(primary, actions)");
-    expect(labels).not.toContain("primary.append(primary, actions)");
+    expect(labels).toContain("element.append(primary, actionButtons[0], actions)");
+    expect(labels).not.toContain("primary.append(primary, actionButtons[0], actions)");
     expect(labels).toContain('button.dataset.universeNodeAction = index === 0 ? "explore-more" : "ask-ai"');
     expect(labels).toContain("actions.hidden = !locked");
     expect(nodeInteraction).toContain("this.callbacks.onExploreMore?.(node.sceneNode)");
@@ -857,6 +860,22 @@ describe("universe scene production invariants", () => {
     expect(overviewFrame.match(/\* NEBULA_SOURCE_FRAME_RATIO/g)).toHaveLength(3);
   });
 
+  it("keeps accumulation layout, camera and particles outside exploration state", () => {
+    expect(source).toContain(
+      'private strategy: UniverseSceneStrategy = "exploration"',
+    );
+    expect(source).toContain("private strategyChangedSinceData = false");
+    expect(source).toContain(
+      'if (this.strategy === "accumulation") {\n      this.frameAccumulation',
+    );
+    expect(source).toContain(
+      'if (this.strategy === "accumulation") {\n      this.sourceSignature = "";',
+    );
+    expect(source).toContain("const resetLayoutForStrategy = this.strategyChangedSinceData");
+    expect(source).toContain("const oldNodes = resetLayoutForStrategy");
+    expect(source).toContain('this.host.dataset.universeNebulaBudget = "0"');
+  });
+
   it("runs overview breathing on a throttled ticker while the main loop sleeps", () => {
     const ambient = sourceBetween(
       "private nebulaAmbientEligible()",
@@ -1073,7 +1092,9 @@ describe("universe scene production invariants", () => {
     expect(flight).toContain("const instantSpeed = Math.abs(delta)");
     expect(flight).toContain("FLIGHT_CARD_COLLAPSE_MS");
     expect(flight).toContain("return moving || cardsSettling");
-    expect(labels).toContain("const cardMorphProgress = this.visualDetailMix * this.flightCardPresence");
+    expect(labels).toContain(
+      "const cardMorphProgress = presentationDetailMix * this.flightCardPresence",
+    );
     expect(labels).toContain("const globalCardMorph = universeCardMorph(cardMorphProgress)");
     expect(labels).toContain("* (forceCardDetail ? 1 : globalCardMorph.reveal)");
     expect(labels).not.toContain("--universe-card-eyebrow-opacity");

@@ -310,6 +310,29 @@
     will-change: transform;
   }
 
+  .sag-space-sparkles[data-space-variant="universe"][data-universe-presentation="accumulation"] {
+    opacity: 0.72;
+  }
+
+  .sag-space-sparkles[data-space-variant="universe"][data-universe-presentation="accumulation"]::before {
+    content: none;
+    animation: none;
+  }
+
+  .sag-space-sparkles[data-space-variant="universe"][data-universe-presentation="accumulation"]
+    .sag-space-particles {
+    animation: none;
+    opacity: 0.58;
+    transform: none;
+    will-change: auto;
+  }
+
+  .sag-space-sparkles[data-space-variant="universe"][data-universe-presentation="accumulation"]
+    .sag-space-sparkle {
+    animation-play-state: paused;
+    opacity: 0.36;
+  }
+
   .sag-space-cursor-layer {
     --space-cursor-meteor-core: hsl(42 88% 48% / 0.96);
     --space-cursor-meteor-tail: hsl(42 82% 62% / 0.56);
@@ -2945,6 +2968,7 @@
   }
 
   .sag-universe-node-label__primary,
+  .sag-universe-node-label__detail-action,
   .sag-universe-node-label__action {
     appearance: none;
     margin: 0;
@@ -2973,6 +2997,7 @@
 
   .sag-nebula-label:focus-visible,
   .sag-universe-node-label:has(.sag-universe-node-label__primary:focus-visible),
+  .sag-universe-node-label__detail-action:focus-visible,
   .sag-universe-node-label__action:focus-visible {
     outline: 2px solid hsl(var(--ring) / 0.72);
     outline-offset: 3px;
@@ -3385,6 +3410,50 @@
     display: none;
   }
 
+  .sag-universe-node-label__detail-action {
+    position: absolute;
+    right: 4px;
+    bottom: calc(100% + 6px);
+    display: inline-flex;
+    min-height: 22px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgb(244 201 95 / 0.42);
+    border-radius: 999px;
+    background: hsl(var(--background) / 0.94);
+    box-shadow:
+      0 6px 18px rgb(0 0 0 / 0.14),
+      0 0 14px rgb(244 201 95 / 0.09);
+    color: rgb(253 224 133 / 0.98);
+    font-size: 9px;
+    font-weight: 600;
+    line-height: 1;
+    padding: 0 9px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      border-color 140ms ease,
+      background-color 140ms ease,
+      color 140ms ease,
+      opacity 140ms ease;
+  }
+
+  .sag-universe-node-label__detail-action:hover:not(:disabled) {
+    border-color: rgb(244 201 95 / 0.68);
+    background: rgb(244 201 95 / 0.12);
+    color: rgb(255 237 176 / 1);
+  }
+
+  .sag-universe-node-label[data-kind="entity"]
+    .sag-universe-node-label__detail-action {
+    border-color: color-mix(in srgb, var(--universe-node-accent), transparent 54%);
+    color: color-mix(in srgb, var(--universe-node-accent), white 24%);
+  }
+
+  .sag-universe-node-label__detail-action[hidden] {
+    display: none;
+  }
+
   .sag-universe-node-label__action {
     display: inline-flex;
     min-width: 0;
@@ -3481,7 +3550,7 @@
 
   .sag-universe-node-label__explore {
     position: absolute;
-    right: 4px;
+    left: 4px;
     bottom: calc(100% + 6px);
     display: inline-flex;
     min-height: 20px;
@@ -3523,6 +3592,7 @@
       .sag-universe-node-label__eyebrow,
       .sag-universe-node-label p,
       .sag-universe-node-label__explore,
+      .sag-universe-node-label__detail-action,
       .sag-universe-node-label__action
     ) {
     transition: none;

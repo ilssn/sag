@@ -6,8 +6,11 @@ import { useReducedMotion } from "motion/react";
 import { createPortal } from "react-dom";
 import { ParticleGalaxy } from "@/components/features/particle-galaxy";
 import {
+  readUniversePresentation,
   readUniverseView,
+  UNIVERSE_PRESENTATION_EVENT,
   UNIVERSE_VIEW_EVENT,
+  type UniversePresentationMode,
   type UniverseViewState,
 } from "@/lib/universe-events";
 
@@ -61,7 +64,27 @@ export function SpaceBackdrop({
   const cursorPortalRootRef = React.useRef<HTMLDivElement | null>(null);
   const universeDetailRef = React.useRef(false);
   const universeVariantRef = React.useRef(false);
+  const [universePresentation, setUniversePresentation] =
+    React.useState<UniversePresentationMode>(readUniversePresentation);
   const [cursorPortalRoot, setCursorPortalRoot] = React.useState<HTMLDivElement | null>(null);
+  const accumulationPresentation = variant === "universe"
+    && universePresentation === "accumulation";
+  const backdropMotionPaused = ambientMotionPaused || accumulationPresentation;
+
+  React.useEffect(() => {
+    if (variant !== "universe") return;
+    const syncPresentation = (event: Event) => {
+      setUniversePresentation(
+        (event as CustomEvent<UniversePresentationMode>).detail,
+      );
+    };
+    setUniversePresentation(readUniversePresentation());
+    window.addEventListener(UNIVERSE_PRESENTATION_EVENT, syncPresentation);
+    return () => window.removeEventListener(
+      UNIVERSE_PRESENTATION_EVENT,
+      syncPresentation,
+    );
+  }, [variant]);
 
   React.useEffect(() => {
     if (variant !== "universe" || reducedMotion) {
@@ -97,7 +120,7 @@ export function SpaceBackdrop({
       universeVariantRef.current = false;
       universeDetailRef.current = false;
       backdrop.dataset.universeView = "fixed";
-      backdrop.dataset.ambientMotion = ambientMotionPaused ? "paused" : "active";
+      backdrop.dataset.ambientMotion = backdropMotionPaused ? "paused" : "active";
       return;
     }
 
@@ -111,7 +134,7 @@ export function SpaceBackdrop({
     if (enteringUniverse) {
       universeDetailRef.current = false;
       backdrop.dataset.universeView = "overview";
-      backdrop.dataset.ambientMotion = ambientMotionPaused ? "paused" : "active";
+      backdrop.dataset.ambientMotion = backdropMotionPaused ? "paused" : "active";
     }
 
     const syncView = (view: UniverseViewState) => {
@@ -129,7 +152,7 @@ export function SpaceBackdrop({
       if (cursorPortalRootRef.current) {
         cursorPortalRootRef.current.dataset.universeView = nextView;
       }
-      backdrop.dataset.ambientMotion = ambientMotionPaused || detail ? "paused" : "active";
+      backdrop.dataset.ambientMotion = backdropMotionPaused || detail ? "paused" : "active";
       if (detail && cursorMeteorRef.current) {
         cursorMeteorRef.current.dataset.active = "false";
       }
@@ -141,7 +164,7 @@ export function SpaceBackdrop({
     if (!enteringUniverse) syncView(readUniverseView());
     window.addEventListener(UNIVERSE_VIEW_EVENT, handleView);
     return () => window.removeEventListener(UNIVERSE_VIEW_EVENT, handleView);
-  }, [ambientMotionPaused, variant]);
+  }, [backdropMotionPaused, variant]);
 
   React.useEffect(() => {
     if (reducedMotion || !cursorMeteorRef.current) return;
@@ -280,14 +303,15 @@ export function SpaceBackdrop({
       className="sag-space-sparkles"
       data-space-variant={variant}
       data-universe-view={variant === "universe" ? "overview" : "fixed"}
-      data-ambient-motion={ambientMotionPaused ? "paused" : "active"}
+      data-universe-presentation={variant === "universe" ? universePresentation : "fixed"}
+      data-ambient-motion={backdropMotionPaused ? "paused" : "active"}
       aria-hidden
     >
       <SpaceParticles
         // Keep one star-field implementation for loading, normal workspace,
         // and exploration. The graph adds its source nebulae on top; it does
         // not replace the shared background with a second particle system.
-        reducedMotion={ambientMotionPaused}
+        reducedMotion={backdropMotionPaused}
         density={1}
       />
       {!reducedMotion && (cursorPortalRoot
@@ -296,16 +320,18 @@ export function SpaceBackdrop({
           cursorPortalRoot,
         )
         : <span ref={cursorMeteorRef} className="sag-space-cursor-meteor" data-active="false" />)}
-      <>
-        <span className="sag-space-galaxy-orbit">
-          <ParticleGalaxy reducedMotion={ambientMotionPaused} />
-        </span>
-        <span className="sag-space-dust" />
-      </>
-      <span className="sag-space-meteor sag-space-meteor--one" />
-      <span className="sag-space-meteor sag-space-meteor--two" />
-      <span className="sag-space-meteor sag-space-meteor--three" />
-      <span className="sag-space-meteor sag-space-meteor--four" />
+      {!accumulationPresentation && (
+        <>
+          <span className="sag-space-galaxy-orbit">
+            <ParticleGalaxy reducedMotion={ambientMotionPaused} />
+          </span>
+          <span className="sag-space-dust" />
+          <span className="sag-space-meteor sag-space-meteor--one" />
+          <span className="sag-space-meteor sag-space-meteor--two" />
+          <span className="sag-space-meteor sag-space-meteor--three" />
+          <span className="sag-space-meteor sag-space-meteor--four" />
+        </>
+      )}
       {SPARKLES.map((star) => (
         <span
           key={`${star.x}-${star.y}`}

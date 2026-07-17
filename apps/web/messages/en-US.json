@@ -1098,6 +1098,7 @@
       "description": "In search results, the wheel only zooms. Lock a node, then choose Explore more in the details panel."
     },
     "nodeActions": {
+      "viewDetails": "View details",
       "exploreMore": "Explore more",
       "askAi": "Ask AI"
     },
