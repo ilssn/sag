@@ -108,7 +108,7 @@ describe("universe temporal axis", () => {
       .not.toEqual({ x: near.normalizedOffset.x, y: near.normalizedOffset.y });
   });
 
-  it("opens the first window quickly, then reserves the widest field for older knowledge", () => {
+  it("keeps every page in the same narrow lateral corridor", () => {
     const largeAxis = createUniverseTemporalAxis(586);
     const ordinals = [0, 1, 3, 7, 35, 292, 585];
     const projections = projectUniverseTemporalAxis(
@@ -121,16 +121,8 @@ describe("universe temporal axis", () => {
       normalizedOffset.y / 0.74,
     ));
 
-    // A large source must not squeeze its first dozen cards into the same tiny
-    // radius merely because their global age is close to zero.
-    expect(radii[3]).toBeGreaterThan(radii[0] * 2.5);
-    // Once displaced, older knowledge keeps making room for newly emerging
-    // data at the core instead of drifting back inward.
-    for (let index = 1; index < radii.length; index += 1) {
-      expect(radii[index]).toBeGreaterThan(radii[index - 1]);
-    }
-    expect(radii.at(-1)).toBeCloseTo(0.78, 8);
-    // Widening the field must never compromise the canonical chronology.
+    radii.forEach((radius) => expect(radius).toBeCloseTo(0.42, 8));
+    // Stable lateral lanes must never compromise the canonical chronology.
     projections.forEach((projection, index) => {
       expect(projection.normalizedOffset.z).toBeCloseTo(
         -ordinals[index] / 585,

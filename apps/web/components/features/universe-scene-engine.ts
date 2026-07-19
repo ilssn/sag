@@ -94,9 +94,9 @@ export interface ForceNode extends NodeObject {
   vx?: number;
   vy?: number;
   vz?: number;
-  fx: number;
-  fy: number;
-  fz: number;
+  fx?: number;
+  fy?: number;
+  fz?: number;
   object?: THREE.Object3D;
   visualOpacity?: number;
   visuallyEmphasized?: boolean;
@@ -117,6 +117,7 @@ export interface ForceNode extends NodeObject {
   /** Camera-relative depth scale and opacity, refreshed per frame. */
   temporalPresenceScale?: number;
   temporalPresenceOpacity?: number;
+  temporalCardPresence?: number;
   /** Stable per-node emergence stagger, cached after its first calculation. */
   temporalRevealStart?: number;
   /** Cached hot-path projection of reversible grain → star → whole-card phases. */
@@ -359,6 +360,9 @@ const TIMELINE_CONDENSE_MS = 680;
 const TIMELINE_DISSOLVE_MS = 300;
 const TIMELINE_EXIT_VARIANCE_MS = 90;
 const TIMELINE_ENTRY_MS = 560;
+/** Only a new accumulation batch moves; the resident graph remains pinned. */
+const ACCUMULATION_SETTLE_TICKS = 42;
+const ACCUMULATION_SETTLE_MS = 720;
 const SOURCE_PALETTE = [
   "#6fc0d0",
   "#9d8bd0",
@@ -1151,6 +1155,8 @@ export class UniverseForceSceneEngine {
   private timelineRevisionWatchTimer: number | null = null;
   private currentPixelRatio: number | null = null;
   private clusterNodes: ForceNode[] = [];
+  private accumulationSettlingIds = new Set<string>();
+  private accumulationSettleTimer: number | null = null;
   private dataReady = false;
   private initialFocusTimer: number | null = null;
   private initialFocusFrame: number | null = null;
@@ -1401,6 +1407,7 @@ export class UniverseForceSceneEngine {
       this.cancelTimelineTransition(true);
     }
     if (strategyChanged) {
+      this.finishAccumulationSettle();
       this.strategyChangedSinceData = true;
       this.didInitialFocus = false;
       this.cancelInitialFocus();
@@ -1511,6 +1518,11 @@ export class UniverseForceSceneEngine {
     policy: UniversePolicy,
     sourceHits: SearchSourceHit[],
   ) {
+    // A new evidence turn starts from a stable graph. Commit the previous
+    // batch's final coordinates before calculating entrances for the next one.
+    if (this.accumulationSettlingIds.size > 0) {
+      this.finishAccumulationSettle();
+    }
     this.policy = policy;
     const resetLayoutForStrategy = this.strategyChangedSinceData;
     this.strategyChangedSinceData = false;
@@ -1852,7 +1864,7 @@ export class UniverseForceSceneEngine {
       entryOrderById.set(node.id, index);
       entrantCountBySource.set(node.sourceId, index + 1);
       const remembered = this.placementTargets.get(node.id);
-      const target = animateTimelineWindow
+      const target = animateTimelineWindow || this.strategy === "exploration"
         ? timelineTarget(node)
         : remembered?.clone()
           ?? resolveIncrementalPosition(node, canonicalTarget(node), obstacles);
@@ -2266,7 +2278,11 @@ export class UniverseForceSceneEngine {
       && !this.lockedId
     ) {
       this.didInitialFocus = true;
-      this.frameAccumulation(this.reducedMotion ? 0 : 420, false);
+      this.frameAccumulationAppend(
+        nodeDelta.enteringIds,
+        this.reducedMotion ? 0 : 420,
+        oldNodes.size === 0,
+      );
     } else if (!this.paused && nextFlight && flightSourceChanged) {
       this.didInitialFocus = true;
       this.focusSource(nextFlight.sourceId);
@@ -2487,6 +2503,58 @@ export class UniverseForceSceneEngine {
       && Number.isFinite(node.x)
       && Number.isFinite(node.y)
       && Number.isFinite(node.z));
+    this.frameAccumulationNodes(
+      concreteNodes,
+      duration,
+      canonical,
+      "accumulation",
+    );
+  }
+
+  private frameAccumulationAppend(
+    enteringIds: readonly string[],
+    duration: number,
+    firstBatch: boolean,
+  ) {
+    const entering = enteringIds
+      .map((id) => this.nodes.get(id))
+      .filter((node): node is ForceNode =>
+        Boolean(node && node.kind !== "source"));
+    if (!entering.length || firstBatch) {
+      this.frameAccumulation(duration, false);
+      return;
+    }
+    const enteringSet = new Set(entering.map((node) => node.id));
+    const bridges = [...new Set(entering.flatMap((node) =>
+      [...(this.adjacency.get(node.id) ?? [])]
+        .filter((id) => !enteringSet.has(id))))]
+      .map((id) => this.nodes.get(id))
+      .filter((node): node is ForceNode =>
+        Boolean(node && node.kind !== "source"))
+      .sort((left, right) =>
+        (this.adjacency.get(right.id)?.size ?? 0)
+          - (this.adjacency.get(left.id)?.size ?? 0)
+        || left.id.localeCompare(right.id))
+      .slice(0, 4);
+    this.frameAccumulationNodes(
+      [...entering, ...bridges],
+      duration,
+      false,
+      "accumulation-append",
+      true,
+    );
+  }
+
+  private frameAccumulationNodes(
+    concreteNodes: readonly ForceNode[],
+    duration: number,
+    canonical: boolean,
+    diagnosticTarget: string,
+    restrainDistance = false,
+  ) {
+    this.requestedSourceId = null;
+    this.overviewRequested = true;
+    this.host.dataset.universeCameraTarget = diagnosticTarget;
     if (!concreteNodes.length) return;
     const bounds = new THREE.Box3();
     concreteNodes.forEach((node) => {
@@ -2510,7 +2578,17 @@ export class UniverseForceSceneEngine {
     const aspect = Math.max(0.4, this.host.clientWidth / Math.max(1, this.host.clientHeight));
     const distanceY = size.y / Math.max(0.01, 2 * halfFov);
     const distanceX = size.x / Math.max(0.01, 2 * halfFov * aspect);
-    const distance = Math.max(190, distanceX, distanceY, size.z * 1.28) * 1.12;
+    let distance = Math.max(190, distanceX, distanceY, size.z * 1.28) * 1.12;
+    if (restrainDistance) {
+      const currentDistance = camera.position.distanceTo(
+        this.controls.target ?? center,
+      );
+      distance = THREE.MathUtils.clamp(
+        distance,
+        currentDistance * 0.78,
+        currentDistance * 1.18,
+      );
+    }
     // Accumulation is deliberately used beside search/answer panels. Frame the
     // graph inside the remaining reading surface instead of centring it behind
     // the workspace, where valid event cards would be collision-suppressed.
@@ -3014,6 +3092,7 @@ export class UniverseForceSceneEngine {
     this.lodArmed = false;
     this.pointerActive = false;
     this.flightState = brakeUniverseTemporalFlight(this.flightState);
+    this.finishAccumulationSettle();
     this.hoveredId = null;
     this.hoveredFromLabel = false;
     this.clearHighlightFlowSprites();
@@ -3047,6 +3126,7 @@ export class UniverseForceSceneEngine {
     this.cancelInitialFocus();
     if (this.sleepTimer !== null) window.clearTimeout(this.sleepTimer);
     if (this.browseGazeTimer !== null) window.clearTimeout(this.browseGazeTimer);
+    this.finishAccumulationSettle();
     this.controls.removeEventListener("start", this.handleControlsStart);
     this.controls.removeEventListener("change", this.handleControlsChange);
     this.resizeObserver.disconnect();
@@ -3155,6 +3235,59 @@ export class UniverseForceSceneEngine {
     node.vz = 0;
   }
 
+  private releaseAccumulationNode(node: ForceNode) {
+    if (
+      this.strategy !== "accumulation"
+      || this.reducedMotion
+      || node.kind === "source"
+    ) return;
+    node.fx = undefined;
+    node.fy = undefined;
+    node.fz = undefined;
+    node.vx = 0;
+    node.vy = 0;
+    node.vz = 0;
+    this.accumulationSettlingIds.add(node.id);
+    this.host.dataset.universeAccumulationSettling = String(
+      this.accumulationSettlingIds.size,
+    );
+    this.host.dataset.universeLayoutStable = "false";
+    this.graph
+      .cooldownTicks(ACCUMULATION_SETTLE_TICKS)
+      .cooldownTime(ACCUMULATION_SETTLE_MS)
+      .d3ReheatSimulation();
+    if (this.accumulationSettleTimer !== null) {
+      window.clearTimeout(this.accumulationSettleTimer);
+    }
+    this.accumulationSettleTimer = window.setTimeout(() => {
+      this.accumulationSettleTimer = null;
+      this.finishAccumulationSettle();
+    }, ACCUMULATION_SETTLE_MS);
+    this.wakeRendering(ACCUMULATION_SETTLE_MS + 180);
+  }
+
+  private finishAccumulationSettle() {
+    if (this.accumulationSettleTimer !== null) {
+      window.clearTimeout(this.accumulationSettleTimer);
+      this.accumulationSettleTimer = null;
+    }
+    this.accumulationSettlingIds.forEach((id) => {
+      const node = this.nodes.get(id);
+      if (!node) return;
+      this.freezeNode(node);
+      this.rememberPlacement(id, node);
+    });
+    this.accumulationSettlingIds.clear();
+    this.graph.cooldownTicks(1).cooldownTime(64);
+    this.host.dataset.universeAccumulationSettling = "0";
+    this.host.dataset.universeLayoutStable = "true";
+    if (this.dataReady) {
+      this.syncFrozenNodeCoordinates();
+      this.updateLinkVisuals();
+      this.updateLabels(performance.now(), true);
+    }
+  }
+
   private rememberPlacement(nodeId: string, position: Pick<THREE.Vector3, "x" | "y" | "z">) {
     this.placementTargets.delete(nodeId);
     this.placementTargets.set(nodeId, new THREE.Vector3(position.x, position.y, position.z));
@@ -3167,17 +3300,26 @@ export class UniverseForceSceneEngine {
   }
 
   private syncFrozenNodeCoordinates() {
+    let frozenCount = 0;
     this.nodes.forEach((node) => {
-      node.x = node.fx;
-      node.y = node.fy;
-      node.z = node.fz;
+      if (
+        !Number.isFinite(node.fx)
+        || !Number.isFinite(node.fy)
+        || !Number.isFinite(node.fz)
+      ) return;
+      node.x = node.fx as number;
+      node.y = node.fy as number;
+      node.z = node.fz as number;
       node.vx = 0;
       node.vy = 0;
       node.vz = 0;
+      frozenCount += 1;
     });
     this.syncGraphObjectPositions();
-    this.host.dataset.universeFrozenNodeCount = String(this.nodes.size);
-    this.host.dataset.universeLayoutStable = "true";
+    this.host.dataset.universeFrozenNodeCount = String(frozenCount);
+    this.host.dataset.universeLayoutStable = String(
+      this.accumulationSettlingIds.size === 0,
+    );
   }
 
   private syncGraphObjectPositions() {
@@ -3219,6 +3361,7 @@ export class UniverseForceSceneEngine {
         node.entry = undefined;
         node.entryOpacity = undefined;
         node.renderedEntryOpacity = undefined;
+        this.releaseAccumulationNode(node);
         this.setObjectOpacity(
           node,
           node.visualOpacity ?? 1,
@@ -3746,15 +3889,16 @@ export class UniverseForceSceneEngine {
   }
 
   /**
-   * Focus used by the label layout. Pointer hover is deliberately excluded:
-   * moving across a card should highlight the relationship, not rebuild the
-   * collision layout underneath the pointer. Click/keyboard focus remains a
-   * committed layout change and is allowed to reveal its one-hop network.
+   * Focus used by the label layout. The deterministic radial slots make the
+   * one-hop cards safe to mount
+   * without moving any existing node or card. Hover can therefore reveal the
+   * factual network immediately; click only changes persistence and actions.
    */
   private labelFocusId() {
     const focusId = this.lockedId
       ?? this.selectedId
-      ?? this.keyboardFocusedId;
+      ?? this.keyboardFocusedId
+      ?? this.hoveredId;
     return focusId && this.nodes.get(focusId)?.kind !== "source" ? focusId : null;
   }
 
@@ -4908,6 +5052,19 @@ export class UniverseForceSceneEngine {
         * (target ? this.nodeAtmosphereOpacity(target) : 1),
     );
     const timelineOpacity = dataOpacity * presenceOpacity;
+    const focusedSlicePresence = this.strategy === "exploration"
+      ? Math.min(
+          source?.temporalCardPresence ?? 0,
+          target?.temporalCardPresence ?? 0,
+        )
+      : 1;
+    const sharedEntityBridge = [source, target].some((node) =>
+      node?.kind === "entity" && (this.adjacency.get(node.id)?.size ?? 0) > 1);
+    const relationSalience = THREE.MathUtils.lerp(
+      0.24,
+      sharedEntityBridge ? 1.24 : 1,
+      focusedSlicePresence,
+    );
     if (!link.visible) {
       return { color: this.darkTheme ? "#5b747a" : "#70898e", opacity: 0 };
     }
@@ -4931,7 +5088,7 @@ export class UniverseForceSceneEngine {
     }
     return {
       color: this.darkTheme ? "#5b949e" : "#385f66",
-      opacity: this.restingLinkOpacity() * timelineOpacity,
+      opacity: this.restingLinkOpacity() * relationSalience * timelineOpacity,
     };
   }
 
@@ -5543,12 +5700,22 @@ export class UniverseForceSceneEngine {
       const requiredFocusCard = label.kind === "node"
         && Boolean(focusCardIds?.has(node.id));
       const forceCardDetail = overviewCardOverride || requiredFocusCard;
-      // Focus may bypass global LOD, never a node's own birth/death. Keeping
-      // emergence.card in every branch prevents a selected far package from
-      // becoming a fully formed ghost card before its star arrives.
-      const nodeCardReveal = emergence.card
-        * (forceCardDetail ? 1 : globalCardMorph.reveal);
-      const nodeCardScale = forceCardDetail ? 1 : globalCardMorph.scale;
+      // Hover/lock resolves a visible star and its one-hop network without
+      // resurrecting particles that have not formed yet. Ordinary labels stay
+      // entirely camera-depth driven.
+      const focusCardReveal = Math.max(emergence.card, emergence.star);
+      const ordinaryCardReveal = this.strategy === "exploration"
+        && node.kind === "entity"
+        ? 0
+        : emergence.card
+          * globalCardMorph.reveal
+          * (node.temporalCardPresence ?? 1);
+      const nodeCardReveal = forceCardDetail
+        ? focusCardReveal
+        : ordinaryCardReveal;
+      const nodeCardScale = forceCardDetail
+        ? 0.72 + focusCardReveal * 0.28
+        : globalCardMorph.scale;
       const depthScale = node.kind === "source" || requiredFocusCard
         ? 1
         : 0.5 + (node.temporalPresenceScale ?? 1) * 0.5;
@@ -5573,7 +5740,7 @@ export class UniverseForceSceneEngine {
         * (label.kind === "node" ? this.nodeAtmosphereOpacity(node) : 1);
       const calculatedOpacity = layoutOpacity * dataOpacity;
       let visibleOpacity = requiredFocusCard
-        ? Math.max(0.72 * emergence.card, calculatedOpacity)
+        ? Math.max(0.72 * focusCardReveal, calculatedOpacity)
         : calculatedOpacity;
       if (visibleOpacity <= 0.01) {
         label.element.hidden = true;
@@ -5794,7 +5961,10 @@ export class UniverseForceSceneEngine {
             ]
           : [sourceMarkerRect]
         : nodeCandidates;
-      if (label.kind === "node" && screen.x >= width / 2) {
+      // Cards open away from the corridor centre. The inverse rule made
+      // left/right event anchors point their wide cards at each other and
+      // manufactured a central pile even when the 3D nodes were well spaced.
+      if (label.kind === "node" && screen.x < width / 2) {
         [candidates[0], candidates[1]] = [candidates[1], candidates[0]];
       }
       const overlapsFixedOverlay = (rect: LabelRect) => [
@@ -5827,10 +5997,20 @@ export class UniverseForceSceneEngine {
         : [];
       const isOpenPlacement = (candidate: LabelRect) =>
         insideViewport(candidate) && !overlapsFixedOverlay(candidate);
-      const rect = candidates.find(isOpenPlacement)
-        ?? clampedCandidates.find((candidate) => !overlapsFixedOverlay(candidate))
-        ?? clampedCandidates[0]
-        ?? candidates[0];
+      const naturalRect = candidates.find(isOpenPlacement);
+      // Exploration is composed around a central temporal corridor. If an
+      // ordinary card no longer has a natural in-frame placement, its lifecycle
+      // has reached the edge and it should dissolve — never teleport to a
+      // clamped viewport border. Accumulation and an explicit focus keep a
+      // dependable fallback because their controls/actions must stay reachable.
+      const allowClampedPlacement =
+        this.strategy === "accumulation" || requiredFocusCard;
+      const rect = naturalRect
+        ?? (allowClampedPlacement
+          ? clampedCandidates.find((candidate) => !overlapsFixedOverlay(candidate))
+            ?? clampedCandidates[0]
+            ?? candidates[0]
+          : undefined);
       if (!rect) {
         label.element.hidden = true;
         label.element.style.display = "none";
@@ -5846,7 +6026,11 @@ export class UniverseForceSceneEngine {
         (hit) => hit.source_id === node.sourceId,
       ));
       const baseLabelOpacity = visibleOpacity * (
-        emphasized ? 1 : label.kind === "source" ? 0.94 : 0.84
+        emphasized
+          ? 1
+          : label.kind === "source"
+            ? 0.94
+            : node.kind === "event" ? 0.9 : 0.72
       );
       label.element.dataset.baseOpacity = baseLabelOpacity.toFixed(3);
       label.element.style.opacity = String(
@@ -5855,7 +6039,16 @@ export class UniverseForceSceneEngine {
       label.element.style.pointerEvents = label.kind === "source"
         ? visibleOpacity >= 0.58 ? "auto" : "none"
         : nodeCardReveal >= 0.72 && visibleOpacity >= 0.22 ? "auto" : "none";
-      label.element.style.zIndex = emphasized ? "4" : label.kind === "node" ? "2" : "1";
+      const depthLayer = Math.round(visibleOpacity * 40);
+      label.element.style.zIndex = String(
+        emphasized
+          ? 240
+          : label.kind === "source"
+            ? 20
+            : node.kind === "event"
+              ? 120 + depthLayer
+              : 60 + depthLayer,
+      );
       if (label.kind === "source") {
         label.element.style.transformOrigin = "center";
         label.element.style.transform = `translate3d(${screen.x}px, ${screen.y}px, 0) translate(-50%, -50%)`;
@@ -6451,6 +6644,7 @@ export class UniverseForceSceneEngine {
     this.nodes.forEach((node) => {
       let scale = 1;
       let opacity = 1;
+      let card = 1;
       if (config && node.kind !== "source" && node.sourceId === config.sourceId) {
         const nodeDepth = config.centerZ - node.z;
         const presence = universeTemporalFlightPresence(
@@ -6464,13 +6658,16 @@ export class UniverseForceSceneEngine {
         // from shrinking the same node twice.
         scale = presence.scale;
         opacity = presence.opacity * dive;
+        card = presence.card * dive;
       }
       if (
         Math.abs((node.temporalPresenceScale ?? 1) - scale) < 0.004
         && Math.abs((node.temporalPresenceOpacity ?? 1) - opacity) < 0.004
+        && Math.abs((node.temporalCardPresence ?? 1) - card) < 0.004
       ) return;
       node.temporalPresenceScale = scale;
       node.temporalPresenceOpacity = opacity;
+      node.temporalCardPresence = card;
       linksDirty = true;
       this.setObjectOpacity(
         node,

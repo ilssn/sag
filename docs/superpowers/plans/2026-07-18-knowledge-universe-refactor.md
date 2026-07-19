@@ -19,7 +19,7 @@
 两种状态共享：
 
 - 同一事件—实体事实模型；
-- 同一事件缓存、场景窗口和卡片预览配置；
+- 同一事件缓存、场景窗口和卡片开关配置；
 - 同一对象注册表、渲染资源和关系高亮规则；
 - 同一实体类型与文档范围过滤。
 
@@ -39,7 +39,7 @@
 2. 主页展示自然、克制、微旋转的信息源星云；进入后保持同一形态连续拉近，不爆炸、不破碎、不闪切。
 3. 时空探索形成完整生命周期：
    `远处粒子 → 小星星 → 星星与完整小卡片 → 正常卡片 → 边缘模糊淡出`。
-4. 网络分页、事件缓存、场景窗口、卡片预览彻底分层。
+4. 网络分页、事件缓存、场景窗口和相机深度形成的焦点关系片彻底分层。
 5. 搜索、问答和主动拓展进入同一线索累积态，多轮结果去重后持续追加并连线。
 6. 累积图谱中旧节点稳定，新批次从阅读前景进入；窗口满后按事件 FIFO 退出。
 7. hover、锁定、详情、AI 问答、探索更多、清除焦点和退出状态职责明确。
@@ -306,7 +306,7 @@ type EventCache = {
 - 缓存写入不创建对象；
 - 进入窗口时从对象池取得或创建；
 - 窗口内同 ID 对象身份不变；
-- hover、锁定和卡片预算变化只修改材质/可见性，不调用全量 `graphData()`；
+- hover、锁定和相机深度变化只修改材质/可见性，不调用全量 `graphData()`；
 - outgoing 动画结束后统一回收；
 - 高频帧复用数组、Map、向量和几何临时对象，不逐帧分配。
 
@@ -331,7 +331,8 @@ type EventCache = {
 | `apps/web/lib/universe-scene-window.ts` | 50/70 事件窗口、进入/退出事务、实体引用计数 |
 | `apps/web/lib/universe-prefetch-controller.ts` | 双向游标、低水位、单请求调度、取消与迟到响应隔离 |
 | `apps/web/lib/universe-accumulation.ts` | EvidenceAppend 去重、批次顺序、FIFO 与快照恢复 |
-| `apps/web/lib/universe-preview-plan.ts` | 阅读孔径、事件卡片 10、焦点接管与碰撞结果 |
+| `apps/web/lib/universe-temporal-axis.ts` | 确定性窄幅时间走廊与稳定事件纵深 |
+| `apps/web/lib/universe-temporal-flight.ts` | 相机飞行、星体生命周期与焦点关系片 |
 
 现有 `universe-timeline-window.ts`、`universe-working-set.ts` 和
 `universe-focus-cards.ts` 中仍有价值的确定性算法迁入上述边界，之后删除重复所有者。
@@ -363,27 +364,26 @@ type EventCache = {
 | `universe-scene-contract.ts` | 版本化命令、快照、事件和只读 presentation |
 | `universe-scene-objects.ts` | 对象池、稳定 ID 注册表、资源释放 |
 | `universe-scene-camera.ts` | 时间推进、空间缩放、拖动、惯性和自动聚焦 |
-| `universe-scene-layout.ts` | 时间锥形投影与稳定累积投影 |
-| `universe-scene-cards.ts` | DOM 卡片投影、整体缩放、碰撞、hover 动作 |
+| `universe-scene-layout.ts` | 窄幅时间走廊、事件本地径向槽位与增量累积投影 |
+| `universe-scene-cards.ts` | DOM 卡片整体缩放、确定性外向锚定与 hover 动作 |
 | `universe-nebula-layer.ts` | 信息源星云与远景粒子，不读取业务状态 |
 
 探索与累积只提供不同的 placement/presentation 策略，不复制渲染器和对象资源。
 
 ### 7.4 设置
 
-`universe-view-preferences.ts` 升级为 v6，只保留：
+`universe-view-preferences.ts` 升级为 v7，只保留：
 
 ```ts
-type UniverseViewPreferencesV6 = {
-  version: 6;
+type UniverseViewPreferences = {
+  version: 7;
   cacheCapacity: number;
   eventWindowSize: number;
   cardsEnabled: boolean;
-  eventCardPreviewCount: number;
   temporalPageSize: number;
   temporalPrefetchPages: number;
-  entityTypes: string[];
-  documentIds: string[];
+  entityTypes: string[] | null;
+  documentIds: string[] | null;
 };
 ```
 
@@ -635,12 +635,12 @@ ruff check .
 只有同时满足以下条件，重构才算完成：
 
 1. 用户能从主页自然进入星云，持续探索、回退并回到主页，全程无闪切。
-2. 50 个事件窗口中只有默认 10 个事件卡片可读，其余仍形成清晰网络。
-3. 分页、缓存、窗口和卡片预览四个概念在代码、设置和文案中一致。
+2. 50 个事件窗口完整形成星体网络，相机深度在中央自然展开约 3–5 个连续事件卡片。
+3. 分页、缓存、窗口和焦点关系片四个概念在代码、设置和文案中一致。
 4. 多轮搜索、问答和探索更多形成同一个稳定增量线索图谱。
 5. 空白点击只清焦点；底部返回明确恢复原探索现场。
 6. 新批次进入不重排旧节点，窗口满后严格按事件 FIFO 退出。
-7. 默认 50/20/3/1000/10 配置通过性能门禁。
+7. 默认 50/20/3/1000 配置通过性能门禁。
 8. 不存在 Shader attribute 错误、场景对象泄漏、监听器增长或整页重建。
-9. 新设置只有 v6，一套配置服务两种状态。
+9. 新设置只有 v7，一套配置服务两种状态。
 10. `docs/architecture/knowledge-universe.md` 已按最终代码重写，旧计划明确标记为历史。

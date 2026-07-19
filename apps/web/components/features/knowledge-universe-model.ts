@@ -47,6 +47,12 @@ export interface Position3D {
   z: number;
 }
 
+export interface SatelliteSlot {
+  index: number;
+  total: number;
+  phaseKey: string;
+}
+
 export interface SourceTimelinePageState {
   deque: UniverseTimelineDeque | null;
   snapshotId: string | null;
@@ -84,10 +90,14 @@ export const EVENT_ENTITY_PROJECTION_LIMIT = 8;
 export const ENTITY_EXPANSION_EVENT_LIMIT = 4;
 
 // Layout policy belongs to the projection model, not the React coordinator.
-// These are deterministic world-space multipliers, never mutable UI state.
-export const TIMELINE_EVENT_LATERAL_SPREAD = 5.2;
-export const LOCAL_ENTITY_SPREAD_MIN = 52;
-export const LOCAL_ENTITY_SPREAD_RANGE = 52;
+// The temporal axis already supplies a normalized spiral. Keep its world-space
+// projection inside one readable corridor, then give each event a restrained
+// local relation cluster. Multiplying both layers into large independent
+// spreads pushes anchors off-screen and turns the graph into disconnected
+// cards clamped to viewport edges.
+export const TIMELINE_EVENT_LATERAL_SPREAD = 9;
+export const LOCAL_ENTITY_SPREAD_MIN = 140;
+export const LOCAL_ENTITY_SPREAD_RANGE = 120;
 export const EMPTY_TIMELINE_BUNDLE_IDS: string[] = [];
 export const TEMPORAL_AXIS_UNITS_PER_EVENT = UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT;
 
@@ -241,31 +251,23 @@ export function stableOffset(key: string, radius: number): Position3D {
 export function stableSatelliteOffset(
   key: string,
   radius: number,
-  parentRadial?: Position3D,
+  _parentRadial?: Position3D,
+  slot?: SatelliteSlot,
 ): Position3D {
-  const parentRadius = parentRadial
-    ? Math.hypot(parentRadial.x, parentRadial.y)
-    : 0;
-  const tangentShare = stableUnit(`${key}:satellite-angle`) * 1.64 - 0.82;
-  const outwardShare = Math.sqrt(Math.max(0, 1 - tangentShare * tangentShare));
-  const radialX = parentRadius > Number.EPSILON
-    ? (parentRadial?.x ?? 0) / parentRadius
-    : 1;
-  const radialY = parentRadius > Number.EPSILON
-    ? (parentRadial?.y ?? 0) / parentRadius
-    : 0;
+  const total = Math.max(1, Math.floor(slot?.total ?? 1));
+  const index = Math.max(0, Math.floor(slot?.index ?? 0)) % total;
+  const phaseKey = slot?.phaseKey ?? key;
+  const phase = stableUnit(`${phaseKey}:satellite-phase`) * Math.PI * 2;
+  const angle = slot
+    ? phase + index * (Math.PI * 2 / total)
+    : stableUnit(`${key}:satellite-angle`) * Math.PI * 2;
   const distance = radius * (0.78 + stableUnit(`${key}:satellite-distance`) * 0.22);
-  const fallbackAngle = stableUnit(`${key}:satellite-fallback-angle`) * Math.PI * 2;
   return {
-    // Once an event has left the core, its entities occupy the outward
-    // half-plane. They can fan tangentially, but never refill the luminous
-    // centre that is reserved for the next arriving event package.
-    x: parentRadius > Number.EPSILON
-      ? (radialX * outwardShare - radialY * tangentShare) * distance
-      : Math.cos(fallbackAngle) * distance,
-    y: parentRadius > Number.EPSILON
-      ? (radialY * outwardShare + radialX * tangentShare) * distance
-      : Math.sin(fallbackAngle) * distance,
+    // A package is one small, deterministic radial graph. Slots are stable
+    // across pagination, evenly distributed, and independent of camera state;
+    // hover therefore only reveals the graph and never causes it to reflow.
+    x: Math.cos(angle) * distance,
+    y: Math.sin(angle) * distance,
     z: (stableUnit(`${key}:satellite-depth`) - 0.5) * 20,
   };
 }

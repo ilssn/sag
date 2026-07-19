@@ -14,13 +14,14 @@ import {
 } from "./knowledge-universe-model";
 
 describe("knowledge universe model", () => {
-  it("keeps timeline packages and local entities on an immersive stage", () => {
-    expect(TIMELINE_EVENT_LATERAL_SPREAD).toBeGreaterThanOrEqual(4);
-    expect(LOCAL_ENTITY_SPREAD_MIN).toBeGreaterThanOrEqual(48);
+  it("keeps timeline packages and local relations in one readable corridor", () => {
+    expect(TIMELINE_EVENT_LATERAL_SPREAD).toBeGreaterThanOrEqual(8);
+    expect(TIMELINE_EVENT_LATERAL_SPREAD).toBeLessThanOrEqual(10);
+    expect(LOCAL_ENTITY_SPREAD_MIN).toBeGreaterThanOrEqual(120);
     expect(LOCAL_ENTITY_SPREAD_MIN + LOCAL_ENTITY_SPREAD_RANGE)
-      .toBeGreaterThanOrEqual(96);
+      .toBeGreaterThanOrEqual(240);
     expect(LOCAL_ENTITY_SPREAD_MIN + LOCAL_ENTITY_SPREAD_RANGE)
-      .toBeLessThanOrEqual(110);
+      .toBeLessThanOrEqual(280);
   });
 
   it("builds isolated browse state with the requested window limits", () => {
@@ -54,29 +55,38 @@ describe("knowledge universe model", () => {
 
   it("keeps entity satellites local to their event's temporal plane", () => {
     const offsets = Array.from({ length: 40 }, (_, index) =>
-      stableSatelliteOffset(`entity-${index}`, 104));
+      stableSatelliteOffset(`entity-${index}`, 38));
 
     expect(Math.max(...offsets.map((offset) => Math.abs(offset.z))))
       .toBeLessThanOrEqual(10);
     expect(Math.min(...offsets.map((offset) => Math.hypot(offset.x, offset.y))))
-      .toBeGreaterThan(55);
+      .toBeGreaterThan(20);
     expect(Math.max(...offsets.map((offset) => Math.hypot(
       offset.x,
       offset.y,
       offset.z,
-    )))).toBeLessThanOrEqual(105);
+    )))).toBeLessThanOrEqual(40);
   });
 
-  it("fans entity satellites outward without refilling the source core", () => {
+  it("uses stable radial slots so a focused relation network does not reflow", () => {
     const parent = { x: 84, y: -36, z: -300 };
-    const offsets = Array.from({ length: 80 }, (_, index) =>
-      stableSatelliteOffset(`entity-${index}`, 104, parent));
+    const offsets = Array.from({ length: 8 }, (_, index) =>
+      stableSatelliteOffset(`entity-${index}`, 38, parent, {
+        index,
+        total: 8,
+        phaseKey: "event-a",
+      }));
 
-    offsets.forEach((offset) => {
-      expect(offset.x * parent.x + offset.y * parent.y).toBeGreaterThanOrEqual(0);
-      expect(Math.hypot(parent.x + offset.x, parent.y + offset.y))
-        .toBeGreaterThanOrEqual(Math.hypot(parent.x, parent.y));
-    });
+    expect(offsets).toEqual(Array.from({ length: 8 }, (_, index) =>
+      stableSatelliteOffset(`entity-${index}`, 38, parent, {
+        index,
+        total: 8,
+        phaseKey: "event-a",
+      })));
+    expect(Math.abs(offsets.reduce((sum, offset) => sum + offset.x, 0) / offsets.length))
+      .toBeLessThan(4);
+    expect(Math.abs(offsets.reduce((sum, offset) => sum + offset.y, 0) / offsets.length))
+      .toBeLessThan(4);
   });
 
   it("reserves the inner field for the latest non-temporal root", () => {

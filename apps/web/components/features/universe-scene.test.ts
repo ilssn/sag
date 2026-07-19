@@ -120,6 +120,7 @@ describe("knowledge universe scene behavior", () => {
     expect(universeTemporalFlightPresence(0, 60)).toEqual({
       scale: 1,
       opacity: 1,
+      card: 1,
     });
     expect(universeTemporalFlightPresence(-300, 60).opacity).toBeLessThan(1);
     expect(universeTemporalFlightPresence(900, 60).scale).toBeLessThan(1);

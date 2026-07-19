@@ -280,23 +280,39 @@ describe("universe temporal flight", () => {
     })).toBeNull();
   });
 
-  it("keeps whatever the camera reaches fully present, thinning only with distance", () => {
-    // At the camera plane and through most of the loaded window: fully there.
-    // Reading events is the point — the stage ahead must stay legible.
-    expect(universeTemporalFlightPresence(0, 60)).toEqual({ scale: 1, opacity: 1 });
-    expect(universeTemporalFlightPresence(60, 60)).toEqual({ scale: 1, opacity: 1 });
-    expect(universeTemporalFlightPresence(60 * 5, 60)).toEqual({ scale: 1, opacity: 1 });
+  it("keeps a near reading band fully present and the rest as atmospheric stars", () => {
+    // At the camera plane and through the next moment: fully readable.
+    expect(universeTemporalFlightPresence(0, 60)).toEqual({
+      scale: 1,
+      opacity: 1,
+      card: 1,
+    });
+    expect(universeTemporalFlightPresence(60, 60)).toEqual({
+      scale: 1,
+      opacity: 1,
+      card: 1,
+    });
+    // A few moments ahead already thin continuously. The resident window stays
+    // visible, but does not turn into a wall of simultaneous cards.
+    const approaching = universeTemporalFlightPresence(60 * 2, 60);
+    expect(approaching.opacity).toBeLessThan(1);
+    expect(approaching.opacity).toBeGreaterThan(0.25);
+    expect(approaching.scale).toBeLessThan(1);
+    expect(approaching.scale).toBeGreaterThan(0.5);
+    expect(approaching.card).toBe(1);
     // Far ahead: atmospheric floor, never invisible — the corridor keeps
     // promising more.
     const far = universeTemporalFlightPresence(60 * 20, 60);
     expect(far.scale).toBeCloseTo(0.5, 5);
     expect(far.opacity).toBeCloseTo(0.25, 5);
+    expect(far.card).toBe(0);
     // Between: monotonic thinning.
-    const mid = universeTemporalFlightPresence(60 * 10, 60);
+    const mid = universeTemporalFlightPresence(60 * 3, 60);
     expect(mid.opacity).toBeLessThan(1);
     expect(mid.opacity).toBeGreaterThan(far.opacity);
     expect(mid.scale).toBeLessThan(1);
     expect(mid.scale).toBeGreaterThan(far.scale);
+    expect(mid.card).toBe(1);
     // Behind: passed packages fade fast but settle on a faint ember, so
     // looking back shows the travelled road instead of pure black.
     expect(universeTemporalFlightPresence(-30, 60).opacity).toBe(1);
@@ -304,5 +320,20 @@ describe("universe temporal flight", () => {
     expect(universeTemporalFlightPresence(-60 * 3, 60).opacity).toBeCloseTo(0.1, 10);
     expect(universeTemporalFlightPresence(-60 * 30, 60).opacity).toBeCloseTo(0.1, 10);
     expect(universeTemporalFlightPresence(-60 * 3, 60).scale).toBe(1);
+  });
+
+  it("slides a four-moment readable slice through a larger star window", () => {
+    const atEventBoundaries = Array.from({ length: 9 }, (_, index) =>
+      universeTemporalFlightPresence(index * 60, 60));
+
+    expect(atEventBoundaries.filter((presence) => presence.card >= 0.72))
+      .toHaveLength(4);
+    expect(atEventBoundaries[4]?.card).toBeGreaterThan(0);
+    expect(atEventBoundaries[5]?.card).toBe(0);
+    expect(atEventBoundaries[8]?.opacity).toBeGreaterThan(0);
+
+    const justPassed = universeTemporalFlightPresence(-0.75 * 60, 60);
+    expect(justPassed.card).toBeGreaterThan(0);
+    expect(universeTemporalFlightPresence(-1.25 * 60, 60).card).toBe(0);
   });
 });

@@ -83,6 +83,12 @@ export interface UniverseTemporalFlightFollowInput {
 export interface UniverseTemporalFlightPresence {
   scale: number;
   opacity: number;
+  /**
+   * Readable-card presence is a narrower camera-relative band than star
+   * presence. It slides continuously by event and never limits which nodes
+   * belong to the resident graph window.
+   */
+  card: number;
 }
 
 /** One 120px wheel notch flies roughly this share of two packages. */
@@ -90,16 +96,22 @@ export const UNIVERSE_FLIGHT_UNITS_PER_WHEEL_PIXEL = 0.9;
 /** How far ahead (in seconds of current velocity) the window follow leads. */
 export const UNIVERSE_FLIGHT_FOLLOW_LEAD_S = 0.5;
 /**
- * Atmosphere ahead of the camera: full presence within, thinning beyond. The
- * full zone must cover most of the loaded window (12 events a page): reading
- * events is the whole point of exploring, so the stage the camera is flying
- * into stays legible and only the far promise thins out.
+ * Camera-relative reading band ahead of the traveller. The complete resident
+ * window remains in the scene as stars and links; only the nearest few moments
+ * resolve into readable cards. This is continuous depth LOD, not a second
+ * count-based preview window, so every moment naturally becomes readable when
+ * the camera reaches it.
  */
-const PRESENCE_AHEAD_FULL_EVENTS = 6;
-const PRESENCE_AHEAD_FAR_EVENTS = 14;
+const PRESENCE_AHEAD_FULL_EVENTS = 1.25;
+const PRESENCE_AHEAD_FAR_EVENTS = 6;
 /** Atmosphere behind the camera: passed packages fade out fast. */
 const PRESENCE_BEHIND_FULL_EVENTS = 0.75;
 const PRESENCE_BEHIND_GONE_EVENTS = 2.5;
+/** Four chronological moments normally make up the focused relation slice. */
+const CARD_AHEAD_FULL_EVENTS = 3.15;
+const CARD_AHEAD_GONE_EVENTS = 4.35;
+const CARD_BEHIND_FULL_EVENTS = 0.45;
+const CARD_BEHIND_GONE_EVENTS = 1.15;
 const PRESENCE_FAR_SCALE = 0.5;
 const PRESENCE_FAR_OPACITY = 0.25;
 /**
@@ -342,9 +354,15 @@ export function universeTemporalFlightPresence(
       PRESENCE_BEHIND_FULL_EVENTS,
       PRESENCE_BEHIND_GONE_EVENTS,
     );
+    const card = 1 - easedRange(
+      -events,
+      CARD_BEHIND_FULL_EVENTS,
+      CARD_BEHIND_GONE_EVENTS,
+    );
     return {
       scale: 1,
       opacity: PRESENCE_BEHIND_EMBER + (1 - PRESENCE_BEHIND_EMBER) * kept,
+      card,
     };
   }
   const fade = easedRange(
@@ -352,8 +370,14 @@ export function universeTemporalFlightPresence(
     PRESENCE_AHEAD_FULL_EVENTS,
     PRESENCE_AHEAD_FAR_EVENTS,
   );
+  const card = 1 - easedRange(
+    events,
+    CARD_AHEAD_FULL_EVENTS,
+    CARD_AHEAD_GONE_EVENTS,
+  );
   return {
     scale: 1 - (1 - PRESENCE_FAR_SCALE) * fade,
     opacity: 1 - (1 - PRESENCE_FAR_OPACITY) * fade,
+    card,
   };
 }

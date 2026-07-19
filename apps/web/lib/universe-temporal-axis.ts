@@ -32,12 +32,13 @@ export interface UniverseTemporalAxis {
 export const UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT = 60;
 
 /**
- * Lateral corridor spread is intentionally wider than the source core. The
- * axis still owns chronology on Z, while these values give neighbouring
- * packages enough breathing room for their event cards and entities.
+ * The counting axis is a stable narrow corridor. Chronology belongs to Z;
+ * lateral lanes only keep neighbouring event cards distinct. Older knowledge
+ * must not drift farther sideways merely because its ordinal is larger —
+ * camera-relative depth already owns near/far scale and edge dissolution.
  */
-export const UNIVERSE_TEMPORAL_AXIS_NEAR_LATERAL_SPREAD = 0.14;
-export const UNIVERSE_TEMPORAL_AXIS_FAR_LATERAL_SPREAD = 0.78;
+export const UNIVERSE_TEMPORAL_AXIS_NEAR_LATERAL_SPREAD = 0.42;
+export const UNIVERSE_TEMPORAL_AXIS_FAR_LATERAL_SPREAD = 0.42;
 export const UNIVERSE_TEMPORAL_AXIS_VERTICAL_ASPECT = 0.74;
 
 /**
@@ -87,8 +88,6 @@ export const DEFAULT_UNIVERSE_TEMPORAL_AXIS_POLICY: UniverseTemporalAxisPolicy =
 };
 
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
-const LOCAL_LATERAL_BURST_EVENTS = 5.5;
-
 function clamp01(value: number) {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
@@ -197,17 +196,10 @@ export function projectUniverseTemporalAxis(
     const ordinal = Number.isFinite(bundle.ordinal)
       ? Math.max(0, bundle.ordinal)
       : 0;
-    // The first handful of packages must already occupy a generous field.
-    // Using only global age makes ordinal 0..11 nearly identical in a 5,000
-    // event source; this bounded local burst opens those packages quickly,
-    // while the smaller age term keeps older knowledge moving outward across
-    // the full journey. Neither term changes temporal Z.
-    const localBurst = 1 - Math.exp(-ordinal / LOCAL_LATERAL_BURST_EVENTS);
-    const lateralProgress = clamp01(localBurst * 0.68 + curvedAge * 0.32);
     const radius = lerp(
       policy.nearLateralSpread,
       policy.farLateralSpread,
-      lateralProgress,
+      curvedAge,
     );
     // Snapshot ordinals form a low-discrepancy spiral, preventing a small
     // visible window from accidentally collapsing into one vertical column.

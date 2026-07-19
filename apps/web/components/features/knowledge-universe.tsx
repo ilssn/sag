@@ -1664,11 +1664,17 @@ export function KnowledgeUniverse({
     };
     const exactByRaw = new Map<string, string>();
     const positionByRaw = new Map<string, Position3D>();
+    const satelliteSlotByEntityKey = new Map<string, {
+      index: number;
+      total: number;
+      phaseKey: string;
+    }>();
 
     const addExactNode = (
       node: (typeof visibleNodes)[number],
       anchor?: Position3D,
       rootEventPlacement?: { index: number; total: number },
+      satelliteSlot?: { index: number; total: number; phaseKey: string },
     ) => {
       const sourceId = resolvedSource(node.kind, node.id, node.source_id);
       const key = universeNodeKey(node.kind, node.id, sourceId);
@@ -1699,7 +1705,7 @@ export function KnowledgeUniverse({
         && !cursorsRef.current.has(key);
       const offset = accumulationMode
         ? anchor
-          ? stableSatelliteOffset(key, radius, center)
+          ? stableSatelliteOffset(key, radius, center, satelliteSlot)
           : stableAccumulationEventOffset(key)
         : timelinePlacement
         // An expansion-discovered event is placed but off the time axis: only
@@ -1736,7 +1742,7 @@ export function KnowledgeUniverse({
                 x: center.x - (partition?.x ?? 0),
                 y: center.y - (partition?.y ?? 0),
                 z: center.z - (partition?.z ?? 0),
-              })
+              }, satelliteSlot)
             : stableOffset(key, radius);
       const position = {
         x: center.x + offset.x,
@@ -1818,6 +1824,28 @@ export function KnowledgeUniverse({
       index,
       total: rootEvents.length,
     }));
+    const entityKeysByPreferredEvent = new Map<string, string[]>();
+    relationsByEntity.forEach((_relations, entityKey) => {
+      const relation = preferredEntityRelation(entityKey);
+      if (!relation) return;
+      const eventKey = universeNodeKey(
+        "event",
+        relation.from_id,
+        relation.source_id,
+      );
+      const entityKeys = entityKeysByPreferredEvent.get(eventKey) ?? [];
+      entityKeys.push(entityKey);
+      entityKeysByPreferredEvent.set(eventKey, entityKeys);
+    });
+    entityKeysByPreferredEvent.forEach((entityKeys, eventKey) => {
+      entityKeys.sort().forEach((entityKey, index) => {
+        satelliteSlotByEntityKey.set(entityKey, {
+          index,
+          total: entityKeys.length,
+          phaseKey: eventKey,
+        });
+      });
+    });
     relationsByEntity.forEach((_relations, entityKey) => {
       const relation = preferredEntityRelation(entityKey);
       if (!relation) return;
@@ -1837,6 +1865,10 @@ export function KnowledgeUniverse({
           relation
             ? positionByRaw.get(universeNodeKey("event", relation.from_id, relation.source_id))
             : undefined,
+          undefined,
+          satelliteSlotByEntityKey.get(
+            universeNodeKey("entity", node.id, node.source_id),
+          ),
         );
       });
     visibleNodes
@@ -1858,7 +1890,14 @@ export function KnowledgeUniverse({
                 universeNodeKey("entity", relation.to_id, relation.source_id),
               )
           : undefined;
-        addExactNode(node, anchor);
+        addExactNode(
+          node,
+          anchor,
+          undefined,
+          node.kind === "entity"
+            ? satelliteSlotByEntityKey.get(key)
+            : undefined,
+        );
       });
 
     projectedWorking.relations.forEach((relation) => {
