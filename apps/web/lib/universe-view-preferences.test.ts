@@ -92,14 +92,13 @@ function workingSet() {
   }, { nodes: 1_000, edges: 1_000 }, 1);
 }
 
-describe("universe v6 view preferences", () => {
+describe("universe v7 view preferences", () => {
   it("uses the one production configuration by default", () => {
     expect(DEFAULT_UNIVERSE_VIEW_PREFERENCES).toEqual({
-      version: 6,
+      version: 7,
       cacheCapacity: 1_000,
       eventWindowSize: 50,
       cardsEnabled: true,
-      eventCardPreviewCount: 10,
       temporalPageSize: 20,
       temporalPrefetchPages: 3,
       entityTypes: null,
@@ -107,23 +106,21 @@ describe("universe v6 view preferences", () => {
     });
   });
 
-  it("repairs untrusted values inside the strict v6 schema", () => {
+  it("repairs untrusted values inside the strict v7 schema", () => {
     expect(normalizeUniverseViewPreferences({
-      version: 6,
+      version: 7,
       cacheCapacity: -100,
       eventWindowSize: 999,
       cardsEnabled: "yes",
-      eventCardPreviewCount: 500,
       temporalPageSize: 27,
       temporalPrefetchPages: 99,
       entityTypes: [" Person ", "", "Person", 42],
       documentIds: [" doc-2 ", "doc-1", "doc-1"],
     })).toEqual({
-      version: 6,
+      version: 7,
       cacheCapacity: 300,
       eventWindowSize: 100,
       cardsEnabled: true,
-      eventCardPreviewCount: 20,
       temporalPageSize: 25,
       temporalPrefetchPages: 3,
       entityTypes: ["Person"],
@@ -142,7 +139,6 @@ describe("universe v6 view preferences", () => {
       max: 5_000,
       default: 1_000,
     });
-    expect(UNIVERSE_VIEW_LIMITS.eventCardPreviewCount.default).toBe(10);
     expect(UNIVERSE_VIEW_LIMITS.temporalPageSize.default).toBe(20);
     expect(UNIVERSE_VIEW_LIMITS.temporalPrefetchPages.default).toBe(3);
   });
@@ -157,10 +153,10 @@ describe("universe v6 view preferences", () => {
     }).cacheCapacity).toBe(400);
   });
 
-  it("reads only v6 and deliberately ignores all old preference keys", () => {
+  it("reads only v7 and deliberately ignores all old preference keys", () => {
     const storage = memoryStorage({
-      "sag:universe-view-preferences:v5": JSON.stringify({
-        version: 5,
+      "sag:universe-view-preferences:v6": JSON.stringify({
+        version: 6,
         visibleEventBundles: 2,
       }),
     });

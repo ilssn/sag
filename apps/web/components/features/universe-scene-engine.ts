@@ -14,11 +14,7 @@ import {
   orderUniverseKeyboardCandidates,
   type UniverseKeyboardDirection,
 } from "@/lib/universe-keyboard-navigation";
-import { planUniversePreviewCards } from "@/lib/universe-preview-plan";
-import {
-  UNIVERSE_VIEW_LIMITS,
-  type UniverseViewPreferences,
-} from "@/lib/universe-view-preferences";
+import type { UniverseViewPreferences } from "@/lib/universe-view-preferences";
 import {
   resolveUniverseDetailSource,
   universeCardMorph,
@@ -1104,7 +1100,6 @@ export class UniverseForceSceneEngine {
   private sourceSignature = "";
   private labelLayer: HTMLDivElement;
   private labels: SceneLabel[] = [];
-  private labelPlacementBudget = { events: 0, entities: 0, total: 0 };
   private renderedLabelFocusId: string | null = null;
   private hoverLabelTimer: number | null = null;
   private hoverLabelFrame: number | null = null;
@@ -1377,9 +1372,7 @@ export class UniverseForceSceneEngine {
     const motionChanged = this.reducedMotion !== options.reducedMotion;
     const timelineDisabled = this.timelineJourney.enabled && !options.timelineJourney.enabled;
     const cardPreferencesChanged =
-      this.viewPreferences.cardsEnabled !== options.viewPreferences.cardsEnabled
-      || this.viewPreferences.eventCardPreviewCount
-        !== options.viewPreferences.eventCardPreviewCount;
+      this.viewPreferences.cardsEnabled !== options.viewPreferences.cardsEnabled;
     const leavingInteractiveMode = this.interactive && !options.interactive;
     const labelTextChanged = this.text.locale !== options.text.locale
       || this.text.viewDetailsAction !== options.text.viewDetailsAction
@@ -1395,9 +1388,6 @@ export class UniverseForceSceneEngine {
     this.host.dataset.universeReducedMotion = String(options.reducedMotion);
     this.host.dataset.universeStrategy = options.strategy;
     this.host.dataset.universeCards = String(options.viewPreferences.cardsEnabled);
-    this.host.dataset.universeEventCardPreviewCount = String(
-      options.viewPreferences.eventCardPreviewCount,
-    );
     this.syncTimelineDiagnostics();
     this.controls.enabled = options.interactive;
     this.controls.enableZoom = options.interactive;
@@ -5166,52 +5156,39 @@ export class UniverseForceSceneEngine {
         - (retainedLabelRank.get(right.id) ?? Number.MAX_SAFE_INTEGER);
       return retainedDifference || left.id.localeCompare(right.id);
     };
-    const previewPlan = planUniversePreviewCards({
-      nodes: [...this.nodes.values()]
-        .filter((node): node is ForceNode & { kind: "event" | "entity" } =>
-          node.kind === "event" || node.kind === "entity")
-        .filter((node) =>
-          this.strategy === "accumulation" || node.sourceId === labelSourceId)
-        .sort(prioritize)
-        .map((node) => ({
-          id: node.id,
-          kind: node.kind,
-          sourceId: node.sourceId,
-          active: node.sceneNode.state === "active",
-        })),
-      adjacency: this.adjacency,
-      sourceId: labelSourceId,
-      includeAllSources: this.strategy === "accumulation",
-      focusId,
-      cardsEnabled: this.viewPreferences.cardsEnabled,
-      eventPreviewCount: this.viewPreferences.eventCardPreviewCount,
-      entitySafetyMax: UNIVERSE_VIEW_LIMITS.entityCardSafetyMax,
-    });
-    const hasConcreteFocus = previewPlan.focused;
+    const focusNode = focusId ? this.nodes.get(focusId) : undefined;
+    const focusedNodeIds = focusNode && focusNode.kind !== "source"
+      ? new Set([focusNode.id, ...(this.adjacency.get(focusNode.id) ?? [])])
+      : null;
+    // The event window is the only presentation boundary. Every active event
+    // and entity in that window participates in the same particle → star →
+    // card lifecycle; there is no second card quota that can silently discard
+    // an otherwise visible event. When cards are disabled, hover/lock still
+    // mounts the factual one-hop network on demand.
+    const activeNodes = [...this.nodes.values()]
+      .filter((node): node is ForceNode & { kind: "event" | "entity" } =>
+        node.kind === "event" || node.kind === "entity")
+      .filter((node) =>
+        this.strategy === "accumulation" || node.sourceId === labelSourceId)
+      .filter((node) => {
+        const focused = focusedNodeIds?.has(node.id) ?? false;
+        if (!this.viewPreferences.cardsEnabled) return focused;
+        return focused || node.sceneNode.state === "active";
+      })
+      .sort(prioritize);
+    const focusedCards = focusedNodeIds
+      ? activeNodes.filter((node) => focusedNodeIds.has(node.id))
+      : [];
     this.host.dataset.universeFocusCardCount = String(
-      hasConcreteFocus ? previewPlan.ids.length : 0,
+      focusedCards.length,
     );
     this.host.dataset.universeFocusEventCardCount = String(
-      hasConcreteFocus ? previewPlan.eventIds.length : 0,
+      focusedCards.filter((node) => node.kind === "event").length,
     );
     this.host.dataset.universeFocusEntityCardCount = String(
-      hasConcreteFocus ? previewPlan.entityIds.length : 0,
+      focusedCards.filter((node) => node.kind === "entity").length,
     );
-    this.host.dataset.universeHiddenRelatedEntityCount = String(
-      previewPlan.hiddenRelatedEntityCount,
-    );
-    const eventLimit = previewPlan.eventIds.length;
-    const entityLimit = previewPlan.entityIds.length;
-    const totalLimit = previewPlan.ids.length;
-    this.labelPlacementBudget = {
-      events: eventLimit,
-      entities: entityLimit,
-      total: totalLimit,
-    };
-    const activeNodes = previewPlan.ids.flatMap((id) => {
-      const node = this.nodes.get(id);
-      return node && node.kind !== "source" ? [node] : [];
-    });
+    this.host.dataset.universeHiddenRelatedEntityCount = "0";
 
     sources.forEach((node) => {
       const labelKey = `source:${node.id}`;
@@ -5531,7 +5508,6 @@ export class UniverseForceSceneEngine {
       8,
       hostRect,
     );
-    const placed: Array<{ left: number; top: number; right: number; bottom: number }> = [];
     let visibleEventLabels = 0;
     let visibleEntityLabels = 0;
     // Flight speed scales the complete card as one object. Internal content
@@ -5555,46 +5531,6 @@ export class UniverseForceSceneEngine {
     const labelSourceId = labelFocusId
       ? this.nodes.get(labelFocusId)?.sourceId ?? this.visualSourceId
       : this.visualSourceId;
-    // DOM labels sit above WebGL. Reserve a small screen-space target around
-    // every visible event so an entity card cannot cover the star or steal its
-    // hover/click interaction.
-    const eventStarRadius = mobile ? 8 : 10;
-    const eventStarRects = [...this.nodes.values()].flatMap((node) => {
-      const emergence = this.nodeEmergence(node);
-      if (
-        node.kind !== "event"
-        || (this.strategy === "exploration" && node.sourceId !== labelSourceId)
-        || emergence.star <= 0.16
-        || (node.entryOpacity ?? 1)
-          * (node.timelineOpacity ?? 1)
-          * currentNodePresentationOpacity(node) <= 0.16
-        || !Number.isFinite(node.x)
-        || !Number.isFinite(node.y)
-        || !Number.isFinite(node.z)
-      ) return [];
-      const scaledEventStarRadius = eventStarRadius
-        * currentNodePresentationScale(node)
-        * emergence.starScale
-        * (node.temporalPresenceScale ?? 1);
-      const projected = new THREE.Vector3(node.x, node.y, node.z).project(camera);
-      const screen = this.graph.graph2ScreenCoords(node.x, node.y, node.z);
-      if (
-        projected.z <= -1
-        || projected.z >= 1
-        || screen.x <= 0
-        || screen.x >= width
-        || screen.y <= 0
-        || screen.y >= height
-      ) return [];
-      return [{
-        nodeId: node.id,
-        left: screen.x - scaledEventStarRadius,
-        top: screen.y - scaledEventStarRadius,
-        right: screen.x + scaledEventStarRadius,
-        bottom: screen.y + scaledEventStarRadius,
-      }];
-    });
-
     this.labels.forEach((label) => {
       const node = this.nodes.get(label.nodeId);
       if (!node || !Number.isFinite(node.x) || !Number.isFinite(node.y) || !Number.isFinite(node.z)) {
@@ -5618,19 +5554,6 @@ export class UniverseForceSceneEngine {
         : 0.5 + (node.temporalPresenceScale ?? 1) * 0.5;
       const belongsToLabelSource = this.strategy === "accumulation"
         || node.sourceId === labelSourceId;
-      const kindPlacementFull = label.kind === "node" && !requiredFocusCard && (
-        visibleEventLabels + visibleEntityLabels >= this.labelPlacementBudget.total
-        || (node.kind === "event"
-          ? visibleEventLabels >= this.labelPlacementBudget.events
-          : visibleEntityLabels >= this.labelPlacementBudget.entities)
-      );
-      if (kindPlacementFull) {
-        label.element.hidden = true;
-        label.element.style.display = "none";
-        label.element.style.pointerEvents = "none";
-        label.element.style.transform = "translate3d(-9999px, -9999px, 0)";
-        return;
-      }
       const sourceHovered = label.kind === "source"
         && !this.lockedId
         && !this.selectedId
@@ -5735,14 +5658,6 @@ export class UniverseForceSceneEngine {
       label.element.dataset.locked = String(locked);
       label.element.dataset.expanded = String(expanded);
       label.element.dataset.compact = String(compact);
-      // Timeline events arrive in a tight temporal corridor. Give their
-      // bounded card set a few screen-space escape routes so overlap guards do
-      // not make a full page look like only two or three events were loaded.
-      const timelineEventCard = label.kind === "node"
-        && node.kind === "event"
-        && Boolean(node.sceneNode.timelineBundleId)
-        && node.sceneNode.root;
-      const distributedCard = requiredFocusCard || timelineEventCard;
       const actions = label.kind === "node"
         ? label.element.querySelector<HTMLElement>("[data-universe-node-actions]")
         : null;
@@ -5819,26 +5734,19 @@ export class UniverseForceSceneEngine {
         sourceBeaconSize,
         "center",
       );
-      const focusGapStep = compact
-        ? 20
-        : Math.min(68, Math.max(36, labelWidth * 0.22));
-      const nodeLabelGaps = compact || distributedCard
-        ? [
-            labelGap,
-            labelGap + focusGapStep,
-            labelGap + focusGapStep * 2,
-          ]
-        : [labelGap];
-      const nodeCandidates = nodeLabelGaps.flatMap((gap) => [
+      // The node projection is authoritative. Cards use four deterministic
+      // anchor sides only to stay inside the viewport and clear fixed UI;
+      // they do not run a second layout or collision simulation.
+      const nodeCandidates = [
         makeRect(
-          screen.x + gap,
+          screen.x + labelGap,
           screen.y - labelHeight / 2,
           labelWidth,
           labelHeight,
           "right",
         ),
         makeRect(
-          screen.x - labelWidth - gap,
+          screen.x - labelWidth - labelGap,
           screen.y - labelHeight / 2,
           labelWidth,
           labelHeight,
@@ -5846,19 +5754,19 @@ export class UniverseForceSceneEngine {
         ),
         makeRect(
           screen.x - labelWidth / 2,
-          screen.y + gap,
+          screen.y + labelGap,
           labelWidth,
           labelHeight,
           "bottom",
         ),
         makeRect(
           screen.x - labelWidth / 2,
-          screen.y - labelHeight - gap,
+          screen.y - labelHeight - labelGap,
           labelWidth,
           labelHeight,
           "top",
         ),
-      ]);
+      ];
       const candidates: LabelRect[] = label.kind === "source"
         ? sourceHovered
           ? [
@@ -5889,35 +5797,22 @@ export class UniverseForceSceneEngine {
       if (label.kind === "node" && screen.x >= width / 2) {
         [candidates[0], candidates[1]] = [candidates[1], candidates[0]];
       }
-      const blockedByViewportOrPanel = (rect: LabelRect) => {
-        const outside = rect.left < 10
-          || rect.right > width - 10
-          || rect.top < 58
-          || rect.bottom > height - 42;
-        const overlapsPanel = [
-          panelRect,
-          summaryRect,
-          progressRect,
-        ].some((overlay) => overlay
-          ? rect.left < overlay.right
-            && rect.right > overlay.left
-            && rect.top < overlay.bottom
-            && rect.bottom > overlay.top
-          : false);
-        return outside || overlapsPanel;
-      };
-      const overlapsPlacedLabel = (rect: LabelRect) => placed.some((other) =>
-        rect.left < other.right + 7
-        && rect.right > other.left - 7
-        && rect.top < other.bottom + 6
-        && rect.bottom > other.top - 6);
-      const overlapsEventStar = (rect: LabelRect) => label.kind === "node"
-        && eventStarRects.some((star) => star.nodeId !== label.nodeId
-          && rect.left < star.right
-          && rect.right > star.left
-          && rect.top < star.bottom
-          && rect.bottom > star.top);
-      const clampedCandidates = requiredFocusCard
+      const overlapsFixedOverlay = (rect: LabelRect) => [
+        panelRect,
+        summaryRect,
+        progressRect,
+      ].some((overlay) => overlay
+        ? rect.left < overlay.right
+          && rect.right > overlay.left
+          && rect.top < overlay.bottom
+          && rect.bottom > overlay.top
+        : false);
+      const insideViewport = (rect: LabelRect) =>
+        rect.left >= 10
+        && rect.right <= width - 10
+        && rect.top >= 58
+        && rect.bottom <= height - 42;
+      const clampedCandidates = label.kind === "node"
         ? candidates.map((candidate) => {
             const maxLeft = Math.max(10, width - labelWidth - 10);
             const maxTop = Math.max(58, height - labelHeight - 42);
@@ -5931,17 +5826,11 @@ export class UniverseForceSceneEngine {
           })
         : [];
       const isOpenPlacement = (candidate: LabelRect) =>
-        !blockedByViewportOrPanel(candidate)
-        && !overlapsPlacedLabel(candidate)
-        && !overlapsEventStar(candidate);
+        insideViewport(candidate) && !overlapsFixedOverlay(candidate);
       const rect = candidates.find(isOpenPlacement)
-        ?? clampedCandidates.find(isOpenPlacement)
-        ?? (requiredFocusCard || emphasized
-          ? [...clampedCandidates, ...candidates]
-              .find((candidate) => !blockedByViewportOrPanel(candidate))
-            ?? clampedCandidates[0]
-            ?? candidates[0]
-          : null);
+        ?? clampedCandidates.find((candidate) => !overlapsFixedOverlay(candidate))
+        ?? clampedCandidates[0]
+        ?? candidates[0];
       if (!rect) {
         label.element.hidden = true;
         label.element.style.display = "none";
@@ -6001,7 +5890,6 @@ export class UniverseForceSceneEngine {
         }
         label.element.style.transform = `translate3d(${translateX}px, ${translateY}px, 0) scale(${labelScale})`;
       }
-      if (visibleOpacity >= 0.22) placed.push(rect);
       if (label.kind === "node") {
         if (node.kind === "event") visibleEventLabels += 1;
         else visibleEntityLabels += 1;

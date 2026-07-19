@@ -12,11 +12,10 @@ import {
 describe("knowledge universe settings contract", () => {
   it("exposes one configuration shared by exploration and accumulation", () => {
     expect(DEFAULT_UNIVERSE_VIEW_PREFERENCES).toEqual({
-      version: 6,
+      version: 7,
       cacheCapacity: 1_000,
       eventWindowSize: 50,
       cardsEnabled: true,
-      eventCardPreviewCount: 10,
       temporalPageSize: 20,
       temporalPrefetchPages: 3,
       entityTypes: null,
@@ -24,19 +23,17 @@ describe("knowledge universe settings contract", () => {
     });
   });
 
-  it("keeps cache, scene window, preview and network page capacities distinct", () => {
+  it("keeps cache, scene window and network page capacities distinct", () => {
     const normalized = normalizeUniverseViewPreferences({
       ...DEFAULT_UNIVERSE_VIEW_PREFERENCES,
       cacheCapacity: 1_000,
       eventWindowSize: 50,
-      eventCardPreviewCount: 10,
       temporalPageSize: 20,
       temporalPrefetchPages: 3,
     });
 
     expect(normalized.cacheCapacity).toBe(1_000);
     expect(normalized.eventWindowSize).toBe(50);
-    expect(normalized.eventCardPreviewCount).toBe(10);
     expect(normalized.temporalPageSize).toBe(20);
     expect(normalized.temporalPrefetchPages).toBe(3);
     expect(minimumUniverseCacheCapacity(50, 20, 3)).toBe(200);
@@ -52,11 +49,6 @@ describe("knowledge universe settings contract", () => {
       min: 20,
       max: 100,
       default: 50,
-    });
-    expect(UNIVERSE_VIEW_LIMITS.eventCardPreviewCount).toMatchObject({
-      min: 0,
-      max: 20,
-      default: 10,
     });
   });
 
@@ -84,7 +76,6 @@ describe("knowledge universe settings contract", () => {
       expect(messages.AppShell.graphSettings).toBeTruthy();
       expect(messages.GraphSettings.drawer.title).toBeTruthy();
       expect(messages.GraphSettings.cards.enabled.title).toBeTruthy();
-      expect(messages.GraphSettings.cards.preview.title).toBeTruthy();
       expect(messages.GraphSettings.eventWindow.title).toBeTruthy();
       expect(messages.GraphSettings.cacheCapacity.title).toBeTruthy();
       expect(messages.GraphSettings.temporal.page.title).toBeTruthy();

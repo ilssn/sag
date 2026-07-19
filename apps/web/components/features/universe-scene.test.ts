@@ -4,7 +4,6 @@ import {
   universeCardMorph,
   universeNodeEmergence,
 } from "@/lib/universe-presentation";
-import { planUniversePreviewCards } from "@/lib/universe-preview-plan";
 import { planUniverseSceneDelta } from "@/lib/universe-scene-transition";
 import {
   advanceUniverseSourceExitGate,
@@ -59,43 +58,6 @@ describe("knowledge universe scene behavior", () => {
     expect(universeCardMorph(0.6).scale).toBeGreaterThan(
       universeCardMorph(0.3).scale,
     );
-  });
-
-  it("bounds resting cards and lets focus replace rather than expand them", () => {
-    const nodes = [
-      { id: "event-a", kind: "event" as const, sourceId: "s", active: true },
-      { id: "event-b", kind: "event" as const, sourceId: "s", active: true },
-      { id: "entity-a", kind: "entity" as const, sourceId: "s", active: true },
-      { id: "entity-b", kind: "entity" as const, sourceId: "s", active: true },
-    ];
-    const adjacency = new Map<string, ReadonlySet<string>>([
-      ["event-a", new Set(["entity-a"])],
-      ["event-b", new Set(["entity-b"])],
-      ["entity-a", new Set(["event-a"])],
-      ["entity-b", new Set(["event-b"])],
-    ]);
-    const rest = planUniversePreviewCards({
-      nodes,
-      adjacency,
-      sourceId: "s",
-      focusId: null,
-      cardsEnabled: true,
-      eventPreviewCount: 1,
-      entitySafetyMax: 24,
-    });
-    const focus = planUniversePreviewCards({
-      nodes,
-      adjacency,
-      sourceId: "s",
-      focusId: "event-b",
-      cardsEnabled: true,
-      eventPreviewCount: 1,
-      entitySafetyMax: 24,
-    });
-
-    expect(rest.ids).toEqual(["event-a", "entity-a"]);
-    expect(focus.ids).toEqual(["event-b", "entity-b"]);
-    expect(focus.ids).toHaveLength(rest.ids.length);
   });
 
   it("uses wheel travel for time in exploration and preserves native zoom elsewhere", () => {

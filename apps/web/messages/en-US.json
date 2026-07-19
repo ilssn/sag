@@ -1147,11 +1147,6 @@
         "title": "Enable event and entity cards",
         "description": "The complete star network remains when disabled. Hover or lock still reveals the focused relationship.",
         "aria": "Enable event and entity cards"
-      },
-      "preview": {
-        "title": "Event card previews",
-        "description": "Limit readable event cards in the resting scene. Related entities follow events and focused relationships.",
-        "aria": "Event card preview count"
       }
     },
     "entityTypes": {

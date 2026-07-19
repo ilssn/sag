@@ -146,25 +146,6 @@ export function UniverseViewSettings({
             onCheckedChange={(value) => emit({ cardsEnabled: value === true })}
           />
         </SettingsRow>
-        <SettingsRow
-          title={t("cards.preview.title")}
-          description={t("cards.preview.description")}
-        >
-          <SettingSlider
-            ariaLabel={t("cards.preview.aria")}
-            value={normalized.eventCardPreviewCount}
-            min={UNIVERSE_VIEW_LIMITS.eventCardPreviewCount.min}
-            max={Math.min(
-              normalized.eventWindowSize,
-              UNIVERSE_VIEW_LIMITS.eventCardPreviewCount.max,
-            )}
-            step={UNIVERSE_VIEW_LIMITS.eventCardPreviewCount.step}
-            recommended={UNIVERSE_VIEW_LIMITS.eventCardPreviewCount.default}
-            onChange={(eventCardPreviewCount) => emit({
-              eventCardPreviewCount,
-            })}
-          />
-        </SettingsRow>
       </SettingsSection>
 
       <SettingsSection

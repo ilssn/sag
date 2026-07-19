@@ -8,9 +8,9 @@ import {
   type UniverseWorkingSet,
 } from "./universe-working-set";
 
-export const UNIVERSE_VIEW_PREFERENCES_VERSION = 6;
+export const UNIVERSE_VIEW_PREFERENCES_VERSION = 7;
 export const UNIVERSE_VIEW_PREFERENCES_STORAGE_KEY =
-  "sag:universe-view-preferences:v6";
+  "sag:universe-view-preferences:v7";
 export const UNIVERSE_ENTITY_CATEGORIES_STORAGE_KEY =
   "sag:universe-entity-categories";
 
@@ -25,7 +25,6 @@ export interface UniverseViewPreferences {
   cacheCapacity: number;
   eventWindowSize: number;
   cardsEnabled: boolean;
-  eventCardPreviewCount: number;
   temporalPageSize: number;
   temporalPrefetchPages: number;
   /** `null` means every discovered entity type is selected. */
@@ -48,12 +47,6 @@ export const UNIVERSE_VIEW_LIMITS = {
     step: 5,
     default: 50,
   },
-  eventCardPreviewCount: {
-    min: 0,
-    max: 20,
-    step: 1,
-    default: 10,
-  },
   temporalPageSize: {
     min: 10,
     max: 50,
@@ -66,8 +59,6 @@ export const UNIVERSE_VIEW_LIMITS = {
     step: 1,
     default: 3,
   },
-  /** Internal DOM safety cap; it is not another user-facing setting. */
-  entityCardSafetyMax: 24,
 } as const;
 
 export const DEFAULT_UNIVERSE_VIEW_PREFERENCES: Readonly<UniverseViewPreferences> =
@@ -76,8 +67,6 @@ export const DEFAULT_UNIVERSE_VIEW_PREFERENCES: Readonly<UniverseViewPreferences
     cacheCapacity: UNIVERSE_VIEW_LIMITS.cacheCapacity.default,
     eventWindowSize: UNIVERSE_VIEW_LIMITS.eventWindowSize.default,
     cardsEnabled: true,
-    eventCardPreviewCount:
-      UNIVERSE_VIEW_LIMITS.eventCardPreviewCount.default,
     temporalPageSize: UNIVERSE_VIEW_LIMITS.temporalPageSize.default,
     temporalPrefetchPages:
       UNIVERSE_VIEW_LIMITS.temporalPrefetchPages.default,
@@ -209,13 +198,6 @@ export function normalizeUniverseViewPreferences(
     UNIVERSE_VIEW_LIMITS.cacheCapacity.min,
     UNIVERSE_VIEW_LIMITS.cacheCapacity.max,
   );
-  const eventCardPreviewCount = Math.min(
-    eventWindowSize,
-    normalizedNumber(
-      input.eventCardPreviewCount,
-      UNIVERSE_VIEW_LIMITS.eventCardPreviewCount,
-    ),
-  );
   const selectedEntityTypes = normalizeStringSelection(
     input.entityTypes,
     MAX_REMEMBERED_ENTITY_CATEGORIES,
@@ -229,7 +211,6 @@ export function normalizeUniverseViewPreferences(
     cardsEnabled: typeof input.cardsEnabled === "boolean"
       ? input.cardsEnabled
       : DEFAULT_UNIVERSE_VIEW_PREFERENCES.cardsEnabled,
-    eventCardPreviewCount,
     temporalPageSize,
     temporalPrefetchPages,
     entityTypes: selectedEntityTypes.length > 0
