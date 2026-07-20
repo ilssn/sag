@@ -45,6 +45,31 @@ describe("universe event card display limit", () => {
     });
   });
 
+  it("brings every resident entity out with its event card at rest", () => {
+    const relatedEntities = Array.from({ length: 8 }, (_, index) => ({
+      id: `entity-${index}`,
+      kind: "entity" as const,
+      sourceId: "source-a",
+      active: true,
+    }));
+    const entityIds = relatedEntities.map((node) => node.id);
+
+    expect(plan({
+      nodes: [
+        { id: "event-a", kind: "event", sourceId: "source-a", active: true },
+        ...relatedEntities,
+      ],
+      adjacency: new Map([
+        ["event-a", new Set(entityIds)],
+      ]),
+      eventPreviewCount: 1,
+    })).toMatchObject({
+      eventIds: ["event-a"],
+      entityIds,
+      hiddenRelatedEntityCount: 0,
+    });
+  });
+
   it("lets a focused one-hop network replace the resting card selection", () => {
     expect(plan({
       focusId: "event-c",

@@ -66,8 +66,11 @@ export const UNIVERSE_VIEW_LIMITS = {
     step: 1,
     default: 3,
   },
-  /** Internal DOM safety cap; it is not another user-facing setting. */
-  entityCardSafetyMax: 24,
+  /**
+   * Internal DOM safety cap, sized for every resident entity belonging to the
+   * maximum 20-event card aperture (20 × the server's 8-entity page).
+   */
+  entityCardSafetyMax: 160,
 } as const;
 
 export const DEFAULT_UNIVERSE_VIEW_PREFERENCES: Readonly<UniverseViewPreferences> =

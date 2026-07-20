@@ -162,10 +162,11 @@ export function planUniversePreviewCards(
     0,
     nodes.length,
   );
-  const entityLimit = focused
-    ? entitySafetyLimit
-    : Math.min(entitySafetyLimit, eventIds.length * 2);
-  const entityIds = entityCandidates.slice(0, entityLimit);
+  // Event + entities is one visual knowledge package. Once an event receives
+  // a reading card, every related entity already resident in the scene must
+  // receive its compact label too; a separate "two entities per event" cap
+  // made most of the package appear only after focus and looked like data loss.
+  const entityIds = entityCandidates.slice(0, entitySafetyLimit);
 
   return {
     ids: [...eventIds, ...entityIds],
