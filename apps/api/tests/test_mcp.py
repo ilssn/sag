@@ -375,8 +375,9 @@ def test_registry_overlay_does_not_pollute_global():
 @pytest.mark.asyncio
 async def test_mcp_binding_validation_and_source_descriptor():
     """agent 挂载外部 MCP 的校验 + 信源 MCP 连接描述端点。"""
-    from sag_api.main import app
+    from sag_api.main import create_app
 
+    app = create_app()
     transport = httpx.ASGITransport(app=app)
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
@@ -404,6 +405,26 @@ async def test_mcp_binding_validation_and_source_descriptor():
 
             unauthorized = await c.get("/mcp/")
             assert unauthorized.status_code == 401
+
+            initialized = await c.post(
+                "/mcp/",
+                headers={
+                    **A,
+                    "Host": "192.168.1.20:8000",
+                    "Accept": "application/json, text/event-stream",
+                },
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-06-18",
+                        "capabilities": {},
+                        "clientInfo": {"name": "lan-host-test", "version": "1.0"},
+                    },
+                },
+            )
+            assert initialized.status_code == 200, initialized.text
 
             agent = (await c.post("/api/v1/agents", headers=A, json={"name": "挂载助手"})).json()
             ok = await c.post(
