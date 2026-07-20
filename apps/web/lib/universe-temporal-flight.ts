@@ -107,11 +107,11 @@ const PRESENCE_AHEAD_FAR_EVENTS = 6;
 /** Atmosphere behind the camera: passed packages fade out fast. */
 const PRESENCE_BEHIND_FULL_EVENTS = 0.75;
 const PRESENCE_BEHIND_GONE_EVENTS = 2.5;
-/** Four chronological moments normally make up the focused relation slice. */
+/** Five chronological moments form the readable core; two more begin as previews. */
 const CARD_AHEAD_FULL_EVENTS = 3.15;
-const CARD_AHEAD_GONE_EVENTS = 4.35;
-const CARD_BEHIND_FULL_EVENTS = 0.45;
-const CARD_BEHIND_GONE_EVENTS = 1.15;
+const CARD_AHEAD_GONE_EVENTS = 6.15;
+const CARD_BEHIND_FULL_EVENTS = 0.65;
+const CARD_BEHIND_GONE_EVENTS = 1.8;
 const PRESENCE_FAR_SCALE = 0.5;
 const PRESENCE_FAR_OPACITY = 0.25;
 /**

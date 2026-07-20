@@ -14,14 +14,14 @@ import {
 } from "./knowledge-universe-model";
 
 describe("knowledge universe model", () => {
-  it("keeps timeline packages and local relations in one readable corridor", () => {
-    expect(TIMELINE_EVENT_LATERAL_SPREAD).toBeGreaterThanOrEqual(8);
-    expect(TIMELINE_EVENT_LATERAL_SPREAD).toBeLessThanOrEqual(10);
-    expect(LOCAL_ENTITY_SPREAD_MIN).toBeGreaterThanOrEqual(120);
+  it("keeps approaching packages central before perspective fans them outward", () => {
+    expect(TIMELINE_EVENT_LATERAL_SPREAD).toBeGreaterThanOrEqual(4);
+    expect(TIMELINE_EVENT_LATERAL_SPREAD).toBeLessThanOrEqual(5);
+    expect(LOCAL_ENTITY_SPREAD_MIN).toBeGreaterThanOrEqual(80);
     expect(LOCAL_ENTITY_SPREAD_MIN + LOCAL_ENTITY_SPREAD_RANGE)
-      .toBeGreaterThanOrEqual(240);
+      .toBeGreaterThanOrEqual(140);
     expect(LOCAL_ENTITY_SPREAD_MIN + LOCAL_ENTITY_SPREAD_RANGE)
-      .toBeLessThanOrEqual(280);
+      .toBeLessThanOrEqual(180);
   });
 
   it("builds isolated browse state with the requested window limits", () => {

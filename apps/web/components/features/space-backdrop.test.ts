@@ -53,13 +53,18 @@ describe("space backdrop interaction isolation", () => {
     expect(source).not.toContain("useTransform");
   });
 
-  it("keeps accumulated evidence static without changing exploration decoration", () => {
+  it("keeps accumulated evidence static with scene-owned universe decoration", () => {
     expect(source).toContain("UNIVERSE_PRESENTATION_EVENT");
     expect(source).toContain(
       'universePresentation === "accumulation"',
     );
-    expect(source).toContain("{!accumulationPresentation && (");
-    expect(source).toContain("reducedMotion={backdropMotionPaused}");
+    expect(source).toContain('const universeBackdrop = variant === "universe"');
+    expect(source).toContain(
+      "{!universeBackdrop && !accumulationPresentation && (",
+    );
+    expect(source).toContain(
+      "reducedMotion={universeBackdrop || backdropMotionPaused}",
+    );
     expect(source).toContain(
       'data-universe-presentation={variant === "universe" ? universePresentation : "fixed"}',
     );
@@ -72,8 +77,9 @@ describe("space backdrop interaction isolation", () => {
     expect(source).toContain('if (!enteringUniverse) syncView(readUniverseView())');
   });
 
-  it("keeps a low-cost breathing field and drifting star canvas in the overview", () => {
-    expect(source).toContain("density={1}");
+  it("keeps the universe sky quiet while the shell retains its rich atmosphere", () => {
+    expect(source).toContain("density={universeBackdrop ? 0.52 : 1}");
+    expect(source).toContain("{!universeBackdrop && SPARKLES.map");
     expect(particleSource).toContain("const BASE_PARTICLE_COUNT = 264");
     expect(galaxySource).toContain("const PARTICLE_ALPHA_SCALE = 1.65");
     expect(galaxySource).toContain("createHaloParticles(random, 520)");
@@ -83,8 +89,12 @@ describe("space backdrop interaction isolation", () => {
       new URL("../../app/globals.css", import.meta.url),
       "utf8",
     );
-    expect(css).toContain("sag-space-nebula-breathe");
-    expect(css).toContain("sag-space-starfield-drift");
+    expect(css).toContain(
+      '.sag-space-sparkles[data-space-variant="universe"]::before {\n    content: none;',
+    );
+    expect(css).toContain(
+      '.sag-space-sparkles[data-space-variant="universe"] .sag-space-particles {\n    animation: none;',
+    );
     expect(css).toContain("sag-universe-overview-breathe");
     expect(css).toContain(
       '.sag-knowledge-universe[data-universe-mode="explore"][data-universe-view="overview"]',

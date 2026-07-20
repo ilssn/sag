@@ -116,7 +116,7 @@ describe("universe presentation state", () => {
     const particle = universeNodeEmergence(0, "event", 0);
     const formingStar = universeNodeEmergence(0.18, "event", 0);
     const settledStar = universeNodeEmergence(0.26, "event", 0);
-    const resolvingCard = universeNodeEmergence(0.56, "event", 0);
+    const resolvingCard = universeNodeEmergence(0.42, "event", 0);
     const resolved = universeNodeEmergence(1, "event", 0);
 
     expect(particle).toEqual({
@@ -125,7 +125,7 @@ describe("universe presentation state", () => {
       card: 0,
       cloudScale: 0.22,
       starScale: 0.08,
-      cardScale: 0.36,
+      cardScale: 0.28,
       blur: 7,
     });
     expect(formingStar.grain).toBeGreaterThan(0);
@@ -136,7 +136,7 @@ describe("universe presentation state", () => {
     expect(settledStar.card).toBe(0);
     expect(resolvingCard.star).toBe(1);
     expect(resolvingCard.card).toBeGreaterThan(0);
-    expect(resolvingCard.cardScale).toBeGreaterThan(0.36);
+    expect(resolvingCard.cardScale).toBeGreaterThan(0.28);
     expect(resolvingCard.blur).toBeLessThan(7);
     expect(resolved).toMatchObject({
       star: 1,

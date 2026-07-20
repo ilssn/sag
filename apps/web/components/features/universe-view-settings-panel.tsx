@@ -128,6 +128,7 @@ export function UniverseViewSettings({
       data-settings-compact={compact}
       data-settings-device={mobile ? "mobile" : "desktop"}
       data-event-window-size={normalized.eventWindowSize}
+      data-event-card-preview-count={normalized.eventCardPreviewCount}
       data-cache-capacity={normalized.cacheCapacity}
     >
       <SettingsSection
@@ -144,6 +145,25 @@ export function UniverseViewSettings({
             aria-label={t("cards.enabled.aria")}
             checked={normalized.cardsEnabled}
             onCheckedChange={(value) => emit({ cardsEnabled: value === true })}
+          />
+        </SettingsRow>
+        <SettingsRow
+          title={t("cards.preview.title")}
+          description={t("cards.preview.description")}
+        >
+          <SettingSlider
+            ariaLabel={t("cards.preview.aria")}
+            value={normalized.eventCardPreviewCount}
+            min={UNIVERSE_VIEW_LIMITS.eventCardPreviewCount.min}
+            max={Math.min(
+              normalized.eventWindowSize,
+              UNIVERSE_VIEW_LIMITS.eventCardPreviewCount.max,
+            )}
+            step={UNIVERSE_VIEW_LIMITS.eventCardPreviewCount.step}
+            recommended={UNIVERSE_VIEW_LIMITS.eventCardPreviewCount.default}
+            onChange={(eventCardPreviewCount) => emit({
+              eventCardPreviewCount,
+            })}
           />
         </SettingsRow>
       </SettingsSection>

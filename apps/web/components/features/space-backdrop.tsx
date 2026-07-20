@@ -70,6 +70,7 @@ export function SpaceBackdrop({
   const accumulationPresentation = variant === "universe"
     && universePresentation === "accumulation";
   const backdropMotionPaused = ambientMotionPaused || accumulationPresentation;
+  const universeBackdrop = variant === "universe";
 
   React.useEffect(() => {
     if (variant !== "universe") return;
@@ -308,11 +309,11 @@ export function SpaceBackdrop({
       aria-hidden
     >
       <SpaceParticles
-        // Keep one star-field implementation for loading, normal workspace,
-        // and exploration. The graph adds its source nebulae on top; it does
-        // not replace the shared background with a second particle system.
-        reducedMotion={backdropMotionPaused}
-        density={1}
+        // In the universe the shared field is only a quiet, distant sky. The
+        // scene engine owns the sole moving/data-bearing nebula, so background
+        // particles never compete with source dust or timeline particles.
+        reducedMotion={universeBackdrop || backdropMotionPaused}
+        density={universeBackdrop ? 0.52 : 1}
       />
       {!reducedMotion && (cursorPortalRoot
         ? createPortal(
@@ -320,7 +321,7 @@ export function SpaceBackdrop({
           cursorPortalRoot,
         )
         : <span ref={cursorMeteorRef} className="sag-space-cursor-meteor" data-active="false" />)}
-      {!accumulationPresentation && (
+      {!universeBackdrop && !accumulationPresentation && (
         <>
           <span className="sag-space-galaxy-orbit">
             <ParticleGalaxy reducedMotion={ambientMotionPaused} />
@@ -332,7 +333,7 @@ export function SpaceBackdrop({
           <span className="sag-space-meteor sag-space-meteor--four" />
         </>
       )}
-      {SPARKLES.map((star) => (
+      {!universeBackdrop && SPARKLES.map((star) => (
         <span
           key={`${star.x}-${star.y}`}
           className="sag-space-sparkle"

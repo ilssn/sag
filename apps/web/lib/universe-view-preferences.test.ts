@@ -99,6 +99,7 @@ describe("universe v7 view preferences", () => {
       cacheCapacity: 1_000,
       eventWindowSize: 50,
       cardsEnabled: true,
+      eventCardPreviewCount: 13,
       temporalPageSize: 20,
       temporalPrefetchPages: 3,
       entityTypes: null,
@@ -112,6 +113,7 @@ describe("universe v7 view preferences", () => {
       cacheCapacity: -100,
       eventWindowSize: 999,
       cardsEnabled: "yes",
+      eventCardPreviewCount: 999,
       temporalPageSize: 27,
       temporalPrefetchPages: 99,
       entityTypes: [" Person ", "", "Person", 42],
@@ -121,6 +123,7 @@ describe("universe v7 view preferences", () => {
       cacheCapacity: 300,
       eventWindowSize: 100,
       cardsEnabled: true,
+      eventCardPreviewCount: 20,
       temporalPageSize: 25,
       temporalPrefetchPages: 3,
       entityTypes: ["Person"],
@@ -138,6 +141,11 @@ describe("universe v7 view preferences", () => {
       min: 200,
       max: 5_000,
       default: 1_000,
+    });
+    expect(UNIVERSE_VIEW_LIMITS.eventCardPreviewCount).toMatchObject({
+      min: 1,
+      max: 20,
+      default: 13,
     });
     expect(UNIVERSE_VIEW_LIMITS.temporalPageSize.default).toBe(20);
     expect(UNIVERSE_VIEW_LIMITS.temporalPrefetchPages.default).toBe(3);

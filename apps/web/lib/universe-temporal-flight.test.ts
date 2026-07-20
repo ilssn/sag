@@ -322,18 +322,20 @@ describe("universe temporal flight", () => {
     expect(universeTemporalFlightPresence(-60 * 3, 60).scale).toBe(1);
   });
 
-  it("slides a four-moment readable slice through a larger star window", () => {
+  it("slides a five-moment core with early previews through the star window", () => {
     const atEventBoundaries = Array.from({ length: 9 }, (_, index) =>
       universeTemporalFlightPresence(index * 60, 60));
 
     expect(atEventBoundaries.filter((presence) => presence.card >= 0.72))
-      .toHaveLength(4);
+      .toHaveLength(5);
     expect(atEventBoundaries[4]?.card).toBeGreaterThan(0);
-    expect(atEventBoundaries[5]?.card).toBe(0);
+    expect(atEventBoundaries[5]?.card).toBeGreaterThan(0);
+    expect(atEventBoundaries[7]?.card).toBe(0);
     expect(atEventBoundaries[8]?.opacity).toBeGreaterThan(0);
 
     const justPassed = universeTemporalFlightPresence(-0.75 * 60, 60);
     expect(justPassed.card).toBeGreaterThan(0);
-    expect(universeTemporalFlightPresence(-1.25 * 60, 60).card).toBe(0);
+    expect(universeTemporalFlightPresence(-1.25 * 60, 60).card).toBeGreaterThan(0);
+    expect(universeTemporalFlightPresence(-2 * 60, 60).card).toBe(0);
   });
 });

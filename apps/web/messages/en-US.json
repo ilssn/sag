@@ -1101,7 +1101,7 @@
       "description": "In search results, the wheel only zooms. Lock a node, then choose Explore more in the details panel."
     },
     "nodeActions": {
-      "viewDetails": "View details",
+      "viewDetails": "Details ›",
       "exploreMore": "Explore more",
       "askAi": "Ask AI"
     },
@@ -1147,6 +1147,11 @@
         "title": "Enable event and entity cards",
         "description": "The complete star network remains when disabled. Hover or lock still reveals the focused relationship.",
         "aria": "Enable event and entity cards"
+      },
+      "preview": {
+        "title": "Event cards shown",
+        "description": "Limits only the event cards expanded by default. The event window, entities, and factual links stay intact.",
+        "aria": "Number of event cards shown by default"
       }
     },
     "entityTypes": {

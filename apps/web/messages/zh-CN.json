@@ -1101,7 +1101,7 @@
       "description": "搜索结果中滚轮仅用于缩放；锁定节点后，可在详情中选择“探索更多”"
     },
     "nodeActions": {
-      "viewDetails": "查看详情",
+      "viewDetails": "详情 ›",
       "exploreMore": "探索更多",
       "askAi": "AI 问答"
     },
@@ -1147,6 +1147,11 @@
         "title": "启用事件与实体卡片",
         "description": "关闭后仍保留完整星点网络，悬停或锁定时仍可查看当前关系。",
         "aria": "启用事件与实体卡片"
+      },
+      "preview": {
+        "title": "事件卡片数量",
+        "description": "只限制画面中默认展开的事件卡片；事件窗口、实体和真实连线不受影响。",
+        "aria": "默认显示的事件卡片数量"
       }
     },
     "entityTypes": {

@@ -72,16 +72,18 @@ export function universeNodeEmergence(
   const grainIn = phase(value, 0.005 + delay * 0.25, 0.15 + delay * 0.6);
   const grainOut = phase(value, 0.18 + delay, 0.5 + delay);
   const star = phase(value, 0.08 + delay, 0.34 + delay);
-  // The complete card starts only after its star is nearly settled. With the
-  // maximum kind + peer delay, the final card still resolves exactly at 1.
-  const card = phase(value, 0.4 + delay, 0.8 + delay);
+  // Let the complete card begin while the star finishes condensing. This
+  // overlap is the visual hand-off: a central point becomes a small card,
+  // rather than a full card suddenly appearing after it has reached an edge.
+  // The maximum kind + peer delay still resolves exactly at progress 1.
+  const card = phase(value, 0.26 + delay, 0.68 + delay);
   const result = target ?? {
     grain: 0,
     star: 0,
     card: 0,
     cloudScale: 0.22,
     starScale: 0.08,
-    cardScale: 0.36,
+    cardScale: 0.28,
     blur: 7,
   };
 
@@ -91,7 +93,7 @@ export function universeNodeEmergence(
   result.cloudScale = 0.22
     + easeOutCubic(phase(value, 0.005 + delay * 0.25, 0.46 + delay)) * 0.78;
   result.starScale = 0.08 + easeOutCubic(star) * 0.92;
-  result.cardScale = 0.36 + easeOutCubic(card) * 0.64;
+  result.cardScale = 0.28 + easeOutCubic(card) * 0.72;
   result.blur = 7 * Math.pow(1 - card, 1.3);
   return result;
 }

@@ -273,41 +273,22 @@
   }
 
   .sag-space-sparkles[data-space-variant="universe"] {
-    /* The universe layer is the depth cue for every graph state. Keep it
-       present behind the cards; only the foreground decoration is gated in
-       detail mode below. */
-    opacity: 0.88;
+    /* The scene owns the only semantic nebula. This layer is a motionless,
+       distant sky — enough depth to avoid a flat black canvas, never another
+       foreground particle cloud. */
+    opacity: 0.5;
     transition: opacity 360ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
   .sag-space-sparkles[data-space-variant="universe"]::before {
-    position: absolute;
-    inset: -18%;
-    z-index: 0;
-    content: "";
-    pointer-events: none;
-    background:
-      radial-gradient(
-        ellipse 42% 34% at 51% 47%,
-        hsl(198 46% 34% / 0.14),
-        transparent 70%
-      ),
-      radial-gradient(
-        ellipse 24% 20% at 51% 48%,
-        hsl(42 82% 56% / 0.08),
-        transparent 72%
-      );
-    filter: blur(18px);
-    opacity: 0.52;
-    transform: translate3d(-1%, 0, 0) scale(0.96);
-    animation: sag-space-nebula-breathe 18s ease-in-out infinite alternate;
-    will-change: transform, opacity;
+    content: none;
   }
 
   .sag-space-sparkles[data-space-variant="universe"] .sag-space-particles {
-    animation: sag-space-starfield-drift 42s ease-in-out infinite alternate;
-    transform-origin: 50% 48%;
-    will-change: transform;
+    animation: none;
+    opacity: 0.82;
+    transform: none;
+    will-change: auto;
   }
 
   .sag-space-sparkles[data-space-variant="universe"][data-universe-presentation="accumulation"] {
@@ -349,9 +330,9 @@
   }
 
   .sag-space-sparkles[data-space-variant="universe"][data-universe-view="detail"] {
-    /* A quieter star field gives the timeline room without flattening the
-       scene into a black void. */
-    opacity: 0.64;
+    /* Keep the far sky beneath the corridor, with the data particles carrying
+       every visible movement and transition. */
+    opacity: 0.38;
   }
 
   .sag-space-sparkles[data-space-variant="universe"][data-universe-view="detail"]::before,
@@ -3412,23 +3393,20 @@
 
   .sag-universe-node-label__detail-action {
     position: absolute;
-    right: 4px;
-    bottom: calc(100% + 6px);
+    right: 9px;
+    top: 8px;
+    z-index: 1;
     display: inline-flex;
-    min-height: 22px;
+    min-height: 18px;
     align-items: center;
     justify-content: center;
-    border: 1px solid rgb(244 201 95 / 0.42);
-    border-radius: 999px;
-    background: hsl(var(--background) / 0.94);
-    box-shadow:
-      0 6px 18px rgb(0 0 0 / 0.14),
-      0 0 14px rgb(244 201 95 / 0.09);
+    border-radius: 4px;
+    background: transparent;
     color: rgb(253 224 133 / 0.98);
-    font-size: 9px;
-    font-weight: 600;
+    font-size: 10px;
+    font-weight: 650;
     line-height: 1;
-    padding: 0 9px;
+    padding: 0 2px;
     white-space: nowrap;
     cursor: pointer;
     transition:
@@ -3439,15 +3417,35 @@
   }
 
   .sag-universe-node-label__detail-action:hover:not(:disabled) {
-    border-color: rgb(244 201 95 / 0.68);
-    background: rgb(244 201 95 / 0.12);
+    background: rgb(244 201 95 / 0.1);
     color: rgb(255 237 176 / 1);
+  }
+
+  .sag-universe-node-label:has(
+      .sag-universe-node-label__detail-action:not([hidden])
+    )
+    .sag-universe-node-label__primary {
+    padding-right: 48px;
   }
 
   .sag-universe-node-label[data-kind="entity"]
     .sag-universe-node-label__detail-action {
-    border-color: color-mix(in srgb, var(--universe-node-accent), transparent 54%);
     color: color-mix(in srgb, var(--universe-node-accent), white 24%);
+  }
+
+  .sag-universe-node-label[data-kind="entity"][data-compact="true"]
+    .sag-universe-node-label__detail-action {
+    right: 6px;
+    top: 5px;
+    min-height: 18px;
+    font-size: 9px;
+  }
+
+  .sag-universe-node-label[data-kind="entity"][data-compact="true"]:has(
+      .sag-universe-node-label__detail-action:not([hidden])
+    )
+    .sag-universe-node-label__primary {
+    padding-right: 42px;
   }
 
   .sag-universe-node-label__detail-action[hidden] {

@@ -14,7 +14,14 @@ import {
   orderUniverseKeyboardCandidates,
   type UniverseKeyboardDirection,
 } from "@/lib/universe-keyboard-navigation";
-import type { UniverseViewPreferences } from "@/lib/universe-view-preferences";
+import {
+  planUniversePreviewCards,
+  universeCardApertureBucket,
+} from "@/lib/universe-preview-plan";
+import {
+  UNIVERSE_VIEW_LIMITS,
+  type UniverseViewPreferences,
+} from "@/lib/universe-view-preferences";
 import {
   resolveUniverseDetailSource,
   universeCardMorph,
@@ -231,6 +238,10 @@ interface ClusterForce {
 const EVENT_COLOR = new THREE.Color("#ffd166");
 const EVENT_LIGHT_COLOR = new THREE.Color("#b77b0b");
 const WHITE = new THREE.Color("#ffffff");
+const EVENT_STAR_HALO_SIZE = { root: 20, regular: 16 } as const;
+const EVENT_STAR_CORE_SIZE = { root: 14, regular: 11 } as const;
+const ENTITY_STAR_HALO_SIZE = { root: 12, regular: 10 } as const;
+const ENTITY_STAR_CORE_SIZE = { root: 7.5, regular: 6 } as const;
 export const UNIVERSE_BRAND_GOLD = "#d6ae63";
 const NEBULA_BRAND_GOLD = new THREE.Color(UNIVERSE_BRAND_GOLD);
 /**
@@ -1104,6 +1115,7 @@ export class UniverseForceSceneEngine {
   private sourceSignature = "";
   private labelLayer: HTMLDivElement;
   private labels: SceneLabel[] = [];
+  private renderedCardApertureKey: string | null = null;
   private renderedLabelFocusId: string | null = null;
   private hoverLabelTimer: number | null = null;
   private hoverLabelFrame: number | null = null;
@@ -1378,7 +1390,9 @@ export class UniverseForceSceneEngine {
     const motionChanged = this.reducedMotion !== options.reducedMotion;
     const timelineDisabled = this.timelineJourney.enabled && !options.timelineJourney.enabled;
     const cardPreferencesChanged =
-      this.viewPreferences.cardsEnabled !== options.viewPreferences.cardsEnabled;
+      this.viewPreferences.cardsEnabled !== options.viewPreferences.cardsEnabled
+      || this.viewPreferences.eventCardPreviewCount
+        !== options.viewPreferences.eventCardPreviewCount;
     const leavingInteractiveMode = this.interactive && !options.interactive;
     const labelTextChanged = this.text.locale !== options.text.locale
       || this.text.viewDetailsAction !== options.text.viewDetailsAction
@@ -1394,6 +1408,9 @@ export class UniverseForceSceneEngine {
     this.host.dataset.universeReducedMotion = String(options.reducedMotion);
     this.host.dataset.universeStrategy = options.strategy;
     this.host.dataset.universeCards = String(options.viewPreferences.cardsEnabled);
+    this.host.dataset.universeEventCardPreviewCount = String(
+      options.viewPreferences.eventCardPreviewCount,
+    );
     this.syncTimelineDiagnostics();
     this.controls.enabled = options.interactive;
     this.controls.enableZoom = options.interactive;
@@ -3704,13 +3721,15 @@ export class UniverseForceSceneEngine {
         map: this.eventTexture,
         color: this.darkTheme ? EVENT_COLOR : EVENT_LIGHT_COLOR,
         transparent: true,
-        opacity: node.sceneNode.root ? 0.58 : 0.44,
+        opacity: node.sceneNode.root ? 0.72 : 0.6,
         depthWrite: false,
         toneMapped: false,
         blending: THREE.AdditiveBlending,
       });
       const halo = new THREE.Sprite(haloMaterial);
-      const haloSize = node.sceneNode.root ? 14 : 11;
+      const haloSize = node.sceneNode.root
+        ? EVENT_STAR_HALO_SIZE.root
+        : EVENT_STAR_HALO_SIZE.regular;
       halo.scale.set(haloSize, haloSize, haloSize);
       halo.renderOrder = 3;
       halo.userData.eventHalo = true;
@@ -3729,7 +3748,9 @@ export class UniverseForceSceneEngine {
         blending: THREE.NormalBlending,
       });
       sprite = new THREE.Sprite(coreMaterial);
-      const coreSize = node.sceneNode.root ? 9.6 : 7.6;
+      const coreSize = node.sceneNode.root
+        ? EVENT_STAR_CORE_SIZE.root
+        : EVENT_STAR_CORE_SIZE.regular;
       sprite.scale.set(coreSize, coreSize, coreSize);
       sprite.renderOrder = 4;
       sprite.userData.eventStar = true;
@@ -3748,7 +3769,7 @@ export class UniverseForceSceneEngine {
       const hit = new THREE.Mesh(this.sourceHitGeometry, hitMaterial);
       // Generous: exploring means landing the pointer on stars while they
       // drift with presence and parallax — a near miss must still count.
-      const hitRadius = node.sceneNode.root ? 11 : 9.5;
+      const hitRadius = node.sceneNode.root ? 15 : 12;
       hit.scale.set(hitRadius, hitRadius, hitRadius);
       hit.userData.hitArea = true;
       hit.userData.eventHitArea = true;
@@ -3759,13 +3780,15 @@ export class UniverseForceSceneEngine {
         map: this.entityTexture,
         color,
         transparent: true,
-        opacity: node.sceneNode.root ? 0.34 : 0.26,
+        opacity: node.sceneNode.root ? 0.48 : 0.38,
         depthWrite: false,
         toneMapped: false,
         blending: THREE.AdditiveBlending,
       });
       const halo = new THREE.Sprite(haloMaterial);
-      const haloSize = node.sceneNode.root ? 8 : 6.5;
+      const haloSize = node.sceneNode.root
+        ? ENTITY_STAR_HALO_SIZE.root
+        : ENTITY_STAR_HALO_SIZE.regular;
       halo.scale.set(haloSize, haloSize, haloSize);
       halo.renderOrder = 2;
       halo.userData.entityHalo = true;
@@ -3784,7 +3807,9 @@ export class UniverseForceSceneEngine {
         blending: THREE.NormalBlending,
       });
       sprite = new THREE.Sprite(coreMaterial);
-      const coreSize = node.sceneNode.root ? 5.2 : 4;
+      const coreSize = node.sceneNode.root
+        ? ENTITY_STAR_CORE_SIZE.root
+        : ENTITY_STAR_CORE_SIZE.regular;
       sprite.scale.set(coreSize, coreSize, coreSize);
       sprite.renderOrder = 2;
       sprite.userData.entityCore = true;
@@ -3798,7 +3823,7 @@ export class UniverseForceSceneEngine {
         colorWrite: false,
       });
       const hit = new THREE.Mesh(this.sourceHitGeometry, hitMaterial);
-      const hitRadius = node.sceneNode.root ? 8 : 7;
+      const hitRadius = node.sceneNode.root ? 10 : 9;
       hit.scale.set(hitRadius, hitRadius, hitRadius);
       hit.userData.hitArea = true;
       hit.userData.entityHitArea = true;
@@ -4186,7 +4211,7 @@ export class UniverseForceSceneEngine {
       card: 0,
       cloudScale: 0.22,
       starScale: 0.08,
-      cardScale: 0.36,
+      cardScale: 0.28,
       blur: 7,
     };
     universeNodeEmergence(availability, node.kind, stagger, next);
@@ -4332,17 +4357,21 @@ export class UniverseForceSceneEngine {
     const visibleWorldHeight = 2 * distance
       * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
     const coreSize = node.kind === "event"
-      ? node.sceneNode.root ? 9.6 : 7.6
-      : node.sceneNode.root ? 5.2 : 4;
+      ? node.sceneNode.root
+        ? EVENT_STAR_CORE_SIZE.root
+        : EVENT_STAR_CORE_SIZE.regular
+      : node.sceneNode.root
+        ? ENTITY_STAR_CORE_SIZE.root
+        : ENTITY_STAR_CORE_SIZE.regular;
     const projectedPixels = coreSize * Math.max(1, this.host.clientHeight)
       / Math.max(1, visibleWorldHeight);
     const minimumPixels = node.kind === "event"
-      ? node.sceneNode.root ? 18 : 15
-      : node.sceneNode.root ? 10 : 8;
+      ? node.sceneNode.root ? 26 : 22
+      : node.sceneNode.root ? 16 : 13;
     const maximumPixels = node.kind === "event"
-      ? node.sceneNode.root ? 30 : 24
-      : node.sceneNode.root ? 16 : 14;
-    const maximumScale = node.kind === "event" ? 2.4 : 3.2;
+      ? node.sceneNode.root ? 42 : 34
+      : node.sceneNode.root ? 26 : 22;
+    const maximumScale = node.kind === "event" ? 2.8 : 3.6;
     const requestedScale = projectedPixels < minimumPixels
       ? minimumPixels / Math.max(1, projectedPixels)
       : projectedPixels > maximumPixels
@@ -4378,15 +4407,18 @@ export class UniverseForceSceneEngine {
           config.vestibuleDepth * 0.9,
         )
       : 0;
+    const sourceTransition = Math.max(focus, dive);
     if (child.userData.sourceAura) {
       return selectedSource
-        ? THREE.MathUtils.lerp(1, 0.42, focus)
-          * THREE.MathUtils.lerp(1, 0.72, dive)
+        // The overview beacon hands off to the source's own particle field.
+        // Leaving a second glowing orb inside the corridor made one source
+        // look like three unrelated layers.
+        ? THREE.MathUtils.lerp(1, 0.035, sourceTransition)
         : Math.max(0.04, 1 - this.visualDetailMix * 0.96);
     }
     if (child.userData.sourceCore) {
       return selectedSource
-        ? THREE.MathUtils.lerp(1, 0.3, dive)
+        ? THREE.MathUtils.lerp(1, 0.025, sourceTransition)
         : Math.max(0.03, 1 - this.visualDetailMix * 1.02);
     }
     return 1;
@@ -5028,14 +5060,16 @@ export class UniverseForceSceneEngine {
   private restingLinkOpacity() {
     const load = THREE.MathUtils.clamp((this.visibleEdgeIds.size - 24) / 336, 0, 1);
     return this.darkTheme
-      ? THREE.MathUtils.lerp(0.18, 0.055, load)
-      : THREE.MathUtils.lerp(0.16, 0.045, load);
+      ? THREE.MathUtils.lerp(0.44, 0.18, load)
+      : THREE.MathUtils.lerp(0.38, 0.14, load);
   }
 
   private linkWorldWidth() {
     // three-forcegraph rounds cylinder widths upward to one decimal place.
-    // Use values that survive that quantization instead of 0.22 becoming 0.3.
-    return this.links.length >= 240 ? 0.1 : 0.2;
+    // Keep the factual network legible at rest even in dense windows.
+    if (this.links.length >= 240) return 0.2;
+    if (this.links.length >= 100) return 0.3;
+    return 0.4;
   }
 
   private linkVisualStyle(link: ForceLink) {
@@ -5061,7 +5095,7 @@ export class UniverseForceSceneEngine {
     const sharedEntityBridge = [source, target].some((node) =>
       node?.kind === "entity" && (this.adjacency.get(node.id)?.size ?? 0) > 1);
     const relationSalience = THREE.MathUtils.lerp(
-      0.24,
+      0.68,
       sharedEntityBridge ? 1.24 : 1,
       focusedSlicePresence,
     );
@@ -5087,7 +5121,7 @@ export class UniverseForceSceneEngine {
       };
     }
     return {
-      color: this.darkTheme ? "#5b949e" : "#385f66",
+      color: this.darkTheme ? "#77c3cf" : "#315f69",
       opacity: this.restingLinkOpacity() * relationSalience * timelineOpacity,
     };
   }
@@ -5247,7 +5281,32 @@ export class UniverseForceSceneEngine {
     this.graph.renderer().render(this.graph.scene(), this.graph.camera());
   }
 
+  private timelineViewDistance(node: ForceNode) {
+    const config = this.flightConfig;
+    if (
+      !config
+      || node.sourceId !== config.sourceId
+      || !node.sceneNode.timelineBundleId
+    ) return undefined;
+    const nodeDepth = config.centerZ - node.sceneNode.z;
+    return Math.abs(nodeDepth - this.appliedFlightDepth)
+      / Math.max(1, config.unitsPerEvent);
+  }
+
+  private cardApertureKey() {
+    const config = this.flightConfig;
+    if (!config || this.strategy !== "exploration") return null;
+    return [
+      config.sourceId,
+      universeCardApertureBucket(
+        this.appliedFlightDepth,
+        config.unitsPerEvent,
+      ),
+    ].join(":");
+  }
+
   private rebuildLabels() {
+    this.renderedCardApertureKey = this.cardApertureKey();
     const focusId = this.labelFocusId();
     const transientHover = focusId !== null && focusId === this.transientHoverFocusId();
     this.cancelHoverLabelRebuild();
@@ -5313,39 +5372,45 @@ export class UniverseForceSceneEngine {
         - (retainedLabelRank.get(right.id) ?? Number.MAX_SAFE_INTEGER);
       return retainedDifference || left.id.localeCompare(right.id);
     };
-    const focusNode = focusId ? this.nodes.get(focusId) : undefined;
-    const focusedNodeIds = focusNode && focusNode.kind !== "source"
-      ? new Set([focusNode.id, ...(this.adjacency.get(focusNode.id) ?? [])])
-      : null;
-    // The event window is the only presentation boundary. Every active event
-    // and entity in that window participates in the same particle → star →
-    // card lifecycle; there is no second card quota that can silently discard
-    // an otherwise visible event. When cards are disabled, hover/lock still
-    // mounts the factual one-hop network on demand.
-    const activeNodes = [...this.nodes.values()]
-      .filter((node): node is ForceNode & { kind: "event" | "entity" } =>
-        node.kind === "event" || node.kind === "entity")
-      .filter((node) =>
-        this.strategy === "accumulation" || node.sourceId === labelSourceId)
-      .filter((node) => {
-        const focused = focusedNodeIds?.has(node.id) ?? false;
-        if (!this.viewPreferences.cardsEnabled) return focused;
-        return focused || node.sceneNode.state === "active";
-      })
-      .sort(prioritize);
-    const focusedCards = focusedNodeIds
-      ? activeNodes.filter((node) => focusedNodeIds.has(node.id))
-      : [];
+    const previewPlan = planUniversePreviewCards({
+      nodes: [...this.nodes.values()]
+        .filter((node): node is ForceNode & { kind: "event" | "entity" } =>
+          node.kind === "event" || node.kind === "entity")
+        .filter((node) => !node.timelineRetiring)
+        .filter((node) =>
+          this.strategy === "accumulation" || node.sourceId === labelSourceId)
+        .sort(prioritize)
+        .map((node) => ({
+          id: node.id,
+          kind: node.kind,
+          sourceId: node.sourceId,
+          active: node.sceneNode.state === "active",
+          viewDistance: this.timelineViewDistance(node),
+        })),
+      adjacency: this.adjacency,
+      sourceId: labelSourceId,
+      includeAllSources: this.strategy === "accumulation",
+      focusId,
+      cardsEnabled: this.viewPreferences.cardsEnabled,
+      eventPreviewCount: this.viewPreferences.eventCardPreviewCount,
+      entitySafetyMax: UNIVERSE_VIEW_LIMITS.entityCardSafetyMax,
+    });
+    const activeNodes = previewPlan.ids.flatMap((id) => {
+      const node = this.nodes.get(id);
+      return node && node.kind !== "source" ? [node] : [];
+    });
     this.host.dataset.universeFocusCardCount = String(
-      focusedCards.length,
+      previewPlan.focused ? previewPlan.ids.length : 0,
     );
     this.host.dataset.universeFocusEventCardCount = String(
-      focusedCards.filter((node) => node.kind === "event").length,
+      previewPlan.focused ? previewPlan.eventIds.length : 0,
     );
     this.host.dataset.universeFocusEntityCardCount = String(
-      focusedCards.filter((node) => node.kind === "entity").length,
+      previewPlan.focused ? previewPlan.entityIds.length : 0,
     );
-    this.host.dataset.universeHiddenRelatedEntityCount = "0";
+    this.host.dataset.universeHiddenRelatedEntityCount = String(
+      previewPlan.hiddenRelatedEntityCount,
+    );
 
     sources.forEach((node) => {
       const labelKey = `source:${node.id}`;
@@ -5704,12 +5769,12 @@ export class UniverseForceSceneEngine {
       // resurrecting particles that have not formed yet. Ordinary labels stay
       // entirely camera-depth driven.
       const focusCardReveal = Math.max(emergence.card, emergence.star);
-      const ordinaryCardReveal = this.strategy === "exploration"
-        && node.kind === "entity"
-        ? 0
-        : emergence.card
-          * globalCardMorph.reveal
-          * (node.temporalCardPresence ?? 1);
+      // Events and their entities are one knowledge package. Both use the
+      // same camera-depth lifecycle; entities simply resolve as compact cards.
+      // The preview plan already bounded which packages receive DOM cards.
+      const ordinaryCardReveal = emergence.card
+        * globalCardMorph.reveal
+        * (node.temporalCardPresence ?? 1);
       const nodeCardReveal = forceCardDetail
         ? focusCardReveal
         : ordinaryCardReveal;
@@ -6717,7 +6782,11 @@ export class UniverseForceSceneEngine {
       this.updateTemporalPresence();
       this.updateVisualLayout(now);
       this.updateNodeMorphScales(now);
-      this.updateLabels(now);
+      if (this.cardApertureKey() !== this.renderedCardApertureKey) {
+        this.rebuildLabels();
+      } else {
+        this.updateLabels(now);
+      }
       this.evaluateLod(now);
     }
     // Cards duck while the camera streaks past and re-expand once it settles.

@@ -16,6 +16,7 @@ describe("knowledge universe settings contract", () => {
       cacheCapacity: 1_000,
       eventWindowSize: 50,
       cardsEnabled: true,
+      eventCardPreviewCount: 13,
       temporalPageSize: 20,
       temporalPrefetchPages: 3,
       entityTypes: null,
@@ -50,6 +51,11 @@ describe("knowledge universe settings contract", () => {
       max: 100,
       default: 50,
     });
+    expect(UNIVERSE_VIEW_LIMITS.eventCardPreviewCount).toMatchObject({
+      min: 1,
+      max: 20,
+      default: 13,
+    });
   });
 
   it("repairs filters while preserving all-documents and all-types semantics", () => {
@@ -76,6 +82,7 @@ describe("knowledge universe settings contract", () => {
       expect(messages.AppShell.graphSettings).toBeTruthy();
       expect(messages.GraphSettings.drawer.title).toBeTruthy();
       expect(messages.GraphSettings.cards.enabled.title).toBeTruthy();
+      expect(messages.GraphSettings.cards.preview.title).toBeTruthy();
       expect(messages.GraphSettings.eventWindow.title).toBeTruthy();
       expect(messages.GraphSettings.cacheCapacity.title).toBeTruthy();
       expect(messages.GraphSettings.temporal.page.title).toBeTruthy();
