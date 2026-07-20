@@ -15,13 +15,13 @@ import {
 
 describe("knowledge universe model", () => {
   it("keeps approaching packages central before perspective fans them outward", () => {
-    expect(TIMELINE_EVENT_LATERAL_SPREAD).toBeGreaterThanOrEqual(4);
-    expect(TIMELINE_EVENT_LATERAL_SPREAD).toBeLessThanOrEqual(5);
-    expect(LOCAL_ENTITY_SPREAD_MIN).toBeGreaterThanOrEqual(80);
+    expect(TIMELINE_EVENT_LATERAL_SPREAD).toBeGreaterThanOrEqual(6);
+    expect(TIMELINE_EVENT_LATERAL_SPREAD).toBeLessThanOrEqual(7);
+    expect(LOCAL_ENTITY_SPREAD_MIN).toBeGreaterThanOrEqual(100);
     expect(LOCAL_ENTITY_SPREAD_MIN + LOCAL_ENTITY_SPREAD_RANGE)
-      .toBeGreaterThanOrEqual(140);
+      .toBeGreaterThanOrEqual(190);
     expect(LOCAL_ENTITY_SPREAD_MIN + LOCAL_ENTITY_SPREAD_RANGE)
-      .toBeLessThanOrEqual(180);
+      .toBeLessThanOrEqual(210);
   });
 
   it("builds isolated browse state with the requested window limits", () => {

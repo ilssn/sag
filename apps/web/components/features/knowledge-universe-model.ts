@@ -92,12 +92,13 @@ export const ENTITY_EXPANSION_EVENT_LIMIT = 4;
 // Layout policy belongs to the projection model, not the React coordinator.
 // The temporal axis already supplies a normalized spiral. Keep its world-space
 // projection inside one readable corridor, then give each event a restrained
-// local relation cluster. Perspective now owns most of the apparent spread:
-// an approaching package forms near the source, grows through the reading
-// field, and only then travels toward the edge as the camera passes it.
-export const TIMELINE_EVENT_LATERAL_SPREAD = 4.8;
-export const LOCAL_ENTITY_SPREAD_MIN = 96;
-export const LOCAL_ENTITY_SPREAD_RANGE = 64;
+// local relation cluster. Perspective owns the centre-first transition, while
+// this middle-width corridor keeps a surrounding outer layer in view: an
+// approaching package forms near the source, grows through the reading field,
+// then fans toward (but does not immediately stick to) the viewport edge.
+export const TIMELINE_EVENT_LATERAL_SPREAD = 6.4;
+export const LOCAL_ENTITY_SPREAD_MIN = 112;
+export const LOCAL_ENTITY_SPREAD_RANGE = 88;
 export const EMPTY_TIMELINE_BUNDLE_IDS: string[] = [];
 export const TEMPORAL_AXIS_UNITS_PER_EVENT = UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT;
 
