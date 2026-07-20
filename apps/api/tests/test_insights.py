@@ -190,7 +190,7 @@ async def test_entity_read_path():
             assert limited["counts"]["events"] == 2
             assert limited["truncated"] is True
 
-            # 搜索命中分块可稳定映射回事件标题、摘要及真实事件—实体关系。
+            # 搜索命中分块可稳定映射回事项标题、正文及真实事项—实体关系。
             from sag_api.sag import RetrievedSection
 
             search_graph = await app.state.engine_manager.graph_for_sections(
@@ -205,6 +205,7 @@ async def test_entity_read_path():
             )
             assert search_graph.events[0].title == "过五关斩六将"
             assert search_graph.events[0].summary.startswith("关羽千里走单骑")
+            assert search_graph.events[0].content == "关羽过五关斩六将。"
             assert search_graph.events[0].score == pytest.approx(0.91)
             assert search_graph.entities[0].name == "关羽"
             assert search_graph.associations[0].event_id == search_graph.events[0].id

@@ -40,6 +40,7 @@ import {
   UNIVERSE_PATCH_EVENT,
   UNIVERSE_PATCH_RESET_EVENT,
   dispatchUniverseFocus,
+  dispatchUniverseResume,
   takePendingUniverseAsk,
   takePendingUniverseDetail,
   type UniverseAskTarget,
@@ -298,6 +299,7 @@ export function PetMiniWorkspace({
   const conversationRuntime = useConversationRuntime();
   const {
     agent,
+    appMode,
     user,
     workspaceSection,
     enterExploreMode,
@@ -810,6 +812,13 @@ export function PetMiniWorkspace({
     if (workspaceSection !== "search") enterExploreMode("search");
   };
 
+  const returnToExploration = React.useCallback(() => {
+    setAnswerHistoryOpen(false);
+    setDetailTrail([]);
+    dispatchUniverseResume();
+    onClose();
+  }, [onClose]);
+
   const newAnswer = () => {
     if (answerBusy) return;
     observedRouteThreadRef.current = routeThreadId;
@@ -994,9 +1003,13 @@ export function PetMiniWorkspace({
           variant="ghost"
           size="icon"
           className="size-7"
-          onClick={onClose}
-          aria-label={t("controls.close")}
-          title={t("controls.close")}
+          onClick={appMode === "explore" ? returnToExploration : onClose}
+          aria-label={t(
+            appMode === "explore" ? "controls.returnToExplore" : "controls.close",
+          )}
+          title={t(
+            appMode === "explore" ? "controls.returnToExplore" : "controls.close",
+          )}
         >
           <X className="size-3.5" />
         </Button>

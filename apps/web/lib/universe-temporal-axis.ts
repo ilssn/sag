@@ -32,6 +32,16 @@ export interface UniverseTemporalAxis {
 export const UNIVERSE_TEMPORAL_AXIS_UNITS_PER_EVENT = 60;
 
 /**
+ * The counting axis is a stable narrow corridor. Chronology belongs to Z;
+ * lateral lanes only keep neighbouring event cards distinct. Older knowledge
+ * must not drift farther sideways merely because its ordinal is larger —
+ * camera-relative depth already owns near/far scale and edge dissolution.
+ */
+export const UNIVERSE_TEMPORAL_AXIS_NEAR_LATERAL_SPREAD = 0.42;
+export const UNIVERSE_TEMPORAL_AXIS_FAR_LATERAL_SPREAD = 0.42;
+export const UNIVERSE_TEMPORAL_AXIS_VERTICAL_ASPECT = 0.74;
+
+/**
  * The vestibule: a stretch of axis between the entry pose (flight depth 0)
  * and the first event. Arriving in a source shows only the intact nebula —
  * the hero pose; scrolling forward crosses the vestibule while the dust
@@ -46,9 +56,9 @@ export interface UniverseTemporalAxisPolicy {
   /** Normalized lateral radius at the near and far ends of the axis. */
   nearLateralSpread: number;
   farLateralSpread: number;
-  /** Share of the lateral radius that varies per package. */
-  lateralJitter: number;
   verticalAspect: number;
+  /** Stable source-scoped rotation for the low-discrepancy package lanes. */
+  angularPhase: number;
   /** Shapes depth without changing ordering or endpoints. 1 keeps travel even. */
   ageExponent: number;
 }
@@ -70,13 +80,14 @@ export interface UniverseTemporalBundleProjection {
 
 export const DEFAULT_UNIVERSE_TEMPORAL_AXIS_POLICY: UniverseTemporalAxisPolicy = {
   depthSpan: 1,
-  nearLateralSpread: 0.18,
-  farLateralSpread: 0.44,
-  lateralJitter: 0.45,
-  verticalAspect: 0.7,
+  nearLateralSpread: UNIVERSE_TEMPORAL_AXIS_NEAR_LATERAL_SPREAD,
+  farLateralSpread: UNIVERSE_TEMPORAL_AXIS_FAR_LATERAL_SPREAD,
+  verticalAspect: UNIVERSE_TEMPORAL_AXIS_VERTICAL_ASPECT,
+  angularPhase: 0,
   ageExponent: 1,
 };
 
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 function clamp01(value: number) {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(1, value));
@@ -159,12 +170,10 @@ export function resolveUniverseTemporalAxisPolicy(
       nearLateralSpread,
       nonNegative(input.farLateralSpread, defaults.farLateralSpread),
     ),
-    lateralJitter: clamp01(
-      Number.isFinite(input.lateralJitter)
-        ? (input.lateralJitter as number)
-        : defaults.lateralJitter,
-    ),
     verticalAspect: nonNegative(input.verticalAspect, defaults.verticalAspect),
+    angularPhase: Number.isFinite(input.angularPhase)
+      ? (input.angularPhase as number)
+      : defaults.angularPhase,
     ageExponent: positive(input.ageExponent, defaults.ageExponent),
   };
 }
@@ -184,16 +193,21 @@ export function projectUniverseTemporalAxis(
   return bundles.map((bundle) => {
     const ageProgress = universeTemporalAxisAgeProgress(axis, bundle.ordinal);
     const curvedAge = Math.pow(ageProgress, policy.ageExponent);
-    // Every package keeps a lateral radius, jittered per package, so packages
-    // never stack onto the axis line itself.
+    const ordinal = Number.isFinite(bundle.ordinal)
+      ? Math.max(0, bundle.ordinal)
+      : 0;
     const radius = lerp(
       policy.nearLateralSpread,
       policy.farLateralSpread,
       curvedAge,
-    ) * lerp(1 - policy.lateralJitter, 1, stableUnit(`${bundle.bundleId}:lateral`));
-    // The angle is a pure function of package identity: a package may not swing
-    // sideways because of the direction the camera last travelled.
-    const angle = stableUnit(bundle.bundleId) * Math.PI * 2;
+    );
+    // Snapshot ordinals form a low-discrepancy spiral, preventing a small
+    // visible window from accidentally collapsing into one vertical column.
+    // Identity contributes only a restrained organic perturbation, so paging
+    // never reflows an existing package.
+    const angle = policy.angularPhase
+      + ordinal * GOLDEN_ANGLE
+      + (stableUnit(`${bundle.bundleId}:angle`) - 0.5) * 0.12;
 
     return {
       bundleId: bundle.bundleId,

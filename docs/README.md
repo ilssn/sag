@@ -18,5 +18,9 @@
 
 ## 目标设计与实施计划
 
-- [**下一代 4D 知识探索工作台**](superpowers/plans/2026-07-15-next-generation-knowledge-atlas.md)
-  —— 统一范围、渐进式 4D 呈现、探索—阅读—问答闭环、v3 数据契约、性能门禁与一次切换计划。
+- [**4D 知识宇宙重构实施计划（当前）**](superpowers/plans/2026-07-18-knowledge-universe-refactor.md)
+  —— 明确区分时空探索与线索累积，以缓存、窗口、卡片预览三层模型实现连续探索、稳定增量构图和生产性能门禁。
+
+### 历史目标计划
+
+- [下一代 4D 知识探索工作台（已被当前计划取代）](superpowers/plans/2026-07-15-next-generation-knowledge-atlas.md)

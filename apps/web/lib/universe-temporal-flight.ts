@@ -28,6 +28,27 @@ export interface UniverseTemporalFlightWheelInput {
   reducedMotion?: boolean;
 }
 
+/**
+ * Deliberate second-stage retreat at the source entrance. Reaching depth zero
+ * first restores the intact nebula; only a fresh outward wheel gesture exits
+ * to the universe overview. The arm delay absorbs trackpad inertia from the
+ * gesture that merely returned to the entrance.
+ */
+export interface UniverseSourceExitGate {
+  armedAt: number | null;
+  lastWheelAt: number | null;
+  outwardPixels: number;
+}
+
+export interface UniverseSourceExitWheelInput extends UniverseTemporalFlightWheelInput {
+  now: number;
+}
+
+export interface UniverseSourceExitWheelResult {
+  gate: UniverseSourceExitGate;
+  exitRequested: boolean;
+}
+
 export interface UniverseTemporalFlightStepInput {
   /** Milliseconds since the previous step. */
   elapsedMs: number;
@@ -62,6 +83,12 @@ export interface UniverseTemporalFlightFollowInput {
 export interface UniverseTemporalFlightPresence {
   scale: number;
   opacity: number;
+  /**
+   * Readable-card presence is a narrower camera-relative band than star
+   * presence. It slides continuously by event and never limits which nodes
+   * belong to the resident graph window.
+   */
+  card: number;
 }
 
 /** One 120px wheel notch flies roughly this share of two packages. */
@@ -69,16 +96,22 @@ export const UNIVERSE_FLIGHT_UNITS_PER_WHEEL_PIXEL = 0.9;
 /** How far ahead (in seconds of current velocity) the window follow leads. */
 export const UNIVERSE_FLIGHT_FOLLOW_LEAD_S = 0.5;
 /**
- * Atmosphere ahead of the camera: full presence within, thinning beyond. The
- * full zone must cover most of the loaded window (12 events a page): reading
- * events is the whole point of exploring, so the stage the camera is flying
- * into stays legible and only the far promise thins out.
+ * Camera-relative reading band ahead of the traveller. The complete resident
+ * window remains in the scene as stars and links; only the nearest few moments
+ * resolve into readable cards. This is continuous depth LOD, not a second
+ * count-based preview window, so every moment naturally becomes readable when
+ * the camera reaches it.
  */
-const PRESENCE_AHEAD_FULL_EVENTS = 6;
-const PRESENCE_AHEAD_FAR_EVENTS = 14;
+const PRESENCE_AHEAD_FULL_EVENTS = 1.25;
+const PRESENCE_AHEAD_FAR_EVENTS = 6;
 /** Atmosphere behind the camera: passed packages fade out fast. */
 const PRESENCE_BEHIND_FULL_EVENTS = 0.75;
 const PRESENCE_BEHIND_GONE_EVENTS = 2.5;
+/** Five chronological moments form the readable core; two more begin as previews. */
+const CARD_AHEAD_FULL_EVENTS = 3.15;
+const CARD_AHEAD_GONE_EVENTS = 6.15;
+const CARD_BEHIND_FULL_EVENTS = 0.65;
+const CARD_BEHIND_GONE_EVENTS = 1.8;
 const PRESENCE_FAR_SCALE = 0.5;
 const PRESENCE_FAR_OPACITY = 0.25;
 /**
@@ -92,6 +125,12 @@ export const UNIVERSE_FLIGHT_VELOCITY_HALF_LIFE_MS = 160;
 export const UNIVERSE_FLIGHT_GLIDE_HALF_LIFE_MS = 140;
 /** Distances below this settle instantly instead of easing forever. */
 export const UNIVERSE_FLIGHT_SETTLE_EPSILON = 0.5;
+/** Ignore the inertia tail that delivered the camera to the nebula entrance. */
+export const UNIVERSE_SOURCE_EXIT_ARM_DELAY_MS = 260;
+/** Trackpad samples farther apart than this form a new deliberate gesture. */
+export const UNIVERSE_SOURCE_EXIT_GESTURE_GAP_MS = 520;
+/** One ordinary mouse notch, or a short trackpad pull, exits the source. */
+export const UNIVERSE_SOURCE_EXIT_WHEEL_PX = 72;
 /** Velocities below this stop instead of easing forever. */
 const VELOCITY_REST_EPSILON = 2;
 /** Frames longer than this (tab switches) step as if one frame passed. */
@@ -115,6 +154,55 @@ function normalizedWheelPixels(input: UniverseTemporalFlightWheelInput) {
     return delta * Math.max(1, finite(input.viewportHeight, 800));
   }
   return delta;
+}
+
+export function createUniverseSourceExitGate(
+  armedAt: number | null = null,
+): UniverseSourceExitGate {
+  return { armedAt, lastWheelAt: null, outwardPixels: 0 };
+}
+
+export function armUniverseSourceExitGate(now: number): UniverseSourceExitGate {
+  return createUniverseSourceExitGate(Math.max(0, finite(now)));
+}
+
+/**
+ * Consumes wheel samples only while the camera is already at the source
+ * entrance. Inward motion cancels the exit intent; outward motion must happen
+ * after the entry has visibly settled and cross a small gesture threshold.
+ */
+export function advanceUniverseSourceExitGate(
+  gate: UniverseSourceExitGate,
+  input: UniverseSourceExitWheelInput,
+): UniverseSourceExitWheelResult {
+  const now = Math.max(0, finite(input.now));
+  const outwardPixels = normalizedWheelPixels(input);
+  if (outwardPixels <= 0) {
+    return { gate: createUniverseSourceExitGate(), exitRequested: false };
+  }
+  if (gate.armedAt === null) {
+    return { gate: armUniverseSourceExitGate(now), exitRequested: false };
+  }
+  if (now - gate.armedAt < UNIVERSE_SOURCE_EXIT_ARM_DELAY_MS) {
+    return {
+      gate: { ...gate, lastWheelAt: now, outwardPixels: 0 },
+      exitRequested: false,
+    };
+  }
+  const continuingGesture = gate.lastWheelAt !== null
+    && now - gate.lastWheelAt <= UNIVERSE_SOURCE_EXIT_GESTURE_GAP_MS;
+  const accumulated = (continuingGesture ? gate.outwardPixels : 0)
+    + Math.abs(outwardPixels);
+  if (accumulated < UNIVERSE_SOURCE_EXIT_WHEEL_PX) {
+    return {
+      gate: { ...gate, lastWheelAt: now, outwardPixels: accumulated },
+      exitRequested: false,
+    };
+  }
+  return {
+    gate: createUniverseSourceExitGate(),
+    exitRequested: true,
+  };
 }
 
 /**
@@ -266,9 +354,15 @@ export function universeTemporalFlightPresence(
       PRESENCE_BEHIND_FULL_EVENTS,
       PRESENCE_BEHIND_GONE_EVENTS,
     );
+    const card = 1 - easedRange(
+      -events,
+      CARD_BEHIND_FULL_EVENTS,
+      CARD_BEHIND_GONE_EVENTS,
+    );
     return {
       scale: 1,
       opacity: PRESENCE_BEHIND_EMBER + (1 - PRESENCE_BEHIND_EMBER) * kept,
+      card,
     };
   }
   const fade = easedRange(
@@ -276,8 +370,14 @@ export function universeTemporalFlightPresence(
     PRESENCE_AHEAD_FULL_EVENTS,
     PRESENCE_AHEAD_FAR_EVENTS,
   );
+  const card = 1 - easedRange(
+    events,
+    CARD_AHEAD_FULL_EVENTS,
+    CARD_AHEAD_GONE_EVENTS,
+  );
   return {
     scale: 1 - (1 - PRESENCE_FAR_SCALE) * fade,
     opacity: 1 - (1 - PRESENCE_FAR_OPACITY) * fade,
+    card,
   };
 }

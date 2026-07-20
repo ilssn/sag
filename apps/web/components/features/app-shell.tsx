@@ -46,6 +46,7 @@ import {
   UNIVERSE_ASK_EVENT,
   UNIVERSE_DETAIL_EVENT,
   dispatchUniverseActivation,
+  dispatchUniverseReset,
 } from "@/lib/universe-events";
 import { cn } from "@/lib/utils";
 import {
@@ -335,6 +336,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const nextSection = section
       ?? workspaceSectionFromPathname(pathname)
       ?? workspaceSection;
+    if (appMode !== "explore") {
+      // Entering from search/answer is a fresh visit to the universe home.
+      // Context results remain in their panels; the graph starts at overview
+      // and only enters a source after the user deliberately selects one.
+      dispatchUniverseReset("explore-home");
+    }
     setWorkspaceSection(nextSection);
     setAppMode("explore");
     persistAppMode(window.localStorage, "explore", nextSection);
@@ -369,7 +376,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [router]);
 
   React.useEffect(() => {
-    const revealDetail = () => enterExploreMode("search");
+    // A node click opens a detail preview inside the current exploration; it
+    // must not silently switch the workspace to search/cumulative mode.
+    const revealDetail = () => enterExploreMode();
     const revealAsk = () => enterExploreMode("answer");
     window.addEventListener(UNIVERSE_DETAIL_EVENT, revealDetail);
     window.addEventListener(UNIVERSE_ASK_EVENT, revealAsk);
@@ -644,15 +653,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <div
                 className={cn(
                   "bg-space-field relative grid h-svh min-h-0 overflow-hidden",
-                  // Explore owns the whole sky in WebGL: the CSS washes, orbit
-                  // arcs and sparkles are a second, static universe that stays
-                  // put while the 3D one rotates — that mismatch reads as the
-                  // depths drifting. One universe at a time.
-                  appMode === "explore" && "bg-space-field--void",
                   windowed && "place-items-center p-4",
                 )}
               >
-                {appMode !== "explore" && <SpaceBackdrop />}
+                <SpaceBackdrop variant={appMode === "explore" ? "universe" : "shell"} />
                 <KnowledgeUniverse interactive={appMode === "explore"} />
                 {appMode === "explore" && (
                   <motion.div

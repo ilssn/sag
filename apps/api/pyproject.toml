@@ -2,7 +2,7 @@
 name = "sag-api"
 version = "0.1.0"
 description = "sag — 开源知识库平台后端（FastAPI + zleap-sag）"
-readme = "README.md"
+readme = { text = "SAG API — FastAPI backend for the SAG knowledge platform.", content-type = "text/markdown" }
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [

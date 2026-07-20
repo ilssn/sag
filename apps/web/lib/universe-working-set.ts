@@ -6,8 +6,8 @@ import type {
 } from "./types";
 
 export const UNIVERSE_SCENE_BUDGET = {
-  desktop: { nodes: 240, edges: 360 },
-  mobile: { nodes: 120, edges: 180 },
+  desktop: { nodes: 700, edges: 1_000 },
+  mobile: { nodes: 520, edges: 720 },
 } as const;
 
 /**
@@ -18,8 +18,8 @@ export const UNIVERSE_SCENE_BUDGET = {
  * using the smaller scene budget because they have no virtual bundle window.
  */
 export const UNIVERSE_RESIDENT_BUDGET = {
-  desktop: { nodes: 1_152, edges: 1_152 },
-  mobile: { nodes: 480, edges: 480 },
+  desktop: { nodes: 10_000, edges: 12_000 },
+  mobile: { nodes: 10_000, edges: 12_000 },
 } as const;
 
 export interface UniverseWorkingNode extends UniverseActivationNode {
@@ -588,6 +588,46 @@ export function replaceUniverseWorkingSet(
     node_order: [...nodesByKey.keys()],
   }, now);
   return trimUniverseWorkingSet(replacement, budget);
+}
+
+/**
+ * Adds one contextual result to an existing graph without changing the graph
+ * epoch. Stable node identities let the renderer keep every existing node in
+ * place while newly discovered events and entities animate into the network.
+ *
+ * A later result wins when the same factual node/relation is returned again;
+ * accumulated facts remain event-bundle-aware and are evicted oldest-first
+ * only when the hard scene budget is reached.
+ */
+export function mergeUniverseWorkingSetActivation(
+  current: UniverseWorkingSet,
+  activation: UniverseActivation,
+  budget: { nodes: number; edges: number },
+  now = Date.now(),
+): UniverseWorkingSet {
+  const nodes = new Map(current.nodes.map((node) => [
+    universeNodeKey(node.kind, node.id, node.source_id),
+    node as UniverseActivationNode,
+  ]));
+  activation.nodes.forEach((node) => {
+    nodes.set(
+      universeNodeKey(node.kind, node.id, node.source_id),
+      node,
+    );
+  });
+  const relations = new Map(current.relations.map((relation) => [
+    universeRelationKey(relation),
+    relation,
+  ]));
+  activation.relations.forEach((relation) => {
+    relations.set(universeRelationKey(relation), relation);
+  });
+  return replaceUniverseWorkingSet({
+    ...activation,
+    epoch: current.epoch,
+    nodes: [...nodes.values()],
+    relations: [...relations.values()],
+  }, budget, now);
 }
 
 export function universeAnchorProgress(

@@ -3,17 +3,25 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SearchResponse } from "./types";
 import {
   activationFromSearch,
+  dispatchUniverseContext,
   dispatchUniverseDetail,
   dispatchUniverseFocus,
   dispatchUniverseInteraction,
+  dispatchUniversePresentation,
+  dispatchUniverseResume,
   dispatchUniversePatchReset,
   dispatchUniverseSourceFocus,
   dispatchUniverseView,
+  readUniverseContext,
+  readUniversePresentation,
   readUniverseView,
+  UNIVERSE_CONTEXT_EVENT,
   UNIVERSE_INTERACTION_EVENT,
   UNIVERSE_DETAIL_EVENT,
   UNIVERSE_FOCUS_EVENT,
   UNIVERSE_PATCH_RESET_EVENT,
+  UNIVERSE_PRESENTATION_EVENT,
+  UNIVERSE_RESUME_EVENT,
   UNIVERSE_SOURCE_FOCUS_EVENT,
 } from "./universe-events";
 
@@ -92,6 +100,27 @@ describe("universe search activation", () => {
 });
 
 describe("universe view state", () => {
+  it("publishes accumulation presentation independently from browse view state", () => {
+    const target = new EventTarget();
+    vi.stubGlobal("window", target);
+    const modes: unknown[] = [];
+    target.addEventListener(UNIVERSE_PRESENTATION_EVENT, (event) => {
+      modes.push((event as CustomEvent).detail);
+    });
+
+    dispatchUniversePresentation("accumulation");
+
+    expect(readUniversePresentation()).toBe("accumulation");
+    expect(modes).toEqual(["accumulation"]);
+    expect(readUniverseView()).toEqual({
+      mode: "overview",
+      source_id: null,
+      progress: 0,
+    });
+
+    dispatchUniversePresentation("exploration");
+  });
+
   it("keeps the camera-derived progress bounded and clears source identity in overview", () => {
     dispatchUniverseView({ mode: "detail", source_id: "source-a", progress: 1.4 });
     expect(readUniverseView()).toEqual({
@@ -132,6 +161,31 @@ describe("universe view state", () => {
     dispatchUniverseInteraction();
 
     expect(gestures).toBe(1);
+  });
+
+  it("tracks contextual workspaces and resumes the retained graph explicitly", () => {
+    const target = new EventTarget();
+    vi.stubGlobal("window", target);
+    const contexts: unknown[] = [];
+    let resumes = 0;
+    target.addEventListener(UNIVERSE_CONTEXT_EVENT, (event) => {
+      contexts.push((event as CustomEvent).detail);
+    });
+    target.addEventListener(UNIVERSE_RESUME_EVENT, () => {
+      resumes += 1;
+    });
+
+    dispatchUniverseContext({ active: true, section: "answer" });
+    expect(readUniverseContext()).toEqual({ active: true, section: "answer" });
+
+    dispatchUniverseResume();
+
+    expect(readUniverseContext()).toEqual({ active: false, section: null });
+    expect(contexts).toEqual([
+      { active: true, section: "answer" },
+      { active: false, section: null },
+    ]);
+    expect(resumes).toBe(1);
   });
 
   it("carries a stable event sequence into contextual detail navigation", () => {

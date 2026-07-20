@@ -11,7 +11,7 @@ describe("app shell viewport stage", () => {
   it("pins the universe stage to the visible viewport instead of content height", () => {
     const stageStart = appShellSource.indexOf("<DetailPanelProvider>");
     const backdropStart = appShellSource.indexOf(
-      "{appMode !== \"explore\" && <SpaceBackdrop />}",
+      '<SpaceBackdrop variant={appMode === "explore" ? "universe" : "shell"} />',
       stageStart,
     );
     const stageOpening = appShellSource.slice(stageStart, backdropStart);
@@ -24,5 +24,33 @@ describe("app shell viewport stage", () => {
     expect(stageOpening).not.toContain(
       '"bg-space-field relative grid min-h-svh overflow-hidden"',
     );
+  });
+
+  it("keeps one backdrop mounted and selects the lightweight universe atmosphere in explore", () => {
+    expect(appShellSource).toContain(
+      '<SpaceBackdrop variant={appMode === "explore" ? "universe" : "shell"} />',
+    );
+    expect(appShellSource).not.toContain(
+      '{appMode !== "explore" && <SpaceBackdrop />}',
+    );
+  });
+
+  it("enters exploration from panels through a fresh universe home", () => {
+    const start = appShellSource.indexOf(
+      "const enterExploreMode = React.useCallback",
+    );
+    const end = appShellSource.indexOf(
+      "const exitExploreMode = React.useCallback",
+      start,
+    );
+    const enterExploreMode = appShellSource.slice(start, end);
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    expect(appShellSource).toContain("dispatchUniverseReset,");
+    expect(enterExploreMode).toContain('if (appMode !== "explore")');
+    expect(enterExploreMode).toContain('dispatchUniverseReset("explore-home")');
+    expect(enterExploreMode.indexOf('dispatchUniverseReset("explore-home")'))
+      .toBeLessThan(enterExploreMode.indexOf('setAppMode("explore")'));
   });
 });

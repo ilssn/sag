@@ -14,14 +14,24 @@ export const UNIVERSE_SOURCE_FOCUS_EVENT = "sag:universe-source-focus";
 export const UNIVERSE_DETAIL_EVENT = "sag:universe-detail";
 export const UNIVERSE_ASK_EVENT = "sag:universe-ask";
 export const UNIVERSE_INTERACTION_EVENT = "sag:universe-interaction";
+export const UNIVERSE_RESUME_EVENT = "sag:universe-resume";
+export const UNIVERSE_CONTEXT_EVENT = "sag:universe-context";
 export const UNIVERSE_PATCH_EVENT = "sag:universe-patch";
 export const UNIVERSE_PATCH_RESET_EVENT = "sag:universe-patch-reset";
 export const UNIVERSE_VIEW_EVENT = "sag:universe-view";
+export const UNIVERSE_PRESENTATION_EVENT = "sag:universe-presentation";
+
+export type UniversePresentationMode = "exploration" | "accumulation";
 
 export interface UniverseViewState {
   mode: "overview" | "detail";
   source_id: string | null;
   progress: number;
+}
+
+export interface UniverseContextState {
+  active: boolean;
+  section: "search" | "answer" | null;
 }
 
 export interface UniverseDetailTimelineItem {
@@ -64,9 +74,52 @@ let currentUniverseView: UniverseViewState = {
   source_id: null,
   progress: 0,
 };
+let currentUniverseContext: UniverseContextState = {
+  active: false,
+  section: null,
+};
+let currentUniversePresentation: UniversePresentationMode = "exploration";
 
 export function readUniverseView() {
   return currentUniverseView;
+}
+
+export function readUniverseContext() {
+  return currentUniverseContext;
+}
+
+export function readUniversePresentation() {
+  return currentUniversePresentation;
+}
+
+export function dispatchUniversePresentation(mode: UniversePresentationMode) {
+  if (mode === currentUniversePresentation) return currentUniversePresentation;
+  currentUniversePresentation = mode;
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent<UniversePresentationMode>(
+      UNIVERSE_PRESENTATION_EVENT,
+      { detail: mode },
+    ));
+  }
+  return currentUniversePresentation;
+}
+
+export function dispatchUniverseContext(context: UniverseContextState) {
+  const next: UniverseContextState = context.active && context.section
+    ? { active: true, section: context.section }
+    : { active: false, section: null };
+  if (
+    next.active === currentUniverseContext.active
+    && next.section === currentUniverseContext.section
+  ) return currentUniverseContext;
+  currentUniverseContext = next;
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent<UniverseContextState>(
+      UNIVERSE_CONTEXT_EVENT,
+      { detail: next },
+    ));
+  }
+  return next;
 }
 
 export function dispatchUniverseView(view: UniverseViewState) {
@@ -97,6 +150,13 @@ export function dispatchUniverseView(view: UniverseViewState) {
 export function dispatchUniverseInteraction() {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new Event(UNIVERSE_INTERACTION_EVENT));
+}
+
+/** Leaves a contextual search/answer workspace and resumes the retained graph. */
+export function dispatchUniverseResume() {
+  if (typeof window === "undefined") return;
+  dispatchUniverseContext({ active: false, section: null });
+  window.dispatchEvent(new Event(UNIVERSE_RESUME_EVENT));
 }
 
 export function dispatchUniverseActivation(
