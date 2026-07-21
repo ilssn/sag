@@ -318,6 +318,7 @@ SAG has a separated Next.js frontend and FastAPI backend. The backend is a refer
 ```text
 apps/
 ├── web/                    Next.js 15 + React 19 product UI
+├── desktop/                Electron shell, packaging, and local runtime lifecycle
 └── api/
     ├── sag_api/
     │   ├── api/v1/         FastAPI HTTP routes and serialization
@@ -366,6 +367,10 @@ cd apps/api && ruff check .
 cd apps/web && npm run typecheck
 cd apps/web && npm run build
 ```
+
+### Desktop client
+
+The Electron client packages the same Next.js application together with the local FastAPI backend. Desktop development, target-specific release builds, signing, update configuration, and data locations are documented in [`apps/desktop/README.md`](apps/desktop/README.md).
 
 ### Use `zleap-sag` directly
 
