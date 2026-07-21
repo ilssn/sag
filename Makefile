@@ -28,12 +28,12 @@ test: ## 运行后端与 Agent Core 测试
 build: ## 构建前端产物
 	cd apps/web && npm run build
 
-release: ## 发布桌面稳定版到 public（用法：make release VERSION=1.3.0）
-	@test -n "$(VERSION)" || (echo "VERSION 必填，例如：make release VERSION=1.3.0" && exit 1)
+release: ## 从独立公开 clone 发布桌面稳定版（用法：make release VERSION=1.4.0）
+	@test -n "$(VERSION)" || (echo "VERSION 必填，例如：make release VERSION=1.4.0" && exit 1)
 	node scripts/release-public.mjs "$(VERSION)"
 
 release-dry-run: ## 只检查 public 发布前置条件，不改文件、不推送
-	@test -n "$(VERSION)" || (echo "VERSION 必填，例如：make release-dry-run VERSION=1.3.0" && exit 1)
+	@test -n "$(VERSION)" || (echo "VERSION 必填，例如：make release-dry-run VERSION=1.4.0" && exit 1)
 	node scripts/release-public.mjs "$(VERSION)" --dry-run
 
 compose-config: ## 校验默认 Docker 配置（SQLite + LanceDB）

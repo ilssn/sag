@@ -49,20 +49,20 @@ npm run dev
 
 ## 一条命令发布到 public
 
-正式发布只能从仓库根目录、干净且已合并完成的 `main` 分支执行：
+正式发布只能从 `Zleap-AI/SAG` 的独立公开 clone 根目录、干净且已合并完成的 `main` 分支执行。该 clone 不得添加内部仓库 remote，也不得包含内部 Git 历史：
 
 ```bash
-make release-dry-run VERSION=1.3.0
-make release VERSION=1.3.0
+make release-dry-run VERSION=1.4.0
+make release VERSION=1.4.0
 ```
 
 `scripts/release-public.mjs` 会：
 
-1. 校验当前分支、干净工作区、严格递增的稳定 SemVer，以及 `public` 是否指向 `Zleap-AI/SAG`；
-2. 拉取并确认本地 `main` 包含 `public/main`，避免覆盖公开仓库的新提交；
+1. 校验当前分支、干净工作区、严格递增的稳定 SemVer，以及 fetch/push remote 是否都指向 `Zleap-AI/SAG`；
+2. 拉取并确认本地 `main` 包含 `origin/main`，且两者根提交完全一致，阻止内部或其他无关历史进入公开仓库；
 3. 同步 Desktop/Web/API 运行时版本及 lockfile，更新 README 徽章，将 `Unreleased` 归档为本次版本；
 4. 创建 `release: vX.Y.Z` 提交和不可变注解标签；
-5. 原子推送 `main + vX.Y.Z` 到 `public`。任一引用推送失败时，两者都不会在远端生效。
+5. 原子推送 `main + vX.Y.Z` 到公开仓库的 `origin`。任一引用推送失败时，两者都不会在远端生效。
 
 标签随后触发 `.github/workflows/desktop-release.yml`。流水线复用完整 CI 门禁，在 `macos-15` ARM64 与 `windows-2025` x64 原生 runner 并行构建；macOS 必须签名并公证成功，Windows 明确生成无签名安装包，且两个平台更新元数据和校验文件齐全时，才创建公开 GitHub Release。
 
@@ -154,7 +154,7 @@ npm run package:dir
 | `SAG_DESKTOP_PYTHON` | `apps/api/.venv` 中的 Python | 构建 sidecar 使用的解释器 |
 | `SAG_PYTHON_DIST_DIR` | API 默认冻结产物目录 | 复用 CI 中已构建的 sidecar |
 
-macOS 签名凭据通过 electron-builder 支持的 CI 环境变量注入，不写入仓库。Windows 当前不注入签名凭据。应用图标母版和平台产物位于 `apps/desktop/assets/icon-master.png`、`icon.icns` 与 `icon.ico`。
+macOS 签名凭据只注入 electron-builder 的最终签名与公证步骤，不会传给 Next.js、PyInstaller 或它们的构建依赖，也不写入仓库。Windows 当前不注入签名凭据。应用图标母版和平台产物位于 `apps/desktop/assets/icon-master.png`、`icon.icns` 与 `icon.ico`。
 
 `SAG_DESKTOP_API_PORT` 属于发布构建参数，不建议交给最终用户修改，因为 Next.js 中的 API Base 是构建时值。若确实修改，构建和运行阶段必须保持一致。
 

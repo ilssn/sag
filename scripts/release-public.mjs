@@ -8,7 +8,7 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const publicRemote = process.env.SAG_PUBLIC_REMOTE || "public";
+const publicRemote = process.env.SAG_PUBLIC_REMOTE || "origin";
 const publicRepository = process.env.SAG_PUBLIC_REPOSITORY || "Zleap-AI/SAG";
 const releaseBranch = process.env.SAG_RELEASE_BRANCH || "main";
 const releaseFiles = [
@@ -47,6 +47,11 @@ function git(args, options) {
 
 function gitOutput(args) {
   return git(args, { capture: true }).stdout.trim();
+}
+
+function gitLines(args) {
+  const output = gitOutput(args);
+  return output ? output.split(/\r?\n/).filter(Boolean) : [];
 }
 
 function normalizeVersion(value) {
@@ -178,6 +183,37 @@ function remoteMatchesRepository(remoteUrl) {
   return normalized.endsWith(`/${publicRepository}`) || normalized.endsWith(`:${publicRepository}`);
 }
 
+function assertPublicRemote() {
+  const fetchUrl = gitOutput(["remote", "get-url", publicRemote]);
+  const pushUrl = gitOutput(["remote", "get-url", "--push", publicRemote]);
+  for (const [kind, remoteUrl] of [["fetch", fetchUrl], ["push", pushUrl]]) {
+    if (!remoteMatchesRepository(remoteUrl)) {
+      fail(`${publicRemote} ${kind} URL points to ${remoteUrl}; expected ${publicRepository}`);
+    }
+  }
+  return fetchUrl;
+}
+
+function assertPublicHistory(remoteBranchRef) {
+  if (git(["merge-base", "--is-ancestor", remoteBranchRef, "HEAD"], { allowFailure: true }).status !== 0) {
+    fail(`local ${releaseBranch} does not contain ${publicRemote}/${releaseBranch}; reconcile before releasing`);
+  }
+  const localRoots = gitLines(["rev-list", "--max-parents=0", "HEAD"]).sort();
+  const remoteRoots = gitLines(["rev-list", "--max-parents=0", remoteBranchRef]).sort();
+  if (localRoots.join("\n") !== remoteRoots.join("\n")) {
+    fail("local history contains roots outside the public repository; release from an independent public clone");
+  }
+}
+
+function stableTagsMergedInto(ref) {
+  return gitLines(["tag", "--merged", ref, "--list", "v*.*.*", "--sort=-version:refname"])
+    .filter((tag) => /^v\d+\.\d+\.\d+$/.test(tag));
+}
+
+function highestStableTag(ref) {
+  return stableTagsMergedInto(ref)[0] || null;
+}
+
 async function confirmRelease(tag, remoteUrl, assumeYes) {
   if (assumeYes) return;
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -206,19 +242,15 @@ async function prepareRelease(rawVersion, flags) {
   const branch = gitOutput(["branch", "--show-current"]);
   if (branch !== releaseBranch) fail(`release from ${releaseBranch}, not ${branch || "detached HEAD"}`);
 
-  const remoteUrl = gitOutput(["remote", "get-url", publicRemote]);
-  if (!remoteMatchesRepository(remoteUrl)) {
-    fail(`${publicRemote} points to ${remoteUrl}; expected ${publicRepository}`);
-  }
+  const remoteUrl = assertPublicRemote();
 
   git(["fetch", "--prune", publicRemote]);
   git(["fetch", publicRemote, "--tags"]);
-  if (git(["show-ref", "--verify", "--quiet", `refs/remotes/${publicRemote}/${releaseBranch}`], { allowFailure: true }).status !== 0) {
+  const remoteBranchRef = `refs/remotes/${publicRemote}/${releaseBranch}`;
+  if (git(["show-ref", "--verify", "--quiet", remoteBranchRef], { allowFailure: true }).status !== 0) {
     fail(`missing ${publicRemote}/${releaseBranch} after fetch`);
   }
-  if (git(["merge-base", "--is-ancestor", `${publicRemote}/${releaseBranch}`, "HEAD"], { allowFailure: true }).status !== 0) {
-    fail(`local ${releaseBranch} does not contain ${publicRemote}/${releaseBranch}; reconcile before releasing`);
-  }
+  assertPublicHistory(remoteBranchRef);
   if (git(["show-ref", "--verify", "--quiet", `refs/tags/${tag}`], { allowFailure: true }).status === 0) {
     fail(`tag ${tag} already exists`);
   }
@@ -232,6 +264,10 @@ async function prepareRelease(rawVersion, flags) {
   }
   if (compareVersions(version, desktopVersion) <= 0) {
     fail(`new version ${version} must be greater than current version ${desktopVersion}`);
+  }
+  const latestPublicTag = highestStableTag(remoteBranchRef);
+  if (latestPublicTag && compareVersions(version, normalizeVersion(latestPublicTag)) <= 0) {
+    fail(`new version ${version} must be greater than latest public tag ${latestPublicTag}`);
   }
 
   if (dryRun) {
@@ -270,6 +306,36 @@ async function prepareRelease(rawVersion, flags) {
   console.log(`release: pushed ${tag}; follow https://github.com/${publicRepository}/actions`);
 }
 
+function verifyLatestRelease(rawTag, expectedSha) {
+  const version = normalizeVersion(rawTag);
+  const tag = `v${version}`;
+  if (rawTag !== tag) fail(`expected canonical tag ${tag}, received ${rawTag || "nothing"}`);
+  if (!/^[0-9a-f]{40,64}$/i.test(String(expectedSha || ""))) {
+    fail(`expected a Git commit SHA, received ${expectedSha || "nothing"}`);
+  }
+
+  assertPublicRemote();
+  const remoteBranchRef = `refs/remotes/${publicRemote}/${releaseBranch}`;
+  git(["fetch", "--prune", "--force", publicRemote, `+refs/heads/${releaseBranch}:${remoteBranchRef}`]);
+  git(["fetch", "--force", publicRemote, `+refs/tags/${tag}:refs/tags/${tag}`]);
+  git(["fetch", "--force", publicRemote, "--tags"]);
+
+  if (gitOutput(["cat-file", "-t", tag]) !== "tag") {
+    fail(`${tag} must remain an annotated tag`);
+  }
+  const tagCommit = gitOutput(["rev-parse", `${tag}^{commit}`]);
+  const expectedCommit = gitOutput(["rev-parse", `${expectedSha}^{commit}`]);
+  if (tagCommit !== expectedCommit) {
+    fail(`${tag} moved during the build; expected ${expectedCommit}, found ${tagCommit}`);
+  }
+  assertPublicHistory(remoteBranchRef);
+  const latestPublicTag = highestStableTag(remoteBranchRef);
+  if (latestPublicTag !== tag) {
+    fail(`${tag} is no longer the newest stable tag on ${publicRemote}/${releaseBranch}; found ${latestPublicTag || "none"}`);
+  }
+  console.log(`release: ${tag} is immutable, on public main, and newest`);
+}
+
 const args = process.argv.slice(2);
 if (args[0] === "--verify") {
   const version = normalizeVersion(args[1]);
@@ -277,6 +343,8 @@ if (args[0] === "--verify") {
   console.log(`release: metadata verified for v${version}`);
 } else if (args[0] === "--notes") {
   process.stdout.write(releaseNotes(normalizeVersion(args[1])));
+} else if (args[0] === "--verify-latest") {
+  verifyLatestRelease(args[1], args[2]);
 } else {
   const versionArg = args.find((argument) => !argument.startsWith("--"));
   const flags = new Set(args.filter((argument) => argument.startsWith("--")));

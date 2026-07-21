@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: desktop-release-${{ github.ref }}
+  group: desktop-release-${{ github.repository }}
   cancel-in-progress: false
 
 permissions:
@@ -96,6 +96,18 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: apps/api/uv.lock
+      - name: Verify native Apple Silicon toolchain
+        shell: bash
+        run: |
+          test "$(uname -m)" = "arm64" || {
+            echo "::error::macOS release runner must be arm64."
+            exit 1
+          }
+          test "$(node -p 'process.arch')" = "arm64" || {
+            echo "::error::Node.js must be arm64."
+            exit 1
+          }
+          python -c 'import platform; raise SystemExit(0 if platform.machine() == "arm64" else "Python must be arm64")'
       - name: Install Web dependencies
         working-directory: apps/web
         run: npm ci
@@ -105,6 +117,9 @@ jobs:
       - name: Install frozen backend dependencies
         working-directory: apps/api
         run: uv sync --frozen --extra desktop
+      - name: Prepare macOS release payload without signing credentials
+        working-directory: apps/desktop
+        run: npm run prepare:release
       - name: Build signed and notarized macOS release
         working-directory: apps/desktop
         env:
@@ -113,7 +128,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npm run dist:mac
+        run: npm run package:mac
       - name: Verify macOS installer and update metadata
         shell: bash
         env:
@@ -180,9 +195,12 @@ jobs:
       - name: Install frozen backend dependencies
         working-directory: apps/api
         run: uv sync --frozen --extra desktop
+      - name: Prepare Windows release payload
+        working-directory: apps/desktop
+        run: npm run prepare:release
       - name: Build unsigned Windows release
         working-directory: apps/desktop
-        run: npm run dist:win
+        run: npm run package:win
       - name: Verify Windows installer and update metadata
         shell: pwsh
         env:
@@ -224,6 +242,11 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Revalidate immutable newest release tag
+        shell: bash
+        run: node scripts/release-public.mjs --verify-latest "$GITHUB_REF_NAME" "$GITHUB_SHA"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: release-*

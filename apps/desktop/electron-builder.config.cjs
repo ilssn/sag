@@ -33,6 +33,7 @@ module.exports = {
   copyright: "Copyright © Zleap AI",
   asar: true,
   compression: "normal",
+  npmRebuild: false,
   electronUpdaterCompatibility: ">=2.16",
   directories: {
     output: "release",
