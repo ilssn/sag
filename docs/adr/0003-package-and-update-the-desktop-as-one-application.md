@@ -27,7 +27,7 @@ The supported first-release targets are:
 
 The bundle version is the version in `apps/desktop/package.json`. Web and backend code are never updated independently inside an installed client.
 
-The update provider is a configurable generic HTTPS endpoint. Builds without an update endpoint do not generate updater configuration and do not check for updates at runtime.
+The update provider is selected at build time. The public stable channel uses GitHub Releases as specified by ADR-0028; a generic HTTPS endpoint remains available for other distribution channels. Builds without an update provider do not generate updater configuration and do not check for updates at runtime.
 
 User data is stored in Electron's standard `userData` directory outside the application bundle. Installation and whole-application updates replace executable resources without replacing knowledge data.
 
@@ -45,7 +45,7 @@ User data is stored in Electron's standard `userData` directory outside the appl
 
 - macOS and Windows releases must be built and smoke-tested on their target operating systems.
 - The installer is large because it contains Chromium and the complete local knowledge stack.
-- Every release requires platform signing; macOS releases also require notarization.
+- macOS releases require Developer ID signing and notarization. The initial Windows channel is deliberately unsigned and therefore shows an unknown-publisher warning until a trusted Authenticode certificate is introduced.
 - A Python-only or Web-only fix still requires a new desktop application version.
 
 ## Alternatives considered

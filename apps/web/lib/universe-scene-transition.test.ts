@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  planUniverseSceneDelivery,
   planUniverseSceneDelta,
   universeTimelineFanProgress,
 } from "./universe-scene-transition";
@@ -12,6 +13,34 @@ import {
 } from "./universe-timeline-window";
 
 describe("universe scene incremental transition", () => {
+  it("restores a retained exploration without replaying scene entrance", () => {
+    expect(planUniverseSceneDelivery({
+      strategyBoundary: true,
+      restoringExploration: true,
+      windowChanged: true,
+      timelineJourneyEnabled: true,
+    })).toEqual({
+      stableRestore: true,
+      animateTimelineWindow: false,
+      animateEntrants: false,
+      autoFocus: false,
+    });
+  });
+
+  it("keeps ordinary timeline and accumulation deliveries animated", () => {
+    expect(planUniverseSceneDelivery({
+      strategyBoundary: false,
+      restoringExploration: false,
+      windowChanged: true,
+      timelineJourneyEnabled: true,
+    })).toMatchObject({
+      stableRestore: false,
+      animateTimelineWindow: true,
+      animateEntrants: true,
+      autoFocus: true,
+    });
+  });
+
   it("keeps the overlapping network retained during a time-page step", () => {
     expect(planUniverseSceneDelta(
       ["source", "event-a", "shared", "event-b"],

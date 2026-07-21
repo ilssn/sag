@@ -6,6 +6,11 @@
   "description": "SAG desktop client for macOS and Windows",
   "author": "Zleap AI",
   "license": "MIT",
+  "homepage": "https://github.com/Zleap-AI/SAG",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Zleap-AI/SAG.git"
+  },
   "main": "dist/main.js",
   "packageManager": "npm@10.9.2",
   "engines": {
@@ -21,9 +26,9 @@
     "prepare:resources": "node ./scripts/prepare-resources.mjs",
     "prepare:release": "npm run build && npm run build:web && npm run build:backend && npm run prepare:resources",
     "package:dir": "npm run prepare:release && electron-builder --config electron-builder.config.cjs --dir",
-    "dist": "npm run prepare:release && electron-builder --config electron-builder.config.cjs",
-    "dist:mac": "npm run prepare:release && electron-builder --config electron-builder.config.cjs --mac --arm64",
-    "dist:win": "npm run prepare:release && electron-builder --config electron-builder.config.cjs --win --x64"
+    "dist": "npm run prepare:release && electron-builder --config electron-builder.config.cjs --publish never",
+    "dist:mac": "npm run prepare:release && electron-builder --config electron-builder.config.cjs --mac --arm64 --publish never",
+    "dist:win": "npm run prepare:release && electron-builder --config electron-builder.config.cjs --win --x64 --publish never"
   },
   "dependencies": {
     "electron-log": "^5.4.4",

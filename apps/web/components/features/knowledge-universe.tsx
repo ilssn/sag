@@ -1238,6 +1238,7 @@ export function KnowledgeUniverse({
       resetScene(epochRef.current + 1);
       return;
     }
+    if (snapshot.view) graphRef.current?.prepareExplorationRestore();
     retainedExplorationRef.current = null;
     resetAccumulationKernel(false);
     expandAbortRef.current?.abort();

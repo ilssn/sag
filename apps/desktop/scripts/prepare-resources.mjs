@@ -71,12 +71,21 @@ const desktopPackage = JSON.parse(
 const webPackage = JSON.parse(
   await readFile(path.join(webRoot, "package.json"), "utf8"),
 );
+const backendInit = await readFile(
+  path.join(repoRoot, "apps", "api", "sag_api", "__init__.py"),
+  "utf8",
+);
+const backendVersion = /^__version__ = "(\d+\.\d+\.\d+)"$/m.exec(backendInit)?.[1];
+if (!backendVersion) {
+  throw new Error("Backend runtime version is missing from apps/api/sag_api/__init__.py.");
+}
 await writeFile(
   path.join(resourcesRoot, "runtime-manifest.json"),
   `${JSON.stringify(
     {
       desktopVersion: desktopPackage.version,
       webVersion: webPackage.version,
+      backendVersion,
       apiPort: Number(process.env.SAG_DESKTOP_API_PORT || 8000),
       generatedAt: new Date().toISOString(),
     },

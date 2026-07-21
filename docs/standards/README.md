@@ -36,4 +36,8 @@ npx tsc --noEmit && npx next build                     # 全绿
 
 以上门禁由 **GitHub Actions 强制执行**（`.github/workflows/ci.yml`：push dev/main 与全部 PR），
 本地跑过 ≠ 通过——以 CI 绿为准。提交节奏：功能分阶段各一提交推 `dev`，全绿后 `--no-ff`
-合 `main`；发布打 `vX.Y.Z` tag。
+合 `main`。
+
+桌面正式发布只允许从干净的 `main` 执行 `make release VERSION=X.Y.Z`。发布脚本统一升版、归档
+`Unreleased`、创建不可变注解标签，并将 `main + vX.Y.Z` 原子推送至 `public`；标签触发
+`.github/workflows/desktop-release.yml`，所有质量门禁和原生平台构建通过、macOS 完成签名与公证、Windows 无签名产物及更新元数据校验通过后，才创建公开 Release。

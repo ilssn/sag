@@ -1,5 +1,30 @@
 const updateBaseUrl = process.env.SAG_UPDATE_BASE_URL?.replace(/\/+$/, "");
+const updateGitHubRepository = process.env.SAG_UPDATE_GITHUB_REPOSITORY?.trim();
 const shouldNotarize = process.env.SAG_NOTARIZE === "true";
+
+if (updateBaseUrl && updateGitHubRepository) {
+  throw new Error(
+    "Configure only one update provider: SAG_UPDATE_BASE_URL or SAG_UPDATE_GITHUB_REPOSITORY.",
+  );
+}
+
+function githubPublishConfig(repository) {
+  if (!repository) return null;
+  const parts = repository.split("/");
+  if (parts.length !== 2 || parts.some((part) => !part)) {
+    throw new Error("SAG_UPDATE_GITHUB_REPOSITORY must use the owner/repository format.");
+  }
+  return {
+    provider: "github",
+    owner: parts[0],
+    repo: parts[1],
+    channel: "latest",
+    releaseType: "release",
+  };
+}
+
+const publish = githubPublishConfig(updateGitHubRepository)
+  || (updateBaseUrl ? { provider: "generic", url: updateBaseUrl } : null);
 
 /** @type {import('electron-builder').Configuration} */
 module.exports = {
@@ -8,6 +33,7 @@ module.exports = {
   copyright: "Copyright © Zleap AI",
   asar: true,
   compression: "normal",
+  electronUpdaterCompatibility: ">=2.16",
   directories: {
     output: "release",
     buildResources: "assets"
@@ -73,12 +99,5 @@ module.exports = {
     differentialPackage: true,
     deleteAppDataOnUninstall: false
   },
-  ...(updateBaseUrl
-    ? {
-        publish: {
-          provider: "generic",
-          url: updateBaseUrl
-        }
-      }
-    : {})
+  ...(publish ? { publish } : {})
 };

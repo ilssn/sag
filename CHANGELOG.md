@@ -1,6 +1,6 @@
 # Changelog
 
-本项目遵循语义化版本。各版本 tag 均可在 [Releases](https://github.com/ilssn/sag/tags) 查看。
+本项目遵循语义化版本。正式版本、安装包与更新元数据均在 [GitHub Releases](https://github.com/Zleap-AI/SAG/releases) 发布。
 
 ## Unreleased
 - 知识宇宙探索模式重构为「时间即飞行」：源内滚轮沿计数轴驱动相机（惯性、轴端墙、窗口

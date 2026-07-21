@@ -34,7 +34,10 @@ import {
   universeVisualDetailProgress,
   type UniverseNodeEmergence,
 } from "@/lib/universe-presentation";
-import { planUniverseSceneDelta } from "@/lib/universe-scene-transition";
+import {
+  planUniverseSceneDelivery,
+  planUniverseSceneDelta,
+} from "@/lib/universe-scene-transition";
 import {
   UNIVERSE_TEMPORAL_AXIS_FAR_LATERAL_SPREAD,
   UNIVERSE_TEMPORAL_AXIS_NEAR_LATERAL_SPREAD,
@@ -1148,6 +1151,7 @@ export class UniverseForceSceneEngine {
   private visualDetailTarget = 0;
   private strategy: UniverseSceneStrategy = "exploration";
   private strategyChangedSinceData = false;
+  private explorationRestorePending = false;
   private reportedViewSourceId: string | null = null;
   private requestedSourceId: string | null = null;
   private overviewRequested = true;
@@ -1555,6 +1559,11 @@ export class UniverseForceSceneEngine {
       this.finishAccumulationSettle();
     }
     this.policy = policy;
+    const resetLayoutForStrategy = this.strategyChangedSinceData;
+    this.strategyChangedSinceData = false;
+    const restoringExploration = this.explorationRestorePending
+      && this.strategy === "exploration";
+    this.explorationRestorePending = false;
     const projectedTopology = this.strategy === "accumulation"
       ? projectUniverseAccumulationTopology(data.nodes, data.links)
       : { nodes: data.nodes, links: data.links, orphanEntityIds: [] };
@@ -1563,8 +1572,6 @@ export class UniverseForceSceneEngine {
     this.host.dataset.universePrunedOrphanEntityCount = String(
       projectedTopology.orphanEntityIds.length,
     );
-    const resetLayoutForStrategy = this.strategyChangedSinceData;
-    this.strategyChangedSinceData = false;
     const epochChanged = data.epoch !== this.dataEpoch;
     const nextWindowRevision = data.windowRevision ?? 0;
     const windowChanged = !epochChanged
@@ -1591,7 +1598,13 @@ export class UniverseForceSceneEngine {
       // second time after the replacement entrance resolves its motion promise.
       this.cancelTimelineTransition(true);
     }
-    const animateTimelineWindow = windowChanged && this.timelineJourney.enabled;
+    const delivery = planUniverseSceneDelivery({
+      strategyBoundary: resetLayoutForStrategy,
+      restoringExploration,
+      windowChanged,
+      timelineJourneyEnabled: this.timelineJourney.enabled,
+    });
+    const animateTimelineWindow = delivery.animateTimelineWindow;
     this.dataWindowRevision = nextWindowRevision;
     this.host.dataset.universeWindowRevision = String(nextWindowRevision);
     const nextFlight = data.temporalFlight ?? null;
@@ -1621,6 +1634,7 @@ export class UniverseForceSceneEngine {
     } else if (
       nextFlight
       && windowChanged
+      && !delivery.stableRestore
       && !this.flightOwnWindowChange
       && this.sourceNavigationPhase !== "origin"
       && this.sourceNavigationPhase !== "returning"
@@ -2012,7 +2026,10 @@ export class UniverseForceSceneEngine {
       if (arc.lengthSq() < 0.0001) arc.set(-travelDirection.y, travelDirection.x, 0.24);
       arc.normalize().multiplyScalar(Math.min(16, 4 + travel.length() * 0.075));
       const timelineMotion = timelineMotionFor(sceneNode, desired);
-      const entry = animateTimelineWindow || sceneNode.kind === "source" || this.reducedMotion
+      const entry = !delivery.animateEntrants
+        || animateTimelineWindow
+        || sceneNode.kind === "source"
+        || this.reducedMotion
         ? undefined
         : {
             startedAt: entryNow + Math.min(
@@ -2310,7 +2327,11 @@ export class UniverseForceSceneEngine {
     if (this.timelineMotionPhase === "entering" && timelineMovingCount === 0) {
       this.finishTimelineMotionPhase();
     }
-    if (
+    if (!delivery.autoFocus) {
+      // The retained camera is applied immediately after this delivery. Any
+      // automatic framing here would race it and make the restored graph jump.
+      this.didInitialFocus = true;
+    } else if (
       !this.paused
       && this.strategy === "accumulation"
       && topologyChanged
@@ -2359,6 +2380,10 @@ export class UniverseForceSceneEngine {
 
   focusOverview() {
     this.frameOverview(760, false);
+  }
+
+  prepareExplorationRestore() {
+    this.explorationRestorePending = true;
   }
 
   captureExplorationView(): UniverseSceneExplorationView | null {
@@ -2410,7 +2435,10 @@ export class UniverseForceSceneEngine {
     this.host.dataset.universeDetailLatched = view.sourceId ?? "";
     this.host.dataset.universeDetailMix = this.visualDetailMix.toFixed(2);
     this.host.dataset.universeDetailTarget = this.visualDetailTarget.toFixed(2);
-    const duration = this.reducedMotion ? 0 : 420;
+    // Snapshot restoration is identity-preserving state recovery. Animating
+    // from the accumulation camera exposes an invalid intermediate frame and
+    // can race source auto-focus, so commit the retained pose atomically.
+    const duration = 0;
     this.graph.cameraPosition(view.camera, view.target, duration);
     this.updateVisualLayout(performance.now(), true, false);
     this.rebuildLabels();
